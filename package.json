@@ -24,9 +24,12 @@
     "db:migrate": "node --env-file-if-exists=.env infra/db/migrate.mjs",
     "db:rollback": "node --env-file-if-exists=.env infra/db/rollback.mjs",
     "db:seed:synthetic": "node --env-file-if-exists=.env infra/db/seed-synthetic.mjs",
-    "db:validate": "node --env-file-if-exists=.env infra/db/validate.mjs"
+    "db:validate": "node --env-file-if-exists=.env infra/db/validate.mjs",
+    "test:browser": "tsc --noEmit -p apps/web/tsconfig.browser.json && playwright test --config apps/web/playwright.config.ts"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.64.1",
     "pg": "8.16.3"
   }
 }

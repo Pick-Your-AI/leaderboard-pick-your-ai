@@ -92,7 +92,10 @@ export function BoardPage({ metricId }: { metricId: string }) {
   }, [metricId, scope, shownLatest, latest]);
 
   useEffect(() => {
-    if (pendingId && follow && mayFollowUpdates(pointerInside, focusInside, Boolean(proof))) apply();
+    // Drawer cleanup restores focus before React processes its focus event.
+    // Consult the DOM as well so closing proof cannot apply an update in that gap.
+    const focusReturnedToTable = regionRef.current?.contains(document.activeElement) ?? false;
+    if (pendingId && follow && mayFollowUpdates(pointerInside, focusInside || focusReturnedToTable, Boolean(proof))) apply();
   }, [pendingId, follow, pointerInside, focusInside, proof, apply]);
 
   const routeHref = useCallback(

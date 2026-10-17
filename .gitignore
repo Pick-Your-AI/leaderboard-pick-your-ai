@@ -13,3 +13,6 @@ __pycache__/
 *.log
 infra/db/.state/
 .vite/
+
+playwright-report/
+test-results/

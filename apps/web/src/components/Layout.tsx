@@ -51,12 +51,22 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
   useEffect(() => {
     if (previousPath.current === pathname) return;
     previousPath.current = pathname;
-    const heading = mainRef.current?.querySelector<HTMLElement>("h1");
-    if (heading) {
+    const focusHeading = () => {
+      const heading = mainRef.current?.querySelector<HTMLElement>("h1");
+      if (!heading) return false;
       heading.tabIndex = -1;
       heading.focus({ preventScroll: false });
-    }
+      return true;
+    };
     window.scrollTo({ top: 0 });
+    // Read-backed routes render a loading state before their heading exists.
+    // Observe only this route's main region and stop once the heading arrives.
+    if (focusHeading() || !mainRef.current) return;
+    const observer = new MutationObserver(() => {
+      if (focusHeading()) observer.disconnect();
+    });
+    observer.observe(mainRef.current, { childList: true, subtree: true });
+    return () => observer.disconnect();
   }, [pathname]);
 
   return (
