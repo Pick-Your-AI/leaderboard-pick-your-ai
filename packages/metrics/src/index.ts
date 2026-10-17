@@ -5,3 +5,5 @@ export {
   metricRegistryV1,
   type CanonicalizationResult,
 } from "./v1/index.js";
+
+export * from "./engine.js";
