@@ -1,5 +1,5 @@
 import {
-  actorSchema, artifactSchema, contributionSchema, metricResultSchema, snapshotSchema,
+  actorSchema, artifactSchema, contributionSchema, metricResultSchema, snapshotSchema, sourceEventSchema,
   type Actor, type Artifact, type Contribution, type MetricResult, type Snapshot,
 } from "@pick-your-ai/contracts";
 
@@ -72,8 +72,7 @@ export function safePublicUrl(value: string | null | undefined): string | null {
       ? url.href : null;
   } catch { return null; }
 }
-const date = (value: string | null) => value === null ||
-  (typeof value === "string" && /^\d{4}-\d\d-\d\dT/.test(value) && Number.isFinite(Date.parse(value)));
+const date = (value: string | null) => sourceEventSchema.shape.occurredAt.safeParse(value).success;
 const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,200}$/.test(value);
 
 /** Validate and construct a fresh allowlisted public object. Never serialize provider objects. */

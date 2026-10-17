@@ -392,3 +392,11 @@ test("disabled policy overlay explains unavailable metrics and removes pinned ev
   assert.equal(health.disabledMetrics[0].id, "pr_opened");
   assert.equal(health.methodology[0].policySignature, "a".repeat(64));
 });
+
+test("public evidence times use the frozen source timestamp contract and reject impossible dates", async t => {
+  const h = harness(t);
+  h.data.selected.evidence[0].occurredAt = "2026-02-30T00:00:00.000Z";
+  const response = await h.app.inject(boardUrl);
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.json().error, "public_projection_unavailable");
+});
