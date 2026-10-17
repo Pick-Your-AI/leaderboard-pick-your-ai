@@ -30,6 +30,7 @@ export function startLiveUpdates(options: LiveOptions): () => void {
   let stream: EventSource | null = null;
   let etag: string | null = null, lastNotice = "", retryStreamAt = 0;
   let highestRevision = -1;
+  let lastHealth: LiveState["freshness"] = "unknown";
   let state: LiveState = { transport: "polling", freshness: "unknown", checkedAt: null };
   function emit(patch: Partial<LiveState>) { state = { ...state, ...patch }; options.onState({ ...state }); }
   function accept(value: unknown) {
@@ -76,7 +77,7 @@ export function startLiveUpdates(options: LiveOptions): () => void {
       if (stopped || current !== generation) return;
       if (response.status === 304) {
         if (!etag) throw new Error("unexpected_not_modified");
-        emit({ checkedAt: new Date().toISOString() });
+        emit({ transport: stream ? "stream" : "polling", freshness: lastHealth, checkedAt: new Date().toISOString() });
       } else {
         if (!response.ok) throw new Error("poll_unavailable");
         const body = await response.json() as Record<string, unknown>;
@@ -85,6 +86,7 @@ export function startLiveUpdates(options: LiveOptions): () => void {
         if (typeof body.revision === "number" && body.revision < highestRevision) return;
         accept(body);
         etag = response.headers.get("ETag");
+        lastHealth = body.status;
         emit({ transport: stream ? "stream" : "polling", freshness: body.status, checkedAt: new Date().toISOString() });
       }
       failures = 0;

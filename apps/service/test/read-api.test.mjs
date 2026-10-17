@@ -266,6 +266,7 @@ test("conditional polling helper pauses when hidden, resumes and reports actual 
   await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(calls, pausedCalls + 1);
   assert.equal(notices.length, 1);
+  assert.equal(states.at(-1).freshness, "stale_or_degraded", "304 restores the last verified health state after visibility pause");
 });
 
 test("polling errors cannot report fake live freshness", async t => {
