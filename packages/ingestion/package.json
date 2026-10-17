@@ -23,6 +23,6 @@
     "@electric-sql/pglite": "0.3.14",
     "@types/node": "24.10.1",
     "@types/pg": "8.15.6",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   }
 }
