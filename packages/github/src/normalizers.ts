@@ -215,6 +215,10 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
     const commitAuthor = register(resource.author), committer = register(resource.committer);
     if (commitAuthor) out.participation.push({ artifactId: id, actorId: commitAuthor.id, role: "author", conservedUnit: id });
     if (committer) out.participation.push({ artifactId: id, actorId: committer.id, role: "committer", conservedUnit: id });
+    for (const linked of envelope.verifiedCoauthors ?? []) {
+      const coauthor = linked.verificationReceipt.trim() ? register(linked.actor) : null;
+      if (coauthor) out.participation.push({ artifactId: id, actorId: coauthor.id, role: "coauthor", conservedUnit: id });
+    }
     const integration = envelope.integration;
     if (!sha || !pinnedSha(sha) || !integration || integration.targetBranch !== integration.defaultBranch || !integration.commitShas.includes(sha)) {
       out.reasons.push("default_branch_integration_unverified");
@@ -254,8 +258,12 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
     if (!metric || !proof.eventId) out.reasons.push("unsupported_or_unproven_triage_action");
     else if (object(payload.change) && JSON.stringify(payload.change.before) === JSON.stringify(payload.change.after)) out.reasons.push("no_op_metadata_change");
     else {
-      emit(metric, sender, "triager", at, transitionUnit, { rawState: `${sourceAction}:${targetId ?? "unknown"}` });
-      if (["labels_applied", "assignments_coordinated", "milestones_curated"].includes(metric)) emit("items_triaged", sender, "triager", at, transitionUnit, { rawState: `${sourceAction}:${targetId ?? "unknown"}` });
+      const missingTarget = ["labels_applied", "assignments_coordinated", "milestones_curated"].includes(metric) && !targetId;
+      if (missingTarget) out.reasons.push("unknown_metadata_target_identity");
+      const properties: Partial<NormalizedGithubFact> = { rawState: `${sourceAction}:${targetId ?? "unknown"}`, ...(missingTarget ? { state: "unknown" } : {}) };
+      const metadataUnit = stable(transitionUnit, targetId ?? id);
+      emit(metric, sender, "triager", at, metadataUnit, properties);
+      if (["labels_applied", "assignments_coordinated", "milestones_curated"].includes(metric)) emit("items_triaged", sender, "triager", at, metadataUnit, properties);
     }
   } else if (envelope.family === "relationship") {
     if (sourceAction === "transferred") {
@@ -273,6 +281,8 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
       const mapping: Record<string, string> = { parent_child: "parent_child_links", blocked_by: "blocker_links", related: "related_links", closing: "closing_links", reference: "reference_links", duplicate: "duplicate_resolution" };
       if (!relationship || relationship.intentional !== true || !text(relationship.from) || !text(relationship.to) || !mapping[String(relationship.kind)] || !proof.eventId) {
         out.reasons.push("automatic_reference_or_relationship_actor_unverified");
+      } else if (relationship.publicEndpointsVerified !== true) {
+        out.reasons.push("relationship_endpoint_visibility_unverified");
       } else {
         const endpoints = [String(relationship.from), String(relationship.to)];
         if (["related", "duplicate"].includes(String(relationship.kind))) endpoints.sort();
@@ -397,7 +407,13 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         options.client.rest(options.source, `/repos/${input.repository.slug}`),
         options.client.rest(options.source, endpoint),
       ]);
-      if (!object(repositoryPayload) || repositoryPayload.id !== input.repository.id || repositoryPayload.private !== false) return none("repository_public_scope_unverified_or_revoked");
+      if (!object(repositoryPayload) || repositoryPayload.id !== input.repository.id || repositoryPayload.private !== false) {
+        const revoked = none("repository_public_scope_unverified_or_revoked");
+        const subject = family === "review" && object(pullResource) ? pullResource : payload;
+        const artifact = object(subject) ? resourceId(subject, family, input.repository.id) : null;
+        if (artifact) revoked.suppressArtifactIds.push(artifact);
+        return revoked;
+      }
       if (!object(payload)) return none("missing_hydrated_source_object");
       const identities = [payload.node_id, payload.id, payload.sha].filter(value => value !== undefined).map(String);
       if (!identities.includes(input.fact.subjectId)) return none("hydrated_subject_identity_mismatch");

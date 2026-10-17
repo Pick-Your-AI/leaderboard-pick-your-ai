@@ -128,6 +128,8 @@ test("agent execution under a User preserves account kind without certifying man
   const removal = normalizeGithubObservation(envelope({ family: "triage", action: "unlabeled", payload: { issue: issue(), sender: fixture.merger, label: { id: 90 } } }));
   assert.equal(metrics(removal, "labels_applied").length, 0);
   assert.equal(metrics(removal, "items_triaged").length, 1);
+  const unknownTarget = normalizeGithubObservation(envelope({ family: "triage", action: "labeled", payload: { issue: issue(), sender: fixture.merger } }));
+  assert.equal(metrics(unknownTarget, "labels_applied")[0].state, "unknown");
 });
 
 test("recognition requires independently authorized receipt; COMMENTED feedback can qualify", () => {
@@ -167,6 +169,8 @@ test("label definition changes and milestone definitions do not multiply attache
   const membership = normalizeGithubObservation(envelope({ family: "triage", action: "labeled", payload: { issue: issue(), label: metadata, sender: fixture.merger } }));
   assert.equal(metrics(membership, "label_taxonomy").length, 0);
   assert.equal(metrics(membership, "labels_applied").length, 1);
+  const secondLabel = normalizeGithubObservation(envelope({ family: "triage", action: "labeled", payload: { issue: issue(), label: { ...metadata, node_id: "L_synthetic_other" }, sender: fixture.merger } }));
+  assert.notEqual(metrics(membership, "labels_applied")[0].id, metrics(secondLabel, "labels_applied")[0].id);
   const noop = normalizeGithubObservation(envelope({ family: "triage", action: "label_edited", payload: { label: metadata, change: { before: "bug", after: "bug" } } }));
   assert.equal(noop.facts.length, 0);
   const milestone = normalizeGithubObservation(envelope({ family: "triage", action: "milestone_closed", payload: { milestone: { ...metadata, node_id: "M_synthetic" }, sender: fixture.merger } }));
@@ -189,7 +193,7 @@ test("triage duplicate receipts, toggles, no-op metadata and scripted batches do
 });
 
 test("relationship endpoint copies conserve one link and never reinterpret related links as blockers", () => {
-  const payload = { issue: issue(), sender: fixture.merger, relationship: { kind: "related", from: "issue:a", to: "issue:b", intentional: true } };
+  const payload = { issue: issue(), sender: fixture.merger, relationship: { kind: "related", from: "issue:a", to: "issue:b", intentional: true, publicEndpointsVerified: true } };
   const a = normalizeGithubObservation(envelope({ family: "relationship", action: "added", payload }));
   const b = normalizeGithubObservation(envelope({ family: "relationship", action: "added", payload: { ...payload, relationship: { ...payload.relationship, from: "issue:b", to: "issue:a" } } }));
   assert.equal(a.facts[0].id, b.facts[0].id);
@@ -197,6 +201,9 @@ test("relationship endpoint copies conserve one link and never reinterpret relat
   assert.equal(metrics(a, "blocker_links").length, 0);
   const automatic = normalizeGithubObservation(envelope({ family: "relationship", action: "cross_referenced", payload: { ...payload, relationship: { ...payload.relationship, intentional: false } } }));
   assert.equal(automatic.facts.length, 0);
+  const restricted = normalizeGithubObservation(envelope({ family: "relationship", action: "added", payload: { ...payload, relationship: { ...payload.relationship, publicEndpointsVerified: false } } }));
+  assert.equal(restricted.facts.length, 0);
+  assert.match(restricted.reasons.join(), /visibility_unverified/);
 });
 
 test("transfer lineage preserves original object and suppresses private/unapproved destinations", () => {
@@ -243,9 +250,11 @@ test("commit author/committer and verified lineage stay separate and integration
   assert.equal(noIntegration.facts.length, 0);
   assert.deepEqual(noIntegration.participation.map(item => item.role), ["author", "committer"]);
   const integrated = normalizeGithubObservation(envelope({ family: "commit", payload, integration: { before, after, canonicalChangeId: "one-change", targetBranch: "main", defaultBranch: "main", commitShas: [after] },
+    verifiedCoauthors: [{ actor: fixture.reviewer, verificationReceipt: "synthetic-account-link" }],
     lineage: [{ relation: "squash_of", sourceIds: ["original:a", "original:b"], targetId: after, evidenceIds: ["verified-pr-merge"] }] }));
   assert.equal(integrated.facts[0].actorId, "101");
   assert.equal(integrated.lineage[0].relation, "squash_of");
+  assert.equal(integrated.participation.find(item => item.role === "coauthor").actorId, "303");
 });
 
 test("release publication keeps automation sender separate from notes author; green CI is unsupported", () => {
@@ -255,6 +264,21 @@ test("release publication keeps automation sender separate from notes author; gr
   assert.equal(out.facts[0].role, "automation");
   assert.equal(metrics(out, "maintenance").length, 0);
   assert.equal(metrics(out, "deployment_work").length, 0);
+});
+
+test("subjective maintenance, deployment, reliability and coordination stay receipt-based with accepted/rejected cases", () => {
+  const raw = normalizeGithubObservation(envelope());
+  const target = metrics(raw, "pr_merged")[0];
+  for (const metricId of ["maintenance", "automation", "deployment_work", "incidents", "issue_resolution", "reproductions", "mentorship", "onboarding", "project_configuration", "issue_ordering"]) {
+    for (const decision of ["accepted", "rejected"]) {
+      const receipt = { verified: true, id: `synthetic-receipt-${metricId}-${decision}`, metricId, actorId: "101", reviewerId: "202", acceptedAt: observedAt,
+        decision, targetFactId: target.id, evidenceIds: [`synthetic-evidence-${metricId}`], changesetId: `synthetic-changeset-${metricId}` };
+      const out = applyRecognitionReceipt(raw, receipt, ["202"]);
+      assert.equal(metrics(out, metricId).length, 1);
+      assert.equal(metrics(out, metricId)[0].state, decision === "accepted" ? "qualified" : "excluded");
+      assert.equal(metrics(raw, metricId).length, 0);
+    }
+  }
 });
 
 test("pipeline wrapper hydrates only matching public object/revision and preserves source labels", async () => {
@@ -279,6 +303,14 @@ test("pipeline wrapper hydrates only matching public object/revision and preserv
   assert.equal(stale.facts.length, 0);
   const unapproved = await normalize({ ...input, repository: { ...input.repository, id: 999 } });
   assert.match(unapproved.reasons[0], /not_authorized/);
+  const privateClient = new GithubReadClient({ apiOrigin: "https://api.synthetic.invalid", token: async () => undefined,
+    checkpoints: { load: async () => undefined, save: async () => {} },
+    fetch: async url => new Response(JSON.stringify(url.endsWith("/issues/20") ? issue() : { ...fixture.repository, private: true })),
+  });
+  const privateNormalize = createGithubEvidenceNormalizer({ client: privateClient, source: "synthetic-source", allowedRepositoryIds: [2], isSynthetic: true });
+  const revoked = await privateNormalize(input);
+  assert.equal(revoked.facts.length, 0);
+  assert.deepEqual(revoked.suppressArtifactIds, ["I_synthetic_20"]);
 });
 
 test("bounded local Git fallback reads pinned changes including rename and excludes formatting-only churn", async t => {
