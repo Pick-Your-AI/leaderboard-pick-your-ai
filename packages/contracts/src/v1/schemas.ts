@@ -337,6 +337,13 @@ export const metricResultSchema = z
   })
   .strict()
   .superRefine((result, ctx) => {
+    if (result.state === "zero" && result.value !== 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A zero result must carry the numeric value 0.",
+        path: ["value"],
+      });
+    }
     if (
       result.state === "zero" &&
       (result.coverage.state !== "complete" ||

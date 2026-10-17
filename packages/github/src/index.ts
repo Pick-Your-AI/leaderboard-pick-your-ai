@@ -41,7 +41,7 @@ export function classifyGithubFailure(input: GithubFailureInput): EndpointOutcom
   const retryAfter = parseRetryAfter(input.headers?.get("retry-after") ?? null, now);
   const reset = primaryReset(input.headers);
   const mentionsRateLimit = /rate limit|secondary rate/i.test(input.message ?? "");
-  const rateLimited = remaining === "0" || retryAfter !== undefined ||
+  const rateLimited = input.status === 429 || remaining === "0" || retryAfter !== undefined ||
     ((input.status === 403 || input.status === 429) && mentionsRateLimit);
 
   if (rateLimited) {

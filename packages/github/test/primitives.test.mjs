@@ -66,3 +66,15 @@ test("quota classification honors headers and keeps visibility unknown", () => {
   assert.equal(classifyGithubFailure({ status: 403 }).kind, "permission_denied");
   assert.equal(readableOutcome(undefined).visibility, "unknown");
 });
+
+test("HTTP 429 without quota headers uses the source retry fallback", () => {
+  assert.deepEqual(classifyGithubFailure({
+    status: 429,
+    now: new Date("2026-01-01T00:00:00Z"),
+  }), {
+    kind: "rate_limited",
+    visibility: "unknown",
+    retryAt: "2026-01-01T00:01:00.000Z",
+    scope: "source",
+  });
+});

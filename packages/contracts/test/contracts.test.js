@@ -127,6 +127,10 @@ test("an incomplete zero is rejected while a complete zero is valid", async () =
   };
   assert.equal(metricResultSchema.safeParse(completeZero).success, true);
   assert.equal(
+    metricResultSchema.safeParse({ ...completeZero, value: 42 }).success,
+    false,
+  );
+  assert.equal(
     metricResultSchema.safeParse({
       ...completeZero,
       coverage: { ...completeZero.coverage, scopeId: null },
