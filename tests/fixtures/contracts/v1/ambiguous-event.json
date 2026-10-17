@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "leaderboard/v1",
+  "eventId": "fixture:event:ambiguous",
+  "adapter": "github_webhook",
+  "action": "closed",
+  "actor": {
+    "schemaVersion": "leaderboard/v1",
+    "identityState": "unresolved",
+    "kind": "unknown",
+    "executionMode": "unknown"
+  },
+  "role": "unknown",
+  "subject": {
+    "schemaVersion": "leaderboard/v1",
+    "source": "github",
+    "kind": "issue",
+    "visibility": "unknown"
+  },
+  "occurredAt": null,
+  "observedAt": "2026-01-03T12:00:00Z",
+  "deduplicationState": "unknown",
+  "observationIds": ["fixture:observation:ambiguous"]
+}

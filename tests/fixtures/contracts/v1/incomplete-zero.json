@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "leaderboard/v1",
+  "metricId": "pr_merged",
+  "state": "zero",
+  "value": 0,
+  "coverage": {
+    "schemaVersion": "leaderboard/v1",
+    "state": "partial",
+    "source": "github_graphql",
+    "scopeId": "fixture:repo:1",
+    "windowStart": "2026-01-01T00:00:00Z",
+    "windowEnd": "2026-02-01T00:00:00Z",
+    "knownStart": null,
+    "lastSuccessfulSync": "2026-01-15T00:00:00Z",
+    "sourceWatermark": null,
+    "missingPages": 1,
+    "permissionsMissing": [],
+    "sourceErrors": []
+  }
+}

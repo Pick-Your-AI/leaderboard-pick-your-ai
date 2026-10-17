@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "leaderboard/v1",
+  "state": "unavailable",
+  "source": "unknown",
+  "scopeId": null,
+  "windowStart": "2026-01-01T00:00:00Z",
+  "windowEnd": "2026-02-01T00:00:00Z",
+  "knownStart": null,
+  "lastSuccessfulSync": null,
+  "sourceWatermark": null,
+  "missingPages": 0,
+  "permissionsMissing": ["Issues read permission not verified"],
+  "sourceErrors": ["Synthetic fixture: source endpoint unavailable"]
+}
