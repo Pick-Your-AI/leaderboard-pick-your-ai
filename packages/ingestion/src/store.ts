@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import type { Delivery, Envelope, IntakeStore } from "./webhook.js";
 import { replayTransitions, transitionFromDelivery, type ReplayResult, type Transition } from "./replay.js";
+import { assertRepositoryAvailable } from "./collection.js";
 
 export interface SqlSession {
   query<T extends Record<string, unknown> = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
@@ -21,6 +22,7 @@ export async function readObjectReplay(db: SqlSession, repositoryId: number, sub
   if (!Number.isSafeInteger(repositoryId) || repositoryId < 1 || !/^[A-Za-z0-9_=-]{1,200}$/.test(subjectId)) {
     throw new Error("invalid_replay_scope");
   }
+  await assertRepositoryAvailable(db, repositoryId, subjectId);
   const rows = await db.query(`SELECT normalization_version, observation
     FROM leaderboard_ingestion.observations
     WHERE observation->>'repositoryId' = $1 AND observation->>'subjectId' = $2
@@ -65,6 +67,13 @@ export interface Lease {
 }
 
 export type FailureCode = "source_unavailable" | "normalization_failed" | "unsupported_payload";
+export interface ReplayAudit {
+  operatorId: string;
+  reason: "source_recovered" | "normalization_corrected" | "operator_reviewed";
+  policyVersion: string;
+  /** Null until the protected host has a real resulting publication revision. */
+  resultingRevision: string | null;
+}
 const failureCodes = new Set<FailureCode>(["source_unavailable", "normalization_failed", "unsupported_payload"]);
 
 export class InboxStore implements IntakeStore {
@@ -85,7 +94,7 @@ export class InboxStore implements IntakeStore {
 
   /** Read-only bounded rebuild from retained delivery receipts, not source coverage certification. */
   async replayObjectState(repositoryId: number, subjectId: string): Promise<RetainedObjectReplay> {
-    return readObjectReplay(this.db, repositoryId, subjectId);
+    return this.db.transaction(tx => readObjectReplay(tx, repositoryId, subjectId));
   }
 
   async claim(leaseSeconds = 60): Promise<Lease | null> {
@@ -169,19 +178,37 @@ export class InboxStore implements IntakeStore {
   }
 
   /** Operator-only primitive. The host must authorize the opaque correction/replay receipt. */
-  async replay(deliveryId: string, receiptId: string): Promise<boolean> {
+  async replay(deliveryId: string, receiptId: string, audit?: ReplayAudit): Promise<boolean> {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(receiptId)) throw new Error("Invalid replay receipt ID");
+    if (audit && (!/^[A-Za-z0-9_.:-]{1,128}$/.test(audit.operatorId) ||
+      !["source_recovered", "normalization_corrected", "operator_reviewed"].includes(audit.reason) ||
+      !/^[A-Za-z0-9_.:-]{1,128}$/.test(audit.policyVersion) ||
+      (audit.resultingRevision !== null && !/^[A-Za-z0-9_.:-]{1,128}$/.test(audit.resultingRevision)))) throw new Error("Invalid replay audit");
     return this.db.transaction(async tx => {
       const result = await tx.query(`SELECT attempts, reason_code FROM leaderboard_ingestion.inbox
         WHERE delivery_id = $1 AND state = 'quarantined' FOR UPDATE`, [deliveryId]);
       const prior = result.rows[0];
       if (!prior) return false;
       await tx.query(`INSERT INTO leaderboard_ingestion.replay_receipts
-        (receipt_id, delivery_id, prior_attempts, prior_reason_code) VALUES ($1, $2, $3, $4)`,
-        [receiptId, deliveryId, prior.attempts, prior.reason_code]);
+        (receipt_id, delivery_id, prior_attempts, prior_reason_code, audit) VALUES ($1, $2, $3, $4, $5::jsonb)`,
+        [receiptId, deliveryId, prior.attempts, prior.reason_code, audit ? JSON.stringify({ operatorId: audit.operatorId, reason: audit.reason,
+          policyVersion: audit.policyVersion, resultingRevision: audit.resultingRevision }) : null]);
       await tx.query(`UPDATE leaderboard_ingestion.inbox SET state = 'pending', attempts = 0,
         available_at = clock_timestamp(), reason_code = NULL WHERE delivery_id = $1`, [deliveryId]);
       return true;
     });
+  }
+
+  /** Operational metrics describe retained delivery processing, never source connectivity. */
+  async health(): Promise<Record<string, unknown>> {
+    return (await this.db.query(`SELECT
+      count(*) FILTER (WHERE state = 'pending')::integer AS pending,
+      count(*) FILTER (WHERE state = 'leased')::integer AS leased,
+      count(*) FILTER (WHERE state = 'quarantined')::integer AS quarantined,
+      count(*) FILTER (WHERE state = 'done')::integer AS completed,
+      EXTRACT(EPOCH FROM (clock_timestamp() - min(received_at) FILTER (WHERE state IN ('pending','leased'))))::double precision AS oldest_unfinished_seconds,
+      max(received_at) AS latest_received_at,
+      (SELECT max(finished_at) FROM leaderboard_ingestion.attempt_history WHERE outcome = 'done') AS last_processed_at
+      FROM leaderboard_ingestion.inbox`)).rows[0]!;
   }
 }

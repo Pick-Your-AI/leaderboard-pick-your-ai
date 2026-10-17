@@ -2,6 +2,7 @@ import { Pool } from "pg";
 import { createIngestionServer, runWorker } from "./runtime.js";
 import { InboxStore, postgresDatabase } from "./store.js";
 import { SnapshotStore } from "./snapshots.js";
+import { CollectionStore } from "./collection.js";
 
 function scopeFromEnvironment(raw: string | undefined): Map<number, Set<number>> {
   if (!raw) throw new Error("Missing scope");
@@ -70,7 +71,7 @@ async function main(): Promise<void> {
       if (!/^\d+$/.test(portText) || Number(portText) < 1 || Number(portText) > 65535) throw new Error("Invalid port");
       const secrets = [process.env.INGESTION_WEBHOOK_SECRET ?? ""];
       if (process.env.INGESTION_PREVIOUS_WEBHOOK_SECRET) secrets.push(process.env.INGESTION_PREVIOUS_WEBHOOK_SECRET);
-      const server = createIngestionServer({ secrets, scope, store });
+      const server = createIngestionServer({ secrets, scope, store, lifecycle: new CollectionStore(database) });
       await new Promise<void>((resolve, reject) => {
         server.once("error", reject);
         server.listen(Number(portText), "127.0.0.1", () => { server.off("error", reject); resolve(); });

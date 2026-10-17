@@ -1,0 +1,10 @@
+DROP TABLE leaderboard_ingestion.enrichment_jobs;
+DROP TABLE leaderboard_ingestion.collection_items;
+DROP TABLE leaderboard_ingestion.collection_pages;
+DROP TABLE leaderboard_ingestion.source_facts;
+DROP FUNCTION leaderboard_ingestion.reject_source_fact_change();
+DROP TABLE leaderboard_ingestion.collection_runs;
+DROP TABLE leaderboard_ingestion.lifecycle_receipts;
+DROP TABLE leaderboard_ingestion.repository_access;
+DROP TABLE leaderboard_ingestion.object_suppressions;
+ALTER TABLE leaderboard_ingestion.replay_receipts DROP COLUMN audit;

@@ -1,10 +1,14 @@
 export { createWebhookHandler, verifySignature } from "./webhook.js";
 export type { Envelope, Delivery, IntakeStore, WebhookOptions } from "./webhook.js";
 export { InboxStore, postgresDatabase } from "./store.js";
-export type { Lease, FailureCode, SqlSession, SqlDatabase } from "./store.js";
+export type { Lease, FailureCode, ReplayAudit, SqlSession, SqlDatabase } from "./store.js";
 export { createIngestionServer, runWorker } from "./runtime.js";
 export type { ServerOptions, WorkerStore, WorkerStatus, WorkerOptions } from "./runtime.js";
 export { transitionFromDelivery, replayTransitions } from "./replay.js";
 export type { Transition, FacetState, ReplayResult } from "./replay.js";
 export { SnapshotStore } from "./snapshots.js";
 export type { SnapshotDocument, StoredSnapshot, SnapshotHead, SnapshotNotice } from "./snapshots.js";
+export { CollectionStore, sourceFamilies } from "./collection.js";
+export type { ScanRequest, SourceFact, SourcePage, SourceFamily, ReadOnlySource } from "./collection.js";
+export { EnrichmentStore } from "./enrichment.js";
+export type { SourceMetadata, EnrichmentSource } from "./enrichment.js";

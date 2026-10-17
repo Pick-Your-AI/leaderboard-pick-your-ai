@@ -4,17 +4,19 @@ import { readFile } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { Pool } from 'pg';
-import { InboxStore, SnapshotStore, postgresDatabase, createWebhookHandler, createIngestionServer, runWorker } from '../dist/index.js';
+import { InboxStore, SnapshotStore, CollectionStore, EnrichmentStore, postgresDatabase, createWebhookHandler, createIngestionServer, runWorker } from '../dist/index.js';
 
 const snapshotUp = await readFile(new URL('../sql/002_snapshots.up.sql', import.meta.url), 'utf8');
 const snapshotDown = await readFile(new URL('../sql/002_snapshots.down.sql', import.meta.url), 'utf8');
-const up = (await readFile(new URL('../sql/001_ingestion.up.sql', import.meta.url), 'utf8')) + '\n' + snapshotUp;
-const down = snapshotDown + '\n' + (await readFile(new URL('../sql/001_ingestion.down.sql', import.meta.url), 'utf8'));
+const collectionUp = await readFile(new URL('../sql/003_collection.up.sql', import.meta.url), 'utf8');
+const collectionDown = await readFile(new URL('../sql/003_collection.down.sql', import.meta.url), 'utf8');
+const up = (await readFile(new URL('../sql/001_ingestion.up.sql', import.meta.url), 'utf8')) + '\n' + snapshotUp + '\n' + collectionUp;
+const down = collectionDown + '\n' + snapshotDown + '\n' + (await readFile(new URL('../sql/001_ingestion.down.sql', import.meta.url), 'utf8'));
 const url = process.env.INGESTION_TEST_DATABASE_URL;
 let engine, db, store, snapshots;
 before(async () => {
   if (url) {
-    if (new URL(url).pathname !== '/leaderboard_ingestion_test') throw new Error('Tests require a disposable leaderboard_ingestion_test database');
+    if (!/^\/leaderboard_ingestion(?:_[a-z0-9]+)*_test$/.test(new URL(url).pathname)) throw new Error('Tests require a disposable leaderboard_ingestion[_suffix]_test database');
     engine = new Pool({ connectionString: url });
     db = postgresDatabase(engine);
   } else {
@@ -33,7 +35,9 @@ after(async () => {
   if (engine) await (url ? engine.end() : engine.close());
 });
 beforeEach(async () => {
+  await db.query('TRUNCATE leaderboard_ingestion.object_suppressions, leaderboard_ingestion.enrichment_jobs, leaderboard_ingestion.collection_items, leaderboard_ingestion.collection_pages, leaderboard_ingestion.source_facts, leaderboard_ingestion.collection_runs, leaderboard_ingestion.lifecycle_receipts, leaderboard_ingestion.repository_access CASCADE');
   await db.query('TRUNCATE leaderboard_ingestion.snapshot_notices, leaderboard_ingestion.snapshot_heads, leaderboard_ingestion.snapshots, leaderboard_ingestion.outbox, leaderboard_ingestion.observations, leaderboard_ingestion.replay_receipts, leaderboard_ingestion.attempt_history, leaderboard_ingestion.inbox RESTART IDENTITY CASCADE');
+  await new CollectionStore(db).verifyPublic(2, 1, null);
 });
 
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -214,6 +218,8 @@ test('read-only object replay uses source time, survives store restart and decla
   const after = await store.replayObjectState(2, 'SYNTHETIC_ISSUE');
   assert.equal(after.replay.facets[0].state, 'ambiguous');
   assert.equal(after.replay.facets[0].value, null);
+  await assert.rejects(store.replayObjectState(999, 'SYNTHETIC_ISSUE'), /repository_unavailable/);
+  await new CollectionStore(db).verifyPublic(999, 1, null);
   assert.equal((await store.replayObjectState(999, 'SYNTHETIC_ISSUE')).sourceObservationCount, 0);
   assert.deepEqual((await store.replayObjectState(999, 'SYNTHETIC_ISSUE')).replay.facets, []);
 });
@@ -431,4 +437,274 @@ test('migration rollback and reapply work on an empty schema', async () => {
   if (url) { await engine.query(down); await engine.query(up); }
   else { await engine.exec(down); await engine.exec(up); }
   assert.equal(await store.insert(delivery()), 'accepted');
+});
+
+const scan = (runId = 'synthetic-scan', overrides = {}) => ({ runId, repositoryId: 2, family: 'issues', mode: 'backfill',
+  since: null, until: '2026-01-03T00:00:00.000Z', ...overrides });
+const fact = (subjectId = 'SYNTHETIC_ISSUE', overrides = {}) => ({ subjectId, sourceRevision: 'synthetic-v1',
+  sourceUrl: 'https://github.com/synthetic-org/synthetic-repo/issues/3', evidence: 'current_state', actorId: null,
+  occurredAt: null, state: 'closed', ...overrides });
+const page = (facts, nextCursor = null, expectedCount = facts.length) => ({ repositoryId: 2, visibility: 'public', facts, nextCursor, expectedCount });
+async function collection() {
+  const result = new CollectionStore(db);
+  return result;
+}
+async function facts() { return (await db.query('SELECT fact_key, document FROM leaderboard_ingestion.source_facts ORDER BY fact_key')).rows; }
+
+test('resumable paginated backfill checkpoints atomically and recovers source failure without invented history', async () => {
+  const collect = await collection();
+  await collect.start(scan());
+  const calls = [];
+  const first = { async readPage(request) { calls.push(request); return page([fact()], 'page-2', 2); } };
+  assert.equal(await collect.step('synthetic-scan', first, 1), 'progress');
+  assert.equal(calls[0].cursor, null);
+  assert.equal(await collect.step('synthetic-scan', { async readPage() { throw new Error('synthetic secret never retained'); } }), 'failed');
+  const failed = (await collect.diagnostics(2))[0];
+  assert.equal(failed.item_count, 1);
+  assert.equal(failed.health, 'disconnected');
+  assert.equal(failed.reason, 'source_read_failed');
+  const restarted = new CollectionStore(db);
+  assert.equal(await restarted.step('synthetic-scan', { async readPage(request) {
+    assert.equal(request.cursor, 'page-2');
+    return page([fact('SYNTHETIC_OTHER')], null, 2);
+  } }), 'complete');
+  assert.equal((await restarted.diagnostics(2))[0].counts_reconciled, true);
+  assert.equal((await facts()).length, 2);
+  assert.equal((await facts())[0].document.actorId, null);
+  assert.equal((await facts())[0].document.occurredAt, null);
+  assert.deepEqual(await counts(), { observations: 0, notices: 0 });
+});
+
+test('omitted delivery converges through reconciliation; overlap and full audit retain identical evidence', async () => {
+  const collect = await collection();
+  await store.insert(delivery());
+  await store.complete(await store.claim());
+  const sourceLedger = await db.query('SELECT event_key, observation FROM leaderboard_ingestion.observations');
+  const readOnly = { async readPage() { return page([fact('SYNTHETIC_MISSING_DELIVERY')]); } };
+  for (const [runId, mode] of [['synthetic-recent', 'reconcile'], ['synthetic-overlap', 'reconcile'], ['synthetic-audit', 'audit']]) {
+    await collect.start(scan(runId, { mode, since: '2026-01-01T00:00:00.000Z' }));
+    assert.equal(await collect.step(runId, readOnly), 'complete');
+  }
+  assert.equal((await facts()).length, 1);
+  assert.deepEqual(await db.query('SELECT event_key, observation FROM leaderboard_ingestion.observations'), sourceLedger);
+  assert.deepEqual((await db.query('SELECT changed_count FROM leaderboard_ingestion.collection_pages ORDER BY run_id')).rows.map(row => row.changed_count).sort(), [0, 0, 1]);
+  await assert.rejects(db.query("UPDATE leaderboard_ingestion.source_facts SET document = '{}'"), /immutable_source_fact/);
+});
+
+test('partial counts, duplicate pages, invalid evidence and source drift never certify complete coverage', async () => {
+  const collect = await collection();
+  await collect.start(scan());
+  assert.equal(await collect.step('synthetic-scan', { async readPage() { return page([fact()], null, 2); } }), 'failed');
+  assert.equal((await facts()).length, 0);
+  assert.equal(await collect.step('synthetic-scan', { async readPage() { return page([fact()], 'next', 2); } }), 'progress');
+  for (const result of [page([fact()], null, 2), page([fact('SYNTHETIC_OTHER')], null, 3),
+    page([fact('SYNTHETIC_OTHER', { actorId: 'SYNTHETIC_OWNER' })], null, 2),
+    { ...page([fact('SYNTHETIC_OTHER')], null, 2), visibility: 'private' },
+    page([fact('SYNTHETIC_FUTURE', { evidence: 'observed_transition', occurredAt: '2027-01-01T00:00:00.000Z' })], null, 2)]) {
+    assert.equal(await collect.step('synthetic-scan', { async readPage() { return result; } }), 'failed');
+    assert.equal((await facts()).length, 1);
+  }
+  assert.equal((await collect.diagnostics(2))[0].counts_reconciled, false);
+  assert.equal((await collect.diagnostics(2))[0].reason, 'source_schema_drift');
+});
+
+test('current Project fields cannot become historical attribution, deleted actor remains unknown', async () => {
+  const collect = await collection();
+  await collect.start(scan('synthetic-current', { family: 'project_current' }));
+  assert.equal(await collect.step('synthetic-current', { async readPage() { return page([fact('SYNTHETIC_PROJECT_FIELD')]); } }), 'complete');
+  await collect.start(scan('synthetic-history', { family: 'project_history' }));
+  assert.equal(await collect.step('synthetic-history', { async readPage() { return page([fact('SYNTHETIC_TRANSITION', {
+    evidence: 'observed_transition', occurredAt: '2026-01-02T00:00:00.000Z', actorId: null })]); } }), 'complete');
+  assert.equal((await facts()).length, 2);
+  assert.equal((await facts()).find(row => row.document.subjectId === 'SYNTHETIC_TRANSITION').document.actorId, null);
+});
+
+test('empty source read differs from disconnected or never-read collector and stale progress', async () => {
+  const collect = await collection();
+  await collect.start(scan('synthetic-empty'));
+  assert.equal((await collect.diagnostics(2))[0].health, 'unproven');
+  assert.equal(await collect.step('synthetic-empty', { async readPage() { return page([]); } }), 'complete');
+  assert.equal((await collect.diagnostics(2))[0].health, 'no_activity_in_window');
+  await db.query("UPDATE leaderboard_ingestion.collection_runs SET last_success_at = clock_timestamp() - interval '2 hours'");
+  assert.equal((await collect.diagnostics(2, 3600))[0].health, 'disconnected');
+  await collect.suppress(id(44), 'a'.repeat(64), 1, [2], 'private');
+  const unavailable = (await collect.diagnostics(2))[0];
+  assert.equal(unavailable.health, 'unavailable');
+  assert.equal(unavailable.coverage, 'unavailable');
+  assert.equal(unavailable.counts_reconciled, false);
+  assert.equal(unavailable.historical_counts_reconciled, true);
+});
+
+test('signed privatization hides latest, pinned snapshots, notices and replay while preserving evidence', async () => {
+  const collect = await collection();
+  await observe();
+  const head = await snapshots.publishObjectState(2, 'SYNTHETIC_ISSUE', 'synthetic-policy-v1', '0');
+  const original = await db.query('SELECT event_key, observation FROM leaderboard_ingestion.observations');
+  const secret = 'synthetic-lifecycle-secret-at-least-32-characters';
+  const handler = createWebhookHandler({ secrets: [secret], scope: new Map([[1, new Set([2])]]), store, lifecycle: collect });
+  const body = JSON.stringify({ installation: { id: 1 }, repository: { id: 2, private: true }, action: 'privatized' });
+  const request = signature => new Request('https://synthetic.invalid/webhook', { method: 'POST', body, headers: {
+    'content-type': 'application/json', 'x-github-event': 'repository', 'x-github-delivery': id(55),
+    'x-hub-signature-256': signature } });
+  assert.equal((await handler(request('sha256=' + '0'.repeat(64)))).status, 401);
+  assert.ok(await snapshots.latest(2, 'SYNTHETIC_ISSUE'));
+  const signature = 'sha256=' + createHmac('sha256', secret).update(body).digest('hex');
+  assert.equal((await handler(request(signature))).status, 202);
+  assert.equal((await handler(request(signature))).status, 200);
+  assert.equal(await snapshots.latest(2, 'SYNTHETIC_ISSUE'), null);
+  assert.equal(await snapshots.byId(head.snapshot.snapshotId), null);
+  assert.deepEqual(await snapshots.notices(2, 'SYNTHETIC_ISSUE', '0'), []);
+  await assert.rejects(store.replayObjectState(2, 'SYNTHETIC_ISSUE'), /repository_unavailable/);
+  await assert.rejects(snapshots.publishObjectState(2, 'SYNTHETIC_ISSUE', 'synthetic-policy-v1', '1'), /repository_unavailable/);
+  assert.deepEqual(await db.query('SELECT event_key, observation FROM leaderboard_ingestion.observations'), original);
+  assert.equal(await collect.verifyPublic(2, 1, '1'), false, 'stale pre-revocation probe cannot restore serving');
+  assert.equal(await collect.verifyPublic(2, 1, '2'), true);
+  assert.ok(await snapshots.byId(head.snapshot.snapshotId));
+});
+
+test('unverified repository access fails closed for replay, publication, pinned reads and notices', async () => {
+  await observe();
+  const head = await snapshots.publishObjectState(2, 'SYNTHETIC_ISSUE', 'synthetic-policy-v1', '0');
+  await db.query('DELETE FROM leaderboard_ingestion.repository_access WHERE repository_id = 2');
+  assert.equal(await snapshots.latest(2, 'SYNTHETIC_ISSUE'), null);
+  assert.equal(await snapshots.byId(head.snapshot.snapshotId), null);
+  assert.deepEqual(await snapshots.notices(2, 'SYNTHETIC_ISSUE', '0'), []);
+  await assert.rejects(store.replayObjectState(2, 'SYNTHETIC_ISSUE'), /repository_unavailable/);
+  await assert.rejects(snapshots.publishObjectState(2, 'SYNTHETIC_ISSUE', 'synthetic-policy-v1', '1'), /repository_unavailable/);
+  assert.deepEqual(await counts(), { observations: 1, notices: 1 });
+});
+
+test('App revocation and repository removal fence in-flight scans and stale reactivation', async () => {
+  const collect = await collection();
+  await collect.start(scan());
+  assert.equal(await collect.step('synthetic-scan', { async readPage() {
+    assert.equal(await collect.suppress(id(70), 'a'.repeat(64), 1, [2], 'removed'), 'accepted');
+    return page([fact()]);
+  } }), 'failed');
+  assert.equal((await facts()).length, 0);
+  assert.equal(await collect.verifyPublic(2, 1, '1'), false);
+  assert.equal(await collect.verifyPublic(2, 1, '2'), true);
+  assert.equal(await collect.step('synthetic-scan', { async readPage() { return page([fact()]); } }), 'failed', 'pre-revocation run stays fenced');
+  await collect.suppress(id(71), 'b'.repeat(64), 1, [], 'revoked');
+  assert.equal(await collect.verifyPublic(2, 1, '4'), false, 'revoked installation cannot restore access');
+  assert.equal(await collect.verifyPublic(3, 1, null), false, 'new repositories cannot bypass installation revocation');
+  assert.equal(await collect.suppress(id(71), 'c'.repeat(64), 1, [], 'revoked'), 'conflict');
+});
+
+test('repository rename preserves stable scope identity and scan replay is idempotent', async () => {
+  const collect = await collection();
+  await collect.start(scan());
+  await collect.step('synthetic-scan', { async readPage() { return page([fact()]); } });
+  await collect.start(scan('synthetic-renamed', { mode: 'reconcile' }));
+  await collect.step('synthetic-renamed', { async readPage() { return page([fact('SYNTHETIC_ISSUE', {
+    sourceUrl: 'https://github.com/synthetic-org/synthetic-renamed/issues/3' })]); } });
+  const before = await facts();
+  assert.equal(before.length, 2, 'retain old and renamed source references');
+  assert.equal(await collect.step('synthetic-renamed', { async readPage() { throw new Error('completed scan must not fetch'); } }), 'complete');
+  assert.deepEqual(await facts(), before);
+  assert.equal((await db.query('SELECT DISTINCT repository_id FROM leaderboard_ingestion.source_facts')).rows.length, 1);
+});
+
+test('PostgreSQL competing scan workers commit one checkpoint and one fact', { skip: !url }, async () => {
+  const collect = await collection();
+  await collect.start(scan());
+  let arrived = 0, release;
+  const both = new Promise(resolve => { release = resolve; });
+  const source = { async readPage() { if (++arrived === 2) release(); await both; return page([fact()]); } };
+  const results = await Promise.all([collect.step('synthetic-scan', source), collect.step('synthetic-scan', source)]);
+  assert.deepEqual(results.sort(), ['complete', 'superseded']);
+  assert.equal((await facts()).length, 1);
+  assert.equal((await collect.diagnostics(2))[0].page_count, 1);
+});
+
+const sourceMetadata = (overrides = {}) => ({ sourceRevision: 'synthetic-v1', acceptedOutcome: true,
+  reviewState: 'approved', additions: 10, deletions: 2, changedFiles: 1, ...overrides });
+async function enrichment() {
+  const collect = await collection();
+  await collect.start(scan());
+  await collect.step('synthetic-scan', { async readPage() { return page([fact()]); } });
+  const key = (await facts())[0].fact_key;
+  const enrich = new EnrichmentStore(db, 3);
+  await enrich.enqueue(key, 'synthetic-policy-v1');
+  return { enrich, collect, key };
+}
+
+test('asynchronous enrichment retains revision-pinned metadata, failures stay visible and recover without contribution credit', async () => {
+  const { enrich, key } = await enrichment();
+  assert.equal((await db.query('SELECT state FROM leaderboard_ingestion.enrichment_jobs')).rows[0].state, 'pending');
+  assert.equal(await enrich.processOne({ async readMetadata() { throw new Error('synthetic secret never retain'); } }), 'failed');
+  let job = (await db.query('SELECT * FROM leaderboard_ingestion.enrichment_jobs')).rows[0];
+  assert.equal(job.state, 'failed');
+  assert.equal(job.reason, 'enrichment_unavailable');
+  assert.equal(job.metadata, null);
+  assert.deepEqual(await counts(), { observations: 0, notices: 0 });
+  await db.query("UPDATE leaderboard_ingestion.enrichment_jobs SET available_at = clock_timestamp() - interval '1 second'");
+  assert.equal(await new EnrichmentStore(db, 3).processOne({ async readMetadata(request) {
+    assert.equal(request.fact.sourceRevision, 'synthetic-v1');
+    return { ...sourceMetadata(), body: 'untrusted instruction text' };
+  } }), 'classified');
+  job = (await db.query('SELECT * FROM leaderboard_ingestion.enrichment_jobs')).rows[0];
+  assert.equal(job.attempts, 2);
+  assert.deepEqual(job.metadata, sourceMetadata());
+  assert.deepEqual(await counts(), { observations: 0, notices: 0 });
+  await enrich.enqueue(key, 'synthetic-policy-v1');
+  assert.equal(await enrich.processOne({ async readMetadata() { throw new Error('must not fetch completed job'); } }), 'idle');
+  await enrich.enqueue(key, 'synthetic-policy-v2');
+  assert.equal(await enrich.processOne({ async readMetadata() { return sourceMetadata({ acceptedOutcome: false }); } }), 'excluded');
+});
+
+test('missing evidence, changed source revision and exhausted attempts never become classified', async () => {
+  const { enrich } = await enrichment();
+  for (const invalid of [sourceMetadata({ acceptedOutcome: null }), sourceMetadata({ sourceRevision: 'synthetic-v2' }), sourceMetadata({ additions: -1 })]) {
+    assert.equal(await enrich.processOne({ async readMetadata() { return invalid; } }), 'failed');
+    await db.query("UPDATE leaderboard_ingestion.enrichment_jobs SET available_at = clock_timestamp() - interval '1 second'");
+  }
+  assert.equal(await enrich.processOne({ async readMetadata() { return sourceMetadata(); } }), 'idle');
+  assert.equal((await db.query('SELECT metadata FROM leaderboard_ingestion.enrichment_jobs')).rows[0].metadata, null);
+});
+
+test('enrichment completion rejects lost lease or access suppression and never overwrites a completed classification', async () => {
+  const { enrich, collect } = await enrichment();
+  assert.equal(await enrich.processOne({ async readMetadata() {
+    await collect.suppress(id(88), 'a'.repeat(64), 1, [2], 'private');
+    return sourceMetadata();
+  } }), 'failed');
+  assert.equal((await db.query('SELECT metadata FROM leaderboard_ingestion.enrichment_jobs')).rows[0].metadata, null);
+  assert.equal(await enrich.processOne({ async readMetadata() { return sourceMetadata(); } }), 'idle');
+});
+
+test('reconciled deletion suppresses old artifact snapshots and preserves unaffected scope and audit evidence', async () => {
+  const collect = await collection();
+  await observe();
+  await observe(2, 'opened', '2026-01-01T00:00:00.000Z', 'SYNTHETIC_OTHER');
+  const first = await snapshots.publishObjectState(2, 'SYNTHETIC_ISSUE', 'synthetic-policy-v1', '0');
+  await snapshots.publishObjectState(2, 'SYNTHETIC_OTHER', 'synthetic-policy-v1', '0');
+  await collect.start(scan());
+  assert.equal(await collect.step('synthetic-scan', { async readPage() { return page([fact('SYNTHETIC_ISSUE', { state: 'deleted' })]); } }), 'complete');
+  assert.equal(await snapshots.latest(2, 'SYNTHETIC_ISSUE'), null);
+  assert.equal(await snapshots.byId(first.snapshot.snapshotId), null);
+  assert.deepEqual(await snapshots.notices(2, 'SYNTHETIC_ISSUE', '0'), []);
+  await assert.rejects(store.replayObjectState(2, 'SYNTHETIC_ISSUE'), /repository_unavailable/);
+  assert.ok(await snapshots.latest(2, 'SYNTHETIC_OTHER'));
+  assert.deepEqual(await counts(), { observations: 2, notices: 2 });
+  assert.equal((await facts())[0].document.state, 'deleted');
+});
+
+test('health and replay audit retain operator-supplied identity, policy and unknown resulting publication', async () => {
+  assert.equal((await store.health()).latest_received_at, null);
+  await store.insert(delivery());
+  assert.equal((await store.health()).pending, 1);
+  const lease = await store.claim();
+  assert.equal((await store.health()).leased, 1);
+  await store.fail(lease, 'source_unavailable', true);
+  assert.equal((await store.health()).quarantined, 1);
+  const audit = { operatorId: 'SYNTHETIC_OPERATOR', reason: 'source_recovered', policyVersion: 'synthetic-policy-v1', resultingRevision: null };
+  assert.equal(await store.replay(id(1), 'synthetic-recovery', audit), true);
+  assert.deepEqual((await db.query('SELECT audit FROM leaderboard_ingestion.replay_receipts')).rows[0].audit, audit);
+  const recovered = await store.claim();
+  assert.equal(await store.complete(recovered), true);
+  assert.equal((await store.health()).completed, 1);
+  assert.ok((await store.health()).last_processed_at);
+  assert.equal((await store.health()).oldest_unfinished_seconds, null);
+  assert.deepEqual(await counts(), { observations: 1, notices: 1 });
 });

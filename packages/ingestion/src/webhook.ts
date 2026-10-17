@@ -28,6 +28,8 @@ export interface WebhookOptions {
   /** Explicit installation -> repository database-ID allowlist; empty means deny all. */
   scope: ReadonlyMap<number, ReadonlySet<number>>;
   store: IntakeStore;
+  lifecycle?: { suppress(deliveryId: string, bodyHash: string, installationId: number,
+    repositoryIds: number[], reason: "private" | "removed" | "revoked"): Promise<"accepted" | "duplicate" | "conflict"> };
   maxBodyBytes?: number;
 }
 
@@ -143,9 +145,32 @@ export function createWebhookHandler(options: WebhookOptions): (request: Request
       let payload: unknown;
       try { payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)); }
       catch { throw new IntakeError(400, "invalid_json"); }
+      const event = request.headers.get("x-github-event");
+      const bodyHash = createHash("sha256").update(body).digest("hex");
+      if (["installation", "installation_repositories", "repository"].includes(event ?? "")) {
+        if (!options.lifecycle) throw new IntakeError(422, "unsupported_event");
+        const data = object(payload);
+        const installationId = integer(object(data.installation).id);
+        if (!scope.has(installationId)) throw new IntakeError(403, "outside_scope");
+        let ids: number[];
+        let reason: "private" | "removed" | "revoked";
+        if (event === "installation" && ["deleted", "suspend"].includes(String(data.action))) {
+          ids = [...scope.get(installationId)!]; reason = "revoked";
+        } else if (event === "installation_repositories" && data.action === "removed") {
+          if (!Array.isArray(data.repositories_removed) || data.repositories_removed.length > 1000) throw new IntakeError(400, "invalid_payload");
+          ids = data.repositories_removed.map(value => integer(object(value).id)).filter(value => scope.get(installationId)!.has(value));
+          reason = "removed";
+        } else if (event === "repository" && ["privatized", "deleted"].includes(String(data.action))) {
+          ids = [integer(object(data.repository).id)]; reason = data.action === "privatized" ? "private" : "removed";
+          if (!scope.get(installationId)!.has(ids[0]!)) throw new IntakeError(403, "outside_scope");
+        } else throw new IntakeError(422, "unsupported_action");
+        const result = await options.lifecycle.suppress(deliveryId.toLowerCase(), bodyHash, installationId, ids, reason);
+        if (result === "conflict") throw new IntakeError(409, "delivery_conflict");
+        return Response.json({ status: result }, { status: result === "accepted" ? 202 : 200 });
+      }
       const envelope = minimize(payload, request.headers.get("x-github-event"), deliveryId.toLowerCase(), scope);
       // Only a successful durable insert can produce an acknowledgement.
-      const result = await options.store.insert({ deliveryId: envelope.deliveryId, bodyHash: createHash("sha256").update(body).digest("hex"), envelope });
+      const result = await options.store.insert({ deliveryId: envelope.deliveryId, bodyHash, envelope });
       if (result === "conflict") throw new IntakeError(409, "delivery_conflict");
       return Response.json({ status: result }, { status: result === "accepted" ? 202 : 200 });
     } catch (error) {

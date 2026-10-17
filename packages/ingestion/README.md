@@ -6,6 +6,16 @@ Partial implementation for [LB-05.01 / #51](https://github.com/Pick-Your-AI/pick
 
 [Atomic retained-state snapshots](SNAPSHOTS.md) add internal publication for #62: immutable content IDs, optimistic revision checks, consistent pinned reads and transactional update notices. These are not public rankings or approved public evidence projections.
 
+[Collection and recovery](../../docs/ingestion-completion.md) adds durable bounded scans,
+revision-pinned asynchronous enrichment, source freshness diagnostics and lifecycle
+suppression. Apply migration `003_collection.up.sql` after migrations 001 and 002.
+Snapshot publication, pinned/latest reads, notices and object replay now fail closed
+unless the repository has a positively verified public-access row. Hosts must
+perform a fresh approved visibility/access probe before calling `verifyPublic`;
+this method does not itself contact GitHub. Configure `lifecycle: new
+CollectionStore(database)` on the webhook handler; the CLI supplies it automatically.
+Rollback 003 before 002/001 on disposable databases only.
+
 ## Run validation
 
 Use Node 24, from this directory:
@@ -16,7 +26,7 @@ npm run typecheck
 npm test
 ```
 
-Default tests use PGlite's embedded PostgreSQL engine and explicitly skip the multi-connection test. CI repeats the suite against a fresh PostgreSQL 17 service, including concurrent duplicate inserts and `SKIP LOCKED` workers. For the same integration suite locally, supply `INGESTION_TEST_DATABASE_URL` pointing to a disposable database named `leaderboard_ingestion_test`. Tests refuse an existing ingestion schema and truncate only that dedicated test schema between cases. They leave it present for inspection; use a fresh database for another run. Never point this setting at a shared or production database.
+Default tests use PGlite's embedded PostgreSQL engine and explicitly skip multi-connection tests. CI repeats the suite against a fresh PostgreSQL 17 service, including concurrent duplicate inserts and `SKIP LOCKED` workers. For the same integration suite locally, supply `INGESTION_TEST_DATABASE_URL` pointing to a disposable database named `leaderboard_ingestion_test` or `leaderboard_ingestion_<suffix>_test` (lowercase alphanumeric suffix segments). Tests refuse an existing ingestion schema and truncate only that dedicated test schema between cases. They leave it present for inspection; use a fresh database for another run. Never point this setting at a shared or production database.
 
 ## Host integration
 

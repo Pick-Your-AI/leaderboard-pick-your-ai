@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { replayTransitions, type ReplayResult } from "./replay.js";
 import { readObjectReplay, type RetainedObjectReplay, type SqlDatabase } from "./store.js";
+import { assertRepositoryAvailable } from "./collection.js";
 
 export interface SnapshotDocument {
   version: "retained-state-snapshot/v1";
@@ -87,6 +88,7 @@ export class SnapshotStore {
     definition(definitionVersion);
     revision(expectedRevision);
     return this.db.transaction(async tx => {
+      await assertRepositoryAvailable(tx, repositoryId, subjectId);
       // Transaction-owned lock covers first publication as well as existing heads.
       await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`leaderboard-snapshots:${key}`]);
       const heads = await tx.query("SELECT revision::text, snapshot_id, published_at FROM leaderboard_ingestion.snapshot_heads WHERE scope_key = $1", [key]);
@@ -120,14 +122,20 @@ export class SnapshotStore {
     const result = await this.db.query(`SELECT snapshot.*, head.revision::text, head.published_at
       FROM leaderboard_ingestion.snapshot_heads AS head JOIN leaderboard_ingestion.snapshots AS snapshot
       ON head.scope_key = snapshot.scope_key AND head.snapshot_id = snapshot.snapshot_id
-      WHERE head.scope_key = $1`, [scopeKey(repositoryId, subjectId)]);
+      WHERE head.scope_key = $1 AND EXISTS (SELECT 1 FROM leaderboard_ingestion.repository_access AS access
+        WHERE access.repository_id = $2 AND access.state = 'public')
+      AND NOT EXISTS (SELECT 1 FROM leaderboard_ingestion.object_suppressions WHERE repository_id = $2 AND subject_id = $3)`, [scopeKey(repositoryId, subjectId), repositoryId, subjectId]);
     const row = result.rows[0];
     return row ? { revision: revision(String(row.revision)), publishedAt: new Date(row.published_at as string).toISOString(), snapshot: decode(row) } : null;
   }
 
   async byId(snapshotId: string): Promise<StoredSnapshot | null> {
     if (typeof snapshotId !== "string" || !/^[a-f0-9]{64}$/.test(snapshotId)) throw new Error("invalid_snapshot_id");
-    const result = await this.db.query("SELECT * FROM leaderboard_ingestion.snapshots WHERE snapshot_id = $1", [snapshotId]);
+    const result = await this.db.query(`SELECT snapshot.* FROM leaderboard_ingestion.snapshots AS snapshot WHERE snapshot_id = $1
+      AND EXISTS (SELECT 1 FROM leaderboard_ingestion.repository_access AS access
+      WHERE access.repository_id::text = snapshot.document->'scope'->>'repositoryId' AND access.state = 'public')
+      AND NOT EXISTS (SELECT 1 FROM leaderboard_ingestion.object_suppressions AS removed
+      WHERE removed.repository_id::text = snapshot.document->'scope'->>'repositoryId' AND removed.subject_id = snapshot.document->'scope'->>'subjectId')`, [snapshotId]);
     return result.rows[0] ? decode(result.rows[0]) : null;
   }
 
@@ -138,7 +146,9 @@ export class SnapshotStore {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("invalid_notice_limit");
     const result = await this.db.query(`SELECT notice.revision::text, notice.snapshot_id, notice.published_at
       FROM leaderboard_ingestion.snapshot_notices AS notice WHERE notice.scope_key = $1 AND notice.revision > $2
-      ORDER BY notice.revision LIMIT $3`, [key, afterRevision, limit]);
+      AND EXISTS (SELECT 1 FROM leaderboard_ingestion.repository_access AS access WHERE access.repository_id = $4 AND access.state = 'public')
+      AND NOT EXISTS (SELECT 1 FROM leaderboard_ingestion.object_suppressions WHERE repository_id = $4 AND subject_id = $5)
+      ORDER BY notice.revision LIMIT $3`, [key, afterRevision, limit, repositoryId, subjectId]);
     return result.rows.map(row => ({ revision: revision(String(row.revision)), snapshotId: String(row.snapshot_id),
       publishedAt: new Date(row.published_at as string).toISOString() }));
   }
