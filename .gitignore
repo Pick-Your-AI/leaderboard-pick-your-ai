@@ -1,3 +1,7 @@
+node_modules/
+dist/
+**/dist/
+coverage/
 __pycache__/
 *.py[cod]
 .venv/
@@ -5,8 +9,6 @@ __pycache__/
 .env.*
 !.env.example
 .DS_Store
-node_modules/
-dist/
-coverage/
 .pytest_cache/
 *.log
+infra/db/.state/

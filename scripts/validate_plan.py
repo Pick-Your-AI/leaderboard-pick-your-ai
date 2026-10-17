@@ -195,7 +195,7 @@ def validate_files(root=ROOT, allow_unpublished=False):
     if mapping["master_sha256"] != digest:
         errors.append("UI mapping fingerprint is stale; review and run scripts/sync_baseline.py")
     for path in [*(root / "planning").rglob("*.json"), *root.rglob("*.md")]:
-        if ".git" in path.parts:
+        if ".git" in path.parts or "node_modules" in path.parts:
             continue
         text = path.read_text(encoding="utf-8")
         if re.search(r"[A-Za-z]:[\\/](?:Users|home)[\\/]|/Users/[^/]+/|/home/[^/]+/", text):
