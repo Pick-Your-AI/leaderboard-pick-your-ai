@@ -255,3 +255,16 @@ test("policy release manifests require designated approval and notes, including 
   assert.equal(planPolicyRelease(comparison, decision).publicEnabled, false);
   assert.throws(() => comparePolicies(frozen, old, { ...old, groupBy: "canonical" }, scope()), /new policy version/);
 });
+
+
+test("uncertain older normalization cannot certify complete newcomer history", () => {
+  const old = fact("historic", { canonicalKey: null, acceptedAt: "2026-02-01T10:00:00Z", observedAt: "2026-02-02T10:00:00Z" });
+  const rows = participationView(input([old, fact("current")]), policy(), scope(), { originAt: "2026-01-01T00:00:00Z", reviewReceipt: "synthetic-review" });
+  assert.equal(rows[0].newcomer, null);
+  assert.equal(rows[0].historyCoverage, "incomplete");
+});
+
+test("policy aggregation cannot silently reinterpret count units or signed net changes", () => {
+  assert.throws(() => board([fact("count", { quantity: 999 })], { aggregation: "sum" }), /registry semantics/);
+  assert.throws(() => board([], { metricId: "net_lines", aggregation: "sum", rank: false }), /signed net changes/);
+});

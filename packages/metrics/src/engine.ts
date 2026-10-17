@@ -151,6 +151,11 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
   if (!metric) throw new Error("Unknown metric ID");
   required(policy.version, "Policy version");
   required(policy.definitionVersion, "Definition version");
+  const implementedAggregation: Record<string, MetricPolicy["aggregation"]> = {
+    count_distinct_eligible_units: "count", sum_eligible_line_units: "sum", ratio: "ratio", median_and_p75_of_elapsed_hours: "duration",
+  };
+  const expectedAggregation = implementedAggregation[metric.definition.aggregation];
+  if (!expectedAggregation || policy.aggregation !== expectedAggregation) throw new Error("Aggregation must match implemented registry semantics; signed net changes are unsupported");
   if (metric.definition.unit !== policy.unit) throw new Error("Unit must match the versioned registry");
   if (!["count", "sum", "ratio", "duration"].includes(policy.aggregation)) throw new Error("Unsupported aggregation");
   if (!["occurredAt", "acceptedAt"].includes(policy.dateBasis)) throw new Error("Unsupported date basis");
@@ -422,9 +427,10 @@ export function participationView(input: FrozenInput, policy: MetricPolicy, requ
   // Newcomer discovery uses organization history, independent of the selected repository lens.
   const historyScope: MetricScope = { ...scope, period: "custom", from: history?.originAt ?? null, repos: [], projects: [], workstreams: [] };
   if (history) { instant(history.originAt); required(history.reviewReceipt, "History origin review receipt"); }
-  const all = prepare(input, policy, historyScope).facts.filter(fact => policy.rankedStates.includes(fact.state as never));
+  const historical = prepare(input, policy, historyScope);
+  const all = historical.facts.filter(fact => policy.rankedStates.includes(fact.state as never));
   const current = prepare(input, policy, scope).facts.filter(fact => policy.rankedStates.includes(fact.state as never));
-  const complete = Boolean(history) && coverageComplete(input, policy, historyScope);
+  const complete = Boolean(history) && coverageComplete(input, policy, historyScope) && !historical.audit.some(entry => /unknown|ambiguous|conflicting|unreviewed/.test(entry.reason));
   const monday = (at: string) => { const date = new Date(instant(at)); date.setUTCHours(0, 0, 0, 0); date.setUTCDate(date.getUTCDate() - (date.getUTCDay() + 6) % 7); return date.toISOString(); };
   const weeks = new Set<string>();
   if (scope.from !== null) for (let at = instant(monday(scope.from)); at < instant(scope.to); at += 604800000) weeks.add(new Date(at).toISOString());
