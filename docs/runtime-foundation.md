@@ -4,7 +4,7 @@ This branch adds a local, reviewable scaffold for the runtime work tracked by [L
 
 ## Toolchain and workspaces
 
-The workspace targets Node.js 24 LTS and npm workspaces. Node 24 is the selected LTS line at this scaffold's creation; see the [Node.js release schedule](https://nodejs.org/en/about/previous-releases). Root workspaces include `packages/*` and `apps/*`, allowing contracts and GitHub source helpers to remain separate from the web, service, and worker applications.
+The workspace targets Node.js 24 LTS and npm workspaces. Node 24 is the selected LTS line at this scaffold's creation; see the [Node.js release schedule](https://nodejs.org/en/about/previous-releases). Root workspaces explicitly include `packages/contracts`, `packages/github`, `packages/metrics` and `apps/*`. The ingestion package retains its own lockfile and validation workflow; install and check it separately from the root workspace.
 
 Install dependencies with `npm ci`. Build and check all workspaces with `npm run build`, `npm run typecheck`, and `npm test`, in that order; tests load the built workspace outputs. Package imports should use declared package names; apps should not reach into another workspace's `src` by relative path. The contracts package is consumed as `@pick-your-ai/contracts`.
 
