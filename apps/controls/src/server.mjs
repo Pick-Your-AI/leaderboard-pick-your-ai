@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { actorId, ControlError, exactKeys, locator, record, requireThat, text } from './store.mjs';
+import { createConfigurationManager } from './configuration.mjs';
 
 const random = () => randomBytes(32).toString('base64url');
 const hash = value => createHash('sha256').update(value).digest('base64url');
@@ -21,13 +22,13 @@ function cookies(req) {
   }
   return parsed;
 }
-async function body(req) {
+async function body(req, maximum = 16_384) {
   requireThat(req.headers['content-type'] === 'application/json', 415, 'JSON required');
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    requireThat(size <= 16_384, 413, 'Request too large');
+    requireThat(size <= maximum, 413, 'Request too large');
     chunks.push(chunk);
   }
   try { const value = JSON.parse(Buffer.concat(chunks).toString('utf8')); exactKeys(value, Object.keys(value)); return value; }
@@ -38,13 +39,14 @@ const canSee = (request, session) => request.owner === session.actorId || sessio
 const kinds = ['evidence', 'correction', 'privacy', 'identity'];
 const categories = ['governance', 'deployment_work', 'mentorship', 'reliability', 'project_configuration', 'ordering', 'public_moderation', 'other'];
 
-export function createControlsServer({ store, provider, origin, rolesForActor = () => ({ roles: [], version: '0' }), approvedPolicyVersions = [], now = Date.now, sessionSeconds = 900 }) {
+export function createControlsServer({ store, provider, origin, rolesForActor = () => ({ roles: [], version: '0' }), approvedPolicyVersions = [], knownMetricIds = [], sourceVerifier, now = Date.now, sessionSeconds = 900 }) {
   const base = new URL(origin);
   requireThat(base.protocol === 'https:' && base.origin === origin && !base.username && !base.password, 500, 'Exact HTTPS public origin required');
   requireThat(Number.isInteger(sessionSeconds) && sessionSeconds >= 60 && sessionSeconds <= 900, 500, 'Session lifetime must be 60-900 seconds');
   requireThat(provider && typeof provider.exchange === 'function' && typeof provider.authorizationURL === 'function', 500, 'Identity provider required');
   requireThat(Array.isArray(approvedPolicyVersions) && approvedPolicyVersions.every(v => typeof v === 'string' && v.length > 0), 500, 'Invalid approved policies');
   const policyVersions = new Set(approvedPolicyVersions);
+  requireThat(Array.isArray(knownMetricIds) && knownMetricIds.every(v => typeof v === 'string' && v.length > 0), 500, 'Invalid metric registry identities');
   const redirectURI = `${origin}/controls/auth/callback`;
 
   async function roleState(id) {
@@ -52,6 +54,7 @@ export function createControlsServer({ store, provider, origin, rolesForActor = 
     requireThat(Array.isArray(value?.roles) && value.roles.every(r => ['reviewer', 'privacy', 'operator'].includes(r)) && typeof value.version === 'string', 500, 'Invalid role authority');
     return { roles: [...new Set(value.roles)].sort(), version: value.version };
   }
+  const manageConfiguration = createConfigurationManager({ store, sourceVerifier, approvedPolicyVersions, knownMetricIds, now, rolesForActor: roleState });
   async function authenticate(req, parsed) {
     const token = parsed[sessionCookie];
     requireThat(typeof token === 'string' && /^[A-Za-z0-9_-]{43}$/.test(token), 401, 'Authentication required');
@@ -127,11 +130,17 @@ export function createControlsServer({ store, provider, origin, rolesForActor = 
         res.writeHead(303, { location: `${origin}/controls/session` }); res.end(); return;
       }
       let session = await authenticate(req, parsed);
-      const inputBody = async () => {
-        const input = await body(req);
+      const inputBody = async (maximum) => {
+        const input = await body(req, maximum);
         session = await authenticate(req, parsed);
         return input;
       };
+      if (path.startsWith('/controls/configuration')) {
+        requireThat(session.roles.includes('operator'), 403, 'Operator role required');
+        const input = req.method === 'GET' ? undefined : await inputBody(131_072);
+        const result = await manageConfiguration({ path, method: req.method, input, session, refreshSession: () => authenticate(req, parsed) });
+        send(result.status, result.data); return;
+      }
       if (req.method === 'GET' && path === '/controls/session') { send(200, { actorId: session.actorId, csrf: session.csrf, roles: session.roles, expires: session.expires }); return; }
       if (req.method === 'POST' && path === '/controls/logout') {
         exactKeys(await inputBody(), []);

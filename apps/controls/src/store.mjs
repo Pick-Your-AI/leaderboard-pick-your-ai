@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, chmodSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
+import { configurationOverlay } from './overlay.mjs';
 
 export class ControlError extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -44,7 +45,9 @@ export function projectPublic(state) {
     .map(r => ({ id: r.id, actorId: r.owner, locator: r.locator, category: r.category,
       scope: r.scope, policyVersion: r.policyVersion,
       collaborators: Object.entries(r.collaborators).filter(([id, consent]) => consent === 'accepted' && visible(id)).map(([id]) => id) }));
-  return { revision: state.revision, profiles, claims };
+  const overlay = configurationOverlay(state);
+  return { revision: state.revision, profiles, claims,
+    configuration: { revision: overlay.revision, version: overlay.version, digest: overlay.digest, disabledMetrics: overlay.disabledMetrics } };
 }
 
 export class ControlStore {

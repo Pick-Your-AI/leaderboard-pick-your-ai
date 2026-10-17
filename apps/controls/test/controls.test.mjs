@@ -8,6 +8,7 @@ import { request as httpRequest } from 'node:http';
 import { ControlStore } from '../src/store.mjs';
 import { createControlsServer } from '../src/server.mjs';
 import { githubOAuthProvider } from '../src/github.mjs';
+import { configurationOverlay } from '../src/configuration.mjs';
 
 // All identities and evidence in this file are fictional test examples.
 const origin = 'https://controls.example.test';
@@ -19,7 +20,7 @@ async function harness(t, options = {}) {
   const store = new ControlStore(filename, options);
   let timestamp = 100_000;
   let broken = false;
-  const authorities = new Map([['2', { roles: ['reviewer'], version: '1' }], ['3', { roles: ['reviewer'], version: '1' }], ['4', { roles: ['privacy'], version: '1' }]]);
+  const authorities = new Map([['2', { roles: ['reviewer'], version: '1' }], ['3', { roles: ['reviewer'], version: '1' }], ['4', { roles: ['privacy'], version: '1' }], ['7', { roles: ['operator'], version: '1' }], ['8', { roles: ['operator'], version: '1' }]]);
   const challenges = new Map();
   const provider = {
     authorizationURL({ state, challenge, redirectURI }) {
@@ -34,7 +35,7 @@ async function harness(t, options = {}) {
       return { actorId: code };
     }
   };
-  const server = createControlsServer({ store, provider, origin, approvedPolicyVersions: options.approvedPolicyVersions || ['test-1'], rolesForActor: id => authorities.get(id) || { roles: [], version: '0' }, now: () => timestamp });
+  const server = createControlsServer({ store, provider, origin, approvedPolicyVersions: options.approvedPolicyVersions || ['test-1'], knownMetricIds: ['pr_merged', 'prs_reviewed'], sourceVerifier: options.sourceVerifier ? input => options.sourceVerifier(input, timestamp) : undefined, rolesForActor: id => authorities.get(id) || { roles: [], version: '0' }, now: () => timestamp });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   async function call(path, { user, method = 'GET', input, headers = {} } = {}) {
@@ -340,4 +341,156 @@ test('synthetic accepted/rejected receipts cover governance, sanitized deploymen
   }
   assert.equal(h.store.publicSnapshot().claims.length, 4);
   assert.ok(h.store.publicSnapshot().claims.every(c => !Object.hasOwn(c, 'score')));
+});
+
+const configurationFixture = () => ({
+  repositories: [{ id: '101', installationId: '901', slug: 'synthetic-example/demo', capabilities: ['issues'] }],
+  projects: [{ id: 'PVT_synthetic', fields: [{ key: 'status', id: 'PVTSSF_synthetic', type: 'SINGLE_SELECT' }] }],
+  metrics: ['pr_merged', 'prs_reviewed'].map(id => ({ id, enabled: true, policyVersion: 'test-1', policyLink: 'https://github.com/synthetic-example/demo/blob/main/policy.md' }))
+});
+function sourceReceipt(input, now) {
+  return { digest: input.digest, baseRevision: input.baseRevision, receiptId: 'synthetic-source-test', verifiedAt: now, validUntil: now + 600_000,
+    repositories: input.document.repositories.map(r => ({ ...r, approved: true, public: true, capabilities: r.capabilities.map(id => ({ id, permission: 'issues:read', permissionVerified: true, tested: true, schemaVersion: 'synthetic-v1', evidenceId: 'synthetic-source-evidence' })) })),
+    projects: input.document.projects.map(p => ({ ...p, approved: true, public: true, permissionVerified: true, evidenceId: 'synthetic-project-fields' })),
+    metrics: input.document.metrics.map(m => ({ id: m.id, policyVersion: m.policyVersion, policyLink: m.policyLink, policyApproved: true, sourceTested: true, evidenceId: 'synthetic-metric-test' })) };
+}
+async function configurationProposal(h, owner, version, document, baseRevision = 0) {
+  const response = await h.call('/controls/configuration/proposals', { user: owner, method: 'POST', input: { version, document, baseRevision } });
+  assert.equal(response.status, 201); return response.data;
+}
+async function configurationActivate(h, owner, approver, proposal) {
+  const preview = await h.call(`/controls/configuration/proposals/${proposal.id}/preview`, { user: owner, method: 'POST', input: { version: proposal.versionNumber } });
+  assert.equal(preview.status, 200);
+  const approval = await h.call(`/controls/configuration/proposals/${proposal.id}/approve`, { user: approver, method: 'POST', input: { version: preview.data.versionNumber, previewDigest: preview.data.preview.digest, conflict: false } });
+  assert.equal(approval.status, 200);
+  const activated = await h.call(`/controls/configuration/proposals/${proposal.id}/activate`, { user: owner, method: 'POST', input: { version: approval.data.versionNumber, approvalId: approval.data.approval.id } });
+  assert.equal(activated.status, 200); return activated.data;
+}
+
+test('configuration defaults deny source verification and direct non-operator access', async t => {
+  const h = await harness(t); const owner = await h.login('7'); const outsider = await h.login('1');
+  assert.equal((await h.call('/controls/configuration', { user: outsider })).status, 403);
+  const proposal = await configurationProposal(h, owner, 'synthetic-v1', configurationFixture());
+  assert.equal((await h.call(`/controls/configuration/proposals/${proposal.id}/preview`, { user: owner, method: 'POST', input: { version: 1 } })).status, 409);
+  assert.equal((await h.call(`/controls/configuration/proposals/${proposal.id}/activate`, { user: owner, method: 'POST', input: { version: 1, approvalId: 'fabricated' } })).status, 409);
+  assert.equal(configurationOverlay(h.store.read()).allowedRepositoryIds, null);
+  const unknown = configurationFixture(); unknown.metrics[0].id = 'invented_metric';
+  assert.equal((await h.call('/controls/configuration/proposals', { user: owner, method: 'POST', input: { baseRevision: 0, version: 'unknown-metric', document: unknown } })).status, 409);
+});
+
+test('configuration preview, independent approval and fresh activation are durable and digest-bound', async t => {
+  let calls = 0; const h = await harness(t, { sourceVerifier(input, now) { calls++; return sourceReceipt(input, now); } });
+  const owner = await h.login('7'); const approver = await h.login('8');
+  const proposal = await configurationProposal(h, owner, 'synthetic-v1', configurationFixture());
+  let preview = await h.call(`/controls/configuration/proposals/${proposal.id}/preview`, { user: owner, method: 'POST', input: { version: 1 } });
+  assert.equal(preview.status, 200); preview = preview.data;
+  assert.equal(preview.preview.configurationDigest, proposal.digest);
+  assert.deepEqual(preview.preview.before.repositoryIds, []); assert.deepEqual(preview.preview.after.repositoryIds, ['101']);
+  const approvalInput = { version: preview.versionNumber, previewDigest: preview.preview.digest, conflict: false };
+  assert.equal((await h.call(`/controls/configuration/proposals/${proposal.id}/approve`, { user: owner, method: 'POST', input: approvalInput })).status, 403);
+  assert.equal((await h.call(`/controls/configuration/proposals/${proposal.id}/approve`, { user: approver, method: 'POST', input: { ...approvalInput, previewDigest: 'fabricated' } })).status, 409);
+  const approved = (await h.call(`/controls/configuration/proposals/${proposal.id}/approve`, { user: approver, method: 'POST', input: approvalInput })).data;
+  assert.equal((await h.call(`/controls/configuration/proposals/${proposal.id}/activate`, { user: owner, method: 'POST', input: { version: approved.versionNumber, approvalId: approved.approval.id } })).status, 200);
+  assert.equal(calls, 2);
+  assert.deepEqual(configurationOverlay(h.store.read()), { revision: 1, version: 'synthetic-v1', digest: proposal.digest, approvalReceipt: approved.approval.id, allowedRepositoryIds: ['101'], disabledMetricIds: [], disabledMetrics: [] });
+  const reopened = new ControlStore(h.filename);
+  try { assert.equal(configurationOverlay(reopened.read()).digest, proposal.digest); assert.equal(reopened.publicSnapshot().configuration.version, 'synthetic-v1'); }
+  finally { reopened.close(); }
+});
+
+test('configuration rejects untested permissions, private scope, wrong fields, unapproved policy and spoofed receipts', async t => {
+  let mutate = report => report;
+  const h = await harness(t, { sourceVerifier(input, now) { return mutate(sourceReceipt(input, now)); } }); const owner = await h.login('7');
+  const changes = [
+    r => { r.digest = 'spoof'; },
+    r => { r.repositories[0].public = false; },
+    r => { r.repositories[0].approved = false; },
+    r => { r.repositories[0].capabilities[0].permissionVerified = false; },
+    r => { r.repositories[0].capabilities[0].tested = false; },
+    r => { r.projects[0].fields = [{ id: 'PVTSSF_wrong', type: 'TEXT' }]; },
+    r => { r.metrics[0].policyApproved = false; },
+    r => { r.metrics[0].policyLink = 'https://github.com/synthetic-example/wrong/issues/1'; },
+    r => { r.validUntil = r.verifiedAt; }
+  ];
+  for (const [index, change] of changes.entries()) {
+    mutate = report => { change(report); return report; };
+    const proposal = await configurationProposal(h, owner, `synthetic-bad-${index}`, configurationFixture());
+    assert.equal((await h.call(`/controls/configuration/proposals/${proposal.id}/preview`, { user: owner, method: 'POST', input: { version: 1 } })).status, 409);
+    assert.equal(configurationOverlay(h.store.read()).revision, 0);
+  }
+  mutate = report => report;
+  const document = configurationFixture(); document.metrics[0].policyVersion = 'unapproved-policy';
+  const proposal = await configurationProposal(h, owner, 'synthetic-unapproved-policy', document);
+  assert.equal((await h.call(`/controls/configuration/proposals/${proposal.id}/preview`, { user: owner, method: 'POST', input: { version: 1 } })).status, 409);
+});
+
+test('metric disable is independent and retains reason/history while source outage cannot expand scope', async t => {
+  let offline = false; const h = await harness(t, { sourceVerifier(input, now) { if (offline) throw Error('Synthetic source outage'); return sourceReceipt(input, now); } });
+  const owner = await h.login('7'); const approver = await h.login('8');
+  const original = await configurationProposal(h, owner, 'synthetic-v1', configurationFixture()); await configurationActivate(h, owner, approver, original);
+  offline = true;
+  const document = configurationFixture(); document.metrics[0].enabled = false; document.metrics[0].reason = 'Synthetic faulty metric suspended pending review';
+  const disable = await configurationProposal(h, owner, 'synthetic-v2', document, 1); const activated = await configurationActivate(h, owner, approver, disable);
+  assert.equal(activated.source.restrictiveOverlay, true);
+  const overlay = configurationOverlay(h.store.read());
+  assert.deepEqual(overlay.disabledMetricIds, ['pr_merged']); assert.equal(overlay.disabledMetrics[0].reason, document.metrics[0].reason);
+  assert.equal(overlay.disabledMetrics[0].policyLink, document.metrics[0].policyLink);
+  assert.equal((await h.call('/controls/public')).data.configuration.disabledMetrics[0].id, 'pr_merged');
+  assert.equal(h.store.read().configuration.active.document.metrics.find(m => m.id === 'prs_reviewed').enabled, true);
+  const omitted = structuredClone(document); omitted.metrics = omitted.metrics.filter(m => m.id !== 'pr_merged');
+  assert.equal((await h.call('/controls/configuration/proposals', { user: owner, method: 'POST', input: { baseRevision: 2, version: 'synthetic-omission', document: omitted } })).status, 409);
+  assert.deepEqual(configurationOverlay(h.store.read()).disabledMetricIds, ['pr_merged']);
+  const expansion = configurationFixture(); expansion.repositories.push({ ...expansion.repositories[0], id: '102' });
+  const expand = await configurationProposal(h, owner, 'synthetic-v3', expansion, 2);
+  assert.equal((await h.call(`/controls/configuration/proposals/${expand.id}/preview`, { user: owner, method: 'POST', input: { version: 1 } })).status, 500);
+  assert.deepEqual(configurationOverlay(h.store.read()).allowedRepositoryIds, ['101']);
+});
+
+test('stale configuration revisions, expired preview and revoked approval cannot activate', async t => {
+  const h = await harness(t, { sourceVerifier: sourceReceipt }); const owner = await h.login('7'); const approver = await h.login('8');
+  const proposal = await configurationProposal(h, owner, 'synthetic-v1', configurationFixture());
+  const preview = (await h.call(`/controls/configuration/proposals/${proposal.id}/preview`, { user: owner, method: 'POST', input: { version: 1 } })).data;
+  const approved = (await h.call(`/controls/configuration/proposals/${proposal.id}/approve`, { user: approver, method: 'POST', input: { version: preview.versionNumber, previewDigest: preview.preview.digest, conflict: false } })).data;
+  h.authorities.set('8', { roles: [], version: '2' });
+  assert.equal((await h.call(`/controls/configuration/proposals/${proposal.id}/activate`, { user: owner, method: 'POST', input: { version: approved.versionNumber, approvalId: approved.approval.id } })).status, 409);
+  assert.equal(configurationOverlay(h.store.read()).revision, 0);
+  h.authorities.set('8', { roles: ['operator'], version: '1' }); h.advance(600_001);
+  assert.equal((await h.call(`/controls/configuration/proposals/${proposal.id}/activate`, { user: owner, method: 'POST', input: { version: approved.versionNumber, approvalId: approved.approval.id } })).status, 409);
+});
+
+test('source schema drift between approved preview and activation requires a new preview', async t => {
+  let drift = false;
+  const h = await harness(t, { sourceVerifier(input, now) {
+    const report = sourceReceipt(input, now);
+    if (drift) report.repositories[0].capabilities[0].schemaVersion = 'synthetic-different-schema';
+    return report;
+  } });
+  const owner = await h.login('7'); const approver = await h.login('8');
+  const proposal = await configurationProposal(h, owner, 'synthetic-v1', configurationFixture());
+  const preview = (await h.call(`/controls/configuration/proposals/${proposal.id}/preview`, { user: owner, method: 'POST', input: { version: 1 } })).data;
+  const approved = (await h.call(`/controls/configuration/proposals/${proposal.id}/approve`, { user: approver, method: 'POST', input: { version: preview.versionNumber, previewDigest: preview.preview.digest, conflict: false } })).data;
+  drift = true;
+  assert.equal((await h.call(`/controls/configuration/proposals/${proposal.id}/activate`, { user: owner, method: 'POST', input: { version: approved.versionNumber, approvalId: approved.approval.id } })).status, 409);
+  assert.equal(configurationOverlay(h.store.read()).revision, 0);
+});
+
+test('rollback is a new tested independently approved version; publication failure remains atomic', async t => {
+  let fail = false;
+  const h = await harness(t, { sourceVerifier: sourceReceipt, transactionalPublisher() { if (fail) throw Error('Synthetic publication failure'); } });
+  const owner = await h.login('7'); const approver = await h.login('8');
+  const original = await configurationProposal(h, owner, 'synthetic-v1', configurationFixture()); await configurationActivate(h, owner, approver, original);
+  const document = configurationFixture(); document.metrics[0].enabled = false; document.metrics[0].reason = 'Synthetic review hold';
+  await configurationActivate(h, owner, approver, await configurationProposal(h, owner, 'synthetic-v2', document, 1));
+  let rollback = await h.call('/controls/configuration/rollback', { user: owner, method: 'POST', input: { baseRevision: 2, version: 'synthetic-v3', targetDigest: original.digest } });
+  assert.equal(rollback.status, 201); rollback = rollback.data;
+  let preview = (await h.call(`/controls/configuration/proposals/${rollback.id}/preview`, { user: owner, method: 'POST', input: { version: 1 } })).data;
+  let approved = (await h.call(`/controls/configuration/proposals/${rollback.id}/approve`, { user: approver, method: 'POST', input: { version: preview.versionNumber, previewDigest: preview.preview.digest, conflict: false } })).data;
+  const before = h.store.read(); const published = h.store.publicSnapshot(); fail = true;
+  const input = { version: approved.versionNumber, approvalId: approved.approval.id };
+  assert.equal((await h.call(`/controls/configuration/proposals/${rollback.id}/activate`, { user: owner, method: 'POST', input })).status, 500);
+  assert.deepEqual(h.store.read(), before); assert.deepEqual(h.store.publicSnapshot(), published);
+  fail = false;
+  assert.equal((await h.call(`/controls/configuration/proposals/${rollback.id}/activate`, { user: owner, method: 'POST', input })).status, 200);
+  assert.equal(configurationOverlay(h.store.read()).revision, 3); assert.deepEqual(configurationOverlay(h.store.read()).disabledMetricIds, []);
+  assert.equal((await h.call(`/controls/configuration/proposals/${original.id}/preview`, { user: owner, method: 'POST', input: { version: 4 } })).status, 409);
 });
