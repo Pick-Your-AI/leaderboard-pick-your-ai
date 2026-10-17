@@ -2,6 +2,8 @@
 
 Partial implementation for [LB-05.01 / #51](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/51) and [LB-05.02 / #54](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/54). This package supplies authenticated intake, durable worker primitives, an HTTP adapter and a stoppable worker runtime. It has no UI and does not install an App, collect live data automatically, publish rankings or deploy a service.
 
+[Event replay](REPLAY.md) adds bounded state reconstruction for #57 and foundational replay tests for #85. It preserves clocks and correction evidence, distinguishes ambiguity from known absence, and reads retained observations without mutating source or worker state.
+
 ## Run validation
 
 Use Node 24, from this directory:
