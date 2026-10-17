@@ -4,7 +4,7 @@
 
 Make everyone's work visible through public, evidence-backed contributor portfolios and independent leaderboards across the [Pick-Your-AI organization](https://github.com/Pick-Your-AI).
 
-This repository contains the complete delivery baseline: **20 epics, 112 work packages, 474 checklist tasks, 227 delivery dependencies and 98 metric definitions**. The application, collector and public live service are planned work. Publishing this repository and its issue hierarchy does not mean those capabilities are implemented.
+This repository contains the complete delivery baseline: **20 epics, 112 work packages, 474 checklist tasks, 227 delivery dependencies and 98 metric definitions**, plus local runtime scaffolding, versioned contracts and ingestion primitives. The public live service remains planned work. Merged code and passing synthetic tests do not establish production source coverage or release acceptance.
 
 - [Delivery Project](https://github.com/orgs/Pick-Your-AI/projects/6) · [Program issue](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/1)
 - [Product scope](docs/PRODUCT.md) · [Delivery plan and complete task list](docs/DELIVERY_PLAN.md)
@@ -34,6 +34,6 @@ These checks cover planning integrity, mappings, dependency cycles, local links 
 
 The [research repository](https://github.com/Pick-Your-AI/pick-your-ai-research) owns research decisions and its imported v1 contracts. The [website repository](https://github.com/Pick-Your-AI/pickyour.ai) owns the builder. The [organization repository](https://github.com/Pick-Your-AI/.github) owns shared guidance. This repository owns contributor-recognition contracts and the future service. Existing owners, source issues and native relationships remain authoritative.
 
-The structured plan lives in [planning/](planning/README.md). Runtime scaffolding is a separate work package; this repository does not contain an app startup command or a deployed contributor site yet. Public hosting and the proposed contributor subdomain require their own approved decisions and operational proof.
+The structured plan lives in [planning/](planning/README.md). See [local runtime setup](docs/runtime-foundation.md) for Node.js 24 startup, database migrations and explicitly synthetic fixtures, and [ingestion operations](docs/INGESTION.md) for the separate collector primitives. Public hosting and the proposed contributor subdomain require their own approved decisions and operational proof.
 
 [MIT license](LICENSE) · [Security reporting](SECURITY.md)

@@ -1,0 +1,64 @@
+[
+  {
+    "schemaVersion": "leaderboard/v1",
+    "eventId": "fixture:event:rest",
+    "adapter": "github_rest",
+    "action": "merged",
+    "actor": {
+      "schemaVersion": "leaderboard/v1",
+      "identityState": "resolved",
+      "githubNodeId": "MDQ6VXNlcjE=",
+      "githubDatabaseId": 1,
+      "login": "fixture-user",
+      "kind": "user",
+      "executionMode": "unknown"
+    },
+    "role": "author",
+    "subject": {
+      "schemaVersion": "leaderboard/v1",
+      "source": "github",
+      "kind": "pull_request",
+      "stableId": "PR_fixture_1",
+      "repositoryId": "REPO_fixture_1",
+      "publicUrl": "https://github.com/example/synthetic/pull/1",
+      "visibility": "public"
+    },
+    "occurredAt": "2026-01-03T12:00:00Z",
+    "observedAt": "2026-01-03T12:00:02Z",
+    "sourceRevision": "fixture:revision:1",
+    "dedupeKey": "github:pull_request:PR_fixture_1:merged:fixture-user:2026-01-03T12:00:00Z",
+    "deduplicationState": "unknown",
+    "observationIds": ["fixture:observation:rest"]
+  },
+  {
+    "schemaVersion": "leaderboard/v1",
+    "eventId": "fixture:event:webhook",
+    "adapter": "github_webhook",
+    "action": "merged",
+    "actor": {
+      "schemaVersion": "leaderboard/v1",
+      "identityState": "resolved",
+      "githubNodeId": "MDQ6VXNlcjE=",
+      "githubDatabaseId": 1,
+      "login": "fixture-user",
+      "kind": "user",
+      "executionMode": "unknown"
+    },
+    "role": "author",
+    "subject": {
+      "schemaVersion": "leaderboard/v1",
+      "source": "github",
+      "kind": "pull_request",
+      "stableId": "PR_fixture_1",
+      "repositoryId": "REPO_fixture_1",
+      "publicUrl": "https://github.com/example/synthetic/pull/1",
+      "visibility": "public"
+    },
+    "occurredAt": "2026-01-03T12:00:00Z",
+    "observedAt": "2026-01-03T12:00:03Z",
+    "sourceRevision": "fixture:revision:1",
+    "dedupeKey": "github:pull_request:PR_fixture_1:merged:fixture-user:2026-01-03T12:00:00Z",
+    "deduplicationState": "unknown",
+    "observationIds": ["fixture:observation:webhook"]
+  }
+]

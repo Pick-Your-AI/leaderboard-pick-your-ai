@@ -1,0 +1,12 @@
+{
+  "description": "Synthetic GraphQL partial result. Partial nodes must not be accepted when the response has errors.",
+  "data": {
+    "repository": {
+      "issues": {
+        "nodes": [{ "id": "ISSUE_1" }],
+        "pageInfo": { "hasNextPage": true, "endCursor": "synthetic-cursor" }
+      }
+    }
+  },
+  "errors": [{ "message": "Synthetic resource limit" }]
+}

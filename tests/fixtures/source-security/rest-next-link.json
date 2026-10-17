@@ -1,0 +1,10 @@
+{
+  "description": "Synthetic REST response demonstrating a next relation. No live repository data.",
+  "headers": {
+    "link": "<https://api.github.test/repos/example/project/issues?per_page=2&page=2>; rel=\"next\", <https://api.github.test/repos/example/project/issues?per_page=2&page=9>; rel=\"last\""
+  },
+  "items": [
+    { "id": 101, "visibility": "unknown" },
+    { "id": 102, "visibility": "unknown" }
+  ]
+}

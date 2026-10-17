@@ -1,0 +1,32 @@
+{
+  "name": "@pick-your-ai/leaderboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "npm@12.2.0",
+  "engines": {
+    "node": ">=24 <25",
+    "npm": ">=11"
+  },
+  "workspaces": [
+    "packages/contracts",
+    "packages/github",
+    "packages/metrics",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "node --test \"packages/{contracts,github,metrics}/test/**/*.test.{js,mjs,ts}\" \"apps/*/test/**/*.test.{js,mjs,ts}\" \"infra/db/test/**/*.test.mjs\"",
+    "dev:web": "npm run dev --workspace @pick-your-ai/web",
+    "dev:service": "npm run dev --workspace @pick-your-ai/service",
+    "dev:worker": "npm run dev --workspace @pick-your-ai/worker",
+    "db:migrate": "node --env-file-if-exists=.env infra/db/migrate.mjs",
+    "db:rollback": "node --env-file-if-exists=.env infra/db/rollback.mjs",
+    "db:seed:synthetic": "node --env-file-if-exists=.env infra/db/seed-synthetic.mjs",
+    "db:validate": "node --env-file-if-exists=.env infra/db/validate.mjs"
+  },
+  "devDependencies": {
+    "pg": "8.16.3"
+  }
+}

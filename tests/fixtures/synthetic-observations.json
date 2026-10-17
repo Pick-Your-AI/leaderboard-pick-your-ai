@@ -1,0 +1,17 @@
+{
+  "fixture_notice": "Synthetic data for local development only. These identities and events are fictional.",
+  "projects": [
+    { "id": "synth-project-copper", "name": "Synthetic Copper Lab", "repository_url": "https://github.com/example-org/synthetic-copper" },
+    { "id": "synth-project-jade", "name": "Synthetic Jade Tools", "repository_url": "https://github.com/example-org/synthetic-jade" }
+  ],
+  "actors": [
+    { "id": "synth-actor-river", "display_name": "Synthetic River" },
+    { "id": "synth-actor-ember", "display_name": "Synthetic Ember" },
+    { "id": "synth-actor-sky", "display_name": "Synthetic Sky" }
+  ],
+  "observations": [
+    { "id": "synth-observation-001", "project_id": "synth-project-copper", "actor_id": "synth-actor-river", "action": "pull_request_merged", "subject": "Example parser improvement", "occurred_at": "2026-01-12T14:20:00Z", "observed_at": "2026-01-12T14:20:03Z", "source_url": "https://github.com/example-org/synthetic-copper/pull/1" },
+    { "id": "synth-observation-002", "project_id": "synth-project-jade", "actor_id": "synth-actor-ember", "action": "review_submitted", "subject": "Example documentation review", "occurred_at": "2026-01-13T09:15:00Z", "observed_at": "2026-01-13T09:15:04Z", "source_url": "https://github.com/example-org/synthetic-jade/pull/2#review-1" },
+    { "id": "synth-observation-003", "project_id": "synth-project-copper", "actor_id": "synth-actor-sky", "action": "issue_closed", "subject": "Example test gap", "occurred_at": "2026-01-14T18:00:00Z", "observed_at": "2026-01-14T18:00:02Z", "source_url": "https://github.com/example-org/synthetic-copper/issues/3" }
+  ]
+}

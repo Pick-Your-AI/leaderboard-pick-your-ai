@@ -76,6 +76,18 @@ class PlanIntegrityTests(unittest.TestCase):
             (root / "planning/ui/ui-backlog-coverage.json").write_text(json.dumps({"master_sha256": digest}), encoding="utf-8")
             self.assertEqual([], validate_files(root))
 
+    def test_dependency_markdown_is_ignored(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            (root / "planning/ui").mkdir(parents=True)
+            (root / "node_modules/example").mkdir(parents=True)
+            backlog = '{\n  "baseline": true\n}\n'
+            digest = hashlib.sha256(backlog.encode()).hexdigest()
+            (root / "planning/project-backlog.json").write_text(backlog, encoding="utf-8")
+            (root / "planning/ui/ui-backlog-coverage.json").write_text(json.dumps({"master_sha256": digest}), encoding="utf-8")
+            (root / "node_modules/example/README.md").write_text("[missing](./not-shipped.md)", encoding="utf-8")
+            self.assertEqual([], validate_files(root))
+
 
 if __name__ == "__main__":
     unittest.main()

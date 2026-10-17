@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: leaderboard
+      POSTGRES_PASSWORD: leaderboard
+      POSTGRES_DB: leaderboard_dev
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leaderboard -d leaderboard_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - leaderboard-db:/var/lib/postgresql/data
+
+volumes:
+  leaderboard-db:
