@@ -540,6 +540,38 @@ fieldset {
   overflow-x: auto;
   margin: var(--space-3) 0;
 }
+.remote-filters {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 48rem;
+  padding: var(--space-3) 0;
+}
+.remote-app main {
+  overflow-wrap: anywhere;
+}
+.remote-app main a {
+  display: inline-block;
+  min-height: 32px;
+  padding-block: 4px;
+  max-width: 100%;
+}
+.remote-app .directory > li {
+  padding-block: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.remote-filters label {
+  display: grid;
+  gap: var(--space-1);
+}
+.remote-filters input {
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-2);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  font: inherit;
+}
 .board-table,
 .data-table,
 .wall-table {
