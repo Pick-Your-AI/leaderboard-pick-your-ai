@@ -74,7 +74,7 @@ All paths are under `/api/v1`:
 | `/contributors/:actorId` | Same-snapshot metric totals, role counts, bounded contribution timeline and evidence IDs |
 | `/evidence/:contributionId` | Public artifact, eligibility reasons, source revision links and snapshot metadata |
 | `/health` | Per-source coverage, reconciliation watermark, sync time and safe degraded state |
-| `/exports?metric=pr_opened&format=json` | Same selected board projection and filters |
+| `/exports?metric=pr_opened&format=json` | Bounded selected board totals, minimized identity and page evidence provenance |
 | `/exports?metric=pr_opened&format=csv` | Escaped, bounded board rows with definitions, source URLs, versions and dates |
 | `/updates` | Bounded SSE snapshot/reset notice or heartbeat; conditional health polling is the fallback |
 
@@ -100,21 +100,70 @@ rows as boards. Timelines are bounded by `limit` and expose truncation plus IDs 
 individual evidence reads; they never silently imply that a truncated timeline is
 complete. Hidden, deleted, suppressed and unlinked profiles share a generic 404.
 
-JSON and CSV are enabled. Markdown portfolio and print presentation exports are
-disabled: `format=markdown`, `format=print` and other unknown formats return 400.
-This avoids adding another unreviewed public presentation path. CSV preserves the
-selected scope and snapshot, quotes every field and prefixes spreadsheet formulas
-even after leading whitespace/control characters. Exports are paged with the same
-limits and next cursor as boards; an export is never an unbounded database dump.
+JSON and CSV downloads use the `public-export/v1` export envelope. Markdown
+portfolio, print, HTML and SVG presentation exports are disabled: `format=markdown`,
+`format=print` and other unknown formats return 400. No rendering/Markdown/URL-fetch
+pipeline is enabled by the export module. Export changes are candidate implementation
+for #108/#110, not publication permission or completion of their review gates.
+
+Both formats preserve the exact organization/repository/workstream/half-open date
+scope, selected snapshot ID/revision/date, metric-definition version, computation
+version, current control-policy version, full metric definition, approved ranking,
+coverage, and any supplied methodology for that metric. Values and ranks come
+unchanged from the selected board; evidence records never become extra metric rows.
+Unknown values remain absent in JSON and blank in CSV; they never become zero.
+Approved row diagnostics (numerator/denominator, sample count, censoring, missing
+readiness and p75) remain bound to the selected visible page in both formats;
+unknown diagnostic values remain null in JSON and blank in CSV.
+
+JSON includes only each row's stable actor ID, public login (or null), rank, result,
+and evidence IDs. The top-level `evidence` list contains only references used by
+that page: evidence ID, repository ID, public source URL, event time, and supplied
+source revision/URL. Display names, provider objects, internal canonical event IDs
+and suppression lists are not export fields. Missing source revision/URL remains
+null, and a supplied safe link is not a claim of immutable source provenance. The
+provider remains responsible for immutable snapshot IDs, current authorization,
+approved evidence and correctness of source revisions; the exporter does not
+invent a revision or infer approval from a URL.
+
+CSV has a header, exactly one `record_type=metadata` record and zero or more
+`record_type=row` records. Consumers must select only `row` records for metric
+totals. The metadata record retains snapshot, scope and definition even for a
+valid empty or fully suppressed page. All records repeat the page metadata;
+`total_rows`, `page_rows` and `next_cursor` describe pagination, not summed credit.
+Structured metric definitions, ranking, coverage, methodology and row evidence are
+JSON-valued CSV cells. Evidence objects preserve the source/revision association.
+Every cell is quoted, embedded quotes are doubled and spreadsheet formulas are
+prefixed with an apostrophe, including after whitespace or Unicode format
+characters. Tabs/newlines remain quoted text; other ASCII controls are rejected.
+JSON is served as an attachment with its JSON content type; CSV has its CSV content
+type. Both set `nosniff` and a sandbox/default-deny content security policy.
+
+Exports use the board's 1–100 row pages and authenticated continuation. A control
+change invalidates a continuation; suppression, revocation, disabled metrics and
+source failure are rechecked before all exports and conditional responses. Export
+responses, including 304, use `Cache-Control: no-store`. This prevents authorized
+server responses being cached for later suppression bypass; it cannot revoke a
+file the recipient already downloaded.
+
+Serialization fails closed with 413 `export_too_large` instead of dropping evidence
+or truncating totals: at most 2 MiB per response, 16 KiB UTF-8 per text field,
+256 KiB per rendered CSV cell and 2,000 distinct evidence records per page. The
+JSON preflight additionally caps 100,000 visited nodes and 24 nested levels before
+allocating the complete document. Request a smaller page when it reduces the
+payload; an individually oversized row needs a reviewed producer correction.
+Disallowed controls produce a generic 503 `export_content_unavailable`. These are
+export serialization bounds, not a claim that provider ingestion/parsing or
+production load has been fully bounded or independently validated.
 
 ## Caching, health and live behavior
 
-Responses use a content-derived ETag and
+Ordinary read responses use a content-derived ETag and
 `Cache-Control: public, max-age=0, must-revalidate`. Each conditional read first
 rechecks current publication controls; an old ETag cannot bypass an opt-out. There
 is no stale-serving grace period or in-process response cache. Canonicalized scope
 and stable ordering make equivalent queries produce equivalent entities; cursor
-expiry uses five-minute issuance buckets. Errors and SSE use `no-store`. A deployment
+expiry uses five-minute issuance buckets. Exports, errors and SSE use `no-store`. A deployment
 CDN must preserve revalidation and must never add stale-if-error/stale-while-revalidate.
 
 Public health includes service version and last successful publish revision.
@@ -168,7 +217,9 @@ python scripts/render_docs.py --check
 
 HTTP integration and browser-helper tests use synthetic data exclusively and cover
 pagination/pins, filter scope, ties/unknowns, suppression/revocation, private evidence,
-ETag revalidation, safe CSV, sanitized outages, invalid/costly queries, deadlines,
+ETag revalidation, parsed CSV formula/quote/newline attacks, empty-export provenance,
+nullable revisions, UTF-8/cell/evidence/response limits, minimized JSON, sanitized
+outages, invalid/costly queries, deadlines,
 SSE reset/heartbeat and conditional polling/pause/fallback. A separate process smoke
 test starts the service from dist-only workspace packages with no metrics source
 tree, verifying the exported metrics registry package boundary. They do not verify a real

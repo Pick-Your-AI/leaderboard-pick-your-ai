@@ -44,6 +44,8 @@ export interface SourcePage {
 }
 /** Adapter performs only read requests and must fully traverse nested pagination via its opaque cursor. */
 export interface ReadOnlySource {
+  /** Optional synchronous host-authorization fence, rechecked inside the write transaction. */
+  assertAuthorized?(): void;
   readPage(request: ScanRequest & { cursor: string | null; limit: number }): Promise<SourcePage>;
 }
 
@@ -319,6 +321,7 @@ export class CollectionStore {
         const current = (
           await tx.query("SELECT * FROM leaderboard_ingestion.collection_runs WHERE run_id = $1 FOR UPDATE", [runId])
         ).rows[0]!;
+        source.assertAuthorized?.();
         if (current.page_count !== run.page_count || current.state === "complete") return "superseded";
         if (current.expected_count !== null && current.expected_count !== page.expectedCount)
           throw new Error("source_count_changed");
@@ -368,6 +371,7 @@ export class CollectionStore {
           last_success_at = clock_timestamp(), attempted_at = clock_timestamp() WHERE run_id = $1`,
           [runId, page.nextCursor, count, page.expectedCount, page.nextCursor === null ? "complete" : "pending"],
         );
+        source.assertAuthorized?.();
         return page.nextCursor === null ? "complete" : "progress";
       });
     } catch {

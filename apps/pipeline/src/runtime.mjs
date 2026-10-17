@@ -62,6 +62,7 @@ export async function createPipeline(options) {
     !c?.metrics?.aggregateMetric ||
     !c?.service?.createService ||
     !controlsStore?.read ||
+    !controlsStore?.transaction ||
     !db?.transaction
   )
     fail("pipeline_components_required");
@@ -83,6 +84,7 @@ export async function createPipeline(options) {
         sourceId: options.sourceId,
         repositories: config.repositories,
         isSynthetic: dataMode === "synthetic",
+        assertAuthorized: () => assertRunConfiguration(),
         onUnavailable: (repo, reason) => denyRepository(repo, reason, utc(now())),
       })
     : null;
@@ -90,8 +92,15 @@ export async function createPipeline(options) {
   const probeSource = options.probeRepository ?? defaultSource?.probeRepository;
   const collection = new c.ingestion.CollectionStore(db);
   const guardedSource = {
+    assertAuthorized() {
+      assertRunConfiguration();
+    },
     async readPage(request) {
+      // The controls overlay can change while an earlier probe/page is pending.
+      // Recheck before collection and reject results that lost authorization.
+      assertRunConfiguration();
       const page = await collectionSource.readPage(request);
+      assertRunConfiguration();
       assertDataMode(page);
       return page;
     },
@@ -113,6 +122,13 @@ export async function createPipeline(options) {
       fail("active_configuration_revoked_source");
     return overlay;
   };
+  // Runs are serialized. A reactivation must start a fresh run rather than
+  // accepting a response begun under an earlier controls configuration.
+  let runConfigurationRevision = null;
+  const assertRunConfiguration = () => {
+    const overlay = restrictConfiguration(controlsStore.read());
+    if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
+  };
   const inbox = new c.ingestion.InboxStore(db);
   const normalizer =
     options.normalizer ??
@@ -122,6 +138,7 @@ export async function createPipeline(options) {
           source: options.sourceId,
           allowedRepositoryIds: config.repositories.map((repo) => repo.id),
           isSynthetic: dataMode === "synthetic",
+          assertAuthorized: () => assertRunConfiguration(),
         })
       : null);
   let stopped = false;
@@ -253,6 +270,7 @@ export async function createPipeline(options) {
     );
   }
   async function verifyRepository(repo) {
+    assertRunConfiguration();
     if (!collectionSource?.readPage || !normalizer || !probeSource) fail("source_provider_unconfigured");
     let checkedAt = utc(now());
     let probe;
@@ -262,6 +280,7 @@ export async function createPipeline(options) {
       await denyRepository(repo, "visibility_probe_unavailable", checkedAt);
       fail("public_source_not_verified");
     }
+    assertRunConfiguration();
     checkedAt = utc(now());
     try {
       assertDataMode(probe);
@@ -341,6 +360,7 @@ export async function createPipeline(options) {
       const normalizationStarted = performance.now();
       let output;
       try {
+        assertRunConfiguration();
         output = await normalizer({
           repository: copy(repository),
           family: row.family,
@@ -349,6 +369,7 @@ export async function createPipeline(options) {
           observedAt: new Date(row.observed_at).toISOString(),
           policyVersion: config.version,
         });
+        assertRunConfiguration();
         monitorSuccess(monitorSource(repository.id), "normalization", normalizationStarted);
       } catch (error) {
         monitorFailure(monitorSource(repository.id), "normalization", "schema_changed");
@@ -447,6 +468,7 @@ export async function createPipeline(options) {
     });
   }
   async function publish(scope, cutoff, observationCutoff) {
+    assertRunConfiguration();
     if (!configuredScope(scope)) fail("scope_not_approved");
     const repos = repositoriesFor(scope);
     const generations = (
@@ -514,6 +536,7 @@ export async function createPipeline(options) {
       context: "event",
     };
     const state = controlsStore.read();
+    assertRunConfiguration();
     for (const actor of actors.values()) if (state.profiles[actor.id]?.suppressed) actor.publicState = "suppressed";
     // Completed scans establish bounded progress, not complete historic source capability.
     const coverage = repos.flatMap((repo) =>
@@ -639,6 +662,7 @@ export async function createPipeline(options) {
             scopeKey(scope),
           ])
         ).rows[0];
+        assertRunConfiguration();
         if (current?.snapshot_id === snapshotId)
           return { snapshotId, revision: Number(current.revision), changed: false };
         const revision = Number(current?.revision ?? 0) + 1;
@@ -664,9 +688,9 @@ export async function createPipeline(options) {
             results: [],
           },
         };
-        await tx.query(
+        const inserted = await tx.query(
           `INSERT INTO leaderboard_pipeline.snapshots (snapshot_id,scope_key,revision,config_version,repository_ids,document,document_hash)
-        VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7) ON CONFLICT DO NOTHING`,
+        VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7) ON CONFLICT DO NOTHING RETURNING snapshot_id`,
           [
             snapshotId,
             scopeKey(scope),
@@ -677,6 +701,10 @@ export async function createPipeline(options) {
             digest(document),
           ],
         );
+        // A historical content ID still owns its original immutable revision/document.
+        // Never advance the head to a new revision when that insert was skipped.
+        // Re-materialize at a fresh cutoff instead of rewriting the prior snapshot.
+        if (inserted.rows.length !== 1) fail("pipeline_snapshot_identity_conflict");
         await tx.query(
           `INSERT INTO leaderboard_pipeline.heads (scope_key,snapshot_id,revision) VALUES ($1,$2,$3)
         ON CONFLICT (scope_key) DO UPDATE SET snapshot_id=EXCLUDED.snapshot_id,revision=EXCLUDED.revision`,
@@ -690,7 +718,19 @@ export async function createPipeline(options) {
           datasetId: frozen.datasetId,
           controlsRevision: state.revision,
         });
+        assertRunConfiguration();
         return { snapshotId, revision, changed: true, receiptId };
+      });
+      // PostgreSQL can commit while controls change. Confirm publication only in
+      // the same synchronous SQLite boundary used by configuration activation.
+      controlsStore.transaction((state) => {
+        const overlay = restrictConfiguration(state);
+        if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
+        state.pipelinePublications ||= {};
+        state.pipelinePublications[publication.snapshotId] = {
+          configurationVersion: config.version,
+          controlsConfigurationRevision: runConfigurationRevision,
+        };
       });
       monitorSuccess(scopeKey(scope), "publication", publicationStarted, String(publication.revision));
       return publication;
@@ -743,6 +783,12 @@ export async function createPipeline(options) {
         // Read current private controls after all awaited I/O, even for pinned historical snapshots.
         const controls = controlsStore.read();
         const overlay = restrictConfiguration(controls);
+        if (
+          [selected.selected_id, selected.head_id].some(
+            (id) => controls.pipelinePublications?.[id]?.configurationVersion !== config.version,
+          )
+        )
+          return null;
         const document = copy(selected.document);
         document.disabledMetrics = overlay.disabledMetrics.map((entry) => ({
           ...entry,
@@ -787,6 +833,7 @@ export async function createPipeline(options) {
       utc(cutoff);
       if (stopped) fail("pipeline_stopped");
       if (!(await approved())) return { state: "blocked", reason: "approved_configuration_required" };
+      runConfigurationRevision = restrictConfiguration(controlsStore.read()).revision;
       if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 10000) fail("invalid_pipeline_page_budget");
       const progress = [];
       for (const repo of config.repositories) {
@@ -797,7 +844,9 @@ export async function createPipeline(options) {
           const collectionStarted = performance.now();
           let status = "progress";
           for (let page = 0; page < maxPages && status === "progress"; page++) {
+            assertRunConfiguration();
             status = await collection.step(runId, guardedSource);
+            assertRunConfiguration();
             if (status === "progress" || status === "complete")
               await db.query(
                 `INSERT INTO leaderboard_pipeline.source_modes(fact_key,data_mode) SELECT item.fact_key,$2 FROM leaderboard_ingestion.collection_items AS item JOIN leaderboard_ingestion.source_facts AS fact USING(fact_key) WHERE item.run_id=$1 AND fact.first_run_id=$1 ON CONFLICT DO NOTHING`,

@@ -1317,3 +1317,45 @@ test("rollback is a new tested independently approved version; publication failu
     409,
   );
 });
+
+test("source receipt that expires during activation authority lookup cannot activate", async (t) => {
+  const h = await harness(t, {
+    sourceVerifier(input, now) {
+      const receipt = sourceReceipt(input, now);
+      if (input.phase === "activate") receipt.validUntil = now + 1000;
+      return receipt;
+    },
+  });
+  const owner = await h.login("7");
+  const approver = await h.login("8");
+  const proposal = await configurationProposal(h, owner, "synthetic-expiring-source", configurationFixture());
+  const preview = (
+    await h.call(`/controls/configuration/proposals/${proposal.id}/preview`, {
+      user: owner,
+      method: "POST",
+      input: { version: 1 },
+    })
+  ).data;
+  const approved = (
+    await h.call(`/controls/configuration/proposals/${proposal.id}/approve`, {
+      user: approver,
+      method: "POST",
+      input: { version: preview.versionNumber, previewDigest: preview.preview.digest, conflict: false },
+    })
+  ).data;
+  const authority = h.authorities.get.bind(h.authorities);
+  h.authorities.get = async (id) => {
+    if (id === "8") {
+      await Promise.resolve();
+      h.advance(2000);
+    }
+    return authority(id);
+  };
+  const result = await h.call(`/controls/configuration/proposals/${proposal.id}/activate`, {
+    user: owner,
+    method: "POST",
+    input: { version: approved.versionNumber, approvalId: approved.approval.id },
+  });
+  assert.equal(result.status, 409);
+  assert.equal(configurationOverlay(h.store.read()).revision, 0);
+});
