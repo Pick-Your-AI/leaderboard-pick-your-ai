@@ -1,0 +1,129 @@
+/*
+ * Leaderboard design tokens, version 1 (LB-13.03).
+ *
+ * Source: Pick-Your-AI/pickyour.ai docs/DESIGN_SYSTEM.md and src/styles/index.css
+ * at c731bc451d227eac843750418b6de3c3377ea90b (teal brand-700 #0f766e, slate
+ * neutrals, one amber accent). Values are copied here on purpose: a change to
+ * the website stylesheet cannot silently restyle the leaderboard. To adopt a
+ * newer website revision, update these values and the source SHA together and
+ * rerun apps/web/test/tokens.test.ts, which checks every text pair for WCAG AA.
+ *
+ * No web font is loaded. The serif page-title proposal stays deferred until a
+ * licence check, a self-hosted subset and a layout-shift check exist.
+ */
+:root {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --content-max: 1280px;
+  --drawer-width: 480px;
+  --row-comfortable: 44px;
+  --row-compact: 32px;
+  --radius: 6px;
+  --focus-width: 3px;
+
+  color-scheme: light;
+  --color-bg: #f8fafc;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #f1f5f9;
+  --color-text: #0f172a;
+  --color-text-muted: #475569;
+  --color-border: #cbd5e1;
+  --color-border-strong: #64748b;
+  --color-link: #0f766e;
+  --color-brand: #0f766e;
+  --color-on-brand: #ffffff;
+  --color-accent: #fbbf24;
+  --color-on-accent: #0f172a;
+  --color-focus: #0f766e;
+
+  --state-observed: #334155;
+  --state-provisional: #92400e;
+  --state-qualified: #115e59;
+  --state-reviewed: #5b21b6;
+  --state-excluded: #9f1239;
+  --state-not-measured: #475569;
+  --health-ok: #166534;
+  --health-warn: #92400e;
+  --health-error: #9f1239;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-bg: #020617;
+    --color-surface: #0f172a;
+    --color-surface-sunken: #1e293b;
+    --color-text: #e2e8f0;
+    --color-text-muted: #94a3b8;
+    --color-border: #334155;
+    --color-border-strong: #94a3b8;
+    --color-link: #2dd4bf;
+    --color-brand: #2dd4bf;
+    --color-on-brand: #020617;
+    --color-accent: #fbbf24;
+    --color-on-accent: #0f172a;
+    --color-focus: #fbbf24;
+
+    --state-observed: #cbd5e1;
+    --state-provisional: #fcd34d;
+    --state-qualified: #5eead4;
+    --state-reviewed: #c4b5fd;
+    --state-excluded: #fda4af;
+    --state-not-measured: #94a3b8;
+    --health-ok: #86efac;
+    --health-warn: #fcd34d;
+    --health-error: #fda4af;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #020617;
+  --color-surface: #0f172a;
+  --color-surface-sunken: #1e293b;
+  --color-text: #e2e8f0;
+  --color-text-muted: #94a3b8;
+  --color-border: #334155;
+  --color-border-strong: #94a3b8;
+  --color-link: #2dd4bf;
+  --color-brand: #2dd4bf;
+  --color-on-brand: #020617;
+  --color-accent: #fbbf24;
+  --color-on-accent: #0f172a;
+  --color-focus: #fbbf24;
+
+  --state-observed: #cbd5e1;
+  --state-provisional: #fcd34d;
+  --state-qualified: #5eead4;
+  --state-reviewed: #c4b5fd;
+  --state-excluded: #fda4af;
+  --state-not-measured: #94a3b8;
+  --health-ok: #86efac;
+  --health-warn: #fcd34d;
+  --health-error: #fda4af;
+}
+
+@media (prefers-contrast: more) {
+  :root:not([data-theme="dark"]) {
+    --color-text-muted: #1e293b;
+    --color-border: #475569;
+    --color-link: #134e4a;
+  }
+}
+
+@media (forced-colors: active) {
+  :root {
+    --color-focus: Highlight;
+    --color-border: CanvasText;
+    --color-border-strong: CanvasText;
+  }
+}
