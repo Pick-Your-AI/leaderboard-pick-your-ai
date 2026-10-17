@@ -2,10 +2,10 @@ name: Validate ingestion backend
 
 on:
   pull_request:
-    paths: ['packages/ingestion/**', '.github/workflows/validate-ingestion.yml']
+    paths: ['packages/ingestion/**', 'tests/fixtures/event-replay.json', '.github/workflows/validate-ingestion.yml']
   push:
     branches: [main]
-    paths: ['packages/ingestion/**', '.github/workflows/validate-ingestion.yml']
+    paths: ['packages/ingestion/**', 'tests/fixtures/event-replay.json', '.github/workflows/validate-ingestion.yml']
 
 permissions:
   contents: read

@@ -21,7 +21,13 @@ function scopeFromEnvironment(raw: string | undefined): Map<number, Set<number>>
 
 async function main(): Promise<void> {
   const mode = process.argv[2];
-  if (mode !== "service" && mode !== "worker") throw new Error("Choose service or worker");
+  if (mode !== "service" && mode !== "worker" && mode !== "replay") throw new Error("Choose service, worker or replay");
+  const repositoryId = Number(process.argv[3]);
+  const subjectId = process.argv[4];
+  if (mode === "replay" && (process.argv.length !== 5 || !/^\d+$/.test(process.argv[3] ?? "") ||
+      !Number.isSafeInteger(repositoryId) || repositoryId < 1 || !subjectId || !/^[A-Za-z0-9_=-]{1,200}$/.test(subjectId))) {
+    throw new Error("Invalid replay scope");
+  }
   const connectionString = process.env.INGESTION_DATABASE_URL;
   if (!connectionString) throw new Error("Missing database configuration");
   const pool = new Pool({ connectionString, max: 4, connectionTimeoutMillis: 5000, query_timeout: 10_000, statement_timeout: 8000 });
@@ -35,7 +41,9 @@ async function main(): Promise<void> {
   try {
     // No automatic migrations or source collection at startup.
     await pool.query("SELECT delivery_id FROM leaderboard_ingestion.inbox LIMIT 0");
-    if (mode === "worker") {
+    if (mode === "replay") {
+      console.log(JSON.stringify(await store.replayObjectState(repositoryId, subjectId!)));
+    } else if (mode === "worker") {
       await runWorker(store, { signal: abort.signal,
         onStatus: status => { if (status !== "idle") console.log(`ingestion-worker: ${status}`); } });
     } else {

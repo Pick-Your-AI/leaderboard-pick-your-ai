@@ -188,6 +188,56 @@ test('operator replay preserves failure history and original delivery identity a
   assert.deepEqual((await db.query('SELECT received_at FROM leaderboard_ingestion.inbox')).rows[0].received_at, original);
 });
 
+test('read-only object replay uses source time, survives store restart and declares retained-only coverage', async () => {
+  const open = delivery(1);
+  open.envelope.action = 'opened';
+  open.envelope.occurredAt = '2026-01-01T00:00:00.000Z';
+  const closed = delivery(2);
+  closed.envelope.action = 'closed';
+  closed.envelope.occurredAt = '2026-01-02T00:00:00.000Z';
+  // Reverse receipt order relative to the source facts.
+  for (const item of [closed, open]) { await store.insert(item); await store.complete(await store.claim()); }
+  const priorCounts = await counts();
+  const first = await store.replayObjectState(2, 'SYNTHETIC_ISSUE');
+  assert.equal(first.coverage, 'retained_observations_only');
+  assert.equal(first.sourceObservationCount, 2);
+  assert.equal(first.replay.facets[0].state, 'known');
+  assert.equal(first.replay.facets[0].value, 'closed');
+  assert.deepEqual(await new InboxStore(db, 3).replayObjectState(2, 'SYNTHETIC_ISSUE'), first);
+  assert.deepEqual(await counts(), priorCounts);
+  // A subsequent unknown-time reopen must not silently use database receive time.
+  await store.insert(delivery(3));
+  await store.complete(await store.claim());
+  const after = await store.replayObjectState(2, 'SYNTHETIC_ISSUE');
+  assert.equal(after.replay.facets[0].state, 'ambiguous');
+  assert.equal(after.replay.facets[0].value, null);
+  assert.equal((await store.replayObjectState(999, 'SYNTHETIC_ISSUE')).sourceObservationCount, 0);
+  assert.deepEqual((await store.replayObjectState(999, 'SYNTHETIC_ISSUE')).replay.facets, []);
+});
+
+test('edits do not assert lifecycle and unknown normalization versions fail closed', async () => {
+  const edit = delivery();
+  edit.envelope.action = 'edited';
+  await store.insert(edit);
+  await store.complete(await store.claim());
+  const result = await store.replayObjectState(2, 'SYNTHETIC_ISSUE');
+  assert.equal(result.sourceObservationCount, 1);
+  assert.deepEqual(result.replay.facets, []);
+  await db.query("UPDATE leaderboard_ingestion.observations SET normalization_version = 'synthetic-unknown'");
+  await assert.rejects(store.replayObjectState(2, 'SYNTHETIC_ISSUE'), /unsupported_normalization_version/);
+  await assert.rejects(store.replayObjectState(0, 'SYNTHETIC_ISSUE'), /invalid_replay_scope/);
+});
+
+test('oversized retained history fails instead of returning an apparently complete partial replay', async () => {
+  await db.query(`INSERT INTO leaderboard_ingestion.inbox (delivery_id, body_hash, envelope)
+    SELECT ('00000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid, repeat('a', 64), $1::jsonb
+    FROM generate_series(1, 257) AS n`, [JSON.stringify(delivery().envelope)]);
+  await db.query(`INSERT INTO leaderboard_ingestion.observations (event_key, delivery_id, normalization_version, observation)
+    SELECT 'synthetic-limit:' || delivery_id, delivery_id, 'delivery-observation/v1', envelope
+    FROM leaderboard_ingestion.inbox`);
+  await assert.rejects(store.replayObjectState(2, 'SYNTHETIC_ISSUE'), /replay_limit_exceeded/);
+});
+
 test('migration rollback and reapply work on an empty schema', async () => {
   if (url) { await engine.query(down); await engine.query(up); }
   else { await engine.exec(down); await engine.exec(up); }

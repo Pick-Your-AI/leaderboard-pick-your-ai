@@ -1,0 +1,31 @@
+{
+  "synthetic": true,
+  "note": "Synthetic source assertions only. No real contributor evidence or scores.",
+  "events": [
+    {
+      "version": "transition/v1", "eventId": "synthetic-open", "objectId": "synthetic-issue", "facet": "lifecycle", "value": "open",
+      "occurredAt": "2026-01-01T00:00:00Z", "observedAt": "2026-01-06T00:00:00Z", "effectiveAt": "2026-01-01T00:00:00Z",
+      "evidenceIds": ["synthetic-source-1"], "afterEventIds": [], "supersedesEventIds": []
+    },
+    {
+      "version": "transition/v1", "eventId": "synthetic-close", "objectId": "synthetic-issue", "facet": "lifecycle", "value": "closed",
+      "occurredAt": "2026-01-02T00:00:00Z", "observedAt": "2026-01-05T00:00:00Z", "effectiveAt": "2026-01-02T00:00:00Z",
+      "evidenceIds": ["synthetic-source-2"], "afterEventIds": [], "supersedesEventIds": []
+    },
+    {
+      "version": "transition/v1", "eventId": "synthetic-reopen", "objectId": "synthetic-issue", "facet": "lifecycle", "value": "open",
+      "occurredAt": "2026-01-03T00:00:00Z", "observedAt": "2026-01-04T00:00:00Z", "effectiveAt": "2026-01-03T00:00:00Z",
+      "evidenceIds": ["synthetic-source-3"], "afterEventIds": [], "supersedesEventIds": []
+    },
+    {
+      "version": "transition/v1", "eventId": "synthetic-add-label", "objectId": "synthetic-issue", "facet": "label:synthetic-stable-label-id", "value": "present",
+      "occurredAt": null, "observedAt": "2026-01-05T00:00:00Z", "effectiveAt": null,
+      "evidenceIds": ["synthetic-source-4"], "afterEventIds": [], "supersedesEventIds": []
+    },
+    {
+      "version": "transition/v1", "eventId": "synthetic-remove-label", "objectId": "synthetic-issue", "facet": "label:synthetic-stable-label-id", "value": null,
+      "occurredAt": null, "observedAt": "2026-01-04T00:00:00Z", "effectiveAt": null,
+      "evidenceIds": ["synthetic-source-5"], "afterEventIds": ["synthetic-add-label"], "supersedesEventIds": []
+    }
+  ]
+}
