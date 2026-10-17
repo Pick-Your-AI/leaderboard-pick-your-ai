@@ -4,6 +4,8 @@ Partial implementation for [LB-05.01 / #51](https://github.com/Pick-Your-AI/pick
 
 [Event replay](REPLAY.md) adds bounded state reconstruction for #57 and foundational replay tests for #85. It preserves clocks and correction evidence, distinguishes ambiguity from known absence, and reads retained observations without mutating source or worker state.
 
+[Atomic retained-state snapshots](SNAPSHOTS.md) add internal publication for #62: immutable content IDs, optimistic revision checks, consistent pinned reads and transactional update notices. These are not public rankings or approved public evidence projections.
+
 ## Run validation
 
 Use Node 24, from this directory:
@@ -18,7 +20,7 @@ Default tests use PGlite's embedded PostgreSQL engine and explicitly skip the mu
 
 ## Host integration
 
-1. Have the approved migration runner apply `sql/001_ingestion.up.sql` inside a transaction. This is a separate `leaderboard_ingestion` schema and does not modify the research contracts or other candidate migrations. The migration is intentionally not auto-run by the library. Rollback destroys this schema's intake state; use `001_ingestion.down.sql` only on disposable empty environments. Retain production receipts through reviewed backup/restore procedures.
+1. Have the approved migration runner apply `sql/001_ingestion.up.sql`, then `sql/002_snapshots.up.sql`, each inside a transaction. This is a separate `leaderboard_ingestion` schema and does not modify the research contracts or other candidate migrations. Migrations are intentionally not auto-run by the library. For disposable rollback, drop snapshot tables with `002_snapshots.down.sql` before dropping intake with `001_ingestion.down.sql`. Retain production receipts through reviewed backup/restore procedures.
 2. Construct a `pg.Pool` using the host's managed connection and TLS settings, then `new InboxStore(postgresDatabase(pool))`. The database must have normal durable commit settings; do not disable `fsync` or synchronous commit. The pool and database are owned by the host.
 3. Construct `createWebhookHandler({ secrets, scope, store })`. Secrets come from the approved secret store, with one current and optionally one previous key. Configure explicit installation-ID to repository-database-ID sets. Empty scope denies everything. Route only the intended webhook endpoint to this Fetch `Request` handler; preserve original bytes and set request timeouts and connection/rate limits in the host or proxy.
 4. Poll `store.claim()` from a bounded worker. `null` means no available work. Call `store.complete(lease)` to persist the deterministic delivery observation and an outbox notice in one transaction. Call `store.fail(lease, reasonCode, permanent)` for a classified processing failure. A false result means the lease no longer belongs to that worker. An uncaught failure leaves the lease recoverable after expiry. Each call uses database time and a fresh token; never retry work using a stale token.

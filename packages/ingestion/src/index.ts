@@ -6,3 +6,5 @@ export { createIngestionServer, runWorker } from "./runtime.js";
 export type { ServerOptions, WorkerStore, WorkerStatus, WorkerOptions } from "./runtime.js";
 export { transitionFromDelivery, replayTransitions } from "./replay.js";
 export type { Transition, FacetState, ReplayResult } from "./replay.js";
+export { SnapshotStore } from "./snapshots.js";
+export type { SnapshotDocument, StoredSnapshot, SnapshotHead, SnapshotNotice } from "./snapshots.js";

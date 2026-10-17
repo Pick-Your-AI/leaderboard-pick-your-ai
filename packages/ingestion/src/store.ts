@@ -10,6 +10,33 @@ export interface SqlDatabase extends SqlSession {
   transaction<T>(work: (session: SqlSession) => Promise<T>): Promise<T>;
 }
 
+export interface RetainedObjectReplay {
+  coverage: "retained_observations_only";
+  sourceObservationCount: number;
+  replay: ReplayResult;
+}
+
+/** One statement fixes the evidence set for a bounded object reconstruction. */
+export async function readObjectReplay(db: SqlSession, repositoryId: number, subjectId: string): Promise<RetainedObjectReplay> {
+  if (!Number.isSafeInteger(repositoryId) || repositoryId < 1 || !/^[A-Za-z0-9_=-]{1,200}$/.test(subjectId)) {
+    throw new Error("invalid_replay_scope");
+  }
+  const rows = await db.query(`SELECT normalization_version, observation
+    FROM leaderboard_ingestion.observations
+    WHERE observation->>'repositoryId' = $1 AND observation->>'subjectId' = $2
+    ORDER BY event_key LIMIT 257`, [String(repositoryId), subjectId]);
+  if (rows.rows.length > 256) throw new Error("replay_limit_exceeded");
+  const transitions: Transition[] = [];
+  for (const row of rows.rows) {
+    if (row.normalization_version !== "delivery-observation/v1") throw new Error("unsupported_normalization_version");
+    const observation = row.observation as Envelope & { observedAt: string };
+    const transition = transitionFromDelivery(observation, observation.observedAt);
+    if (transition) transitions.push(transition);
+  }
+  return { coverage: "retained_observations_only", sourceObservationCount: rows.rows.length,
+    replay: replayTransitions(transitions) };
+}
+
 /** Pool owns connection policy/TLS. Every transaction uses exactly one connection. */
 export function postgresDatabase(pool: Pool): SqlDatabase {
   return {
@@ -57,26 +84,8 @@ export class InboxStore implements IntakeStore {
   }
 
   /** Read-only bounded rebuild from retained delivery receipts, not source coverage certification. */
-  async replayObjectState(repositoryId: number, subjectId: string): Promise<{
-    coverage: "retained_observations_only"; sourceObservationCount: number; replay: ReplayResult;
-  }> {
-    if (!Number.isSafeInteger(repositoryId) || repositoryId < 1 || !/^[A-Za-z0-9_=-]{1,200}$/.test(subjectId)) {
-      throw new Error("invalid_replay_scope");
-    }
-    const rows = await this.db.query(`SELECT normalization_version, observation
-      FROM leaderboard_ingestion.observations
-      WHERE observation->>'repositoryId' = $1 AND observation->>'subjectId' = $2
-      ORDER BY event_key LIMIT 257`, [String(repositoryId), subjectId]);
-    if (rows.rows.length > 256) throw new Error("replay_limit_exceeded");
-    const transitions: Transition[] = [];
-    for (const row of rows.rows) {
-      if (row.normalization_version !== "delivery-observation/v1") throw new Error("unsupported_normalization_version");
-      const observation = row.observation as Envelope & { observedAt: string };
-      const transition = transitionFromDelivery(observation, observation.observedAt);
-      if (transition) transitions.push(transition);
-    }
-    return { coverage: "retained_observations_only", sourceObservationCount: rows.rows.length,
-      replay: replayTransitions(transitions) };
+  async replayObjectState(repositoryId: number, subjectId: string): Promise<RetainedObjectReplay> {
+    return readObjectReplay(this.db, repositoryId, subjectId);
   }
 
   async claim(leaseSeconds = 60): Promise<Lease | null> {
