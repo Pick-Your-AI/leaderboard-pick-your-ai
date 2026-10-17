@@ -1,0 +1,113 @@
+{
+  "captured_at": "2026-10-17T02:32:20.288866+00:00",
+  "scope": "Sanitized source capability findings and official documentation references captured during planning; re-probe before implementation and release.",
+  "official_documentation_findings": [
+    {
+      "claim": "Label-definition webhooks differ from applying labels to issues; Metadata read is documented for subscribing. Milestone-definition webhooks differ from attaching issues to milestones; Issues OR Pull requests read is documented for subscribing. Verify each supported action and hydration endpoint in the App canary.",
+      "source_urls": [
+        "https://docs.github.com/en/webhooks/webhook-events-and-payloads"
+      ]
+    },
+    {
+      "claim": "ProjectV2 exposes field, view and workflow connections. View/workflow configuration snapshots and updatedAt do not provide an edit actor history; evidence-reviewed configuration recognition remains necessary unless a specific event source is proven.",
+      "source_urls": [
+        "https://docs.github.com/en/graphql/reference/projects"
+      ]
+    },
+    {
+      "claim": "TransferredEvent and PinnedEvent expose actor and createdAt in the live schema. Reorder history is a separate capability and must not be inferred from subissue add/remove events or current order.",
+      "source_urls": [
+        "https://docs.github.com/en/graphql/reference/issues"
+      ]
+    },
+    {
+      "claim": "pull_request_review_thread is a documented webhook with Pull requests read permission; resolved payload includes optional sender and updated_at. Verify non-null timestamp semantics in a canary; missing sender/time cannot create named time-window credit.",
+      "source_urls": [
+        "https://docs.github.com/en/webhooks/webhook-events-and-payloads"
+      ]
+    },
+    {
+      "claim": "Public Events API has 300-event/30-day bounded history and can lag by 30 seconds to 6 hours. It is not the source of truth for a live historical leaderboard.",
+      "source_urls": [
+        "https://docs.github.com/en/rest/activity/events"
+      ]
+    },
+    {
+      "claim": "PR files endpoint returns a maximum of 3000 files; large/truncated diffs need a safe Git fallback or visible partial coverage.",
+      "source_urls": [
+        "https://docs.github.com/en/rest/pulls/pulls"
+      ]
+    },
+    {
+      "claim": "Failed webhooks are not automatically redelivered; recent delivery visibility/redelivery spans 3 days; App webhook delivery endpoints require App JWT.",
+      "source_urls": [
+        "https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries",
+        "https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/viewing-webhook-deliveries",
+        "https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/redelivering-webhooks",
+        "https://docs.github.com/en/rest/apps/webhooks"
+      ]
+    },
+    {
+      "claim": "Project item changes and status updates have organization webhook events and Projects organization read permission. Exact App subscription delivery needs canary verification.",
+      "source_urls": [
+        "https://docs.github.com/en/webhooks/webhook-events-and-payloads",
+        "https://github.blog/changelog/2024-06-27-github-issues-projects-graphql-and-webhook-support-for-project-status-updates-and-more/"
+      ]
+    },
+    {
+      "claim": "UserContentEdit includes edit actor, timestamp, diff summary and deletion metadata. Current snapshot/latest-editor fields are not substitutes for complete history.",
+      "source_urls": [
+        "https://docs.github.com/en/graphql/reference/users",
+        "https://docs.github.com/en/graphql/reference/issues"
+      ]
+    },
+    {
+      "claim": "Issue subissue/dependency events are documented with Issues read permission. New relates-to cross-repository deliveries can omit counterpart data.",
+      "source_urls": [
+        "https://docs.github.com/en/webhooks/webhook-events-and-payloads"
+      ]
+    },
+    {
+      "claim": "REST and GraphQL have separate primary budgets plus secondary limits; GraphQL pagination is 1-100 and total request node counts are limited. Treat HTTP 200 GraphQL errors as errors.",
+      "source_urls": [
+        "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+        "https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api"
+      ]
+    },
+    {
+      "claim": "Repository statistics exclude merges and differ from event accounting; large repositories can have unavailable or zero addition/deletion statistics.",
+      "source_urls": [
+        "https://docs.github.com/en/rest/metrics/statistics"
+      ]
+    }
+  ],
+  "source_urls": {
+    "webhooks": "https://docs.github.com/en/webhooks/webhook-events-and-payloads",
+    "graphql_issues": "https://docs.github.com/en/graphql/reference/issues",
+    "graphql_users": "https://docs.github.com/en/graphql/reference/users",
+    "graphql_projects": "https://docs.github.com/en/graphql/reference/projects",
+    "rest_timeline": "https://docs.github.com/en/rest/using-the-rest-api/issue-event-types",
+    "pulls": "https://docs.github.com/en/rest/pulls/pulls",
+    "reviews": "https://docs.github.com/en/rest/pulls/reviews",
+    "rest_limits": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+    "graphql_limits": "https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api",
+    "events": "https://docs.github.com/en/rest/activity/events",
+    "failed_deliveries": "https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries",
+    "delivery_window": "https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/viewing-webhook-deliveries",
+    "redelivery": "https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/redelivering-webhooks",
+    "app_deliveries": "https://docs.github.com/en/rest/apps/webhooks",
+    "webhook_security": "https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries",
+    "webhook_practices": "https://docs.github.com/en/webhooks/using-webhooks/best-practices-for-using-webhooks",
+    "coauthors": "https://docs.github.com/en/pull-requests/how-tos/commit-changes/creating-a-commit-with-multiple-authors",
+    "statistics": "https://docs.github.com/en/rest/metrics/statistics",
+    "projects_field_changes": "https://github.blog/changelog/2024-06-27-github-issues-projects-graphql-and-webhook-support-for-project-status-updates-and-more/",
+    "discussions": "https://docs.github.com/en/graphql/reference/discussions",
+    "research_workflow": "https://github.com/Pick-Your-AI/pick-your-ai-research/blob/main/docs/RESEARCH_WORKFLOW.md"
+  },
+  "important_interpretations": [
+    "Sample issue #40 is intentionally not a full timeline backfill: hasNextPage proves nested pagination is needed.",
+    "Some bot/system actors can have wasAutomated=false; actor identity and automation registry must be considered together.",
+    "UserContentEdits can contain initial creation data; no edit-count metric should count that as an additional edit.",
+    "No claim that a user-account actor performed a manual human action or that AI use can be detected."
+  ]
+}

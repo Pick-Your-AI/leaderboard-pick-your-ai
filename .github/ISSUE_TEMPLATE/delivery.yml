@@ -1,0 +1,40 @@
+name: Delivery work package
+description: An independently reviewable contribution to the leaderboard
+title: "LB follow-up: "
+body:
+  - type: markdown
+    attributes:
+      value: "Check the existing native hierarchy and stable LB IDs before creating another issue. Small steps belong in an existing package checklist."
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome and scope
+      description: Describe the result and the limits of this package.
+    validations:
+      required: true
+  - type: textarea
+    id: relationships
+    attributes:
+      label: Parent and prerequisites
+      description: Link the proposed parent and genuine prerequisites; native relationships should be set during triage.
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Tasks
+      description: Use a checklist for small steps.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance and evidence
+      description: Define what the reviewer can verify and the required source, implementation or operating evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: decisions
+    attributes:
+      label: Open decisions and proposed owner role
+      description: Do not assign a person by implication. Never include private evidence or secrets.

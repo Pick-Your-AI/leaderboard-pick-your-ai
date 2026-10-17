@@ -1,0 +1,92 @@
+{
+  "snapshot": {
+    "started_at": "2026-10-17T02:24:58.286322+00:00",
+    "finished_at": "2026-10-17T02:26:10.902486+00:00",
+    "errors": [],
+    "repositories": [
+      "pick-your-ai-research",
+      ".github",
+      "pickyour.ai"
+    ],
+    "project_count": 5,
+    "issue_pr_count": 391,
+    "scope": "Public repository and Project inventory with source history sampling; raw data remains outside this repository."
+  },
+  "repositories": [
+    {
+      "name": ".github",
+      "url": "https://github.com/Pick-Your-AI/.github",
+      "description": "Organization profile, contribution guidance, and shared community health files for Pick Your AI, a PCPartPicker-inspired AI stack builder.",
+      "default_branch": "main",
+      "tree_sha": "9b48a356b5934d836d9377502c9080c5fa9ed0e6",
+      "issues_total": 1,
+      "issues_open": 1,
+      "pull_requests_total": 1,
+      "pull_requests_merged": 1,
+      "pull_requests_open": 0,
+      "merged_pr_commit_entries": 1,
+      "unique_merged_pr_commit_shas": 1,
+      "discussions_enabled": false
+    },
+    {
+      "name": "pick-your-ai-research",
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research",
+      "description": "Research and shared data contracts for Pick Your AI: component catalogs, compatibility rules, pricing, and evidence for AI stacks.",
+      "default_branch": "main",
+      "tree_sha": "f8237774098f3f376d7b48b8e665a99fdff43e3c",
+      "issues_total": 55,
+      "issues_open": 55,
+      "pull_requests_total": 43,
+      "pull_requests_merged": 34,
+      "pull_requests_open": 8,
+      "merged_pr_commit_entries": 107,
+      "unique_merged_pr_commit_shas": 92,
+      "discussions_enabled": false
+    },
+    {
+      "name": "pickyour.ai",
+      "url": "https://github.com/Pick-Your-AI/pickyour.ai",
+      "description": "Pick Your AI: a PCPartPicker-inspired builder for complete AI stacks. Explore components, compatibility, and costs in a preview using synthetic data.",
+      "default_branch": "main",
+      "tree_sha": "c731bc451d227eac843750418b6de3c3377ea90b",
+      "issues_total": 273,
+      "issues_open": 270,
+      "pull_requests_total": 18,
+      "pull_requests_merged": 13,
+      "pull_requests_open": 0,
+      "merged_pr_commit_entries": 16,
+      "unique_merged_pr_commit_shas": 16,
+      "discussions_enabled": false
+    }
+  ],
+  "projects": [
+    {
+      "number": 1,
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/1"
+    },
+    {
+      "number": 2,
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/2"
+    },
+    {
+      "number": 3,
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/3"
+    },
+    {
+      "number": 4,
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/4"
+    },
+    {
+      "number": 5,
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/5"
+    }
+  ],
+  "scope_note": "This snapshot predates the leaderboard repository and Project. Re-inventory all public repositories and explicitly approved Projects before collector installation. Private and undisclosed repositories are excluded.",
+  "notable_findings": [
+    "GitHub Project membership is not exhaustive contribution scope. Preserve eligible unboarded repository activity.",
+    "Merged research PRs included duplicate commit appearances and intermediate-branch merges. Separate PR activity from unique default-branch integration.",
+    "Public source actor fields do not establish whether work was manual or AI assisted.",
+    "Research acceptance, app implementation, public deployment and contribution recognition are different states.",
+    "Optional Discussions support requires an enabled source; unavailable features are not zero contributions."
+  ]
+}

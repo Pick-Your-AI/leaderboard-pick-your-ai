@@ -1,0 +1,151 @@
+[
+  {
+    "id": "DEC-01",
+    "question": "What is the product and repository boundary?",
+    "recommended": "Dedicated pick-your-ai-leaderboard repository, public contributor site; independent ingestion/API from the static builder",
+    "alternatives": [
+      "Module in website plus separate backend",
+      "Scheduled static-only prototype with honestly periodic freshness"
+    ],
+    "decision_role": "Organization maintainer and operations owner",
+    "before": [
+      "LB-02.01",
+      "LB-20.01"
+    ],
+    "status": "Repository boundary adopted; runtime architecture approval remains open",
+    "decision": "Use Pick-Your-AI/pick-your-ai-leaderboard for the dedicated contributor recognition project. Public hosting, product name, collector installation and runtime implementation remain governed by their delivery packages."
+  },
+  {
+    "id": "DEC-02",
+    "question": "Which sources and history are public and eligible?",
+    "recommended": "All public repositories and Projects explicitly onboarded by stable IDs, starting with the three repositories and five Projects in the historical audit and including this newly published repository and Project after scope acceptance; unknown adoption boundaries are disclosed",
+    "alternatives": [
+      "Explicit subset for beta",
+      "Separate inherited-history lens"
+    ],
+    "decision_role": "Maintainers and privacy owner",
+    "before": [
+      "LB-04.02",
+      "LB-06.01"
+    ],
+    "status": "Proposed"
+  },
+  {
+    "id": "DEC-03",
+    "question": "How should recognition rank people?",
+    "recommended": "Independent count/sum boards with raw/qualified states, no universal weighted score; ratios and wait times descriptive",
+    "alternatives": [
+      "Optional later category composite through separately reviewed governance"
+    ],
+    "decision_role": "Contributor representatives and metric owners",
+    "before": [
+      "LB-11.01"
+    ],
+    "status": "Proposed"
+  },
+  {
+    "id": "DEC-04",
+    "question": "Who accepts evidence and handles disputes?",
+    "recommended": "Named role roster with conflict-of-interest rule, evidence receipts, appeal path and measured response commitment",
+    "alternatives": [
+      "Maintainer review during small beta",
+      "Multi-reviewer panels for contested cases"
+    ],
+    "decision_role": "Organization maintainers",
+    "before": [
+      "LB-10.03",
+      "LB-17.03"
+    ],
+    "status": "Needs role acceptance; no named assignment invented"
+  },
+  {
+    "id": "DEC-05",
+    "question": "How is the service hosted and paid for?",
+    "recommended": "Separate runtime and managed PostgreSQL with static frontend; compare existing approved capacity before vendor selection; set budget ceiling",
+    "alternatives": [
+      "Approved self-hosted service",
+      "Managed application platform"
+    ],
+    "decision_role": "Operations and budget owner",
+    "before": [
+      "LB-20.01"
+    ],
+    "status": "Unselected; no spend or provisioning authorized by concept"
+  },
+  {
+    "id": "DEC-06",
+    "question": "How are public identity and opt-out handled?",
+    "recommended": "Stable public account IDs, no email display, verified optional profile preferences, suppression across projections/caches, minimized correction audit",
+    "alternatives": [
+      "Default public facts with opt-out",
+      "Opt-in profiles with aggregate eligible source activity"
+    ],
+    "decision_role": "Privacy and contributor governance",
+    "before": [
+      "LB-04.05",
+      "LB-15.03",
+      "LB-17.03"
+    ],
+    "status": "Policy decision required before production"
+  },
+  {
+    "id": "DEC-07",
+    "question": "Which metric capabilities ship first?",
+    "recommended": "Automatically provable basics plus clearly labeled raw triage and a bounded reviewed-evidence pilot; conditional/disabled sources exposed honestly; retained-line analysis deferred",
+    "alternatives": [
+      "Automatic-only alpha",
+      "Broader beta after evidence moderation is operational"
+    ],
+    "decision_role": "Product and metric owners",
+    "before": [
+      "LB-19.06",
+      "LB-20.04"
+    ],
+    "status": "Proposed; explicit release manifest required"
+  },
+  {
+    "id": "DEC-08",
+    "question": "What does live mean?",
+    "recommended": "Proposed p95 receive-to-publication under 60 seconds with durable acknowledgment under 2 seconds; upstream lag and stale sources displayed separately",
+    "alternatives": [
+      "Scheduled preview with explicit update interval",
+      "Stricter targets after measured load and cost evaluation"
+    ],
+    "decision_role": "Operations and product",
+    "before": [
+      "LB-19.04",
+      "LB-20.04"
+    ],
+    "status": "Targets only; unmeasured"
+  },
+  {
+    "id": "DEC-09",
+    "question": "Which visual identity is accepted?",
+    "recommended": "Opus-informed editorial contribution ledger within current teal/slate/amber brand; proposed name PickYour.AI Credits; clear Leaderboards navigation and equally visible contributor directory",
+    "alternatives": [
+      "Pick Your AI Contributors product name",
+      "Optional lightweight ASCII accent after existing website design decisions"
+    ],
+    "decision_role": "Design owner and contributors",
+    "before": [
+      "LB-13.04"
+    ],
+    "status": "Concept proposed; exact Claude Opus 5.5 consulted"
+  },
+  {
+    "id": "DEC-10",
+    "question": "What are retention, recovery and operating commitments?",
+    "recommended": "Choose minimized payload retention, backup deletion bounds, RTO/RPO and accepted operational owner before launch; test rather than claim",
+    "alternatives": [
+      "Lean beta service targets",
+      "Higher availability after funding/owner decision"
+    ],
+    "decision_role": "Operations, privacy and budget owner",
+    "before": [
+      "LB-18.03",
+      "LB-20.03",
+      "LB-20.04"
+    ],
+    "status": "Unselected numeric retention/RTO/RPO; decision scoped"
+  }
+]

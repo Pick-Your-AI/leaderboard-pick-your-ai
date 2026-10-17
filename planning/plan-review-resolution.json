@@ -1,0 +1,463 @@
+{
+  "status": "Review findings addressed in concept; no implementation or runtime validation claimed",
+  "organization_review": [
+    {
+      "id": "ORG-REVIEW-01",
+      "resolution": "Added mandatory release manifest and prerequisite closure including metric/source tests, lifecycle, research/market, five-Project view and policy controls.",
+      "state": "addressed-in-plan"
+    },
+    {
+      "id": "ORG-REVIEW-02",
+      "resolution": "LB-19.06 is explicitly staging/prelaunch; LB-20.04 owns authorized deployment and subsequent production readback.",
+      "state": "addressed-in-plan"
+    },
+    {
+      "id": "ORG-REVIEW-03",
+      "resolution": "Threat-model completion requires selected mitigations and linked owners/tests; implemented security controls are required at LB-18.05 and release.",
+      "state": "addressed-in-plan"
+    },
+    {
+      "id": "ORG-REVIEW-04",
+      "resolution": "Every package has contextual fully qualified source URLs; bare cross-repository issue numbers are qualified before rendering.",
+      "state": "addressed-in-plan"
+    },
+    {
+      "id": "ORG-REVIEW-05",
+      "resolution": "PR target-branch activity, unique default-branch integration and stacked research lineage are explicit requirements and fixtures.",
+      "state": "addressed-in-plan"
+    },
+    {
+      "id": "ORG-REVIEW-06",
+      "resolution": "Minimal repository creation and issue publication are separate from new LB-02.07 runtime scaffolding; unresolved hosting/release decisions may remain Backlog.",
+      "state": "addressed-in-plan"
+    },
+    {
+      "id": "ORG-REVIEW-07",
+      "resolution": "Each package has priority/gate/role/references; every metric has a validated primary package mapping and source/definition fields.",
+      "state": "addressed-in-plan"
+    },
+    {
+      "id": "ORG-REVIEW-08",
+      "resolution": "Native issue types/fields, Project item fields/status and Project progress posts have explicit separate capability tests and tasks.",
+      "state": "addressed-in-plan"
+    },
+    {
+      "id": "ORG-REVIEW-09",
+      "resolution": "Authenticated evidence submission LB-10.02 now consumes canonical authentication LB-17.02.",
+      "state": "addressed-in-plan"
+    }
+  ],
+  "metric_review": [
+    {
+      "id": "COV-01",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-08.04"
+      ]
+    },
+    {
+      "id": "COV-02",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-09.03"
+      ]
+    },
+    {
+      "id": "COV-03",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-11.01"
+      ]
+    },
+    {
+      "id": "COV-04",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-07.01",
+        "LB-07.04",
+        "LB-11.04"
+      ]
+    },
+    {
+      "id": "COV-05",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.04"
+      ]
+    },
+    {
+      "id": "COV-06",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-20.06",
+        "LB-07.02"
+      ]
+    },
+    {
+      "id": "COV-07",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-07.05",
+        "LB-10.02",
+        "LB-10.03",
+        "LB-10.04"
+      ]
+    },
+    {
+      "id": "COV-08",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-04.01",
+        "LB-07.04"
+      ]
+    },
+    {
+      "id": "COV-09",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-03.05",
+        "LB-08.02",
+        "LB-08.04",
+        "LB-11.05"
+      ]
+    },
+    {
+      "id": "COV-10",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-07.01",
+        "LB-07.02",
+        "LB-07.03",
+        "LB-19.01"
+      ]
+    },
+    {
+      "id": "COV-11",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-03.03",
+        "LB-07.03"
+      ]
+    },
+    {
+      "id": "COV-12",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.02",
+        "LB-19.02"
+      ]
+    },
+    {
+      "id": "COV-13",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.02",
+        "LB-19.02"
+      ]
+    },
+    {
+      "id": "COV-14",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.04",
+        "LB-10.03"
+      ]
+    },
+    {
+      "id": "COV-15",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.03",
+        "LB-03.06",
+        "LB-19.01"
+      ]
+    },
+    {
+      "id": "COV-16",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.03",
+        "LB-10.03"
+      ]
+    },
+    {
+      "id": "COV-17",
+      "state": "bound-to-work-package-acceptance",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.04",
+        "LB-10.03",
+        "LB-18.03"
+      ]
+    }
+  ],
+  "ui_review": [
+    {
+      "id": "UIR-01",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-03.05"
+    },
+    {
+      "id": "UIR-02",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-13.03"
+    },
+    {
+      "id": "UIR-03",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-13.02"
+    },
+    {
+      "id": "UIR-04",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-14.01"
+    },
+    {
+      "id": "UIR-05",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-14.02"
+    },
+    {
+      "id": "UIR-06",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-14.02"
+    },
+    {
+      "id": "UIR-07",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-14.03"
+    },
+    {
+      "id": "UIR-08",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-15.02"
+    },
+    {
+      "id": "UIR-09",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-12.04"
+    },
+    {
+      "id": "UIR-10",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-14.05"
+    },
+    {
+      "id": "UIR-11",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-14.06"
+    },
+    {
+      "id": "UIR-12",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-16.03"
+    },
+    {
+      "id": "UIR-13",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-16.02"
+    },
+    {
+      "id": "UIR-14",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-16.04"
+    },
+    {
+      "id": "UIR-15",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-17.03"
+    },
+    {
+      "id": "UIR-16",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-19.03"
+    },
+    {
+      "id": "UIR-17",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-13.05"
+    },
+    {
+      "id": "UIR-18",
+      "state": "integrated-as-master-task-and-acceptance",
+      "work_package": "LB-18.03"
+    }
+  ],
+  "consultant_amendments_reference": "ui/ui-concept.json#reviewed_amendments_to_opus",
+  "final_consistency_review": {
+    "finding": "Optional exports were indirectly required by base hardening",
+    "resolution": "LB-18.02 now consumes base read API LB-12.01. Export-specific hardening is conditional in both package acceptance and release manifest.",
+    "state": "addressed-in-plan"
+  },
+  "org_acceptance_fixtures": [
+    {
+      "id": "ORG-CASE-01",
+      "name": "Complete scope includes unboarded work",
+      "evidence": "329 issues + 62 PRs exist; Projects contain 325 issues + 6 PRs. The four issues outside Projects are .github#2 and website#31/#32/#33.",
+      "sources": [
+        "https://github.com/Pick-Your-AI/.github/issues/2",
+        "https://github.com/Pick-Your-AI/pickyour.ai/issues/31",
+        "https://github.com/Pick-Your-AI/pickyour.ai/issues/32",
+        "https://github.com/Pick-Your-AI/pickyour.ai/issues/33"
+      ],
+      "expected": "Repository collection includes every allowed issue/PR. Project grouping neither excludes unboarded work nor counts board member PRs a second time.",
+      "packages": [
+        "LB-06.01",
+        "LB-14.04",
+        "LB-19.02"
+      ]
+    },
+    {
+      "id": "ORG-CASE-02",
+      "name": "Native relationship mirrors and correction churn",
+      "evidence": "REST timelines contain 491 blocked_by_added plus 491 blocking_added, 64 removals of each mirrored form, and 310 parent_issue_added plus 310 sub_issue_added. Current native graph has 427 blockers and 310 parent-child edges.",
+      "expected": "Mirrored endpoint observations produce one relationship operation. Removing a wrong dependency and adding its correction does not inflate unrelated delivery recognition. The reconciled current graph matches the captured native graph.",
+      "packages": [
+        "LB-05.03",
+        "LB-06.02",
+        "LB-08.03",
+        "LB-08.06",
+        "LB-19.01"
+      ]
+    },
+    {
+      "id": "ORG-CASE-03",
+      "name": "Stacked research PR integration",
+      "evidence": "Eleven research PRs merged to research/market-intelligence rather than main; 107 merged-PR commit entries contain 92 distinct SHAs. Fifteen SHAs occur in more than one merged PR.",
+      "sources": [
+        "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/67",
+        "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/79",
+        "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/82"
+      ],
+      "expected": "PR-event participation and unique integrated-change metrics have distinct units. Repeated commits and child/parent diff overlap do not count twice as unique code delivered. Main integration is not assigned the earlier proposal-branch merge time.",
+      "packages": [
+        "LB-03.06",
+        "LB-07.01",
+        "LB-07.02",
+        "LB-07.03",
+        "LB-07.06",
+        "LB-19.01"
+      ]
+    },
+    {
+      "id": "ORG-CASE-04",
+      "name": "Imported contracts and generated content",
+      "evidence": "Raw PR additions total 134525; a diagnostic path heuristic finds 32222 contract additions and 9361 lock/generated additions. Research #44 imports the v1 contract, while website #2 vendors it again. These are diagnostic raw figures, not final eligible authored LOC.",
+      "sources": [
+        "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/44",
+        "https://github.com/Pick-Your-AI/pickyour.ai/pull/2"
+      ],
+      "expected": "Raw volume remains inspectable. Imported/generated/lock content receives its declared classification; importing the same contract into the website does not certify original authored code. Research artifacts remain available in their own contribution categories.",
+      "packages": [
+        "LB-07.02",
+        "LB-07.06",
+        "LB-09.02",
+        "LB-19.01"
+      ]
+    },
+    {
+      "id": "ORG-CASE-05",
+      "name": "Cross-API automation identity",
+      "evidence": "206 Project events have REST actor github-project-automation[bot] (Bot), while GraphQL reports github-project-automation and wasAutomated false.",
+      "expected": "Stable account identity and verified type resolve one automation actor. A false wasAutomated flag does not route these actions to human achievement boards. Logins alone are not join keys.",
+      "packages": [
+        "LB-03.02",
+        "LB-03.03",
+        "LB-08.04",
+        "LB-19.01"
+      ],
+      "sources": [
+        "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/45"
+      ]
+    },
+    {
+      "id": "ORG-CASE-06",
+      "name": "Project schema differences and native issue types",
+      "evidence": "Project 1 priority uses Critical/High/Medium/Low; Project 2 uses P0-P3 and Research Readiness; Project 3 status uses Todo/In Progress/Done; Projects 4/5 use Backlog plus Level, Phase, Workstream and Acceptance Gate. Timelines include 129 issue_type_added events.",
+      "sources": [
+        "https://github.com/orgs/Pick-Your-AI/projects/1",
+        "https://github.com/orgs/Pick-Your-AI/projects/2",
+        "https://github.com/orgs/Pick-Your-AI/projects/3",
+        "https://github.com/orgs/Pick-Your-AI/projects/4",
+        "https://github.com/orgs/Pick-Your-AI/projects/5"
+      ],
+      "expected": "Mappings preserve source values by stable Project/field IDs. Native issue type changes remain distinct from Project Level/custom fields. Unknown historical fields do not acquire invented editors.",
+      "packages": [
+        "LB-03.04",
+        "LB-04.01",
+        "LB-06.02",
+        "LB-08.04",
+        "LB-14.04"
+      ]
+    },
+    {
+      "id": "ORG-CASE-07",
+      "name": "Partial research merge and reopened issues",
+      "evidence": "Research #85 approval explicitly records partial research, pending handoffs, and reversal of automatic closures on issues #30-#32; those issues are currently open. Website #11 is an intentional failed-CI demonstration closed without merge.",
+      "sources": [
+        "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/85",
+        "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/30",
+        "https://github.com/Pick-Your-AI/pickyour.ai/pull/11"
+      ],
+      "expected": "A merge creates the appropriate PR contribution but does not manufacture accepted research completion. A closed-unmerged PR never becomes a delivery. A reopened issue preserves valid earlier contributions while correcting its outcome state.",
+      "packages": [
+        "LB-06.04",
+        "LB-07.01",
+        "LB-08.01",
+        "LB-09.01",
+        "LB-19.01"
+      ]
+    },
+    {
+      "id": "ORG-CASE-08",
+      "name": "Review participation includes non-approval owner decisions",
+      "evidence": "The audit observed 28 formal review records: 13 changes requested, 8 approvals, 6 commented and 1 dismissed. COMMENTED reviews include substantive adopted owner dispositions in the linked PRs.",
+      "sources": [
+        "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/75",
+        "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/88"
+      ],
+      "expected": "Review participation and accepted policy outcomes can recognize evidence-backed COMMENTED reviews. Neither approvals alone nor raw review text length defines quality; the same reviewer/PR retains distinct-review deduplication.",
+      "packages": [
+        "LB-07.04",
+        "LB-09.01",
+        "LB-19.05"
+      ]
+    },
+    {
+      "id": "ORG-CASE-09",
+      "name": "Contributor discovery without assigning unearned delivery",
+      "evidence": "The audit observed external authors of multiple research PRs absent from the default-branch contributors endpoint, public offers to help, and accounts only assigned or mentioned. Those observations support different contribution states.",
+      "sources": [
+        "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/15",
+        "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/69"
+      ],
+      "expected": "Eligible external PR authors appear without requiring default-branch commits or organization membership. An offer can appear as participation with its actual state; assignment/mention/subscription do not confer completed-work credit or negative reputation.",
+      "packages": [
+        "LB-03.02",
+        "LB-08.01",
+        "LB-15.01",
+        "LB-15.02"
+      ]
+    },
+    {
+      "id": "ORG-CASE-10",
+      "name": "Unavailable channels and limited tenure",
+      "evidence": "All three repositories have Discussions disabled and no GitHub Releases. All 258 mobile planning items are Backlog and unassigned. Repositories were created on 2026-10-16; the snapshot is 2026-10-17 UTC.",
+      "expected": "Unavailable discussion adapters are labeled unavailable; no recorded releases differs from unsupported channels. Mobile planning gets planning credit only. Historical trends/newcomer/active-week claims disclose the observation window and do not fabricate earlier history.",
+      "packages": [
+        "LB-06.05",
+        "LB-10.01",
+        "LB-11.03",
+        "LB-11.04",
+        "LB-14.04"
+      ]
+    }
+  ],
+  "audit_snapshot_at": "2026-10-17T02:26:10.902486+00:00"
+}

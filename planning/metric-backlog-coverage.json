@@ -1,0 +1,3491 @@
+{
+  "schema_version": "metric-backlog-coverage-1",
+  "reviewed_at": "2026-10-17T02:32:17.914388+00:00",
+  "status": "Planning coverage review only; neither source capability nor metric implementation is claimed complete.",
+  "catalog_path": "metrics-and-ingestion.json",
+  "backlog_path": "project-backlog.json",
+  "summary": {
+    "catalog_metrics": 98,
+    "mapped_metrics": 98,
+    "unmapped_metrics": 0,
+    "release_eligibility_counts": {
+      "descriptive-only": 16,
+      "conditional": 21,
+      "automatic baseline": 19,
+      "deferred advanced": 1,
+      "evidence-reviewed": 41
+    },
+    "required_clarifications": 17,
+    "backlog_work_packages": 112,
+    "catalog_label_fix": "files_changed now says Files changed; additional neutral label fixes and definition fields applied."
+  },
+  "policy": {
+    "eligibility_classes": {
+      "automatic baseline": "May compute in the initial public-data release after source, identity, scope and policy gates pass. Describes measured activity or merged artifact participation; does not certify subjective quality.",
+      "conditional": "Enabled only when its optional source, historical context, timestamps, target feature and actor evidence are proven. Otherwise explicitly unavailable/partial.",
+      "evidence-reviewed": "Requires an accepted receipt or explicit source review satisfying category criteria; ingestion alone does not award it. Can launch with the receipt workflow.",
+      "descriptive-only": "May compute from supported data but appears as context/distribution or a raw drilldown, without merit/quality ranking. Advanced source prerequisites still apply.",
+      "deferred advanced": "Outside initial implementation; stays disabled until separately scoped, reviewed and validated."
+    },
+    "common_gates": [
+      "LB-01.02",
+      "LB-01.05",
+      "LB-03.01",
+      "LB-03.02",
+      "LB-03.03",
+      "LB-03.04",
+      "LB-03.05",
+      "LB-03.06",
+      "LB-04.01",
+      "LB-06.05",
+      "LB-11.01",
+      "LB-11.02",
+      "LB-11.05",
+      "LB-19.01",
+      "LB-19.05"
+    ],
+    "publication_gates": [
+      "LB-12.01",
+      "LB-12.02",
+      "LB-14.03",
+      "LB-14.05",
+      "LB-18.03",
+      "LB-20.04"
+    ],
+    "common_contract": {
+      "filter_scope": "Same repository/Project/workstream/date/actor eligibility filters must constrain numerator, denominator and evidence. Distinguish current mapping from supported event-time mapping.",
+      "null_semantics": "Zero only for complete supported scope with no eligible units. Missing permissions, timestamps, lineage, optional feature or complete history means unavailable or partial, not zero.",
+      "non_additivity": "Metric families, authorship roles, category facets and cross-Project memberships overlap. Never sum them into unique work, effort or quality. Shared participation may exceed unique artifact count.",
+      "count_denominator": "Count and sum metrics have no mathematical denominator; show eligible source coverage and population separately. Do not divide by days/hours to manufacture productivity.",
+      "time": "UTC half-open event windows; no ingestion-time substitution; current-state metrics must say as of snapshot.",
+      "grouping": "Any time-bucket grouping and suppression rules are exact versioned policy; publication blocks if a qualitative requirement remains unreviewed or undefined.",
+      "minimum_samples": "For descriptive ratios/distributions always show numerator, denominator or n. Optional comparison thresholds need an approved numeric policy; there is no default personal ratio leaderboard.",
+      "attribution": "User account is observed actor, not certified manual effort. Distinguish author, coauthor, reviewer, merger, closer, assignee, resolver and automation. Model trailers are metadata."
+    }
+  },
+  "mappings": [
+    {
+      "metric_id": "pr_opened",
+      "name": "PRs opened",
+      "primary_work_packages": [
+        "LB-07.01"
+      ],
+      "work_package_titles": [
+        "Deliver PR contribution boards"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "PR objects",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one per PR; draft and ready separate",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "pr_ready",
+      "name": "PRs submitted for review",
+      "primary_work_packages": [
+        "LB-07.01"
+      ],
+      "work_package_titles": [
+        "Deliver PR contribution boards"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "PR objects",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "Distinct PRs whose first ready transition occurs in the window; use non-draft creation only when creation state is proven. Do not infer original readiness from current draft flag.",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history_partial",
+        "event_clock": "first_ready_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "pr_merged",
+      "name": "PRs merged",
+      "primary_work_packages": [
+        "LB-07.01"
+      ],
+      "work_package_titles": [
+        "Deliver PR contribution boards"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-10"
+      ],
+      "definition": {
+        "unit": "PR objects",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one per merged PR in window; show team/shared authorship",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history",
+        "event_clock": "merged_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "pr_coauthored",
+      "name": "Merged PR collaborations",
+      "primary_work_packages": [
+        "LB-07.01",
+        "LB-07.03"
+      ],
+      "work_package_titles": [
+        "Deliver PR contribution boards",
+        "Deliver commit and collaboration attribution"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-11"
+      ],
+      "definition": {
+        "unit": "contributor-PR participations",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one contributor/PR; separate primary author from coauthor; no double credit within family",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history_partial",
+        "event_clock": "merged_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "commits_integrated",
+      "name": "Commits integrated",
+      "primary_work_packages": [
+        "LB-07.03"
+      ],
+      "work_package_titles": [
+        "Deliver commit and collaboration attribution"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-10",
+        "COV-11"
+      ],
+      "definition": {
+        "unit": "unique integrated commits",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one canonical repository/SHA; exclude merge-only and empty commits; show imported baseline separately",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history_partial",
+        "event_clock": "first_integrated_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "maintainer_merges",
+      "name": "Merge stewardship",
+      "primary_work_packages": [
+        "LB-07.01"
+      ],
+      "work_package_titles": [
+        "Deliver PR contribution boards"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "merge operations",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one merge/PR; distinct role from authorship; bots separate",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history",
+        "event_clock": "merged_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "direct_changes",
+      "name": "Direct branch changes",
+      "primary_work_packages": [
+        "LB-07.03"
+      ],
+      "work_package_titles": [
+        "Deliver commit and collaboration attribution"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "default-branch changes",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one accepted change not associated to already counted PR; do not encourage bypassing review",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history_partial",
+        "event_clock": "first_integrated_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "reverted_delivery",
+      "name": "Merged work later reverted",
+      "primary_work_packages": [
+        "LB-06.04",
+        "LB-07.01"
+      ],
+      "work_package_titles": [
+        "Model deletions, reverts and eligibility changes",
+        "Deliver PR contribution boards"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "original artifacts with linked reverts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "annotate original; keep historical merge and expose currently effective state; no shame penalty",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history_partial",
+        "event_clock": "revert_merged_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "pr_accepted_rate",
+      "name": "Merged share of decided PRs",
+      "primary_work_packages": [
+        "LB-07.01",
+        "LB-11.04"
+      ],
+      "work_package_titles": [
+        "Deliver PR contribution boards",
+        "Implement newcomer and sustained-participation views"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-03",
+        "COV-04"
+      ],
+      "definition": {
+        "unit": "proportion",
+        "aggregation": "ratio",
+        "numerator": "Number of distinct PRs with final merged decision in the selected decision-time window and scope.",
+        "denominator": {
+          "kind": "count",
+          "definition": "Merged PRs plus finally closed-unmerged PRs in the same decision-time window and scope. Exclude currently open/pending PRs; display their count separately. Reopened PRs and late decisions follow snapshot state and revision policy.",
+          "zero_behavior": "No decided PRs => unavailable, not 0%."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history",
+        "event_clock": "decision_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "release_changes",
+      "name": "Changes included in releases",
+      "primary_work_packages": [
+        "LB-07.05"
+      ],
+      "work_package_titles": [
+        "Recognize release and maintenance work"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted changes per release",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct accepted PR/release; same work in multiple releases not multiple lifetime accomplishments",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history_partial",
+        "event_clock": "published_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "pr_lines_added",
+      "name": "Lines added through authored PRs",
+      "primary_work_packages": [
+        "LB-07.02",
+        "LB-07.03"
+      ],
+      "work_package_titles": [
+        "Deliver transparent LOC and change-size boards",
+        "Deliver commit and collaboration attribution"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-03",
+        "COV-10"
+      ],
+      "definition": {
+        "unit": "eligible text lines added",
+        "aggregation": "sum_eligible_line_units",
+        "numerator": "sum eligible text additions once at default-branch integration; intermediate PR merges are raw context only; explicit shared-work caveat",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history_partial",
+        "event_clock": "default_branch_integrated_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "pr_lines_removed",
+      "name": "Lines removed through authored PRs",
+      "primary_work_packages": [
+        "LB-07.02",
+        "LB-07.03"
+      ],
+      "work_package_titles": [
+        "Deliver transparent LOC and change-size boards",
+        "Deliver commit and collaboration attribution"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-03",
+        "COV-10"
+      ],
+      "definition": {
+        "unit": "eligible text lines deleted",
+        "aggregation": "sum_eligible_line_units",
+        "numerator": "sum eligible text deletions once at default-branch integration; intermediate PR merges are raw context only; no negative merit",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history_partial",
+        "event_clock": "default_branch_integrated_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "pr_lines_changed",
+      "name": "Lines changed through authored PRs",
+      "primary_work_packages": [
+        "LB-07.02",
+        "LB-07.03"
+      ],
+      "work_package_titles": [
+        "Deliver transparent LOC and change-size boards",
+        "Deliver commit and collaboration attribution"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-03",
+        "COV-10"
+      ],
+      "definition": {
+        "unit": "eligible text lines changed",
+        "aggregation": "sum_eligible_line_units",
+        "numerator": "sum additions + deletions once at default-branch integration; separate code/docs/tests/config/data; never sum stacked intermediate PR diffs",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history_partial",
+        "event_clock": "default_branch_integrated_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "net_lines",
+      "name": "Net repository text change",
+      "primary_work_packages": [
+        "LB-07.02"
+      ],
+      "work_package_titles": [
+        "Deliver transparent LOC and change-size boards"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-03"
+      ],
+      "definition": {
+        "unit": "signed net text lines",
+        "aggregation": "sum_additions_minus_sum_deletions",
+        "numerator": "additions - deletions once at default-branch integration; no personal quality ranking",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history_partial",
+        "event_clock": "default_branch_integrated_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "commit_attributed_lines",
+      "name": "Commit-attributed lines",
+      "primary_work_packages": [
+        "LB-07.03",
+        "LB-07.02"
+      ],
+      "work_package_titles": [
+        "Deliver commit and collaboration attribution",
+        "Deliver transparent LOC and change-size boards"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-11"
+      ],
+      "definition": {
+        "unit": "commit-attributed text lines",
+        "aggregation": "sum_eligible_line_units",
+        "numerator": "optional separate lens; Git metadata is attribution not proof; squash/multi-author changes remain shared",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history_partial",
+        "event_clock": "first_integrated_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "files_changed",
+      "name": "Files changed",
+      "primary_work_packages": [
+        "LB-07.02"
+      ],
+      "work_package_titles": [
+        "Deliver transparent LOC and change-size boards"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "distinct paths per PR",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "Count distinct normalized repository/path/PR units among eligible accepted PR changes, separately from unique lifetime paths.",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history_partial",
+        "event_clock": "merged_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "retained_lines",
+      "name": "Attributed lines retained",
+      "primary_work_packages": [
+        "LB-20.06",
+        "LB-07.02"
+      ],
+      "work_package_titles": [
+        "Establish ongoing maintenance and expansion policy",
+        "Deliver transparent LOC and change-size boards"
+      ],
+      "release_eligibility": "deferred advanced",
+      "coverage_assessment": "deferred_not_covered_by_initial_implementation",
+      "clarification_ids": [
+        "COV-06"
+      ],
+      "definition": {
+        "unit": "retained text lines at snapshot",
+        "aggregation": "sum_eligible_line_units",
+        "numerator": "optional later analysis; costly and affected by moves/squashes/imports; no impact/quality claim",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "deferred advanced",
+        "source_coverage_class": "snapshot",
+        "event_clock": "snapshot_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "prs_reviewed",
+      "name": "PRs reviewed",
+      "primary_work_packages": [
+        "LB-07.04"
+      ],
+      "work_package_titles": [
+        "Recognize reviews and follow-up"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "distinct reviewer-PR participations",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct reviewer/PR with submitted review; self-review excluded; bot excluded",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history",
+        "event_clock": "first_submitted_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "review_rounds",
+      "name": "Review rounds contributed",
+      "primary_work_packages": [
+        "LB-07.04"
+      ],
+      "work_package_titles": [
+        "Recognize reviews and follow-up"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "reviewer-PR-head-SHA rounds",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one reviewer/PR/head round; multiple comments one round; do not favor approval over requested changes",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history",
+        "event_clock": "submitted_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "review_feedback",
+      "name": "Review feedback contributions",
+      "primary_work_packages": [
+        "LB-07.04"
+      ],
+      "work_package_titles": [
+        "Recognize reviews and follow-up"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "deduplicated feedback groups",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "Count submitted review objects plus standalone feedback groups; comments attached to a counted review are evidence within that group, not extra groups. Preserve raw comment counts as a separate unranked drilldown.",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history_partial",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "review_threads_resolved",
+      "name": "Review threads helped resolve",
+      "primary_work_packages": [
+        "LB-07.04",
+        "LB-04.01"
+      ],
+      "work_package_titles": [
+        "Recognize reviews and follow-up",
+        "Probe source and permission support"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-08"
+      ],
+      "definition": {
+        "unit": "review threads with proven resolution actor and time",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "Current resolver identity does not establish resolution time or actual fixer. Period count requires proven event time; reopening/re-resolution groups do not inflate unique-thread recognition.",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "observed_or_attested",
+        "event_clock": "resolved_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "accepted_suggestions",
+      "name": "Accepted review suggestions",
+      "primary_work_packages": [
+        "LB-07.04",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize reviews and follow-up",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted suggestion artifacts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "require exact link; textual similarity alone insufficient",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested_or_proven",
+        "event_clock": "integrated_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "first_reviews",
+      "name": "First submitted PR reviews",
+      "primary_work_packages": [
+        "LB-07.04"
+      ],
+      "work_package_titles": [
+        "Recognize reviews and follow-up"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "first submitted reviews per PR",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "Count PRs where this account authored the earliest eligible nonself submitted review. Ties at unresolved timestamp precision share first-review participation; no inference about substantive quality.",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history",
+        "event_clock": "submitted_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "cross_workstream_reviews",
+      "name": "Cross-workstream reviews",
+      "primary_work_packages": [
+        "LB-07.04",
+        "LB-03.04"
+      ],
+      "work_package_titles": [
+        "Recognize reviews and follow-up",
+        "Map repositories, Projects and workstreams over time"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "reviewer-PR participations across known workstreams",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct reviewer/PR; map known workstreams without inferring expertise",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history_partial",
+        "event_clock": "submitted_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "evidence_reviews",
+      "name": "Evidence reviews completed",
+      "primary_work_packages": [
+        "LB-09.01",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize research notes and reviewed decisions",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "reviewer-artifact-version participations",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "count reviewed artifact/version and reviewer, not rubber-stamp approval",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_review_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "review_wait",
+      "name": "Time to first submitted review",
+      "primary_work_packages": [
+        "LB-07.04",
+        "LB-11.04"
+      ],
+      "work_package_titles": [
+        "Recognize reviews and follow-up",
+        "Implement newcomer and sustained-participation views"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-03",
+        "COV-04"
+      ],
+      "definition": {
+        "unit": "elapsed hours distribution",
+        "aggregation": "median_and_p75_of_elapsed_hours",
+        "numerator": "Per eligible PR: timestamp of first nonself eligible submitted review minus proven first-ready timestamp; createdAt only if original non-draft creation is proven.",
+        "denominator": {
+          "kind": "sample_count",
+          "definition": "n eligible PRs with both timestamps; show unresolved right-censored PR count and missing-readiness-evidence count separately. Group by first-ready cohort; not individual review-speed merit.",
+          "zero_behavior": "n=0 => unavailable; never 0 hours."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history_partial",
+        "event_clock": "first_ready_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "issues_opened",
+      "name": "Issues opened",
+      "primary_work_packages": [
+        "LB-08.01"
+      ],
+      "work_package_titles": [
+        "Recognize issue reporting and accepted outcomes"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "issue objects excluding PRs",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one issue ID; distinguish research, bug, question, proposal and duplicate",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "accepted_findings",
+      "name": "Research findings accepted",
+      "primary_work_packages": [
+        "LB-08.01",
+        "LB-09.01"
+      ],
+      "work_package_titles": [
+        "Recognize issue reporting and accepted outcomes",
+        "Recognize research notes and reviewed decisions"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted finding versions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one distinct finding/version; require human acceptance, not merely issue closure",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "confirmed_bugs",
+      "name": "Bugs confirmed",
+      "primary_work_packages": [
+        "LB-08.01",
+        "LB-09.05"
+      ],
+      "work_package_titles": [
+        "Recognize issue reporting and accepted outcomes",
+        "Recognize tests, accessibility and performance findings"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "confirmed bug reports",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "confirmed report not severity self-label; exclude synthetic/test issues",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "confirmed_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "reproductions",
+      "name": "Reproductions contributed",
+      "primary_work_packages": [
+        "LB-08.05",
+        "LB-09.05"
+      ],
+      "work_package_titles": [
+        "Recognize unblocking, onboarding and resolution support",
+        "Recognize tests, accessibility and performance findings"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted reproduction scenarios",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one distinct accepted reproduction/scenario; preserve environment and receipt",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "issue_resolution",
+      "name": "Issues resolved with evidence",
+      "primary_work_packages": [
+        "LB-08.01",
+        "LB-08.05"
+      ],
+      "work_package_titles": [
+        "Recognize issue reporting and accepted outcomes",
+        "Recognize unblocking, onboarding and resolution support"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "resolved issues with accepted deliverables",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "closure actor and assignee not assumed to be solver; require acceptance evidence",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "history_partial",
+        "event_clock": "resolved_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "issue_closure_stewardship",
+      "name": "Issue closure stewardship",
+      "primary_work_packages": [
+        "LB-08.01"
+      ],
+      "work_package_titles": [
+        "Recognize issue reporting and accepted outcomes"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "final closure operations",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one meaningful final closure; duplicate/not-planned/implemented separate; reopen loops grouped",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "issue_answers",
+      "name": "Questions answered",
+      "primary_work_packages": [
+        "LB-08.05",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize unblocking, onboarding and resolution support",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted issue answers",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one accepted answer per question/version; current issue comments alone do not prove answer acceptance",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "issue_clarifications",
+      "name": "Issues clarified",
+      "primary_work_packages": [
+        "LB-08.04",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize issue edits and Project field curation",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-09"
+      ],
+      "definition": {
+        "unit": "accepted clarification groups",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "meaningful scope/reproduction/acceptance-criteria improvement; no award for keystrokes",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "history_partial",
+        "event_clock": "edited_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "duplicate_resolution",
+      "name": "Duplicates resolved",
+      "primary_work_packages": [
+        "LB-08.03",
+        "LB-08.01"
+      ],
+      "work_package_titles": [
+        "Recognize links and relationship maintenance",
+        "Recognize issue reporting and accepted outcomes"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "canonicalized duplicate issues",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one canonicalized issue; require preserved unique evidence; closing alone insufficient",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history_partial",
+        "event_clock": "resolved_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "items_triaged",
+      "name": "Items with triage activity",
+      "primary_work_packages": [
+        "LB-08.02",
+        "LB-08.04"
+      ],
+      "work_package_titles": [
+        "Recognize labels, milestones and ownership routing",
+        "Recognize issue edits and Project field curation"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-09"
+      ],
+      "definition": {
+        "unit": "distinct actor-item-day triage groups",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct actor/item/day qualifying change; group related actions; explicit policy version",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history_partial",
+        "event_clock": "event_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "labels_applied",
+      "name": "Labels applied",
+      "primary_work_packages": [
+        "LB-08.02"
+      ],
+      "work_package_titles": [
+        "Recognize labels, milestones and ownership routing"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "deduplicated label applications",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "unique actor/item/label addition; retain raw count but toggles do not earn repeat recognition",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "labels_corrected",
+      "name": "Label corrections",
+      "primary_work_packages": [
+        "LB-08.02",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize labels, milestones and ownership routing",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-09"
+      ],
+      "definition": {
+        "unit": "accepted label correction groups",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "count meaningful correction group; removing an erroneous label can be useful; no mechanical negative points",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "history_partial",
+        "event_clock": "event_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "assignments_coordinated",
+      "name": "Ownership coordination",
+      "primary_work_packages": [
+        "LB-08.02"
+      ],
+      "work_package_titles": [
+        "Recognize labels, milestones and ownership routing"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "deduplicated assignment transitions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "actor differs from assignee; group reassignment as one action; self-assignment not completed work",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history",
+        "event_clock": "event_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "milestones_curated",
+      "name": "Milestones curated",
+      "primary_work_packages": [
+        "LB-08.02"
+      ],
+      "work_package_titles": [
+        "Recognize labels, milestones and ownership routing"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "deduplicated milestone transitions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "group correction transitions; only for repos actually using milestones",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history",
+        "event_clock": "event_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "title_scope_edits",
+      "name": "Issue title and scope edits",
+      "primary_work_packages": [
+        "LB-08.04",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize issue edits and Project field curation",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-09"
+      ],
+      "definition": {
+        "unit": "accepted item-day clarification groups",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one meaningful item/day edit group; exclude initial creation representation and formatting churn",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "history_partial",
+        "event_clock": "edited_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "reference_links",
+      "name": "References linked",
+      "primary_work_packages": [
+        "LB-08.03"
+      ],
+      "work_package_titles": [
+        "Recognize links and relationship maintenance"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "distinct directed source-target references",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "unique directed source/target relationship; distinguish mention from dependency and accepted evidence",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history_partial",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "closing_links",
+      "name": "PR and issue delivery links",
+      "primary_work_packages": [
+        "LB-08.03"
+      ],
+      "work_package_titles": [
+        "Recognize links and relationship maintenance"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "distinct PR-issue closing links",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one canonical PR/issue pair; explicit closing relation differs from textual reference",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history_partial",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "parent_child_links",
+      "name": "Issue hierarchy curated",
+      "primary_work_packages": [
+        "LB-08.03"
+      ],
+      "work_package_titles": [
+        "Recognize links and relationship maintenance"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "distinct parent-child relation transitions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one ordered parent-child relation; dedupe mirrored timelines and webhook deliveries",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "blocker_links",
+      "name": "Dependencies clarified",
+      "primary_work_packages": [
+        "LB-08.03"
+      ],
+      "work_package_titles": [
+        "Recognize links and relationship maintenance"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "distinct directed blocker transitions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one directed blocking edge; dedupe both endpoints; information inputs are not blockers",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "related_links",
+      "name": "Related issues linked",
+      "primary_work_packages": [
+        "LB-08.03",
+        "LB-04.01"
+      ],
+      "work_package_titles": [
+        "Recognize links and relationship maintenance",
+        "Probe source and permission support"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "distinct unordered relation transitions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one unordered relation pair; cross-repo payload may hide counterpart; unknown pair stays unattributed",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "observed_partial",
+        "event_clock": "event_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "project_items_curated",
+      "name": "Project item curation",
+      "primary_work_packages": [
+        "LB-08.04",
+        "LB-06.02"
+      ],
+      "work_package_titles": [
+        "Recognize issue edits and Project field curation",
+        "Backfill Project and relationship history selectively"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "deduplicated item-project transitions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one item/project operation; creator only proves creation; automation separate",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history_partial",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "project_status_updates",
+      "name": "Project status updates",
+      "primary_work_packages": [
+        "LB-08.04",
+        "LB-06.02"
+      ],
+      "work_package_titles": [
+        "Recognize issue edits and Project field curation",
+        "Backfill Project and relationship history selectively"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-01"
+      ],
+      "definition": {
+        "unit": "deduplicated item-day status groups",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "qualifying state transitions grouped by actor/item/day; show current state separately",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history_partial",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "project_field_updates",
+      "name": "Project priority/readiness/workstream updates",
+      "primary_work_packages": [
+        "LB-08.04",
+        "LB-04.01"
+      ],
+      "work_package_titles": [
+        "Recognize issue edits and Project field curation",
+        "Probe source and permission support"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-01"
+      ],
+      "definition": {
+        "unit": "deduplicated observed item-day field groups",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "only observed before/after actor evidence; snapshots cannot backfill author or intermediate edits",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "observed",
+        "event_clock": "event_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "issue_field_updates",
+      "name": "Native issue field updates",
+      "primary_work_packages": [
+        "LB-08.04",
+        "LB-04.01"
+      ],
+      "work_package_titles": [
+        "Recognize issue edits and Project field curation",
+        "Probe source and permission support"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-01",
+        "COV-05"
+      ],
+      "definition": {
+        "unit": "deduplicated native issue-field transitions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "native issue fields are distinct from Project fields; capability-test per org",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history_partial",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "project_updates",
+      "name": "Project progress updates",
+      "primary_work_packages": [
+        "LB-08.04",
+        "LB-04.01"
+      ],
+      "work_package_titles": [
+        "Recognize issue edits and Project field curation",
+        "Probe source and permission support"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-05"
+      ],
+      "definition": {
+        "unit": "published Project status-update artifacts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct substantive published update; currently optional feature",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history_partial",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "routing_handoffs",
+      "name": "Workstream handoffs clarified",
+      "primary_work_packages": [
+        "LB-08.05",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize unblocking, onboarding and resolution support",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted owner handoff artifacts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one documented accepted handoff between owners; do not count notifications as collaboration",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "label_taxonomy",
+      "name": "Label taxonomy changes",
+      "primary_work_packages": [
+        "LB-08.02",
+        "LB-04.01"
+      ],
+      "work_package_titles": [
+        "Recognize labels, milestones and ownership routing",
+        "Probe source and permission support"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-12"
+      ],
+      "definition": {
+        "unit": "deduplicated actor-label-day definition-change groups",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one actor/label/day definition-change group; create, rename, description/color edit, archive/delete are facets; applying the label to items belongs to labels_applied; no repeat credit for oscillation",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "observed_or_attested",
+        "event_clock": "proven_event_at_or_accepted_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+        "facets": [
+          "definition creation",
+          "name/description/color edit",
+          "archive/unarchive",
+          "definition deletion"
+        ],
+        "permission_rule": "Use only proven approved read scopes and public evidence. Unsupported history/actions stay unavailable or use reviewed receipts; no implied Administration or Members expansion.",
+        "deduplication": "An event plus its confirming receipt is one underlying unit. Facets and linked item side effects do not multiply one definition/configuration/ordering change.",
+        "clock_selection": "Observed action lens uses proven source occurrence time. Receipt-based recognition uses accepted_at in a separately labeled lens unless original occurrence time is evidenced; never substitute receipt time into a raw historical action count.",
+        "source_acceptance_cases": [
+          "A label rename retains the same label identity and yields one definition-change group, not one new label plus changed applications on every issue.",
+          "Creating a label and applying it to an issue yield two distinct typed facts; they do not become two completed outcomes.",
+          "Description/color no-op edits, repeated reversals and bulk setup are suppressed/grouped by the published policy.",
+          "Canary proves label webhook action payload, sender, before/after semantics and occurrence timestamp. Metadata read is documented for subscription; verify hydration endpoint permission separately.",
+          "Missing event time, ghost sender, missing deleted definition or pre-install history remains partial; a reviewed receipt is clearly labeled."
+        ]
+      }
+    },
+    {
+      "metric_id": "milestone_definitions",
+      "name": "Milestone definition changes",
+      "primary_work_packages": [
+        "LB-08.02",
+        "LB-04.01"
+      ],
+      "work_package_titles": [
+        "Recognize labels, milestones and ownership routing",
+        "Probe source and permission support"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-13"
+      ],
+      "definition": {
+        "unit": "deduplicated actor-milestone-day definition-change groups",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one actor/milestone/day definition-change group; creation, title/description/due-date edits and open/close are facets; issue membership belongs to milestones_curated; closing a milestone alone is not delivery",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "observed_or_attested",
+        "event_clock": "proven_event_at_or_accepted_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+        "facets": [
+          "definition creation",
+          "title/description edit",
+          "due-date adjustment",
+          "open/close/reopen",
+          "definition deletion"
+        ],
+        "permission_rule": "Use only proven approved read scopes and public evidence. Unsupported history/actions stay unavailable or use reviewed receipts; no implied Administration or Members expansion.",
+        "deduplication": "An event plus its confirming receipt is one underlying unit. Facets and linked item side effects do not multiply one definition/configuration/ordering change.",
+        "clock_selection": "Observed action lens uses proven source occurrence time. Receipt-based recognition uses accepted_at in a separately labeled lens unless original occurrence time is evidenced; never substitute receipt time into a raw historical action count.",
+        "source_acceptance_cases": [
+          "Canary distinguishes milestone created/edited/closed/reopened events from issue milestoned/demilestoned events.",
+          "One due-date adjustment updates one milestone definition group rather than creating a contribution per attached issue.",
+          "Milestone creator is used for proven creation only, never assumed to be every editor.",
+          "Closing a milestone produces a state fact, not proof every scoped issue was delivered.",
+          "Verify documented Issues OR Pull requests read subscription permission and actual event timestamp coverage; unsupported actions use reviewed receipts."
+        ]
+      }
+    },
+    {
+      "metric_id": "project_configuration",
+      "name": "Project configuration stewardship",
+      "primary_work_packages": [
+        "LB-08.04",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize issue edits and Project field curation",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-14"
+      ],
+      "definition": {
+        "unit": "accepted Project configuration change sets",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one reviewed configuration change set with field/option/view/layout/filter/group/sort/workflow facets; current creator/updatedAt cannot prove later editor; do not count automated item effects as extra authored work",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+        "facets": [
+          "field definitions",
+          "field options",
+          "view definitions",
+          "view filter/group/sort/layout",
+          "workflow configuration"
+        ],
+        "permission_rule": "Use only proven approved read scopes and public evidence. Unsupported history/actions stay unavailable or use reviewed receipts; no implied Administration or Members expansion.",
+        "deduplication": "An event plus its confirming receipt is one underlying unit. Facets and linked item side effects do not multiply one definition/configuration/ordering change.",
+        "clock_selection": "Observed action lens uses proven source occurrence time. Receipt-based recognition uses accepted_at in a separately labeled lens unless original occurrence time is evidenced; never substitute receipt time into a raw historical action count.",
+        "source_acceptance_cases": [
+          "Accepted receipt links public before/after evidence and contributor role for adding/renaming a field or option without treating each item using it as another authored change.",
+          "View filter/group/sort/layout changes and workflow enabled/disabled/configuration changes each have an explicit receipt fixture.",
+          "ProjectV2 fields/views/workflows snapshot metadata does not prove who edited it; current creator and updatedAt are insufficient.",
+          "A changed Project workflow followed by 100 automated item updates yields one reviewed configuration change plus 100 clearly automated raw observations.",
+          "Canary tests whether any exact configuration subtype has actor-bearing events; only proven subtypes may graduate to automatic observation. Do not request new admin permissions merely to fill a scoreboard."
+        ]
+      }
+    },
+    {
+      "metric_id": "issue_transfers",
+      "name": "Issue transfers coordinated",
+      "primary_work_packages": [
+        "LB-08.03",
+        "LB-03.06"
+      ],
+      "work_package_titles": [
+        "Recognize links and relationship maintenance",
+        "Define credit conservation and object lineage"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-15"
+      ],
+      "definition": {
+        "unit": "canonical issue transfer transitions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one canonical issue transfer transition; no new issue/authorship/solution credit on transfer; reverse-transfer oscillations grouped; inaccessible endpoints stay excluded or partial",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history_partial",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+        "facets": [
+          "public source/destination routing",
+          "canonical identity/URL continuity",
+          "visibility-aware withdrawal"
+        ],
+        "permission_rule": "Use only proven approved read scopes and public evidence. Unsupported history/actions stay unavailable or use reviewed receipts; no implied Administration or Members expansion.",
+        "deduplication": "An event plus its confirming receipt is one underlying unit. Facets and linked item side effects do not multiply one definition/configuration/ordering change.",
+        "clock_selection": "Observed action lens uses proven source occurrence time. Receipt-based recognition uses accepted_at in a separately labeled lens unless original occurrence time is evidenced; never substitute receipt time into a raw historical action count.",
+        "source_acceptance_cases": [
+          "Public-to-public transfer uses TransferredEvent actor/createdAt/fromRepository and proven target identity; duplicate representations map to one transition.",
+          "Changed issue numbers/URLs retain canonical alias lineage; source and destination views do not duplicate issue-created counts.",
+          "Transfer to a private or unapproved repository immediately suppresses affected public content and cached projections.",
+          "Missing source/destination identity remains partial and is never guessed from current assignee or title similarity.",
+          "Back-and-forth transfer loops yield raw transitions but no accumulating qualified merit."
+        ]
+      }
+    },
+    {
+      "metric_id": "issue_ordering",
+      "name": "Issue ordering stewardship",
+      "primary_work_packages": [
+        "LB-08.03",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize links and relationship maintenance",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-16"
+      ],
+      "definition": {
+        "unit": "accepted issue ordering change sets",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one accepted ordering change set within parent issue or Project; dragging the same item repeatedly earns no extra credit; current ordered list or priority value proves state only; relation creation and priority edits remain separate facets",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+        "facets": [
+          "subissue order",
+          "Project item order",
+          "ordering rationale"
+        ],
+        "permission_rule": "Use only proven approved read scopes and public evidence. Unsupported history/actions stay unavailable or use reviewed receipts; no implied Administration or Members expansion.",
+        "deduplication": "An event plus its confirming receipt is one underlying unit. Facets and linked item side effects do not multiply one definition/configuration/ordering change.",
+        "clock_selection": "Observed action lens uses proven source occurrence time. Receipt-based recognition uses accepted_at in a separately labeled lens unless original occurrence time is evidenced; never substitute receipt time into a raw historical action count.",
+        "source_acceptance_cases": [
+          "A reviewed plan that reorders ten children is one change set, not ten accepted outcomes.",
+          "Current ordered list or snapshot difference alone produces no named actor credit or fabricated timestamp.",
+          "Dragging an item away and back, or applying an automatic view sort, does not create repeated manual ordering credit.",
+          "Reparenting, changing a priority field and reordering are distinct facts and may share one receipt without additive overall credit.",
+          "Canary checks reorder event/API history independently of subissue add/remove; if unsupported, label receipt-based coverage and do not add privileges."
+        ]
+      }
+    },
+    {
+      "metric_id": "public_moderation",
+      "name": "Public issue and discussion stewardship",
+      "primary_work_packages": [
+        "LB-08.04",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize issue edits and Project field curation",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-17"
+      ],
+      "definition": {
+        "unit": "public stewardship groups",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "unranked distinct actor/item/day public stewardship groups with pin/unpin/lock/unlock facets; do not rank sanctions, expose targets or infer justified moderation; private moderation and organization blocks excluded",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history_partial",
+        "event_clock": "proven_event_at_or_accepted_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+        "facets": [
+          "issue pin/unpin",
+          "comment pin/unpin",
+          "public thread lock/unlock",
+          "approved public discussion stewardship"
+        ],
+        "permission_rule": "Use only proven approved read scopes and public evidence. Unsupported history/actions stay unavailable or use reviewed receipts; no implied Administration or Members expansion.",
+        "deduplication": "An event plus its confirming receipt is one underlying unit. Facets and linked item side effects do not multiply one definition/configuration/ordering change.",
+        "clock_selection": "Observed action lens uses proven source occurrence time. Receipt-based recognition uses accepted_at in a separately labeled lens unless original occurrence time is evidenced; never substitute receipt time into a raw historical action count.",
+        "source_acceptance_cases": [
+          "PinnedEvent/UnpinnedEvent and LockedEvent/UnlockedEvent fixtures preserve actor/time and group repeated toggles.",
+          "Issue-comment pin has its own source object; current pinnedBy/pinnedAt may prove the extant pin but not all prior pin/unpin history.",
+          "No quality, justification, offender identity or sanction severity is inferred from lock or pin actions.",
+          "Private moderation, organization bans, private reports and restricted reasons stay excluded; no organization Administration permission is introduced.",
+          "Editorial recognition of moderation work requires a sanitized approved receipt; public raw counts remain descriptive only."
+        ]
+      }
+    },
+    {
+      "metric_id": "decision_records",
+      "name": "Decision records contributed",
+      "primary_work_packages": [
+        "LB-09.01"
+      ],
+      "work_package_titles": [
+        "Recognize research notes and reviewed decisions"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted record versions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct accepted record/version; draft and reviewed states separate; file count alone insufficient",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "history_partial",
+        "event_clock": "merged_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "catalog_proposals",
+      "name": "Catalog proposals reviewed",
+      "primary_work_packages": [
+        "LB-09.02"
+      ],
+      "work_package_titles": [
+        "Recognize catalogs, pricing and compatibility work"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted canonical-kind-ID-version records",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct canonical kind/id/version; facts about components; not user selection or production publication",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "history_partial",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "pricebook_proposals",
+      "name": "Dated pricebooks reviewed",
+      "primary_work_packages": [
+        "LB-09.02"
+      ],
+      "work_package_titles": [
+        "Recognize catalogs, pricing and compatibility work"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted dated pricebook versions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one reviewed pricebook/version/date scope; prices require units/conditions/provenance",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "history_partial",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "compatibility_proposals",
+      "name": "Compatibility rules proposed",
+      "primary_work_packages": [
+        "LB-09.02"
+      ],
+      "work_package_titles": [
+        "Recognize catalogs, pricing and compatibility work"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "centrally reviewed rule proposals",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "proposal and central approval separate; #40 review governs; never equate merge with universal compatibility",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "primary_sources",
+      "name": "Primary sources mapped to claims",
+      "primary_work_packages": [
+        "LB-09.03"
+      ],
+      "work_package_titles": [
+        "Recognize market research and source curation"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted canonical-source-claim mappings",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct canonical source/claim pair accepted; URL quantity not evidence quality",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "freshness_checks",
+      "name": "Evidence freshness checks",
+      "primary_work_packages": [
+        "LB-09.03"
+      ],
+      "work_package_titles": [
+        "Recognize market research and source curation"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-02"
+      ],
+      "definition": {
+        "unit": "reviewed claim-source rechecks per policy interval",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one claim/source recheck per policy interval; failed or unavailable checks are valid documented outcomes",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "checked_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "reproduced_measurements",
+      "name": "Measurements reproduced",
+      "primary_work_packages": [
+        "LB-09.05",
+        "LB-09.03"
+      ],
+      "work_package_titles": [
+        "Recognize tests, accessibility and performance findings",
+        "Recognize market research and source curation"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted real experiment-run identities",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct experiment/run identity; real measured values only; synthetic fixtures excluded",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "negative_findings",
+      "name": "Useful negative findings",
+      "primary_work_packages": [
+        "LB-09.01",
+        "LB-09.03"
+      ],
+      "work_package_titles": [
+        "Recognize research notes and reviewed decisions",
+        "Recognize market research and source curation"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted bounded negative findings",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "show documented limitations, disproven assumptions and kill criteria without rewarding failure count",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "rights_reviews",
+      "name": "Evidence and data rights reviewed",
+      "primary_work_packages": [
+        "LB-09.03"
+      ],
+      "work_package_titles": [
+        "Recognize market research and source curation"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted artifact-rights review questions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct artifact/license question; no raw restricted data published",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "assumptions_resolved",
+      "name": "Assumptions clarified",
+      "primary_work_packages": [
+        "LB-09.01"
+      ],
+      "work_package_titles": [
+        "Recognize research notes and reviewed decisions"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted assumption decision identities",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one decision identity; valid conclusion may remain unknown; do not force false certainty",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "market_research",
+      "name": "Market research deliverables",
+      "primary_work_packages": [
+        "LB-09.03"
+      ],
+      "work_package_titles": [
+        "Recognize market research and source curation"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted study or analysis artifacts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct study/analysis artifact; interview activity private unless sanitized aggregate approved",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "evidence_manifests",
+      "name": "Evidence artifacts documented",
+      "primary_work_packages": [
+        "LB-09.02"
+      ],
+      "work_package_titles": [
+        "Recognize catalogs, pricing and compatibility work"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted external artifact identities",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct artifact identity/hash; never count raw download bytes or restricted URLs",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "history_partial",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "documentation",
+      "name": "Documentation contributions",
+      "primary_work_packages": [
+        "LB-09.04"
+      ],
+      "work_package_titles": [
+        "Recognize documentation, localization and learning resources"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "merged PR-documentation-category participations",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one PR/category; docs and research distinguish by configured paths",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history_partial",
+        "event_clock": "merged_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "tests",
+      "name": "Testing contributions",
+      "primary_work_packages": [
+        "LB-09.05"
+      ],
+      "work_package_titles": [
+        "Recognize tests, accessibility and performance findings"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "merged PR-testing-category participations",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one PR/category; number of assertions/test files not quality score",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history_partial",
+        "event_clock": "merged_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "regressions_prevented",
+      "name": "Regression cases added",
+      "primary_work_packages": [
+        "LB-09.05"
+      ],
+      "work_package_titles": [
+        "Recognize tests, accessibility and performance findings"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted regression scenarios",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct failure scenario verified by meaningful test; no credit for tests mirroring implementation",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "accessibility",
+      "name": "Accessibility improvements",
+      "primary_work_packages": [
+        "LB-09.05"
+      ],
+      "work_package_titles": [
+        "Recognize tests, accessibility and performance findings"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted accessibility artifact versions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "separate audit, issue discovery and delivered fix; validated criteria identified",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "design",
+      "name": "Design contributions",
+      "primary_work_packages": [
+        "LB-09.06"
+      ],
+      "work_package_titles": [
+        "Recognize design and security contributions safely"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted design flow-component-version artifacts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct reviewed flow/component/version; external artifacts need public sanitized evidence and attribution",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "usability",
+      "name": "Usability findings",
+      "primary_work_packages": [
+        "LB-09.06"
+      ],
+      "work_package_titles": [
+        "Recognize design and security contributions safely"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted sanitized study findings",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "no participant identity or session recordings in public feed",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "localization",
+      "name": "Localization improvements",
+      "primary_work_packages": [
+        "LB-09.04"
+      ],
+      "work_package_titles": [
+        "Recognize documentation, localization and learning resources"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted PR-language-category participations",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one PR/language/category; string count contextual only",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "history_partial",
+        "event_clock": "merged_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "performance",
+      "name": "Performance work validated",
+      "primary_work_packages": [
+        "LB-09.05"
+      ],
+      "work_package_titles": [
+        "Recognize tests, accessibility and performance findings"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted scoped benchmark comparisons",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct scoped result; no universal percent-improvement ranking across workloads",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "security",
+      "name": "Public security contributions",
+      "primary_work_packages": [
+        "LB-09.06"
+      ],
+      "work_package_titles": [
+        "Recognize design and security contributions safely"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "public approved security contribution artifacts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "public post-disclosure evidence only; private reports absent by default, not zero",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "public_only",
+        "event_clock": "published_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "automation",
+      "name": "Automation and tooling improvements",
+      "primary_work_packages": [
+        "LB-07.05"
+      ],
+      "work_package_titles": [
+        "Recognize release and maintenance work"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "merged PR-tooling-category participations",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "human creating automation recognized once; automated repeats remain bot activity",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history_partial",
+        "event_clock": "merged_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "discussions_started",
+      "name": "Discussions started",
+      "primary_work_packages": [
+        "LB-10.01"
+      ],
+      "work_package_titles": [
+        "Enable discussion and support source adapters"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "discussion objects",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "future enabled feature; absence of Discussions in current repos marked not enabled",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "disabled_currently",
+        "event_clock": "created_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "discussion_answers",
+      "name": "Accepted discussion answers",
+      "primary_work_packages": [
+        "LB-10.01"
+      ],
+      "work_package_titles": [
+        "Enable discussion and support source adapters"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted answer artifacts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one accepted answer/question; changes and removal handled",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "disabled_currently",
+        "event_clock": "answer_chosen_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "helpful_feedback",
+      "name": "Helpful community feedback",
+      "primary_work_packages": [
+        "LB-10.01",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Enable discussion and support source adapters",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted feedback artifacts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "no reaction-based popularity scoring; appreciation may be shown unranked",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "mentorship",
+      "name": "Mentorship recognized",
+      "primary_work_packages": [
+        "LB-08.05",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize unblocking, onboarding and resolution support",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "consented mentorship receipts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one documented collaboration, private details optional; do not infer from comments",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "onboarding",
+      "name": "New contributors supported",
+      "primary_work_packages": [
+        "LB-08.05",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize unblocking, onboarding and resolution support",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted newcomer support receipts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "separate first contribution milestone and mentoring relationship; no activity-surveillance claim",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "governance",
+      "name": "Governance contributions",
+      "primary_work_packages": [
+        "LB-10.02",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Create evidence submission and consent flow",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-07"
+      ],
+      "definition": {
+        "unit": "accepted governance decision versions",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one decision/version with explicit evidence; includes reviewed public repository rules/settings/process changes where appropriate; permission administration alone not merit; no private membership or access details exposed",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "outreach",
+      "name": "Community education and outreach",
+      "primary_work_packages": [
+        "LB-09.04",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize documentation, localization and learning resources",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "approved public education or outreach artifacts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "opt-in public artifacts; no private messages, follower counts or scraped attendance",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "published_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "appreciation",
+      "name": "Peer appreciation",
+      "primary_work_packages": [
+        "LB-10.04"
+      ],
+      "work_package_titles": [
+        "Create editorial contributor spotlights"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "moderated evidence-backed nominations",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "unranked rotating recognition; dedupe collusion and avoid popularity score",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "spotlight",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "release_stewardship",
+      "name": "Releases coordinated",
+      "primary_work_packages": [
+        "LB-07.05",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize release and maintenance work",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "release stewardship participations",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "publisher not assumed sole author; prerelease/draft/published separate",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history_partial",
+        "event_clock": "published_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "deployment_work",
+      "name": "Deployment improvements",
+      "primary_work_packages": [
+        "LB-07.05",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize release and maintenance work",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-07"
+      ],
+      "definition": {
+        "unit": "accepted public deployment-work artifacts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "bot execution not human work; permission-gated, no private environment names in public",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "public_only",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "incidents",
+      "name": "Reliability work recognized",
+      "primary_work_packages": [
+        "LB-07.05",
+        "LB-10.04"
+      ],
+      "work_package_titles": [
+        "Recognize release and maintenance work",
+        "Create editorial contributor spotlights"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered_with_specific_clarifications",
+      "clarification_ids": [
+        "COV-07"
+      ],
+      "definition": {
+        "unit": "approved reliability contribution receipts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "no leaderboard by incident count or uptime owned personally; approved narrative recognition",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "spotlight",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "maintenance",
+      "name": "Maintenance contributions",
+      "primary_work_packages": [
+        "LB-07.05"
+      ],
+      "work_package_titles": [
+        "Recognize release and maintenance work"
+      ],
+      "release_eligibility": "automatic baseline",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "merged PR-maintenance-category participations",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "one accepted PR/category; dependency bot PR execution separate from human review",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "automatic baseline",
+        "source_coverage_class": "history_partial",
+        "event_clock": "merged_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "data_quality",
+      "name": "Catalog and data corrections",
+      "primary_work_packages": [
+        "LB-09.02",
+        "LB-10.03"
+      ],
+      "work_package_titles": [
+        "Recognize catalogs, pricing and compatibility work",
+        "Build independent evidence review and appeals"
+      ],
+      "release_eligibility": "evidence-reviewed",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "accepted data correction receipts",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "reward correcting stale/incorrect evidence without creating incentives to introduce errors",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "leaderboard",
+        "release_eligibility": "evidence-reviewed",
+        "source_coverage_class": "attested",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "Requires explicit accepted evidence",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "first_contribution",
+      "name": "First contribution milestones",
+      "primary_work_packages": [
+        "LB-10.05",
+        "LB-15.05"
+      ],
+      "work_package_titles": [
+        "Design achievements and participation milestones",
+        "Implement newcomer, collaborator and achievement sections"
+      ],
+      "release_eligibility": "conditional",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "first-known contribution milestones",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "within known coverage, not first-ever life contribution; mark history completeness",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "spotlight",
+        "release_eligibility": "conditional",
+        "source_coverage_class": "history_partial",
+        "event_clock": "occurred_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "repositories",
+      "name": "Repositories contributed to",
+      "primary_work_packages": [
+        "LB-03.04",
+        "LB-11.02"
+      ],
+      "work_package_titles": [
+        "Map repositories, Projects and workstreams over time",
+        "Implement date, repository and workstream filters"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "distinct repository IDs",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct repo IDs; exclude mirrored/imported duplication; aggregate is contextual",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history_partial",
+        "event_clock": "event_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "workstreams",
+      "name": "Workstreams supported",
+      "primary_work_packages": [
+        "LB-03.04",
+        "LB-11.02"
+      ],
+      "work_package_titles": [
+        "Map repositories, Projects and workstreams over time",
+        "Implement date, repository and workstream filters"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "distinct known workstream IDs",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct verified workstream IDs; unknown unmapped bucket retained",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history_partial",
+        "event_clock": "event_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "collaborations",
+      "name": "Contributors collaborated with",
+      "primary_work_packages": [
+        "LB-15.05",
+        "LB-03.03"
+      ],
+      "work_package_titles": [
+        "Implement newcomer, collaborator and achievement sections",
+        "Represent roles, coauthors and automation honestly"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "distinct evidenced contributor pairs",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "distinct evidenced peer, no inferred social graph from mentions or private membership",
+        "denominator": {
+          "kind": "not_applicable",
+          "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history_partial",
+        "event_clock": "accepted_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    },
+    {
+      "metric_id": "active_periods",
+      "name": "Contribution periods",
+      "primary_work_packages": [
+        "LB-11.04",
+        "LB-15.05"
+      ],
+      "work_package_titles": [
+        "Implement newcomer and sustained-participation views",
+        "Implement newcomer, collaborator and achievement sections"
+      ],
+      "release_eligibility": "descriptive-only",
+      "coverage_assessment": "covered",
+      "clarification_ids": [],
+      "definition": {
+        "unit": "calendar weeks or months with eligible activity",
+        "aggregation": "count_distinct_eligible_units",
+        "numerator": "weeks/months contextual; never streak/attendance requirement; no hours-worked estimate",
+        "denominator": {
+          "kind": "optional_context",
+          "definition": "If displaying a share, denominator is number of fully covered calendar weeks/months in selected interval, never hours worked. Raw active-period count needs no denominator."
+        },
+        "denominator_filter_rule": "Apply identical source/time/eligibility scope to all ratio terms.",
+        "display_policy": "context",
+        "release_eligibility": "descriptive-only",
+        "source_coverage_class": "history_partial",
+        "event_clock": "event_at",
+        "subjective_qualification": "No subjective quality inference from measured activity",
+        "launch_gate": "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled."
+      }
+    }
+  ],
+  "clarifications": [
+    {
+      "id": "COV-01",
+      "severity": "wording",
+      "work_packages": [
+        "LB-08.04"
+      ],
+      "metric_ids": [
+        "project_field_updates",
+        "project_status_updates",
+        "issue_field_updates"
+      ],
+      "finding": "Verified sender identity cannot establish manual execution.",
+      "requested_change": "Replace manual verified sender evidence with observed sender attribution and independently declared execution mode; include an agent acting under a User account fixture."
+    },
+    {
+      "id": "COV-02",
+      "severity": "metric-specific acceptance",
+      "work_packages": [
+        "LB-09.03"
+      ],
+      "metric_ids": [
+        "freshness_checks"
+      ],
+      "finding": "An unavailable source cannot verify a claim, but a documented failed recheck can be a reviewed contribution.",
+      "requested_change": "Explicitly permit evidence-reviewed freshness effort whose outcome is unavailable/changed/contradicted, while withholding verified-source or accepted-fact credit."
+    },
+    {
+      "id": "COV-03",
+      "severity": "contract",
+      "work_packages": [
+        "LB-11.01"
+      ],
+      "metric_ids": [
+        "pr_lines_added",
+        "pr_lines_removed",
+        "pr_lines_changed",
+        "net_lines",
+        "pr_accepted_rate",
+        "review_wait"
+      ],
+      "finding": "Evidence row count does not equal all aggregate values. Sum/difference/ratio/distribution metrics need a derivation, not a count of rows.",
+      "requested_change": "Each displayed value must reconcile through its declared aggregation and unit to eligible evidence; count metrics use cardinality, LOC uses sums, ratios show numerator/denominator, durations show n and distribution."
+    },
+    {
+      "id": "COV-04",
+      "severity": "metric-specific acceptance",
+      "work_packages": [
+        "LB-07.01",
+        "LB-07.04",
+        "LB-11.04"
+      ],
+      "metric_ids": [
+        "pr_accepted_rate",
+        "review_wait"
+      ],
+      "finding": "Generic ratio support lacks exact cohort/censoring acceptance cases.",
+      "requested_change": "Add decided-in-window PR ratio with merged plus closed-unmerged denominator; separate pending cases. Add ready-to-first-submitted-review durations, n, missing readiness evidence and unresolved censored PRs. These are descriptive diagnostics, not individual quality/speed rankings."
+    },
+    {
+      "id": "COV-05",
+      "severity": "source capability",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.04"
+      ],
+      "metric_ids": [
+        "issue_field_updates",
+        "project_updates"
+      ],
+      "finding": "Native issue fields and Project status-update posts are distinct from Project item custom fields and item status transitions; existing prose is broad.",
+      "requested_change": "Name and test all four separately: native IssueFieldChangedEvent, projects_v2_item field edits, ProjectV2ItemStatusChangedEvent and projects_v2_status_update publications. Disable unsupported subtypes."
+    },
+    {
+      "id": "COV-06",
+      "severity": "deferred scope",
+      "work_packages": [
+        "LB-20.06",
+        "LB-07.02"
+      ],
+      "metric_ids": [
+        "retained_lines"
+      ],
+      "finding": "Retained-line blame has no dedicated bounded implementation work package and should not be implied by generic LOC scope.",
+      "requested_change": "Keep explicitly deferred advanced. Before enabling, create a separately owned package for bounded read-only blame, snapshot ancestry, moved-code/formatting/import limitations, privacy and UI caveats."
+    },
+    {
+      "id": "COV-07",
+      "severity": "metric-specific acceptance",
+      "work_packages": [
+        "LB-07.05",
+        "LB-10.02",
+        "LB-10.03",
+        "LB-10.04"
+      ],
+      "metric_ids": [
+        "governance",
+        "deployment_work",
+        "incidents"
+      ],
+      "finding": "General evidence review supports these, but domain categories and acceptance examples are only implicit.",
+      "requested_change": "Add one accepted/rejected receipt example each for governance decisions, sanitized deployment work and reliability/postmortem contribution. No automatic incident-count merit or human credit from CI execution."
+    },
+    {
+      "id": "COV-08",
+      "severity": "attribution source nuance",
+      "work_packages": [
+        "LB-04.01",
+        "LB-07.04"
+      ],
+      "metric_ids": [
+        "review_threads_resolved"
+      ],
+      "finding": "Live PullRequestReviewThread schema has resolvedBy and isResolved but no resolvedAt. Current resolver identity can be known while historical event date/transition history is unknown.",
+      "requested_change": "Treat current resolvedBy as current state; period metrics require a proven timestamped observed transition or receipt. Do not infer resolvedAt from latest PR updatedAt or assume resolver made the underlying code fix."
+    },
+    {
+      "id": "COV-09",
+      "severity": "definition detail",
+      "work_packages": [
+        "LB-03.05",
+        "LB-08.02",
+        "LB-08.04",
+        "LB-11.05"
+      ],
+      "metric_ids": [
+        "items_triaged",
+        "labels_corrected",
+        "title_scope_edits",
+        "issue_clarifications"
+      ],
+      "finding": "Meaningful, substantive and corrected are review judgments unless an exact mechanical rule is published.",
+      "requested_change": "Automatic baseline counts observed distinct triage groups with raw labels. Qualified clarification/correction boards require evidence acceptance. Approve grouping interval and repeated-state suppression through policy, not subjective classifier guesses."
+    },
+    {
+      "id": "COV-10",
+      "severity": "data lineage",
+      "work_packages": [
+        "LB-07.01",
+        "LB-07.02",
+        "LB-07.03",
+        "LB-19.01"
+      ],
+      "metric_ids": [
+        "pr_merged",
+        "commits_integrated",
+        "pr_lines_added",
+        "pr_lines_removed",
+        "pr_lines_changed"
+      ],
+      "finding": "Audit demonstrates stacked PR double counting: 107 commit entries, 92 unique SHAs and 11 intermediate-branch merges.",
+      "requested_change": "Count PR merge events with target-branch facet, but delivered LOC only once on verified default-branch integration. Include exact stacked research sequence as sanitized acceptance fixture and preserve original contributor roles."
+    },
+    {
+      "id": "COV-11",
+      "severity": "identity",
+      "work_packages": [
+        "LB-03.03",
+        "LB-07.03"
+      ],
+      "metric_ids": [
+        "pr_coauthored",
+        "commits_integrated",
+        "commit_attributed_lines"
+      ],
+      "finding": "AI model trailers are not human identities, while a user account can drive an agent.",
+      "requested_change": "Preserve declared AI model/version as assistance metadata; do not create a contributor identity from Claude Opus 5.5 trailer or publish its email. Do not detect AI use by style."
+    },
+    {
+      "id": "COV-12",
+      "severity": "source capability and coverage expansion",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.02",
+        "LB-19.02"
+      ],
+      "metric_ids": [
+        "label_taxonomy"
+      ],
+      "finding": "Applying labels does not cover creating or maintaining the label definitions themselves.",
+      "requested_change": "Add explicit label taxonomy adapter and evidence-receipt fallback with creation, rename, description/color changes, archive/unarchive and deletion facets only as proven by each source action. Current definitions do not reconstruct historical editors.",
+      "source_acceptance_cases": [
+        "A label rename retains the same label identity and yields one definition-change group, not one new label plus changed applications on every issue.",
+        "Creating a label and applying it to an issue yield two distinct typed facts; they do not become two completed outcomes.",
+        "Description/color no-op edits, repeated reversals and bulk setup are suppressed/grouped by the published policy.",
+        "Canary proves label webhook action payload, sender, before/after semantics and occurrence timestamp. Metadata read is documented for subscription; verify hydration endpoint permission separately.",
+        "Missing event time, ghost sender, missing deleted definition or pre-install history remains partial; a reviewed receipt is clearly labeled."
+      ]
+    },
+    {
+      "id": "COV-13",
+      "severity": "source capability and coverage expansion",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.02",
+        "LB-19.02"
+      ],
+      "metric_ids": [
+        "milestone_definitions"
+      ],
+      "finding": "Milestoning an issue does not cover milestone creation and definition stewardship.",
+      "requested_change": "Add milestone-definition adapter for creation/title/description/due-date/state changes and deletion where source supports them, distinct from item membership.",
+      "source_acceptance_cases": [
+        "Canary distinguishes milestone created/edited/closed/reopened events from issue milestoned/demilestoned events.",
+        "One due-date adjustment updates one milestone definition group rather than creating a contribution per attached issue.",
+        "Milestone creator is used for proven creation only, never assumed to be every editor.",
+        "Closing a milestone produces a state fact, not proof every scoped issue was delivered.",
+        "Verify documented Issues OR Pull requests read subscription permission and actual event timestamp coverage; unsupported actions use reviewed receipts."
+      ]
+    },
+    {
+      "id": "COV-14",
+      "severity": "evidence workflow and coverage expansion",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.04",
+        "LB-10.03"
+      ],
+      "metric_ids": [
+        "project_configuration"
+      ],
+      "finding": "Project item values do not cover Project field definitions, options, views, layouts and workflow configuration.",
+      "requested_change": "Add one reviewed Project configuration change-set category with typed facets, rather than manufacturing a score for every option or resulting automated item update.",
+      "source_acceptance_cases": [
+        "Accepted receipt links public before/after evidence and contributor role for adding/renaming a field or option without treating each item using it as another authored change.",
+        "View filter/group/sort/layout changes and workflow enabled/disabled/configuration changes each have an explicit receipt fixture.",
+        "ProjectV2 fields/views/workflows snapshot metadata does not prove who edited it; current creator and updatedAt are insufficient.",
+        "A changed Project workflow followed by 100 automated item updates yields one reviewed configuration change plus 100 clearly automated raw observations.",
+        "Canary tests whether any exact configuration subtype has actor-bearing events; only proven subtypes may graduate to automatic observation. Do not request new admin permissions merely to fill a scoreboard."
+      ]
+    },
+    {
+      "id": "COV-15",
+      "severity": "lineage and coverage expansion",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.03",
+        "LB-03.06",
+        "LB-19.01"
+      ],
+      "metric_ids": [
+        "issue_transfers"
+      ],
+      "finding": "Reference links and closures do not explicitly cover moving an issue between repositories.",
+      "requested_change": "Add transfer stewardship with verified source/destination lineage and attribution, preserving original authorship and evidence while counting no new issue or solution.",
+      "source_acceptance_cases": [
+        "Public-to-public transfer uses TransferredEvent actor/createdAt/fromRepository and proven target identity; duplicate representations map to one transition.",
+        "Changed issue numbers/URLs retain canonical alias lineage; source and destination views do not duplicate issue-created counts.",
+        "Transfer to a private or unapproved repository immediately suppresses affected public content and cached projections.",
+        "Missing source/destination identity remains partial and is never guessed from current assignee or title similarity.",
+        "Back-and-forth transfer loops yield raw transitions but no accumulating qualified merit."
+      ]
+    },
+    {
+      "id": "COV-16",
+      "severity": "evidence workflow and coverage expansion",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.03",
+        "LB-10.03"
+      ],
+      "metric_ids": [
+        "issue_ordering"
+      ],
+      "finding": "Parent/child edges and priority field changes do not cover curated subissue or Project item order. No actor-bearing reorder history was proven.",
+      "requested_change": "Add reviewed ordering-change receipts with parent/Project scope and before/after evidence; keep automatic reorder attribution disabled until the exact subtype source is proven.",
+      "source_acceptance_cases": [
+        "A reviewed plan that reorders ten children is one change set, not ten accepted outcomes.",
+        "Current ordered list or snapshot difference alone produces no named actor credit or fabricated timestamp.",
+        "Dragging an item away and back, or applying an automatic view sort, does not create repeated manual ordering credit.",
+        "Reparenting, changing a priority field and reordering are distinct facts and may share one receipt without additive overall credit.",
+        "Canary checks reorder event/API history independently of subissue add/remove; if unsupported, label receipt-based coverage and do not add privileges."
+      ]
+    },
+    {
+      "id": "COV-17",
+      "severity": "source and privacy coverage expansion",
+      "work_packages": [
+        "LB-04.01",
+        "LB-08.04",
+        "LB-10.03",
+        "LB-18.03"
+      ],
+      "metric_ids": [
+        "public_moderation"
+      ],
+      "finding": "Issue labels/edits do not expressly represent public pinning, locking and discussion stewardship. Such action counts should not rank enforcement.",
+      "requested_change": "Provide an unranked public stewardship facet with actor-backed pin/unpin/lock/unlock observations and approved receipts for unsupported public actions.",
+      "source_acceptance_cases": [
+        "PinnedEvent/UnpinnedEvent and LockedEvent/UnlockedEvent fixtures preserve actor/time and group repeated toggles.",
+        "Issue-comment pin has its own source object; current pinnedBy/pinnedAt may prove the extant pin but not all prior pin/unpin history.",
+        "No quality, justification, offender identity or sanction severity is inferred from lock or pin actions.",
+        "Private moderation, organization bans, private reports and restricted reasons stay excluded; no organization Administration permission is introduced.",
+        "Editorial recognition of moderation work requires a sanitized approved receipt; public raw counts remain descriptive only."
+      ]
+    }
+  ],
+  "overall_findings": [
+    "All 98 IDs map to existing reviewable work packages. Retained-line analysis is deliberately deferred, not covertly included in baseline LOC.",
+    "Most specialty metrics are covered by the common evidence receipt/review workflow plus a domain package. They must not appear automatically qualified merely because a PR merged.",
+    "Unit/aggregation/numerator/denominator fields have been added to each catalog metric so count, sum, ratio and duration semantics are machine-readable.",
+    "No numerical minimum-sample threshold was invented; descriptive diagnostics always show n and do not rank personal quality.",
+    "Projects 1-5 and future explicitly approved IDs replace stale 1/2/3 references; historic association remains evidence-constrained.",
+    "Live review-thread schema exposes resolvedBy but not resolvedAt; current-state identity and period attribution are different capabilities.",
+    "Six additional forms explicitly cover label/milestone definitions, Project configuration, issue transfers/order and public moderation; repository configuration stays an evidence-backed facet of existing governance rather than a duplicate metric."
+  ],
+  "sources": {
+    "official_and_live": "metric-api-evidence.json",
+    "organization_audit": "source-audit.json",
+    "audit_explanation": "../docs/SOURCE_AUDIT.md",
+    "review_thread_schema_probe": "The planning GraphQL schema probe observed resolvedBy/isResolved and no resolvedAt on PullRequestReviewThread. See the sanitized capability findings in metric-api-evidence.json; re-probe at implementation time."
+  }
+}

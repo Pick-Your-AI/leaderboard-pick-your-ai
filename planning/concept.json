@@ -1,0 +1,196 @@
+{
+  "title": "Pick Your AI contributor leaderboard and contribution showcase",
+  "proposed_product_name": "PickYour.AI Credits",
+  "tagline": "Contributions, with evidence.",
+  "prepared_at": "2026-10-17T02:36:01.054963+00:00",
+  "state": "Delivery baseline for the dedicated repository and organization Project; app implementation and live service remain planned.",
+  "audit": {
+    "snapshot": {
+      "started_at": "2026-10-17T02:24:58.286322+00:00",
+      "finished_at": "2026-10-17T02:26:10.902486+00:00",
+      "errors": [],
+      "repositories": [
+        "pick-your-ai-research",
+        ".github",
+        "pickyour.ai"
+      ],
+      "project_count": 5,
+      "issue_pr_count": 391,
+      "scope": "Public repository and Project inventory with source history sampling; raw data remains outside this repository."
+    },
+    "manifest": "source-audit.json",
+    "limitations": [
+      "Historical public inventory predates publication of this repository and Project.",
+      "Refresh visible organization inventory before installing the collector.",
+      "Raw exports and full consultation sessions are not republished."
+    ]
+  },
+  "product_positioning": {
+    "intent": "Make each contributor's actual work visible in a public near-live portfolio with many independent ways to be recognized.",
+    "audiences": [
+      "Visitors discovering people and current work",
+      "Contributors showing evidence across roles",
+      "Newcomers finding ways to help",
+      "Maintainers recognizing stewardship and checking accuracy",
+      "Community displays and livestream viewers"
+    ],
+    "recognition_layers": [
+      "Observed activity with raw counts",
+      "Qualified/accepted outcomes under published rules",
+      "Reviewed optional recognition receipts",
+      "Editorial spotlights labeled as selection"
+    ],
+    "primary_categories": [
+      "Research",
+      "Design",
+      "Issues",
+      "Triage",
+      "Planning and structure",
+      "Code",
+      "Review",
+      "Testing and quality",
+      "Documentation",
+      "Maintenance and security",
+      "Community"
+    ],
+    "ranking": "Independent boards with explicit units, period and source coverage; shared dense ranks; no universal score or inferred employee productivity.",
+    "scope_lenses": [
+      "Entire organization",
+      "Repository",
+      "Project",
+      "T0-T6 or mapped program workstream",
+      "Contribution category",
+      "Role",
+      "User accounts/automation/all",
+      "Date window",
+      "First observed qualifying contribution with history caveat"
+    ],
+    "recognition_safety": "Quantity is activity; labels surviving and issues closing do not establish correctness or acceptance. Bots, coauthors, reviewers and authors retain distinct provenance. No inferred AI/manual authorship."
+  },
+  "organization_integration": {
+    "new_repo": "Pick-Your-AI/pick-your-ai-leaderboard",
+    "new_project": "Contributor Leaderboard Delivery; see docs/PUBLICATION.json",
+    "public_entry": "Proposed contributors.pickyour.ai plus links from organization profile and website",
+    "research_boundary": "Research repository supplies public evidence and ownership; its frozen builder contracts remain unchanged. Leaderboard contracts are a separate bounded schema.",
+    "website_boundary": "Current React/Vite website is static on cPanel; retain it as an independently deployed frontend. The proposed leaderboard server requires separately approved infrastructure.",
+    "mobile_boundary": "Android/Apple Projects are consumers and contribution scopes. Their 258 Backlog planning items are not shipped applications. No duplicate mobile backend is introduced.",
+    "unboarded_work": "Include eligible repository activity even without Project membership; .github#2 and website#31/#32/#33 demonstrate why boards alone are incomplete.",
+    "existing_authority": "Live GitHub Assignees and native relationships remain authoritative. Do not transfer ownership or reparent existing issues to the new program."
+  },
+  "architecture": {
+    "recommendation": "TypeScript modular application with React/Vite static frontend, API/webhook service, background workers and PostgreSQL-backed durable inbox/outbox; scale components independently only when measured load warrants it.",
+    "modules": {
+      "apps/web": "Public boards, directory, profiles, evidence and live wall; authenticated console lazily separated",
+      "apps/service": "Read APIs, SSE snapshot notices, webhook receiver and protected mutations",
+      "apps/worker": "Backfill, enrichment, classification, reconciliation and aggregate projection",
+      "packages/contracts": "Versioned leaderboard schemas and client types",
+      "packages/github": "Permission-aware source adapters and pagination",
+      "packages/metrics": "Pure definitions, counting, dedupe and policy evaluation",
+      "packages/ui": "Accessible brand components",
+      "infra": "Host-neutral configuration, migrations and runbooks",
+      "tests/fixtures": "Synthetic and sanitized edge-case data; no real emails or secrets"
+    },
+    "flow": [
+      "GitHub signed delivery -> durable inbox -> acknowledgment",
+      "Worker hydration -> canonical source observations -> identity/context/lineage",
+      "Versioned eligibility and evidence receipts -> deterministic metric projections",
+      "Atomic public-safe snapshot -> API/cache -> SSE invalidation or ETag polling",
+      "Overlapping reconciliation -> discrepancy records -> corrected snapshot"
+    ],
+    "data_model_reference": "metrics-and-ingestion.json#architecture",
+    "no_initial_redis_requirement": "Use database leases/outbox first; dedicated broker/cache is an ADR if justified.",
+    "live_semantics": "Display last published and collected-through times, source health and coverage. Near-live starts from received/observable source facts; public Events feed is not the live source of truth.",
+    "proposed_targets": {
+      "webhook_ack_p95": "<2 seconds after durable write",
+      "received_to_publication_p95": "<60 seconds under agreed test load",
+      "reconciliation": "5-15 minute recent-window scans and daily rotating completeness audits, budget-adaptive",
+      "availability_rto_rpo": "Owner/budget decision before launch; no unmeasured promise"
+    },
+    "browser_refresh": "SSE revision notices with resumable cursor and conditional polling fallback; preserve reading position and only apply reorder on user action unless explicitly enabled.",
+    "source_limits_reference": "metric-api-evidence.json and metrics-and-ingestion.json#sources"
+  },
+  "ui": {
+    "direction": "Editorial contribution ledger: calm dense data, clear typography, teal/slate/amber brand, generous navigation and evidence-first rows. Optional ASCII accent must not obscure data or imply unsupported 3D implementation.",
+    "routes": [
+      "/ overview",
+      "/leaderboards category/metric browser",
+      "/leaderboards/:metric ranking and methodology",
+      "/contributors searchable all-contributor directory",
+      "/contributors/:login portfolio",
+      "/activity public feed",
+      "/contributions/:id permanent evidence detail",
+      "/projects/:id scope view",
+      "/methodology definitions and governance",
+      "/coverage source health",
+      "/live fullscreen wall",
+      "/account optional profile preferences",
+      "/admin protected operations/review"
+    ],
+    "essential_interactions": [
+      "URL-persisted filters and explicit time bounds",
+      "Evidence drawer with full-page equivalent",
+      "Accepted and pending values visually and arithmetically separate",
+      "Shared-rank ties and coverage-aware rank movement",
+      "Directory includes attributable observed work, not only high-ranking accepted contributors",
+      "Live updates held while reading; visible apply/pause control",
+      "Accessible tables, sortable headers and mobile card parity",
+      "Functional correction/opt-out destination with receipts"
+    ],
+    "states": [
+      "Loading",
+      "Empty complete scope",
+      "No filter matches",
+      "Partial history",
+      "Unsupported capability",
+      "Pending evidence",
+      "Stale data",
+      "Disconnected collector",
+      "Rebuilding snapshot",
+      "Hidden/deleted contributor",
+      "Source no longer public",
+      "Corrected result"
+    ],
+    "accessibility": "WCAG 2.2 AA target; keyboard, screen reader, contrast, zoom/reflow, reduced motion and live announcement testing; source/quality status always in words, not color alone.",
+    "consultation_reference": "ui/ui-concept.json#consultation",
+    "ui_acceptance_reference": "ui/ui-concept.json and ui/ui-backlog-coverage.json; master uses dense ties and last-30-day default; reviewed source consultation is advice, and corrected master policies take precedence"
+  },
+  "fairness_and_proof": {
+    "identity": "Stable GitHub IDs, explicit roles; user-account event is not proof of manual work; model trailers are nonhuman assistance metadata.",
+    "loc": "Separate additions, deletions, churn and net change. Show raw PR-associated volume and eligible code separately; exclude generated/vendor/imports and identify incomplete diffs. Stack/default integration dedupe is required.",
+    "triage": "Distinct curated objects and observed actions are both visible; deterministic grouping prevents toggle inflation. Qualitative correctness needs reviewed evidence.",
+    "research": "Accepted research, reproducible measurements, public source evidence and production deployment are different stages. Negative findings and documented unavailable-source checks can be valuable.",
+    "time": "UTC half-open windows; event/acceptance dates distinct from ingest dates; unknown dates remain unknown; late backfills labeled.",
+    "privacy": "Public allowlist, minimized records, no email publication or private security content; verified opt-out/correction across all projections and caches.",
+    "manual_evidence": "Public receipt, contributor consent as appropriate, independent review, role attribution and reversible decisions; no automatic qualitative value from comments, stars or reaction counts.",
+    "rank_comparison": "Comparable coverage and policy versions required; descriptive ratios have sample/denominator/censoring labels; no bad-contributor list or speed obligation."
+  },
+  "backlog": {
+    "programs": 1,
+    "epics": 20,
+    "work_packages": 112,
+    "checklist_tasks": 474,
+    "proposed_issues": 133,
+    "blocked_by_edges": 227
+  },
+  "metric_catalog": {
+    "path": "metrics-and-ingestion.json",
+    "total": 98,
+    "families": {
+      "delivery": 10,
+      "lines": 7,
+      "review": 9,
+      "issues": 9,
+      "triage": 23,
+      "research": 12,
+      "craft": 10,
+      "community": 8,
+      "operations": 5,
+      "breadth": 5
+    },
+    "traceability": "metric-backlog-coverage.json"
+  },
+  "decision_register": "decision-register.json",
+  "release_manifest": "release-manifest.json",
+  "review_resolution": "plan-review-resolution.json",
+  "validation": "../scripts/validate_plan.py"
+}

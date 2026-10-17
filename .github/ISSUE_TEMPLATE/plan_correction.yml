@@ -1,0 +1,24 @@
+name: Plan or metric correction
+description: Report a source, definition, mapping or documentation discrepancy
+title: "Correction: "
+labels: ["question"]
+body:
+  - type: textarea
+    id: discrepancy
+    attributes:
+      label: Observed discrepancy
+      description: Link the affected definition, package or public source.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Public evidence and proposed correction
+      description: Keep private or personal evidence out of this form; use the security reporting guidance when appropriate.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Affected mappings and decisions
+      description: Identify consequences for existing tasks, release gates or metric policy.

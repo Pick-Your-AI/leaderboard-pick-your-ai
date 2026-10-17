@@ -1,0 +1,1080 @@
+{
+  "status": "UI design baseline; app implementation and runtime validation remain future gates.",
+  "consultation": {
+    "requested_model": "claude-opus-5-5",
+    "observed_model_usage_key": "claude-opus-5-5",
+    "observed_canonical_model": "claude-opus-5-5",
+    "provider": "firstParty",
+    "successful": true,
+    "completed_at": "2026-10-17T02:30:57.056827+00:00",
+    "isolation": "No tools, no MCP servers, safe mode, no Chrome, no skills, plan permission mode and no persisted Claude session. Only the supplied public/source-reviewed context was sent."
+  },
+  "recommendation": {
+    "proposed_product_name": "PickYour.AI Credits",
+    "name_status": "Dedicated repository Pick-Your-AI/pick-your-ai-leaderboard is selected; PickYour.AI Credits remains a proposed product name requiring the design decision.",
+    "concept": "Credits, with receipts",
+    "tagline": "Contributions, with evidence.",
+    "visual_direction": "An editorial contribution ledger, with equal-weight departments, precise tabular numbers, hairline rules and clear source proof.",
+    "core_decisions": [
+      "Recognize many distinct kinds of work through parallel boards and an inclusive contributor directory.",
+      "Do not create an overall contributor score, streak pressure, an inactivity list or an employee performance comparison.",
+      "Every displayed metric must have a defined unit, eligible population, date basis, coverage and public evidence path.",
+      "People can inspect submitted and observed work even when no accepted outcome has occurred.",
+      "Code volume is a visible optional dimension with context; it does not dominate the homepage.",
+      "Browsing is anonymous; authentication is optional and reserved for verified preferences and correction administration."
+    ]
+  },
+  "reviewed_amendments_to_opus": [
+    {
+      "id": "A01",
+      "finding": "Opus treats labels present for 14 days as Accepted, and proposes a 30-day duplicate window.",
+      "decision": "Persistence is an observable maturity signal, not proof of correctness or acceptance. Use Observed or Matured labels unless a separate reviewed outcome exists. Any window is versioned policy, not a discovered requirement; never delay all credit for a newcomer solely because of a window."
+    },
+    {
+      "id": "A02",
+      "finding": "Opus describes issues closed as completed as Accepted reports.",
+      "decision": "Show precise observable states such as Issues closed as completed. A closure reason alone does not certify a useful report, research completion, a verified fix or deployment. Outcome-specific boards require their own evidence."
+    },
+    {
+      "id": "A03",
+      "finding": "One example ranks 31 labels while 28 are accepted and 3 are provisional under accepted scope.",
+      "decision": "The rank value must use only the selected eligible state. Show accepted 28 and provisional 3 separately. Never silently add incompatible states or units."
+    },
+    {
+      "id": "A04",
+      "finding": "Opus directory eligibility requires an accepted receipt.",
+      "decision": "Include everyone with a verifiable eligible public contribution, including observed submissions, issue diagnosis and review. State filters may narrow the directory, but initial acceptance delays must not erase contributors. Assignment or membership alone is not a contribution."
+    },
+    {
+      "id": "A05",
+      "finding": "Opus uses one global accepted-date default.",
+      "decision": "The global scope is a requested view, while each metric declares supported state and date bases. Do not invent an acceptance timestamp for an observed label, comment or structural link. Show incompatible choices explicitly and select the metric's declared default."
+    },
+    {
+      "id": "A06",
+      "finding": "Opus suggests coauthor email mapping as verification.",
+      "decision": "A trailer or matching email alone is insufficient. Use documented reliable account attribution and verified person-account coauthor evidence. The observed Claude Opus 5.5 trailer is AI-assistance metadata and must not create a human leaderboard identity. Never publish linking emails."
+    },
+    {
+      "id": "A07",
+      "finding": "Opus proposes bulk revert-and-exclude for triage spam.",
+      "decision": "Administrative actions affect only this leaderboard's inclusion records and reversible credit decisions. Never silently edit or revert upstream GitHub labels, issue state, relationships or Project fields."
+    },
+    {
+      "id": "A08",
+      "finding": "Opus proposes showing a named contributor's opt-out in public microcopy.",
+      "decision": "Avoid exposing privacy choices unnecessarily. Honor suppression across profile, board, wall, export, search and share assets; publish only a minimal generic redacted correction record when appropriate. Define aggregate behavior before rollout."
+    },
+    {
+      "id": "A09",
+      "finding": "Opus proposes 100-row pagination plus Show all.",
+      "decision": "Use accessible bounded pagination and server/snapshot-filtered export. Offer Show all only below a documented safe result cap; do not create an unbounded DOM or download."
+    },
+    {
+      "id": "A10",
+      "finding": "Opus suggests a live cross-repository token drift CI dependency.",
+      "decision": "Keep a versioned local token contract with the source SHA and an explicit update workflow. Detect divergence without making every remote website styling change an uncontrolled build dependency."
+    },
+    {
+      "id": "A11",
+      "finding": "Opus reserves amber for changes and forbids red/green globally.",
+      "decision": "Preserve restrained teal/slate/amber branding and neutral ranking. Semantic validation or destructive controls may use accessible status colors with words/icons; do not confuse rank with correctness. Always label states rather than relying on glyph or color."
+    },
+    {
+      "id": "A12",
+      "finding": "Opus proposes a commenter contacting the owner of open ASCII work.",
+      "decision": "Record future coordination with website #32/#33 in the plan. This concept phase sends no comments or messages. Current user authorization does not require implementation or contact now."
+    },
+    {
+      "id": "A13",
+      "finding": "Opus coverage examples include full since repository creation.",
+      "decision": "Use that claim only after a documented completeness check for the precise source and metric. A successful pagination pass does not establish that GitHub retained every historical action. Unknown and unavailable remain distinct from zero."
+    },
+    {
+      "id": "A14",
+      "finding": "Opus rank comparison example does not constrain changing policy or populations.",
+      "decision": "Show changes only for comparable date windows, eligible populations, attribution policy and coverage. Otherwise state Comparison unavailable because the scope or method changed."
+    },
+    {
+      "id": "A15",
+      "finding": "Opus describes static wall mode as refreshing periodically.",
+      "decision": "Distinguish frozen snapshot, single-board auto-refresh and cycling live modes in the configurator. A frozen snapshot never changes and says so. Live modes apply data only at safe update boundaries."
+    }
+  ],
+  "information_architecture": {
+    "routes": [
+      {
+        "path": "/",
+        "purpose": "Equal-weight contribution departments, first observed contributors, selected live activity and coverage summary"
+      },
+      {
+        "path": "/leaderboards",
+        "purpose": "Searchable metric catalog with departments, synonyms and availability"
+      },
+      {
+        "path": "/leaderboards?department=:department",
+        "purpose": "One department's metric catalog"
+      },
+      {
+        "path": "/leaderboards/:metric",
+        "purpose": "Ranked or unranked measured contributions, method disclosure and proof drawer"
+      },
+      {
+        "path": "/contributors",
+        "purpose": "Inclusive alphabetical contributor directory independent from top ranks"
+      },
+      {
+        "path": "/contributors/:login",
+        "purpose": "Contribution portfolio keyed internally by stable account identity, with alias redirects"
+      },
+      {
+        "path": "/contributions/:id",
+        "purpose": "Citable evidence, attribution, state, dates, exclusions and corrections"
+      },
+      {
+        "path": "/activity",
+        "purpose": "Public chronological artifact-level feed with distinct activity, collection, acceptance and correction states"
+      },
+      {
+        "path": "/projects/:id",
+        "purpose": "Program/project scope with repository overlap and historical-attribution caveats"
+      },
+      {
+        "path": "/live",
+        "purpose": "Configurator or a public display with an explicit mode"
+      },
+      {
+        "path": "/methodology",
+        "purpose": "Principles, source models, state definitions and metric index"
+      },
+      {
+        "path": "/methodology/:metric",
+        "purpose": "Versioned method sheet for one dimension"
+      },
+      {
+        "path": "/methodology/changes",
+        "purpose": "Policy changelog and historical interpretation"
+      },
+      {
+        "path": "/coverage",
+        "purpose": "Source, metric, repository and history coverage with gaps"
+      },
+      {
+        "path": "/corrections",
+        "purpose": "Minimized public correction history"
+      },
+      {
+        "path": "/account/*",
+        "purpose": "Later optional identity-verified preferences and portfolio highlights"
+      },
+      {
+        "path": "/admin/*",
+        "purpose": "Later authenticated internal correction review; never upstream GitHub mutation"
+      }
+    ],
+    "departments_in_lifecycle_order": [
+      "Research",
+      "Design",
+      "Issues",
+      "Triage",
+      "Planning and Structure",
+      "Code",
+      "Review",
+      "Testing and Quality",
+      "Documentation",
+      "Maintenance and Security",
+      "Community"
+    ],
+    "separate_actor_area": "Automation; main area is user-account activity, not a claim of manually performed work",
+    "registry_driven": [
+      "department index",
+      "metric search",
+      "method sheets",
+      "supported filter choices",
+      "coverage display",
+      "wall configuration"
+    ],
+    "metric_registry_fields": [
+      "id",
+      "department",
+      "title",
+      "oneLine",
+      "unit",
+      "numeratorDefinition",
+      "denominatorDefinition",
+      "eligiblePopulation",
+      "supportedStates",
+      "dateBasis",
+      "tieRule",
+      "sources",
+      "exclusions",
+      "coverageByRepository",
+      "maturity",
+      "defaultView",
+      "leadBoard",
+      "synonyms",
+      "gamingNotes",
+      "policyVersion"
+    ],
+    "url_scope": [
+      "period or from/to",
+      "metric-supported date basis",
+      "UTC cutoff",
+      "repository IDs",
+      "program/project IDs",
+      "workstream",
+      "department",
+      "actor class",
+      "newcomer cohort",
+      "eligible state",
+      "LOC categories",
+      "selected contributor",
+      "immutable snapshot ID",
+      "display density"
+    ],
+    "scope_rules": [
+      "Use stable IDs internally; names are display values and may change.",
+      "Research T0-T6 is not the whole organization's program taxonomy.",
+      "Website, Android and Apple programs may share a repository.",
+      "A contribution may belong to multiple programs but counts once in an organization aggregate.",
+      "Unknown or unassigned program remains visible without inferred membership.",
+      "Invalid or incompatible filters get a visible explanation, not silent substitution.",
+      "Default period is the last 30 days. Support 7/30/90-day rolling windows, all-time, custom half-open UTC windows and calendar presets including quarter.",
+      "Public actor filters say user accounts, automation and all activity. An event attributed to a person account does not prove manual execution or absence of AI assistance."
+    ]
+  },
+  "screen_behavior": {
+    "overview": "Show all departments with the same visual weight and a clear explainable lead metric. Lead metrics prefer verifiable outcomes, but departments without an outcome metric show a clearly labeled observed measure or availability explanation. Never fabricate an accepted state to fill a slot. Keep the People link and unranked first-contribution strip visible. Unsupported departments remain discoverable.",
+    "board": "Header states measure, unit, period, date basis, actor scope, method version and coverage. Hold updates by default. Use a semantic table with contextual columns. An explicit contributor link opens a shareable proof drawer; a separate profile link remains a normal navigation target. Accepted and provisional values never share a rank numerator. Pending evidence is distinct from unsupported source capability, partial history, stale collection and unknown actor. None of those states is automatically a zero or an accepted outcome.",
+    "ties": "Use shared dense ranks 1, =2, =2, 3. Alphabetical/ID display within ties has no rank or credit effect. Top-N boundaries include tied contributors or provide explicit continuation. Small-cohort presentation and threshold are versioned policy choices; retain visible counts and do not invent inferior ranks.",
+    "loc": "Expose additions, deletions, net, changed files, PR count and PR-size context separately. Group source/docs/tests/generated/vendor/lockfile/other. Show bulk import, formatting and rename exclusions with exact classifier coverage. Do not use net LOC as a default merit ranking or code volume as the Overview lead.",
+    "profile": "Group measures by department, with no total score. Show evidence links, selected scope, verified roles, first observed contribution with coverage caveat and optional consented highlights. Distinguish no eligible activity from not measured. No public linking emails or inferred private work. Optional monthly summaries require complete enough data and an accessible table.",
+    "proof": "Show the exact observed action and actor role, activity/acceptance timestamps where applicable, current policy inclusion, public source, ingestion provenance, correction history and exclusion reason. GitHub author, merger, reviewer and closer are distinct roles. A missing actor does not become an assumed assignee.",
+    "methodology": "Each method contains what counts, unit, numerator/denominator, population, date basis, tie semantics, exclusions, sources, coverage, known gaps, gaming risks and policy version. Keep concise method disclosure on the board itself.",
+    "coverage": "Accessible repository/source/metric matrix and mobile per-repository list. Display history boundaries and outages, current freshness and attribution gaps. Avoid completeness percentages when the denominator is unknowable.",
+    "corrections": "Every proof offers a prefilled issue-form link for public factual corrections, with snapshot and receipt IDs. Sensitive privacy requests require a verified staffed private path before public launch; do not invent an email address or claim a nonfunctional form works. Later authenticated tools show preview, reason and reversible internal application."
+  },
+  "design_system": {
+    "brand_source_sha": "c731bc451d227eac843750418b6de3c3377ea90b",
+    "palette": {
+      "lightBackground": "#f8fafc",
+      "darkBackground": "#020617",
+      "lightSurface": "#ffffff",
+      "darkSurface": "#0f172a",
+      "brandTeal": "#0f766e",
+      "darkLinkTeal": "#2dd4bf",
+      "changeAccent": "#fbbf24"
+    },
+    "typography": "Existing system sans for body and navigation; existing monospace with tabular numerals for metrics. Opus proposes Instrument Serif for page titles only; adopting it is optional and requires license verification, self-hosted subset, no-font fallback and a layout-shift check.",
+    "layout": "Hairline separators rather than a field of cards; 1280px default content max; spacing 4/8/12/16/24/32/48/64; mobile starts at 320px reflow with 16px side padding; 640/1024/1280 layout changes.",
+    "density": "44px comfortable row targets; compact mode only for fine pointers and sufficient viewport, retaining usable interactive targets.",
+    "drawer": "480px supplementary panel on desktop, full-screen dialog below 1024px; focus placement, Escape, focus return and back navigation are defined.",
+    "evidence_labels": [
+      "Observed action",
+      "Provisional or pending verification",
+      "Qualified/accepted under a stated rule",
+      "Reviewed manual recognition",
+      "Excluded under stated policy",
+      "Not measured, with source-specific reason"
+    ],
+    "evidence_glyphs": "Optional symbols accompany persistent text labels. No color-only or glyph-only meaning; no unsupported claim that glyphs alone guarantee accessibility.",
+    "ascii_coordination": "Current #32/#33 proposals are unmerged and local-only. Reserve an optional empty decorative slot; do not create a dependency on their code. Any future artwork must be aria-hidden, bounded, pausable, responsive, reduced-motion aware and paused offscreen.",
+    "components": [
+      "AppHeader",
+      "ScopeBar",
+      "PeriodPicker",
+      "FreshnessIndicator",
+      "UpdateControl",
+      "DepartmentIndex",
+      "DepartmentBlock",
+      "BoardTable",
+      "RankCell",
+      "ValueCell",
+      "StateLabel",
+      "MethodDisclosure",
+      "CoverageNote",
+      "CoverageMatrix",
+      "CategoryBreakdown",
+      "ReceiptRow",
+      "ReceiptDrawer",
+      "ReceiptPage",
+      "ProfileHeader",
+      "CreditsByDepartment",
+      "ExportDialog",
+      "ReportProblemDialog",
+      "EmptyState",
+      "SyntheticDataBanner",
+      "WallFrame",
+      "WallPage",
+      "WallControls"
+    ]
+  },
+  "accessibility_and_resilience": [
+    "WCAG 2.2 AA acceptance target, measured contrast, keyboard support, semantic headings and tables, visible unobscured focus and skip navigation.",
+    "Verify with keyboard and at least two representative screen readers; test 200% text/zoom, 400% reflow as appropriate and 320px CSS width.",
+    "Use one polite live summary per applied batch. Do not announce each changed row or move focus automatically on background refresh.",
+    "Tables retain captions, row/column headers and aria-sort; mobile stacked layouts preserve programmatic relationships.",
+    "All charts have adjacent text/table equivalents; use explicit units and Intl formatting with visible UTC cutoff semantics.",
+    "Support reduced motion, forced colors, no custom font, missing avatar, slow network, stale snapshot and failed refresh.",
+    "Optional single-key shortcuts are discoverable and can be disabled; do not intercept text entry.",
+    "Sanitize any rendered public source text, validate external source URLs, and export CSV safely against formula injection.",
+    "Provide independent light/dark/system preference without requiring account creation or tracking.",
+    "Synthetic fixtures are clearly named and carry a persistent banner on every route; they cannot silently enter public production datasets.",
+    "Use precise user-account versus automation labels; keep execution mode and declared AI assistance as independent evidence fields, never infer them from a GitHub account type."
+  ],
+  "live_display": {
+    "read_mode": "Hold while I read is default. Queue new snapshots and show an Apply updates control. Preserve filter state, scroll, selection and focus.",
+    "follow_mode": "Explicit opt-in. No reordering while keyboard focus, pointer engagement or proof drawer is active. Apply coherent snapshots at safe intervals. No partial mix of policy/snapshot numerators and denominators.",
+    "freshness": "Show data-as-of timestamp, observation/ingestion freshness and reconciliation status distinctly. Labels are Fresh, Polling, Delayed, Reconciling, Stale or Error based on verified pipeline metadata, not a decorative always-green live indicator.",
+    "wall_modes": [
+      "Frozen snapshot",
+      "Single board with safe auto-refresh",
+      "Cycling live boards"
+    ],
+    "wall_formats": [
+      "16:9 at 1920x1080",
+      "16:9 at 3840x2160",
+      "9:16 portrait",
+      "4:3 optional"
+    ],
+    "wall_defaults": "30-second cycle, minimum proposed 20 seconds, avatars off, safe margins, persistent scope and freshness, no marquee or count-up effects. Reduced motion uses instant transitions.",
+    "wall_controls": "Pause/play, previous/next, cycle interval, display mode and motion setting. Configurator copies a public URL and never automatically launches OBS or external software.",
+    "fair_exposure": "Cycle configured departments and tie continuation pages transparently. Offer an unranked contributor credits roll so high-volume contributors are not the only people ever displayed.",
+    "privacy": "Public eligible data only, no private Project metadata, no restricted evidence or identity emails. Respect contributor display suppression on every generated wall payload."
+  },
+  "ui_backlog": [
+    {
+      "id": "UI-01",
+      "epic": "UI contract and recognition principles",
+      "depends_on": [
+        "core metric and identity policy"
+      ],
+      "children": [
+        {
+          "id": "UI-01.1",
+          "title": "Record recognition and display principles",
+          "tasks": [
+            "Define inclusive directory eligibility",
+            "Record no overall score and no streaks",
+            "Separate observed action from accepted outcome",
+            "Document ranking and privacy defaults"
+          ],
+          "acceptance": [
+            "Decisions and revisable defaults are explicit",
+            "No unsupported acceptance state or hidden score"
+          ]
+        },
+        {
+          "id": "UI-01.2",
+          "title": "Define registry and public view contracts",
+          "tasks": [
+            "Specify metric metadata and supported filters",
+            "Specify state/coverage/reason enums",
+            "Create fixture examples for each family",
+            "Define stable IDs and URL serialization"
+          ],
+          "acceptance": [
+            "Every view has unit, date basis, source and coverage",
+            "Unsupported states cannot be requested silently"
+          ]
+        },
+        {
+          "id": "UI-01.3",
+          "title": "Coordinate brand and hosting boundaries",
+          "tasks": [
+            "Record current source SHA and token provenance",
+            "Link pending website #32/#33 without depending on them",
+            "Specify static route deployment requirements",
+            "Separate frontend from ingestion/API hosting"
+          ],
+          "acceptance": [
+            "No Node runtime assumed on cPanel",
+            "No frozen research schema changes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-02",
+      "epic": "Design system and component foundations",
+      "depends_on": [
+        "UI-01"
+      ],
+      "children": [
+        {
+          "id": "UI-02.1",
+          "title": "Implement versioned visual tokens and typography",
+          "tasks": [
+            "Light/dark/system themes",
+            "Contrast matrix",
+            "Optional display-font licensing and fallback",
+            "Responsive spacing and density"
+          ],
+          "acceptance": [
+            "Current brand family is recognizable",
+            "No-font and forced-colors states are usable"
+          ]
+        },
+        {
+          "id": "UI-02.2",
+          "title": "Build semantic metric components",
+          "tasks": [
+            "Table/rank/value cells",
+            "Text-backed state labels",
+            "Method and coverage disclosures",
+            "Scope and period controls"
+          ],
+          "acceptance": [
+            "All component variants have labeled fixtures",
+            "State and unit never rely only on color"
+          ]
+        },
+        {
+          "id": "UI-02.3",
+          "title": "Build complete failure and empty-state library",
+          "tasks": [
+            "Unknown versus true zero",
+            "Unsupported history",
+            "Empty filters",
+            "Rate limit and stale data",
+            "Privacy suppression and retraction",
+            "Synthetic banner"
+          ],
+          "acceptance": [
+            "Each backend state maps to a designed visible state",
+            "No fallback converts missing data to zero"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-03",
+      "epic": "Public navigation and discovery",
+      "depends_on": [
+        "UI-02"
+      ],
+      "children": [
+        {
+          "id": "UI-03.1",
+          "title": "Implement shared URL scope and navigation",
+          "tasks": [
+            "Filter round trips",
+            "Back/forward restoration",
+            "Stable project IDs",
+            "Invalid and incompatible parameter handling",
+            "Scope sentence"
+          ],
+          "acceptance": [
+            "Share links reproduce exact filters",
+            "Unknown program stays visible"
+          ]
+        },
+        {
+          "id": "UI-03.2",
+          "title": "Build equal-weight Overview",
+          "tasks": [
+            "Lifecycle department sections",
+            "Explainable lead metrics",
+            "Unranked first observed contributors",
+            "Coverage summary",
+            "All-People discovery"
+          ],
+          "acceptance": [
+            "Non-code departments have equal weight",
+            "Unavailable departments remain visible"
+          ]
+        },
+        {
+          "id": "UI-03.3",
+          "title": "Build registry-driven board search",
+          "tasks": [
+            "Department index",
+            "Synonyms",
+            "Maturity and coverage labels",
+            "Mobile accordion"
+          ],
+          "acceptance": [
+            "A new metric requires no bespoke navigation code",
+            "Users find labels, docs, research and review by ordinary terms"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-04",
+      "epic": "Board details and trustworthy comparisons",
+      "depends_on": [
+        "UI-03"
+      ],
+      "children": [
+        {
+          "id": "UI-04.1",
+          "title": "Implement ranked and unranked board views",
+          "tasks": [
+            "Dense ties and boundary continuation",
+            "Small cohort policy",
+            "Separate provisional context",
+            "Accessible sorting",
+            "Bounded pagination"
+          ],
+          "acceptance": [
+            "Displayed rank numerator exactly matches eligibility",
+            "No hidden tie breaker or truncated tied winners"
+          ]
+        },
+        {
+          "id": "UI-04.2",
+          "title": "Implement contextual code-change views",
+          "tasks": [
+            "Additions/deletions/net",
+            "File and PR counts",
+            "Category breakdown",
+            "Import/format/rename exclusions",
+            "Classifier coverage"
+          ],
+          "acceptance": [
+            "Generated or unknown file classes are explicit",
+            "LOC does not become the default overall ranking"
+          ]
+        },
+        {
+          "id": "UI-04.3",
+          "title": "Implement comparable-period changes",
+          "tasks": [
+            "Scope/policy/coverage comparability check",
+            "Text-based changes",
+            "Unavailable comparison explanation"
+          ],
+          "acceptance": [
+            "Movement disabled by default",
+            "Method changes never masquerade as contributor rank changes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-05",
+      "epic": "Evidence and contributor portfolios",
+      "depends_on": [
+        "UI-04",
+        "core provenance and identity contracts"
+      ],
+      "children": [
+        {
+          "id": "UI-05.1",
+          "title": "Implement proof drawer and receipt route",
+          "tasks": [
+            "Actor role and exact action",
+            "Applicable dates",
+            "Source and ingestion provenance",
+            "Inclusion/exclusion reasons",
+            "Correction history",
+            "Focus and share links"
+          ],
+          "acceptance": [
+            "Every counted item reaches public evidence",
+            "Missing actors are never inferred from assignment"
+          ]
+        },
+        {
+          "id": "UI-05.2",
+          "title": "Implement inclusive People directory",
+          "tasks": [
+            "Alphabetical listing",
+            "Observed and outcome-state filters",
+            "User-account/automation separation without inferred manual authorship",
+            "Privacy suppression",
+            "Identity rename handling"
+          ],
+          "acceptance": [
+            "A verified first submission can appear before merge",
+            "Membership alone adds nobody"
+          ]
+        },
+        {
+          "id": "UI-05.3",
+          "title": "Implement contribution portfolios",
+          "tasks": [
+            "Department grouping",
+            "Evidence lists",
+            "Coverage-aware first seen",
+            "Optional highlights",
+            "No total score"
+          ],
+          "acceptance": [
+            "No identity emails or inferred private work",
+            "Unknown metrics differ from zero"
+          ]
+        },
+        {
+          "id": "UI-05.4",
+          "title": "Implement reproducible exports and share assets",
+          "tasks": [
+            "JSON/CSV/Markdown",
+            "Snapshot and policy references",
+            "Safe escaping",
+            "Scope summary",
+            "Privacy propagation",
+            "Print styling"
+          ],
+          "acceptance": [
+            "Every exported count is reproducible from permitted receipts",
+            "CSV formula injection is prevented"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-06",
+      "epic": "Methodology and coverage transparency",
+      "depends_on": [
+        "UI-01",
+        "core source capability matrix"
+      ],
+      "children": [
+        {
+          "id": "UI-06.1",
+          "title": "Generate metric method sheets",
+          "tasks": [
+            "Twelve method sections",
+            "Inline summary",
+            "Version links",
+            "Missing metadata enforcement"
+          ],
+          "acceptance": [
+            "No shipped metric lacks method/source/coverage",
+            "Observable states are named precisely"
+          ]
+        },
+        {
+          "id": "UI-06.2",
+          "title": "Build accessible coverage explorer",
+          "tasks": [
+            "Metric/source/repository matrix",
+            "History gaps",
+            "Mobile list",
+            "Attribution availability",
+            "Current freshness"
+          ],
+          "acceptance": [
+            "No invented completeness denominator",
+            "Gap state has text and programmatic labels"
+          ]
+        },
+        {
+          "id": "UI-06.3",
+          "title": "Build policy and correction history",
+          "tasks": [
+            "Versioned change log",
+            "Recomputation notes",
+            "Redacted corrections",
+            "Links from affected values"
+          ],
+          "acceptance": [
+            "Users can explain why a number changed",
+            "Sensitive suppression is not exposed in public prose"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-07",
+      "epic": "Snapshot binding and safe live updates",
+      "depends_on": [
+        "UI-03",
+        "core immutable public snapshots"
+      ],
+      "children": [
+        {
+          "id": "UI-07.1",
+          "title": "Bind real data with immutable snapshot scope",
+          "tasks": [
+            "Snapshot pinning",
+            "Coherent publication swaps",
+            "Latest and historic modes",
+            "Schema mismatch handling",
+            "No production fixture fallback"
+          ],
+          "acceptance": [
+            "No mixed snapshot numerators and denominators",
+            "Historic links remain reproducible"
+          ]
+        },
+        {
+          "id": "UI-07.2",
+          "title": "Implement freshness and transport status",
+          "tasks": [
+            "Data as-of",
+            "Observation and ingestion lag",
+            "Reconciliation state",
+            "Rate-limit and outage states"
+          ],
+          "acceptance": [
+            "Live status follows actual pipeline metadata",
+            "Stale data remains visibly dated"
+          ]
+        },
+        {
+          "id": "UI-07.3",
+          "title": "Implement hold and follow modes",
+          "tasks": [
+            "Queued updates",
+            "Apply control",
+            "Focus/scroll preservation",
+            "Pointer and drawer hold",
+            "One polite summary"
+          ],
+          "acceptance": [
+            "Reading rows never move unexpectedly",
+            "Live mode cannot replace a focused item silently"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-08",
+      "epic": "Public live wall and credits roll",
+      "depends_on": [
+        "UI-07"
+      ],
+      "children": [
+        {
+          "id": "UI-08.1",
+          "title": "Build wall configuration and URL contract",
+          "tasks": [
+            "Frozen/single/cycling modes",
+            "Metric and department selection",
+            "Public URL copy",
+            "Motion and avatar controls"
+          ],
+          "acceptance": [
+            "No external app launch",
+            "Mode semantics match behavior"
+          ]
+        },
+        {
+          "id": "UI-08.2",
+          "title": "Build display layouts and tie continuation",
+          "tasks": [
+            "1080p and 4K 16:9",
+            "Portrait",
+            "Safe margins",
+            "Long names and units",
+            "Unranked contributor roll"
+          ],
+          "acceptance": [
+            "No overflow or truncated tied winners",
+            "Scope and freshness remain visible"
+          ]
+        },
+        {
+          "id": "UI-08.3",
+          "title": "Implement cycle and network resilience",
+          "tasks": [
+            "Pause/previous/next",
+            "Safe transition updates",
+            "Reduced-motion cuts",
+            "Offline stale view",
+            "Fair department rotation"
+          ],
+          "acceptance": [
+            "No count-up or marquee pressure",
+            "Suppressed profiles never enter wall payloads"
+          ]
+        },
+        {
+          "id": "UI-08.4",
+          "title": "Run wall soak and recovery validation",
+          "tasks": [
+            "Eight-hour rendering soak",
+            "Network loss/recovery",
+            "Long session memory check",
+            "Resize and high-DPI check"
+          ],
+          "acceptance": [
+            "Bounded memory and recovered freshness",
+            "No duplicate event display after reconnect"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-09",
+      "epic": "Corrections and optional personal control",
+      "depends_on": [
+        "UI-05",
+        "core correction governance"
+      ],
+      "children": [
+        {
+          "id": "UI-09.1",
+          "title": "Deliver working public and private correction paths",
+          "tasks": [
+            "Prefilled public issue form",
+            "Identity/coverage/source categories",
+            "Verified private privacy channel",
+            "Delivery verification"
+          ],
+          "acceptance": [
+            "A real correction reaches the authorized destination",
+            "No sensitive case is routed into a public issue by default"
+          ]
+        },
+        {
+          "id": "UI-09.2",
+          "title": "Implement optional identity-only sign-in",
+          "tasks": [
+            "Minimal verified permissions",
+            "Clear account state",
+            "Sign-out",
+            "Anonymous browsing regression"
+          ],
+          "acceptance": [
+            "Public browsing needs no login",
+            "No GitHub write permission requested for read-only identity preferences"
+          ]
+        },
+        {
+          "id": "UI-09.3",
+          "title": "Implement verified visibility and portfolio preferences",
+          "tasks": [
+            "Own-profile authorization",
+            "Board/profile/live/export suppression",
+            "Avatar choice",
+            "Highlight pinning",
+            "Snapshot propagation"
+          ],
+          "acceptance": [
+            "One person cannot change another's display",
+            "Suppression reaches all public representations within documented bounds"
+          ]
+        },
+        {
+          "id": "UI-09.4",
+          "title": "Implement internal review and manual recognition",
+          "tasks": [
+            "Conflict-of-interest handling",
+            "Recipient consent",
+            "Reasoned decisions",
+            "Preview and reversible application",
+            "Minimal public log"
+          ],
+          "acceptance": [
+            "No self-approved awards",
+            "No upstream GitHub mutation from credit decisions"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-10",
+      "epic": "Accessibility, performance and usability verification",
+      "depends_on": [
+        "UI-02 through UI-09 as delivered"
+      ],
+      "children": [
+        {
+          "id": "UI-10.1",
+          "title": "Verify accessible journeys and all states",
+          "tasks": [
+            "Automated checks",
+            "Keyboard and two screen readers",
+            "Zoom/reflow/forced colors",
+            "Reduced motion",
+            "Focus through refresh and drawer"
+          ],
+          "acceptance": [
+            "WCAG 2.2 AA target documented with manual evidence",
+            "No critical accessibility defects at launch"
+          ]
+        },
+        {
+          "id": "UI-10.2",
+          "title": "Verify responsive and visual quality",
+          "tasks": [
+            "Light/dark baselines",
+            "320/360/768/1024/1280 widths",
+            "All unknown/error states",
+            "Long text and ties",
+            "Wall resolutions"
+          ],
+          "acceptance": [
+            "No primary-data horizontal overflow on mobile",
+            "Every evidence state remains legible"
+          ]
+        },
+        {
+          "id": "UI-10.3",
+          "title": "Enforce measured route performance",
+          "tasks": [
+            "Mid-tier mobile route load",
+            "LCP target under 2.5s",
+            "CLS target under 0.05",
+            "Payload/DOM bounds",
+            "No third-party tracking scripts"
+          ],
+          "acceptance": [
+            "Budgets measured with declared conditions",
+            "Large directories remain bounded and usable"
+          ]
+        },
+        {
+          "id": "UI-10.4",
+          "title": "Run representative usability sessions",
+          "tasks": [
+            "Newcomer",
+            "Non-code contributor",
+            "Maintainer",
+            "Anonymous visitor",
+            "Stream host",
+            "Record findings as issues"
+          ],
+          "acceptance": [
+            "Participants find their contribution and source proof",
+            "Participants explain zero versus unavailable and observed versus accepted"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "UI-11",
+      "epic": "Public rollout and sustained product quality",
+      "depends_on": [
+        "UI-06",
+        "UI-07",
+        "UI-09.1",
+        "UI-10",
+        "core production readiness"
+      ],
+      "children": [
+        {
+          "id": "UI-11.1",
+          "title": "Define minimal analytics and public-data handling",
+          "tasks": [
+            "No behavioral tracking by default",
+            "Optional aggregate route metrics",
+            "No session recording",
+            "Retention and deletion propagation",
+            "Public disclosure"
+          ],
+          "acceptance": [
+            "No contributor surveillance dashboards",
+            "Analytics cannot reveal hidden profile choices"
+          ]
+        },
+        {
+          "id": "UI-11.2",
+          "title": "Pass launch evidence gate",
+          "tasks": [
+            "Verified live metric sources",
+            "Working corrections and privacy path",
+            "Accessible real-data review",
+            "Synthetic-data exclusion",
+            "Rollback snapshot and capability switches"
+          ],
+          "acceptance": [
+            "No unsupported board is presented as complete",
+            "Launch remains separate from local implementation validation"
+          ]
+        },
+        {
+          "id": "UI-11.3",
+          "title": "Coordinate staged exposure and review",
+          "tasks": [
+            "Reviewable preview",
+            "Public beta after deployment authorization",
+            "Website navigation integration",
+            "Wall exposure",
+            "Thirty-day policy and correction review"
+          ],
+          "acceptance": [
+            "Existing website owners and open design work are respected",
+            "Rollback and correction ownership are explicit"
+          ]
+        }
+      ]
+    }
+  ],
+  "initial_defaults_and_later_decisions": {
+    "safe_initial_defaults": [
+      "anonymous public browsing",
+      "user-account board area plus separate automation; account class does not establish manual execution",
+      "last 30 days by default, with rolling and calendar presets including quarter and explicit UTC cutoffs",
+      "per-metric supported state/date basis",
+      "hold updates",
+      "dense ties",
+      "unranked directory",
+      "LOC exclusions on",
+      "no total score",
+      "no streaks",
+      "wall avatars off",
+      "30-second cycle",
+      "bounded pagination",
+      "existing teal/slate/amber brand"
+    ],
+    "revisable_product_choices": [
+      "product/repository name",
+      "URL",
+      "display font",
+      "department ordering",
+      "small-cohort threshold",
+      "maturity windows",
+      "self-merge treatment",
+      "default period",
+      "optional signed-in control plane"
+    ],
+    "actual_launch_prerequisites": [
+      "verified supported metric sources and attribution",
+      "approved source/publication scope",
+      "working staffed private privacy channel",
+      "documented correction ownership",
+      "hosting and secret-bearing backend separation",
+      "production deployment authority"
+    ],
+    "not_claimed": [
+      "No GitHub permissions were inferred",
+      "No source completeness was assumed",
+      "No live statistics were fabricated",
+      "No public form delivery was claimed without a test",
+      "No model fallback was used",
+      "No user approval was requested merely for reversible planning choices"
+    ]
+  },
+  "master_alignment": {
+    "authority": "../concept.json, ../project-backlog.json and ../decision-register.json define final adopted policy. This reviewed UI file refines those choices; the raw Opus consultation remains unchanged advice.",
+    "traceability": "ui-backlog-coverage.json maps every UI source item to existing LB work packages.",
+    "publication": "The 37 UI child IDs are design-coverage references only. Do not create them as additional GitHub issues beside the master LB hierarchy.",
+    "adapted_choices": [
+      {
+        "topic": "Ties",
+        "original_opus_proposal": "Competition ranking 1,2,2,4",
+        "adopted": "Dense ranking 1,2,2,3; tie order conveys no superiority"
+      },
+      {
+        "topic": "Date default",
+        "original_opus_proposal": "Current calendar quarter",
+        "adopted": "Last 30 days, plus rolling/all-time/custom and calendar presets including quarter"
+      },
+      {
+        "topic": "Actor wording",
+        "original_opus_proposal": "Humans versus bots",
+        "adopted": "User accounts versus automation; account type does not prove manual execution"
+      },
+      {
+        "topic": "Canonical routes",
+        "original_opus_proposal": "/boards, /people, /receipts, /wall",
+        "adopted": "/leaderboards, /contributors, /contributions, /activity, /projects/:id and /live"
+      },
+      {
+        "topic": "Repository",
+        "original_opus_proposal": "Example repository credits",
+        "adopted": "Proposed pick-your-ai-leaderboard repository, with PickYour.AI Credits as proposed product name"
+      },
+      {
+        "topic": "Tagline",
+        "original_opus_proposal": "See who built it. Check the receipts. Find where you fit.",
+        "adopted": "Contributions, with evidence."
+      }
+    ]
+  }
+}
