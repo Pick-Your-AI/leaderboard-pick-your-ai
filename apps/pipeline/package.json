@@ -1,0 +1,22 @@
+{
+  "name": "@pick-your-ai/pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24 <25" },
+  "scripts": {
+    "build": "node --check src/index.mjs && node --check src/runtime.mjs && node --check src/github-source.mjs",
+    "typecheck": "node --check src/index.mjs && node --check src/runtime.mjs && node --check src/github-source.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@pick-your-ai/contracts": "0.1.0",
+    "@pick-your-ai/ingestion": "0.1.0",
+    "@pick-your-ai/metrics": "0.1.0",
+    "@pick-your-ai/github": "0.1.0",
+    "@pick-your-ai/service": "0.1.0",
+    "@pick-your-ai/controls": "0.1.0",
+    "pg": "8.16.3"
+  },
+  "devDependencies": { "@electric-sql/pglite": "0.3.14" }
+}
