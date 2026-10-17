@@ -12,12 +12,13 @@
     "packages/contracts",
     "packages/github",
     "packages/metrics",
+    "packages/ingestion",
     "apps/*"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "node --test \"packages/{contracts,github,metrics}/test/**/*.test.{js,mjs,ts}\" \"apps/*/test/**/*.test.{js,mjs,ts}\" \"infra/{db,recovery}/test/**/*.test.mjs\"",
+    "test": "node --test \"packages/{contracts,github,metrics,ingestion}/test/**/*.test.{js,mjs,ts}\" \"apps/*/test/**/*.test.{js,mjs,ts}\" \"infra/{db,recovery}/test/**/*.test.mjs\"",
     "dev:web": "npm run dev --workspace @pick-your-ai/web",
     "dev:service": "npm run dev --workspace @pick-your-ai/service",
     "dev:worker": "npm run dev --workspace @pick-your-ai/worker",
