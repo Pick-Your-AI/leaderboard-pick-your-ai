@@ -223,6 +223,12 @@ export class GithubReadClient {
           await response.body?.cancel();
           throw new GithubClientError({ kind: "unsafe_request" }, source);
         }
+        // Conditional 304 responses still carry quota state. Observe it before
+        // returning a cached representation, just as for a fresh HTTP 200.
+        if ((response.ok || response.status === 304) && response.headers.get("x-ratelimit-remaining") === "0") {
+          const reset = Number(response.headers.get("x-ratelimit-reset")) * 1000;
+          await this.pause(source, Number.isFinite(reset) && reset > this.options.now() ? reset : this.options.now() + 60_000);
+        }
         if (response.status === 304) {
           await response.body?.cancel();
           if (!cache) throw new GithubClientError({ kind: "invalid_response" }, source);
@@ -241,10 +247,6 @@ export class GithubReadClient {
           const link = response.headers.get("link");
           if (!query && response.headers.get("etag")) {
             await this.options.checkpoints.save(cacheKey, { version: 1, etag: response.headers.get("etag"), body, link });
-          }
-          if (response.headers.get("x-ratelimit-remaining") === "0") {
-            const reset = Number(response.headers.get("x-ratelimit-reset")) * 1000;
-            await this.pause(source, Number.isFinite(reset) && reset > this.options.now() ? reset : this.options.now() + 60_000);
           }
           return { body, link };
         }

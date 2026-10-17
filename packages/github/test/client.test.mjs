@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { FileCheckpointStore, GithubReadClient, GithubClientError } from "../dist/index.js";
 
@@ -44,7 +44,11 @@ test("REST retrieves >100 items and conditional refresh retains cached paginatio
 
 test("durable checkpoint resumes failed scan in another client without replaying prior pages", async t => {
   const directory = await mkdtemp(join(tmpdir(), "github-checkpoints-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  t.after(async () => {
+    assert.equal(dirname(resolve(directory)), resolve(tmpdir()));
+    assert.match(basename(directory), /^github-checkpoints-/);
+    await rm(directory, { recursive: true, force: true });
+  });
   const checkpoints = new FileCheckpointStore(directory);
   const calls = [];
   const first = create(async url => {
@@ -283,4 +287,22 @@ test("successful final quota unit pauses next request while retaining successful
   assert.deepEqual(waits, []);
   await client.rest("a", "/a");
   assert.deepEqual(waits, [7000]);
+});
+
+test("conditional 304 quota exhaustion pauses the next request before reusing cached data", async () => {
+  let now = Date.parse("2026-01-01T00:00:00Z");
+  const waits = [];
+  let count = 0;
+  const client = create(async () => {
+    count++;
+    if (count === 1) return json({ ok: true }, 200, { etag: '"synthetic-v1"' });
+    return new Response(null, { status: 304, headers: count === 2 ? {
+      "x-ratelimit-remaining": "0", "x-ratelimit-reset": String((now + 10_000) / 1000),
+    } : {} });
+  }, { now: () => now, sleep: async ms => { waits.push(ms); now += ms; } });
+  assert.deepEqual(await client.rest("a", "/a"), { ok: true });
+  assert.deepEqual(await client.rest("a", "/a"), { ok: true });
+  assert.deepEqual(waits, []);
+  assert.deepEqual(await client.rest("a", "/a"), { ok: true });
+  assert.deepEqual(waits, [10_000]);
 });
