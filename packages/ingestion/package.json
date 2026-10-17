@@ -7,7 +7,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.json && node --test test/*.test.mjs"
+    "test": "tsc -p tsconfig.json && node --test test/*.test.mjs",
+    "start:service": "node dist/cli.js service",
+    "start:worker": "node dist/cli.js worker"
   },
   "dependencies": { "pg": "8.16.3" },
   "devDependencies": {

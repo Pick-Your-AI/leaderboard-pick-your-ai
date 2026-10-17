@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createHmac } from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { Pool } from 'pg';
-import { InboxStore, postgresDatabase, createWebhookHandler } from '../dist/index.js';
+import { InboxStore, postgresDatabase, createWebhookHandler, createIngestionServer, runWorker } from '../dist/index.js';
 
 const up = await readFile(new URL('../sql/001_ingestion.up.sql', import.meta.url), 'utf8');
 const down = await readFile(new URL('../sql/001_ingestion.down.sql', import.meta.url), 'utf8');
@@ -86,6 +86,31 @@ test('acknowledged data survives a new store instance; only one current lease co
   assert.equal(observation.occurredAt, null);
   assert.equal(observation.actorId, null);
   assert.equal(observation.qualification, 'not_evaluated');
+});
+
+test('HTTP receiver restart retains acknowledged receipt and a restarted worker makes fresh progress', async () => {
+  const secret = 'synthetic-http-integration-secret-32-characters';
+  const options = { secrets: [secret], scope: new Map([[1, new Set([2])]]), store };
+  const body = JSON.stringify({ action: 'reopened', installation: { id: 1 },
+    repository: { id: 2, private: false, visibility: 'public', full_name: 'synthetic-org/synthetic-repo' },
+    sender: null, issue: { node_id: 'SYNTHETIC_ISSUE', number: 3 } });
+  const headers = { 'content-type': 'application/json', 'x-github-event': 'issues', 'x-github-delivery': id(1),
+    'x-hub-signature-256': `sha256=${createHmac('sha256', secret).update(body).digest('hex')}` };
+  for (const expected of [202, 200]) {
+    const server = createIngestionServer({ ...options, store: new InboxStore(db, 3) });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/webhooks/github`, { method: 'POST', headers, body });
+      assert.equal(response.status, expected);
+      await response.json();
+    } finally { await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
+  }
+  const control = new AbortController();
+  const states = [];
+  await runWorker(new InboxStore(db, 3), { signal: control.signal,
+    onStatus: state => { states.push(state); control.abort(); } });
+  assert.deepEqual(states, ['processed']);
+  assert.deepEqual(await counts(), { observations: 1, notices: 1 });
 });
 
 test('expired worker cannot complete or fail a delivery reclaimed by another worker', async () => {
