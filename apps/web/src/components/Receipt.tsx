@@ -3,7 +3,7 @@ import type { ContributionRecord, Person } from "../data/model.ts";
 import { getMetric } from "../data/registry.ts";
 import { repositories } from "../data/source.ts";
 import { formatDateTime } from "../lib/format.ts";
-import { Link } from "../lib/router.tsx";
+import { Link, ScopedLink } from "../lib/router.tsx";
 import { StateLabel } from "./status.tsx";
 
 const roleLabels: Record<ContributionRecord["role"], string> = {
@@ -33,7 +33,7 @@ export function PersonName({ person, link = true }: { person: Person | null; lin
       {person.actor.kind !== "user" && <span className="tag">Automation</span>}
     </>
   );
-  return link ? <Link to={`/contributors/${encodeURIComponent(person.login)}`}>{label}</Link> : <span>{label}</span>;
+  return link ? <ScopedLink to={`/contributors/${encodeURIComponent(person.login)}`}>{label}</ScopedLink> : <span>{label}</span>;
 }
 
 export function SourceLink({ record }: { record: ContributionRecord }) {
@@ -54,7 +54,7 @@ export function ReceiptRow({ record }: { record: ContributionRecord }) {
   return (
     <li className="receipt-row">
       <div className="receipt-row-main">
-        <Link to={`/contributions/${record.id}`}>{record.title}</Link>
+        <ScopedLink to={`/contributions/${record.id}`}>{record.title}</ScopedLink>
         <StateLabel state={record.evidence} />
       </div>
       <div className="receipt-row-meta muted">
@@ -91,7 +91,7 @@ export function ReceiptBody({ record, person }: { record: ContributionRecord; pe
         <ul className="inline-list">
           {record.metricIds.map((metricId) => (
             <li key={metricId}>
-              <Link to={`/leaderboards/${metricId}`}>{getMetric(metricId)?.name ?? metricId}</Link>
+              <ScopedLink to={`/leaderboards/${metricId}`}>{getMetric(metricId)?.name ?? metricId}</ScopedLink>
             </li>
           ))}
         </ul>

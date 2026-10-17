@@ -5,7 +5,7 @@ import { registry, releaseEligibilityLabels } from "../data/registry.ts";
 import { formatNumber, plural } from "../lib/format.ts";
 import { cutWithTies } from "../lib/ranking.ts";
 import type { Density } from "../lib/scope.ts";
-import { Link } from "../lib/router.tsx";
+import { Link, ScopedLink } from "../lib/router.tsx";
 import { PersonName } from "./Receipt.tsx";
 
 function ordinal(rank: number): string {
@@ -154,7 +154,7 @@ export function MethodDisclosure({ metric }: { metric: MetricDefinition }) {
         </dd>
       </dl>
       <p>
-        <Link to={`/methodology/${metric.id}`}>Full method sheet</Link>
+        <ScopedLink to={`/methodology/${metric.id}`}>Full method sheet</ScopedLink>
       </p>
     </details>
   );

@@ -361,9 +361,13 @@ export interface ContributionView {
   repository: string;
 }
 
-export function getContribution(id: string): ContributionView | null {
+export function getContribution(id: string, snapshotId?: string): ContributionView | null {
   const record = contributions.find((candidate) => candidate.id === id);
   if (!record) return null;
+  if (snapshotId) {
+    const snapshot = getSnapshot(snapshotId);
+    if (!snapshot || Date.parse(record.observedAt) > Date.parse(snapshot.cutoff)) return null;
+  }
   const person = personFor(record.actorId);
   if (person?.publicState === "suppressed") return null;
   return {

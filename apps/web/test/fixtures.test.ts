@@ -127,3 +127,11 @@ test("the directory includes observed-only newcomers alphabetically", () => {
   assert.ok(logins.includes("synthetic-gale"));
   assert.deepEqual(logins, [...logins].sort());
 });
+
+
+test("a pinned contribution page cannot expose records first observed in a later snapshot", () => {
+  assert.equal(getContribution("syn-c-009", "syn-r42"), null);
+  assert.equal(getContribution("syn-c-016", "syn-r42"), null);
+  assert.equal(getContribution("syn-c-009", "syn-r43")?.record.id, "syn-c-009");
+  assert.equal(getContribution("syn-c-001", "syn-r41")?.record.id, "syn-c-001");
+});

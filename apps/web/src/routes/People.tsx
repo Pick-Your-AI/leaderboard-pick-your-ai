@@ -7,7 +7,7 @@ import { families, familyLabel } from "../data/registry.ts";
 import { buildProfile, listContributors } from "../data/source.ts";
 import { formatDate, formatNumber, plural } from "../lib/format.ts";
 import { useLatestSnapshotId, useRead, useScope } from "../lib/hooks.ts";
-import { Link, useRouter } from "../lib/router.tsx";
+import { Link, useRouter, ScopedLink } from "../lib/router.tsx";
 import { serializeScope } from "../lib/scope.ts";
 
 export function ContributorsPage() {
@@ -90,7 +90,7 @@ export function ProfilePage({ login }: { login: string }) {
       <>
         <PageHeader title="Profile not available" />
         <EmptyState title="There is no public profile at this address">
-          The account may not exist, or there is nothing public to show. <Link to="/contributors">Browse all contributors</Link>.
+          The account may not exist, or there is nothing public to show. <ScopedLink to="/contributors">Browse all contributors</ScopedLink>.
         </EmptyState>
       </>
     );
@@ -126,7 +126,7 @@ export function ProfilePage({ login }: { login: string }) {
         <h2 id="first-observed">First observed contribution</h2>
         {profile.firstObserved ? (
           <p>
-            <Link to={`/contributions/${profile.firstObserved.id}`}>{profile.firstObserved.title}</Link>, observed{" "}
+            <ScopedLink to={`/contributions/${profile.firstObserved.id}`}>{profile.firstObserved.title}</ScopedLink>, observed{" "}
             {formatDate(profile.firstObserved.observedAt)}. <span className="muted">Earlier work may predate the known source history.</span>
           </p>
         ) : (

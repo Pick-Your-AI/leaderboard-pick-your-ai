@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Link, useRouter } from "../lib/router.tsx";
+import { useRouter, ScopedLink } from "../lib/router.tsx";
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
 import { SYNTHETIC_DATASET_ID } from "../data/synthetic.ts";
 
@@ -18,7 +18,7 @@ export function SyntheticDataBanner() {
   return (
     <aside className="synthetic-banner" aria-label="Synthetic data notice">
       <strong>Synthetic prototype data.</strong> Every person, repository, count and rank here is invented for design
-      evaluation ({SYNTHETIC_DATASET_ID}). <Link to="/prototype">What this prototype shows</Link>
+      evaluation ({SYNTHETIC_DATASET_ID}). <ScopedLink to="/prototype">What this prototype shows</ScopedLink>
     </aside>
   );
 }
@@ -67,19 +67,19 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
       <SyntheticDataBanner />
       <header className="app-header">
         <div className="header-inner">
-          <Link to="/" className="wordmark">
+          <ScopedLink to="/" className="wordmark">
             <span aria-hidden="true" className="wordmark-mark">
               ▚
             </span>{" "}
             PickYour.AI <span className="wordmark-product">Credits</span>
-          </Link>
+          </ScopedLink>
           <nav aria-label="Primary">
             <ul>
               {navigation.map((item) => (
                 <li key={item.to}>
-                  <Link to={item.to} aria-current={item.match(pathname) ? "page" : undefined}>
+                  <ScopedLink to={item.to} aria-current={item.match(pathname) ? "page" : undefined}>
                     {item.label}
-                  </Link>
+                  </ScopedLink>
                 </li>
               ))}
             </ul>
@@ -93,8 +93,8 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
       <footer className="app-footer">
         <div className="footer-inner">
           <p>
-            Contributions, with evidence. No overall score, no streaks. <Link to="/methodology">How counting works</Link> ·{" "}
-            <Link to="/corrections">Corrections</Link> · <Link to="/prototype">Prototype guide</Link>
+            Contributions, with evidence. No overall score, no streaks. <ScopedLink to="/methodology">How counting works</ScopedLink> ·{" "}
+            <ScopedLink to="/corrections">Corrections</ScopedLink> · <ScopedLink to="/prototype">Prototype guide</ScopedLink>
           </p>
           <p className="muted">
             Browsing is anonymous. A user-account event does not establish manual authorship or the absence of AI assistance.

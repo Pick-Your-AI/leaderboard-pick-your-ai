@@ -16,8 +16,8 @@ import { familyLabel, getMetric, releaseEligibilityLabels } from "../data/regist
 import { buildBoard, type Board, type BoardRow } from "../data/source.ts";
 import { plural } from "../lib/format.ts";
 import { useLatestSnapshotId, useRead, useScope } from "../lib/hooks.ts";
-import { Link, useRouter } from "../lib/router.tsx";
-import { serializeScope } from "../lib/scope.ts";
+import { Link, useRouter, ScopedLink } from "../lib/router.tsx";
+import { serializeScope, mayFollowUpdates } from "../lib/scope.ts";
 
 const PAGE_SIZE = 25;
 
@@ -71,7 +71,8 @@ export function BoardPage({ metricId }: { metricId: string }) {
   const latest = useLatestSnapshotId();
   const [shownLatest, setShownLatest] = useState(latest);
   const [follow, setFollow] = useState(false);
-  const [engaged, setEngaged] = useState(false);
+  const [pointerInside, setPointerInside] = useState(false);
+  const [focusInside, setFocusInside] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const regionRef = useRef<HTMLDivElement>(null);
   const scopeKey = serializeScope(scope);
@@ -91,8 +92,8 @@ export function BoardPage({ metricId }: { metricId: string }) {
   }, [metricId, scope, shownLatest, latest]);
 
   useEffect(() => {
-    if (pendingId && follow && !engaged && !proof) apply();
-  }, [pendingId, follow, engaged, proof, apply]);
+    if (pendingId && follow && mayFollowUpdates(pointerInside, focusInside, Boolean(proof))) apply();
+  }, [pendingId, follow, pointerInside, focusInside, proof, apply]);
 
   const routeHref = useCallback(
     (extra: Record<string, string | null>) => hrefWith(pathname, { ...params, ...extra }),
@@ -110,12 +111,12 @@ export function BoardPage({ metricId }: { metricId: string }) {
   if (!metric) return null;
 
   const engagement = {
-    onFocus: () => setEngaged(true),
+    onFocus: () => setFocusInside(true),
     onBlur: (event: React.FocusEvent) => {
-      if (!regionRef.current?.contains(event.relatedTarget as Node | null)) setEngaged(false);
+      if (!regionRef.current?.contains(event.relatedTarget as Node | null)) setFocusInside(false);
     },
-    onPointerEnter: () => setEngaged(true),
-    onPointerLeave: () => setEngaged(false),
+    onPointerEnter: () => setPointerInside(true),
+    onPointerLeave: () => setPointerInside(false),
   };
 
   return (
@@ -238,8 +239,8 @@ function BoardBody({
               : "This measure is defined in the metric registry, but the synthetic prototype has no fixture for it. It is not zero, and it is not ranked."}
           </p>
           <p>
-            <Link to={`/methodology/${board.metric.id}`}>Read its method sheet</Link> or{" "}
-            <Link to="/prototype">see which boards have prototype data</Link>.
+            <ScopedLink to={`/methodology/${board.metric.id}`}>Read its method sheet</ScopedLink> or{" "}
+            <ScopedLink to="/prototype">see which boards have prototype data</ScopedLink>.
           </p>
         </EmptyState>
       )}

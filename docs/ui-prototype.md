@@ -53,3 +53,8 @@ The consultation ran on 2026-10-17 with requested and observed model `claude-opu
 An axe-core 4.10.2 scan (WCAG 2.0/2.1/2.2 A and AA plus best-practice tags) ran on 18 routes in both light and dark themes, including an open evidence drawer, the stale snapshot and the cycling wall. After the synthetic banner became a labelled landmark, it reported zero violations. A keyboard check confirmed that Enter on a Proof link opens the drawer with focus on its heading, and Escape closes it and returns focus to the link. The scan was run by hand on the dev server and is not yet wired into CI.
 
 These checks are not done: screen-reader testing, real-device touch walkthroughs, 400% zoom review, axe in CI, and participant usability sessions. An automated scan does not establish WCAG conformance by itself. The production bundle is about 526 kB because it includes zod and the full metric registry. Splitting it belongs with the performance work in LB 19.04.
+
+
+## Independent review follow-up
+
+Cross-route navigation, profiles, receipts and method links now carry global scope and snapshot selection while leaving route-specific search and drawer controls behind. Rendered-link regression coverage checks the primary navigation and the shared person/receipt components. Contribution pages read the selected snapshot, hide records first observed after its cutoff, and prefill corrections with that served snapshot. Follow mode tracks pointer and keyboard focus independently, so either kind of engagement continues to hold updates when the other ends. These fixes do not complete the outstanding owner, zoom, device or participant acceptance gates listed above.

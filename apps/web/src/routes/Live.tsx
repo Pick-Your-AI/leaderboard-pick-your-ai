@@ -7,7 +7,7 @@ import { buildBoard, fixtureMetricIds, listContributors, SourceError } from "../
 import { formatNumber } from "../lib/format.ts";
 import { useLatestSnapshotId, useScope } from "../lib/hooks.ts";
 import { cutWithTies } from "../lib/ranking.ts";
-import { Link } from "../lib/router.tsx";
+import { Link, ScopedLink } from "../lib/router.tsx";
 import { serializeScope, type Scope } from "../lib/scope.ts";
 
 type WallMode = "frozen" | "single" | "cycle";
@@ -254,9 +254,9 @@ function WallPage({ mode, boards, interval, format }: { mode: WallMode; boards: 
               {paused ? "Resume updates" : "Pause updates"}
             </button>
           )}
-          <Link to="/live" className="button button-ghost">
+          <ScopedLink to="/live" className="button button-ghost">
             Exit wall
-          </Link>
+          </ScopedLink>
         </footer>
       </div>
     </div>

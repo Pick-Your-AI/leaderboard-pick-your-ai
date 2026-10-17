@@ -14,7 +14,7 @@ import { coverage, projects, repositories, snapshots } from "../data/source.ts";
 import { fixtureMetrics, SYNTHETIC_DATASET_ID } from "../data/synthetic.ts";
 import { formatDate, formatDateTime } from "../lib/format.ts";
 import { useScope } from "../lib/hooks.ts";
-import { Link } from "../lib/router.tsx";
+import { Link, ScopedLink } from "../lib/router.tsx";
 
 export function MethodologyPage() {
   return (
@@ -51,7 +51,7 @@ export function MethodologyPage() {
       <section className="section" aria-labelledby="index">
         <h2 id="index">Measure index</h2>
         <p className="muted">
-          Registry {registry.contract_version}, policy {registry.policy_version}. <Link to="/methodology/changes">Policy changes</Link>
+          Registry {registry.contract_version}, policy {registry.policy_version}. <ScopedLink to="/methodology/changes">Policy changes</ScopedLink>
         </p>
         {families.map((family) => (
           <div key={family.id}>
@@ -59,7 +59,7 @@ export function MethodologyPage() {
             <ul className="inline-list">
               {metricsInFamily(family.id).map((metric) => (
                 <li key={metric.id}>
-                  <Link to={`/methodology/${metric.id}`}>{metric.name}</Link>
+                  <ScopedLink to={`/methodology/${metric.id}`}>{metric.name}</ScopedLink>
                 </li>
               ))}
             </ul>
@@ -94,7 +94,7 @@ export function MethodSheetPage({ metricId }: { metricId: string }) {
     <>
       <PageHeader eyebrow={`Method sheet · ${registry.policy_version}`} title={metric.name}>
         <p>
-          <Link to={`/leaderboards/${metric.id}`}>Open the board</Link>
+          <ScopedLink to={`/leaderboards/${metric.id}`}>Open the board</ScopedLink>
         </p>
       </PageHeader>
       <dl className="receipt">
@@ -373,7 +373,7 @@ export function NotFoundPage() {
     <>
       <PageHeader title="Page not found" />
       <EmptyState title="Nothing lives at this address">
-        <Link to="/">Go to the overview</Link> or <Link to="/leaderboards">browse leaderboards</Link>.
+        <ScopedLink to="/">Go to the overview</ScopedLink> or <ScopedLink to="/leaderboards">browse leaderboards</ScopedLink>.
       </EmptyState>
     </>
   );

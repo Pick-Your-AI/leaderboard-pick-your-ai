@@ -1,3 +1,5 @@
+import { parseScope, scopedHref } from "./scope.ts";
+import { scopeContext } from "../data/source.ts";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 /**
@@ -95,4 +97,11 @@ export function matchPath(pattern: string, pathname: string): Record<string, str
     }
   }
   return params;
+}
+
+/** Ordinary cross-route links preserve filters and an immutable snapshot pin. */
+export function ScopedLink({ to, ...rest }: LinkProps) {
+  const { search } = useRouter();
+  const { scope } = parseScope(search, scopeContext);
+  return <Link {...rest} to={scopedHref(to, scope)} />;
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { defaultScope, parseScope, resolveWindow, serializeScope } from "../src/lib/scope.ts";
+import { defaultScope, parseScope, resolveWindow, serializeScope, scopedHref, mayFollowUpdates } from "../src/lib/scope.ts";
 
 const context = { repoIds: ["r1", "r2"], projectIds: ["p1"], snapshotIds: ["s1", "s2"] };
 
@@ -57,4 +57,24 @@ test("rolling and calendar windows resolve against the snapshot cutoff in UTC", 
   assert.equal(at("year").start?.toISOString(), "2026-01-01T00:00:00.000Z");
   assert.equal(at("all").start, null);
   assert.equal(at("7d").end.toISOString(), cutoff.toISOString());
+});
+
+
+test("cross-route journeys preserve global scope without leaking route controls", () => {
+  const selected = parseScope("?period=90d&repo=r1&project=p1&actor=automation&snapshot=s1&density=compact&q=triage&proof=reader", context).scope;
+  for (const path of ["/", "/leaderboards", "/contributors/reader", "/contributions/receipt", "/methodology/triage", "/coverage", "/live"]) {
+    const href = scopedHref(path, selected);
+    const url = new URL(href, "https://prototype.example");
+    assert.equal(url.pathname, path);
+    assert.deepEqual(parseScope(url.search, context).scope, selected);
+    assert.equal(url.searchParams.has("q"), false);
+    assert.equal(url.searchParams.has("proof"), false);
+  }
+});
+
+test("follow mode cannot resume while keyboard, pointer or proof remains engaged", () => {
+  assert.equal(mayFollowUpdates(false, true, false), false, "pointer leave must not release keyboard engagement");
+  assert.equal(mayFollowUpdates(true, false, false), false, "blur must not release pointer engagement");
+  assert.equal(mayFollowUpdates(false, false, true), false);
+  assert.equal(mayFollowUpdates(false, false, false), true);
 });

@@ -308,3 +308,13 @@ export function inWindow(timestamp: string, window: TimeWindow): boolean {
   const time = Date.parse(timestamp);
   return (window.start === null || time >= window.start.getTime()) && time < window.end.getTime();
 }
+
+/** Carry only global scope across route changes, leaving local searches behind. */
+export function scopedHref(path: string, scope: Scope): string {
+  return `${path}${serializeScope(scope)}`;
+}
+
+/** Follow updates wait for every form of reader engagement to end. */
+export function mayFollowUpdates(pointerInside: boolean, focusInside: boolean, proofOpen: boolean): boolean {
+  return !pointerInside && !focusInside && !proofOpen;
+}

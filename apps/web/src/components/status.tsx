@@ -3,7 +3,7 @@ import type { Coverage } from "@pick-your-ai/contracts";
 import type { EvidenceState, Freshness, SnapshotMeta } from "../data/model.ts";
 import type { SnapshotView } from "../data/source.ts";
 import { formatDate, formatDateTime } from "../lib/format.ts";
-import { Link } from "../lib/router.tsx";
+import { ScopedLink } from "../lib/router.tsx";
 
 /** Evidence states always carry a word; the glyph is decoration only. */
 export const evidenceLabels: Record<EvidenceState, { label: string; glyph: string; description: string }> = {
@@ -135,8 +135,8 @@ export function ErrorState({ error }: { error: Error & { detail?: string } }) {
       </p>
       {error.detail && <p>{error.detail}</p>}
       <p>
-        Nothing on this page has been replaced with zeros or estimates. Try the latest snapshot, or check <Link to="/coverage">source
-        coverage</Link>.
+        Nothing on this page has been replaced with zeros or estimates. Try the latest snapshot, or check <ScopedLink to="/coverage">source
+        coverage</ScopedLink>.
       </p>
     </div>
   );

@@ -4,21 +4,28 @@ import { PersonName, ReceiptBody } from "../components/Receipt.tsx";
 import { ScopeBar } from "../components/ScopeBar.tsx";
 import { EmptyState, ErrorState, FreshnessIndicator, Loading, Notice, SnapshotNotices, StateLabel } from "../components/status.tsx";
 import type { ContributionRecord } from "../data/model.ts";
-import { getContribution, listActivity, listCorrections, personFor, repositories } from "../data/source.ts";
+import { getContribution, listActivity, listCorrections, personFor, repositories, resolveSnapshot } from "../data/source.ts";
 import { formatDateTime } from "../lib/format.ts";
 import { useLatestSnapshotId, useRead, useScope } from "../lib/hooks.ts";
-import { Link } from "../lib/router.tsx";
-import { serializeScope } from "../lib/scope.ts";
+import { ScopedLink } from "../lib/router.tsx";
+import { serializeScope, resolveWindow } from "../lib/scope.ts";
 
 export function ContributionPage({ id }: { id: string }) {
   const latest = useLatestSnapshotId();
-  const view = getContribution(id);
+  const { scope } = useScope();
+  const state = useRead(() => {
+    const snapshot = resolveSnapshot(scope, latest);
+    return { view: getContribution(id, snapshot.served.id), snapshot };
+  }, [id, serializeScope(scope), latest]);
+  if (state.status === "loading") return <Loading label="contribution" />;
+  if (state.status === "error") return <ErrorState error={state.error} />;
+  const { view, snapshot } = state.data;
   if (!view) {
     return (
       <>
         <PageHeader title="Contribution not available" />
         <EmptyState title="There is no public contribution with this ID">
-          It may have been removed, or it was never public. <Link to="/activity">Browse activity</Link>.
+          It may have been removed, or it was never public. <ScopedLink to="/activity">Browse activity</ScopedLink>.
         </EmptyState>
       </>
     );
@@ -26,7 +33,7 @@ export function ContributionPage({ id }: { id: string }) {
   const { record, person } = view;
   const correctionPreview = new URLSearchParams({
     receipt: record.id,
-    snapshot: latest,
+    snapshot: snapshot.served.id,
     title: `Correction: ${record.id}`,
   }).toString();
 
@@ -37,6 +44,9 @@ export function ContributionPage({ id }: { id: string }) {
           <StateLabel state={record.evidence} /> · <span className="mono">{view.repository}</span>
         </p>
       </PageHeader>
+      <ScopeBar timeWindow={resolveWindow(scope, new Date(snapshot.served.cutoff))} />
+      <FreshnessIndicator view={snapshot} compact />
+      <SnapshotNotices view={snapshot} />
       {record.corrections.length > 0 && (
         <Notice tone="info" title="Corrected result">
           This contribution's credit changed after a public correction. The history below shows what changed and when.
@@ -116,7 +126,7 @@ export function ActivityPage() {
                     <span className="tag">{entry.kind}</span>
                     <span>
                       <PersonName person={personFor(entry.record.actorId)} /> ·{" "}
-                      <Link to={`/contributions/${entry.record.id}`}>{entry.record.title}</Link>
+                      <ScopedLink to={`/contributions/${entry.record.id}`}>{entry.record.title}</ScopedLink>
                       {entry.kind === "Activity" && (
                         <>
                           {" "}
@@ -152,7 +162,7 @@ export function CorrectionsPage() {
               <li key={correction.correctionId} className="receipt-row">
                 <div className="receipt-row-main">
                   <span className="mono">{correction.correctionId}</span>
-                  <Link to={`/contributions/${record.id}`}>{record.title}</Link>
+                  <ScopedLink to={`/contributions/${record.id}`}>{record.title}</ScopedLink>
                 </div>
                 <div className="receipt-row-meta muted">
                   <time dateTime={correction.at}>{formatDateTime(correction.at)}</time> · {correction.summary}
