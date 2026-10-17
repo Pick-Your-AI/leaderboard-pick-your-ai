@@ -48,7 +48,7 @@ The dedicated repository boundary has been selected. Other recommendations below
 
 **Status:** Repository boundary adopted; runtime architecture approval remains open
 
-**Decision:** Use Pick-Your-AI/pick-your-ai-leaderboard for the dedicated contributor recognition project. Public hosting, product name, collector installation and runtime implementation remain governed by their delivery packages.
+**Decision:** Use Pick-Your-AI/pick-your-ai-leaderboard for the dedicated contributor recognition project. The user selected leaderboard.pickyour.ai as the target public domain. This approves the domain only; hosting, spending, operations ownership and launch acceptance remain unresolved. Product name, collector installation and runtime implementation remain governed by their delivery packages.
 
 **Id:** DEC-02
 
