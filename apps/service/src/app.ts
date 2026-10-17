@@ -1,7 +1,7 @@
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { metricRegistrySchema, type MetricRegistry } from "@pick-your-ai/contracts";
+import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { projectRead, PublicReadError, unavailableSource, type PublicRead, type PublicScope, type PublicSnapshotSource } from "./public-source.js";
 
 export interface ServiceOptions {
@@ -24,8 +24,7 @@ const csv = (value: unknown) => {
 export function createService(options: ServiceOptions = {}) {
   const app = Fastify({ logger: false, bodyLimit: 1024, routerOptions: { maxParamLength: 200 } });
   const source = options.source ?? unavailableSource;
-  const registry = metricRegistrySchema.parse(options.registry ?? JSON.parse(readFileSync(
-    new URL("../../../packages/metrics/src/v1/registry.json", import.meta.url), "utf8")));
+  const registry = metricRegistrySchema.parse(options.registry ?? metricRegistryV1);
   const now = options.now ?? Date.now;
   const secret = options.cursorSecret ?? randomBytes(32).toString("hex");
   const timeout = options.sourceTimeoutMs ?? 2000;

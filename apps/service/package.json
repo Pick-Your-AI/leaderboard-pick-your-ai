@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@pick-your-ai/contracts": "0.1.0",
+    "@pick-your-ai/metrics": "0.1.0",
     "fastify": "5.12.7"
   },
   "devDependencies": {

@@ -144,6 +144,8 @@ validation from these deterministic limits.
 Validation commands:
 
 ```sh
+npm run build --workspace @pick-your-ai/contracts
+npm run build --workspace @pick-your-ai/metrics
 npm run build --workspace @pick-your-ai/service
 node --test apps/service/test/*.test.mjs
 python scripts/validate_plan.py
@@ -154,7 +156,9 @@ python scripts/render_docs.py --check
 HTTP integration and browser-helper tests use synthetic data exclusively and cover
 pagination/pins, filter scope, ties/unknowns, suppression/revocation, private evidence,
 ETag revalidation, safe CSV, sanitized outages, invalid/costly queries, deadlines,
-SSE reset/heartbeat and conditional polling/pause/fallback. They do not verify a real
+SSE reset/heartbeat and conditional polling/pause/fallback. A separate process smoke
+test starts the service from dist-only workspace packages with no metrics source
+tree, verifying the exported metrics registry package boundary. They do not verify a real
 GitHub App, source permissions, metric correctness on real observations or deployment.
 Issues #99, #105, #106, #92 and #110 still require their applicable prerequisite policy
 and affected-owner acceptance, plus a reviewed public projection producer. Anonymous
