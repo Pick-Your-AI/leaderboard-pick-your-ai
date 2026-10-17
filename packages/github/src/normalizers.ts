@@ -62,6 +62,7 @@ export interface GithubEvidenceEnvelope {
     commitShas: readonly string[]; diff?: PinnedPhysicalDiff };
   lineage?: readonly GithubLineage[];
   reviewCohort?: { verified: true; firstReadyAt: string | null; firstSubmittedReviewAt: string | null };
+  reviewParticipation?: { verified: true; firstSubmittedAt: string | null; roundFirstSubmittedAt: string | null };
 }
 
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -89,6 +90,7 @@ function url(value: unknown, slug: string, allowProject = false): string | null 
   if (typeof value !== "string") return null;
   try {
     const parsed = new URL(value);
+    if (/^#(?:issuecomment-\d+|pullrequestreview-\d+|discussion_r\d+|r\d+)$/.test(parsed.hash)) parsed.hash = "";
     if (parsed.origin !== "https://github.com" || parsed.username || parsed.password || parsed.search || parsed.hash) return null;
     if (!parsed.pathname.startsWith(`/${slug}/`) && !(allowProject && /^\/orgs\/[A-Za-z0-9-]+\/projects\/\d+$/.test(parsed.pathname))) return null;
     if (!/^\/[A-Za-z0-9_.\/-]+$/.test(parsed.pathname) || parsed.pathname.includes("..")) return null;
@@ -119,7 +121,7 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
     envelope.action?.startsWith("milestone_") && object(payload.milestone) ? payload.milestone : payload;
   const kind: NormalizedPublicEvidence["artifact"]["kind"] = envelope.family === "pull_request" || envelope.family === "review" || envelope.family === "revert" ? "pull_request" :
     envelope.family === "commit" ? "commit" : envelope.family === "release" ? "release" : envelope.family === "project_snapshot" || envelope.family === "field_change" && envelope.action?.startsWith("project") ? "project" :
-    envelope.family === "triage" && /^(?:label|milestone)_/.test(envelope.action ?? "") ? "other" : "issue";
+    envelope.family === "comment" || envelope.family === "triage" && /^(?:label|milestone)_/.test(envelope.action ?? "") ? "other" : "issue";
   const id = resourceId(resource, kind, repository.id);
   if (repository.visibility !== "public" || object(payload.repository) && payload.repository.private !== false) {
     if (id) out.suppressArtifactIds.push(id);
@@ -165,7 +167,9 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
   } else if (envelope.family === "pull_request") {
     const created = time(resource.created_at ?? resource.createdAt);
     emit("pr_opened", author, "author", created, `${id}:opened`);
-    if (sourceAction === "ready_for_review") emit("pr_ready", author, "author", at, `${id}:ready:${at}`);
+    if (envelope.reviewCohort?.verified && time(envelope.reviewCohort.firstReadyAt)) {
+      emit("pr_ready", author, "author", time(envelope.reviewCohort.firstReadyAt), `${id}:ready`);
+    } else if (sourceAction === "ready_for_review") out.reasons.push("first_ready_milestone_not_proven_by_a_toggle");
     const merged = resource.merged === true && time(resource.merged_at ?? resource.mergedAt);
     const decision = merged || resource.state === "closed" && resource.merged === false && time(resource.closed_at ?? resource.closedAt);
     if (merged) {
@@ -183,7 +187,7 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
       const coauthor = entry.verificationReceipt.trim() ? register(entry.actor) : null;
       if (coauthor) {
         out.participation.push({ artifactId: id, actorId: coauthor.id, role: "coauthor", conservedUnit: `${id}:merged` });
-        emit("pr_coauthored", coauthor, "coauthor", merged || created, `${id}:participation`);
+        emit("pr_coauthored", coauthor, "coauthor", merged || null, `${id}:participation`, !merged ? { state: "pending" } : {});
       }
     }
   } else if (envelope.family === "issue") {
@@ -204,9 +208,15 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
     else if (state === "DISMISSED" || sourceAction === "dismissed") {
       emit("review_rounds", reviewer, "reviewer", at, `${reviewId}:dismissed`, { state: "excluded", rawState: "dismissed" });
     } else {
-      emit("prs_reviewed", reviewer, "reviewer", submitted, `${reviewId}:reviewer-participation`, { rawState: state! });
-      emit("review_rounds", reviewer, "reviewer", submitted, `${reviewId}:submitted`, { rawState: state! });
-      emit("review_feedback", reviewer, "reviewer", submitted, `${reviewId}:feedback`, { rawState: state! });
+      const firstSubmitted = envelope.reviewParticipation?.verified ? time(envelope.reviewParticipation.firstSubmittedAt) : null;
+      if (reviewer?.kind === "user" && author && reviewer.id !== author.id && firstSubmitted) {
+        emit("prs_reviewed", reviewer, "reviewer", firstSubmitted, `${id}:reviewer-participation`, { rawState: "submitted_review_participation" });
+      } else out.reasons.push(!firstSubmitted ? "first_submitted_review_milestone_unverified" : "self_or_non_user_review_excluded");
+      const head = text(review.commit_id ?? review.commitOid);
+      const firstInRound = envelope.reviewParticipation?.verified ? time(envelope.reviewParticipation.roundFirstSubmittedAt) : null;
+      if (head && pinnedSha(head) && firstInRound) emit("review_rounds", reviewer, "reviewer", firstInRound, `${id}:head:${head}`, { rawState: `submitted_head:${head}` });
+      else out.reasons.push("review_head_round_or_first_submission_unverified");
+      emit("review_feedback", reviewer, "reviewer", time(review.created_at ?? review.createdAt), `${reviewId}:feedback`, { rawState: state! });
       if (envelope.action === "first_submitted_review_verified") emit("first_reviews", reviewer, "reviewer", submitted, `${id}:first-review`);
     }
     out.reasons.push("review_quality_requires_independent_receipt");
@@ -308,8 +318,13 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
     } else {
       out.physicalDiff = classifyPhysicalDiff(integration.diff);
       if (!out.physicalDiff.complete) out.reasons.push(...out.physicalDiff.reasons);
-      else for (const [metric, quantity] of [["pr_lines_added", out.physicalDiff.additions], ["pr_lines_removed", out.physicalDiff.deletions], ["pr_lines_changed", out.physicalDiff.changed], ["files_changed", out.physicalDiff.filesChanged]] as const) {
-        emit(metric, author, "author", at, `${repository.id}:${integration.canonicalChangeId}:default-integration`, { quantity: quantity!, rawState: "physical_change_not_effort" });
+      else {
+        for (const [metric, quantity] of [["pr_lines_added", out.physicalDiff.additions], ["pr_lines_removed", out.physicalDiff.deletions], ["pr_lines_changed", out.physicalDiff.changed]] as const) {
+          emit(metric, author, "author", at, `${repository.id}:${integration.canonicalChangeId}:default-integration`, { quantity: quantity!, rawState: "physical_change_not_effort" });
+        }
+        for (const file of out.physicalDiff.files.filter(file => file.eligible)) {
+          emit("files_changed", author, "author", at, `${repository.id}:${integration.canonicalChangeId}:path:${file.path}`, { rawState: `eligible_${file.classification}_path` });
+        }
       }
     }
   }

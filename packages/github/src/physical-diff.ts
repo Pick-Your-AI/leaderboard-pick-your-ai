@@ -30,7 +30,7 @@ export interface ClassifiedPhysicalDiff {
   files: Array<PhysicalFile & { classification: FileClass; eligible: boolean; reason: string | null }>;
   reasons: string[];
 }
-export function pinnedSha(value: string): boolean { return typeof value === "string" && /^[a-f0-9]{40,64}$/i.test(value); }
+export function pinnedSha(value: string): boolean { return typeof value === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(value); }
 function path(value: string): void {
   if (typeof value !== "string" || !value || value.startsWith("/") || value.includes("\\") ||
     value.split("/").some(part => part === ".." || part === ".") || /[\x00-\x1f]/.test(value)) throw new Error("Unsafe diff path");
@@ -66,7 +66,7 @@ export function classifyPhysicalDiff(diff: PinnedPhysicalDiff): ClassifiedPhysic
   const eligible = files.filter(file => file.eligible);
   const additions = eligible.reduce((sum, file) => sum + file.additions, 0);
   const deletions = eligible.reduce((sum, file) => sum + file.deletions, 0);
-  if (![rawAdditions, rawDeletions, additions, deletions].every(Number.isSafeInteger)) throw new Error("Physical aggregate exceeds safe integer bound");
+  if (![rawAdditions, rawDeletions, additions, deletions, additions + deletions, rawAdditions + rawDeletions].every(Number.isSafeInteger)) throw new Error("Physical aggregate exceeds safe integer bound");
   return { complete: diff.complete, additions: diff.complete ? additions : null, deletions: diff.complete ? deletions : null,
     changed: diff.complete ? additions + deletions : null, net: diff.complete ? additions - deletions : null,
     filesChanged: diff.complete ? eligible.length : null, rawAdditions, rawDeletions, files,

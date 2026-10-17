@@ -78,7 +78,8 @@ test("verified coauthors conserve the object and model trailers never create peo
 
 test("submitted COMMENTED review is raw feedback, distinct PR grouping excludes spam and dismissal is explicit", () => {
   const make = (reviewId, state = "COMMENTED") => normalizeGithubObservation(envelope({ family: "review", action: "submitted",
-    payload: { pull_request: pr(), review: { id: reviewId, node_id: `R_${reviewId}`, user: fixture.reviewer, state, submitted_at: at } } }));
+    reviewParticipation: { verified: true, firstSubmittedAt: at, roundFirstSubmittedAt: at },
+    payload: { pull_request: pr(), review: { id: reviewId, node_id: `R_${reviewId}`, user: fixture.reviewer, state, submitted_at: at, created_at: at, commit_id: after } } }));
   const a = make(1), b = make(2, "APPROVED");
   assert.equal(metrics(a, "prs_reviewed")[0].artifactId, metrics(b, "prs_reviewed")[0].artifactId);
   assert.equal(new Set([...a.facts, ...b.facts].filter(item => item.metricId === "prs_reviewed").map(item => `${item.actorId}:${item.artifactId}`)).size, 1);
@@ -106,6 +107,11 @@ test("issue reporter, closer and implementing outcome never silently receive eac
   assert.equal(metrics(out, "issue_closure_stewardship")[0].actorId, "202");
   assert.equal(metrics(out, "issue_resolution").length, 0);
   assert.equal(metrics(out, "confirmed_bugs").length, 0);
+  const comment = normalizeGithubObservation(envelope({ family: "comment", action: "created", payload: { id: 50, node_id: "IC_synthetic_50", user: fixture.reviewer,
+    created_at: at, html_url: "https://github.com/synthetic-owner/repository/issues/20#issuecomment-50" } }));
+  assert.equal(comment.facts[0].state, "pending");
+  assert.equal(comment.evidence[0].artifact.kind, "other");
+  assert.equal(comment.evidence[0].artifact.publicUrl, "https://github.com/synthetic-owner/repository/issues/20");
 });
 
 test("explicit revert lineage annotates original delivery without creating reverter merit or deleting history", () => {
@@ -134,7 +140,7 @@ test("agent execution under a User preserves account kind without certifying man
 
 test("recognition requires independently authorized receipt; COMMENTED feedback can qualify", () => {
   const raw = normalizeGithubObservation(envelope({ family: "review", action: "submitted", payload: { pull_request: pr(),
-    review: { id: 1, user: fixture.reviewer, state: "COMMENTED", submitted_at: at } } }));
+    review: { id: 1, user: fixture.reviewer, state: "COMMENTED", submitted_at: at, created_at: at, commit_id: after } } }));
   const target = metrics(raw, "review_feedback")[0];
   const receipt = { verified: true, id: "synthetic-acceptance", metricId: "review_feedback", actorId: "303", reviewerId: "202", acceptedAt: observedAt,
     decision: "accepted", targetFactId: target.id, evidenceIds: ["synthetic-accepted-review-outcome"] };
@@ -227,6 +233,8 @@ test("physical line classes exclude vendor/generated/locks/binary/imports and di
   assert.equal(out.additions, 15); assert.equal(out.deletions, 5); assert.equal(out.changed, 20); assert.equal(out.net, 10); assert.equal(out.filesChanged, 3);
   assert.equal(classifyPhysicalDiff({ before, after, complete: false, files: [] }).changed, null);
   assert.throws(() => classifyPhysicalDiff({ before, after, complete: true, files: [{ path: "../secret", additions: 1, deletions: 0 }] }), /Unsafe/);
+  for (const length of [41, 42, 63]) assert.throws(() => classifyPhysicalDiff({ before: "a".repeat(length), after, complete: true, files: [] }), /pinned/);
+  assert.throws(() => classifyPhysicalDiff({ before, after, complete: true, files: [{ path: "src/main.ts", additions: Number.MAX_SAFE_INTEGER, deletions: 1 }] }), /safe integer/);
 });
 
 test("stacked branch merges keep PR participation while delivered LOC appears once at pinned default integration", () => {
@@ -332,4 +340,47 @@ test("bounded local Git fallback reads pinned changes including rename and exclu
   assert.equal(classifyPhysicalDiff(diff).changed, 0);
   assert.equal((await readPinnedGitDiff({ repositoryPath: directory, before: first, after: second, maxFiles: 1 })).complete, false);
   await assert.rejects(readPinnedGitDiff({ repositoryPath: directory, before: "--untrusted", after: second }), /Pinned/);
+});
+
+test("registry clocks conserve first readiness and merged coauthor participation rather than toggles", () => {
+  const firstReadyAt = "2026-10-02T10:00:00Z";
+  const first = normalizeGithubObservation(envelope({ action: "ready_for_review", occurredAt: firstReadyAt,
+    reviewCohort: { verified: true, firstReadyAt, firstSubmittedReviewAt: null } }));
+  const toggle = normalizeGithubObservation(envelope({ action: "ready_for_review", occurredAt: at,
+    reviewCohort: { verified: true, firstReadyAt, firstSubmittedReviewAt: null } }));
+  assert.equal(metrics(first, "pr_ready")[0].id, metrics(toggle, "pr_ready")[0].id);
+  assert.equal(metrics(toggle, "pr_ready")[0].occurredAt, "2026-10-02T10:00:00.000Z");
+  assert.equal(metrics(normalizeGithubObservation(envelope({ action: "ready_for_review" })), "pr_ready").length, 0);
+  const unmerged = pr(); unmerged.merged = false; unmerged.merged_at = null; unmerged.closed_at = null; unmerged.state = "open";
+  const pending = normalizeGithubObservation(envelope({ payload: { pull_request: unmerged },
+    verifiedCoauthors: [{ actor: fixture.reviewer, verificationReceipt: "synthetic-verified-link" }] }));
+  assert.equal(metrics(pending, "pr_coauthored")[0].state, "pending");
+  assert.equal(metrics(pending, "pr_coauthored")[0].occurredAt, null);
+});
+
+test("review participation excludes self/bots and rounds conserve reviewer/PR/head with first-submission clocks", () => {
+  const input = envelope({ family: "review", action: "submitted",
+    reviewParticipation: { verified: true, firstSubmittedAt: at, roundFirstSubmittedAt: at },
+    payload: { pull_request: pr(), review: { id: 91, user: fixture.reviewer, state: "APPROVED", submitted_at: at, created_at: at, commit_id: after } } });
+  const a = normalizeGithubObservation(input);
+  const repeated = normalizeGithubObservation({ ...input, payload: { ...input.payload, review: { ...input.payload.review, id: 92, submitted_at: observedAt, state: "CHANGES_REQUESTED" } } });
+  assert.equal(metrics(a, "review_rounds")[0].id, metrics(repeated, "review_rounds")[0].id);
+  assert.equal(metrics(a, "review_rounds")[0].occurredAt, metrics(repeated, "review_rounds")[0].occurredAt);
+  assert.equal(metrics(a, "prs_reviewed")[0].id, metrics(repeated, "prs_reviewed")[0].id);
+  for (const user of [fixture.author, fixture.bot]) {
+    const out = normalizeGithubObservation({ ...input, payload: { ...input.payload, review: { ...input.payload.review, user } } });
+    assert.equal(metrics(out, "prs_reviewed").length, 0);
+  }
+  const missingHead = normalizeGithubObservation({ ...input, payload: { ...input.payload, review: { ...input.payload.review, commit_id: null } } });
+  assert.equal(metrics(missingHead, "review_rounds").length, 0);
+  assert.equal(metrics(normalizeGithubObservation({ ...input, reviewParticipation: undefined }), "prs_reviewed").length, 0);
+});
+
+test("files_changed emits one canonical count unit per eligible path, never a quantity pretending to be count", () => {
+  const out = normalizeGithubObservation(envelope({ integration: { before, after, canonicalChangeId: "synthetic-many-files", targetBranch: "main", defaultBranch: "main", commitShas: [after],
+    diff: { before, after, complete: true, files: [{ path: "src/a.ts", additions: 2, deletions: 1 }, { path: "src/b.ts", additions: 3, deletions: 1 }, { path: "vendor/x.ts", additions: 100, deletions: 1 }] } } }));
+  const files = metrics(out, "files_changed");
+  assert.equal(files.length, 2);
+  assert.equal(new Set(files.map(fact => fact.canonicalKey)).size, 2);
+  assert.ok(files.every(fact => fact.quantity === undefined));
 });
