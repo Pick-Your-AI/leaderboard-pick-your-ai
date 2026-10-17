@@ -345,7 +345,7 @@ export const metricResultSchema = z
       });
     }
     if (
-      result.state === "zero" &&
+      (result.state === "zero" || (result.state === "measured" && result.value === 0)) &&
       (result.coverage.state !== "complete" ||
         result.coverage.scopeId === null ||
         result.coverage.windowStart === null ||

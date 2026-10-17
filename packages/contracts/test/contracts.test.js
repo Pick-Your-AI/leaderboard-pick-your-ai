@@ -116,6 +116,10 @@ test("identity corrections and artifact lineage require review evidence", () => 
 test("an incomplete zero is rejected while a complete zero is valid", async () => {
   const incompleteZero = await fixture("incomplete-zero.json");
   assert.equal(metricResultSchema.safeParse(incompleteZero).success, false);
+  assert.equal(
+    metricResultSchema.safeParse({ ...incompleteZero, state: "measured" }).success,
+    false,
+  );
   const completeZero = {
     ...incompleteZero,
     coverage: {
@@ -126,6 +130,10 @@ test("an incomplete zero is rejected while a complete zero is valid", async () =
     },
   };
   assert.equal(metricResultSchema.safeParse(completeZero).success, true);
+  assert.equal(
+    metricResultSchema.safeParse({ ...completeZero, state: "measured" }).success,
+    true,
+  );
   assert.equal(
     metricResultSchema.safeParse({ ...completeZero, value: 42 }).success,
     false,
