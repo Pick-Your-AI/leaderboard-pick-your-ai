@@ -376,3 +376,19 @@ test("malformed live identifiers never trigger snapshot replacement", async t =>
   assert.equal(states.at(-1).freshness, "unknown");
   assert.equal(states.at(-1).transport, "unavailable");
 });
+
+test("disabled policy overlay explains unavailable metrics and removes pinned evidence/profile totals", async t => {
+  const h = harness(t);
+  h.data.selected.disabledMetrics = [{ id: "pr_opened", reason: "policy_withdrawn", policyVersion: "review-v2", policyLink: "https://github.com/synthetic/example/blob/main/policy.md" }];
+  h.data.selected.methodology = [{ metricId: "pr_opened", policyVersion: "review-v1", policySignature: "a".repeat(64), policyLink: null }];
+  const response = await h.app.inject(`${boardUrl}&snapshot=public-1`);
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.json().error, "metric_disabled");
+  assert.equal(response.json().metric.reason, "policy_withdrawn");
+  assert.equal((await h.app.inject("/api/v1/exports?metric=pr_opened&format=csv&snapshot=public-1")).statusCode, 503);
+  assert.deepEqual((await h.app.inject("/api/v1/contributors/alice?snapshot=public-1")).json().results, []);
+  assert.equal((await h.app.inject("/api/v1/evidence/e-alice?snapshot=public-1")).statusCode, 404);
+  const health = (await h.app.inject("/api/v1/health")).json();
+  assert.equal(health.disabledMetrics[0].id, "pr_opened");
+  assert.equal(health.methodology[0].policySignature, "a".repeat(64));
+});

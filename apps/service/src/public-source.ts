@@ -37,6 +37,8 @@ export interface PublishedSnapshot {
   evidence: PublicEvidence[];
   /** Approved per-metric direction; the API does not infer comparability or scoring. */
   ranking: { metricId: string; direction: "ascending" | "descending"; rank?: boolean }[];
+  disabledMetrics?: { id: string; reason: string; policyVersion: string; policyLink: string | null }[];
+  methodology?: { metricId: string; policyVersion: string; policySignature: string; policyLink: string | null }[];
 }
 /** Current controls must be read atomically even for a historical snapshot. */
 export interface PublicRead {
@@ -90,6 +92,19 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
         (entry.rank !== undefined && typeof entry.rank !== "boolean")) return reject();
     return { metricId: entry.metricId, direction: entry.direction, rank: entry.rank !== false };
   });
+  if ((selected.disabledMetrics !== undefined && (!Array.isArray(selected.disabledMetrics) || selected.disabledMetrics.length > 98)) ||
+      (selected.methodology !== undefined && (!Array.isArray(selected.methodology) || selected.methodology.length > 98))) return reject();
+  const disabledMetrics = (selected.disabledMetrics ?? []).map(entry => {
+    if (!id(entry.id) || !id(entry.policyVersion) || typeof entry.reason !== "string" || !/^[a-z0-9_:-]{1,100}$/.test(entry.reason)) return reject();
+    return { id: entry.id, reason: entry.reason, policyVersion: entry.policyVersion, policyLink: safePublicUrl(entry.policyLink) };
+  });
+  const methodology = (selected.methodology ?? []).map(entry => {
+    if (!id(entry.metricId) || !id(entry.policyVersion) || typeof entry.policySignature !== "string" || !/^[a-f0-9]{64}$/.test(entry.policySignature)) return reject();
+    return { metricId: entry.metricId, policyVersion: entry.policyVersion, policySignature: entry.policySignature, policyLink: safePublicUrl(entry.policyLink) };
+  });
+  if (new Set(disabledMetrics.map(entry => entry.id)).size !== disabledMetrics.length ||
+      new Set(methodology.map(entry => entry.metricId)).size !== methodology.length) return reject();
+  const disabled = new Set(disabledMetrics.map(entry => entry.id));
   if (new Set(ranking.map(entry => entry.metricId)).size !== ranking.length) return reject();
   const snapshot = snapshotSchema.parse(selected.snapshot);
   const controls = input.controls;
@@ -111,12 +126,13 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
   const actorIds = new Set(actors.map(actor => actor.actorId));
   const evidence = selected.evidence.map(entry => {
     const artifact = artifactSchema.parse(entry.artifact);
-    const contribution = contributionSchema.parse(entry.contribution);
+    const parsed = contributionSchema.parse(entry.contribution);
+    const contribution = { ...parsed, metricIds: parsed.metricIds.filter(metricId => !disabled.has(metricId)) };
     if (!date(entry.occurredAt) || (entry.sourceRevision !== null && !id(entry.sourceRevision))) return reject();
     return { artifact, contribution, occurredAt: entry.occurredAt, sourceRevision: entry.sourceRevision,
       sourceRevisionUrl: safePublicUrl(entry.sourceRevisionUrl) };
   }).filter(entry => entry.artifact.visibility === "public" && safePublicUrl(entry.artifact.publicUrl) !== null &&
-    !suppressedArtifacts.has(entry.artifact.stableId!) && entry.contribution.qualification === "eligible" &&
+    !suppressedArtifacts.has(entry.artifact.stableId!) && entry.contribution.metricIds.length > 0 && entry.contribution.qualification === "eligible" &&
     entry.contribution.artifactId === entry.artifact.stableId && actorIds.has(entry.contribution.actorId ?? "") &&
     (scope.repository === null || entry.artifact.repositoryId === scope.repository) &&
     (scope.start === null || (entry.occurredAt !== null && Date.parse(entry.occurredAt) >= Date.parse(scope.start))) &&
@@ -131,7 +147,7 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
     const result = metricResultSchema.parse(entry.result);
     if (evidenceReferenceCount > 40000 || !ranking.some(entry => entry.metricId === result.metricId)) return reject();
     return { actorId: entry.actorId, result, evidenceIds: [...entry.evidenceIds] };
-  }).filter(entry => actorIds.has(entry.actorId) &&
+  }).filter(entry => !disabled.has(entry.result.metricId) && actorIds.has(entry.actorId) &&
     // Remove affected aggregates entirely; subtracting evidence counts would corrupt ratios/weights.
     entry.evidenceIds.every(evidenceId => {
       const evidence = evidenceMap.get(evidenceId);
@@ -147,6 +163,7 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
     controls: { version: controls.version, suppressedActorIds: [], suppressedArtifactIds: [], revokedSnapshotIds: [] },
     selected: { approvedPublic: true, scope: { ...scope },
       snapshot: { ...snapshot, coverage: snapshot.coverage.map(coverage), results: [] },
-      actors, rows: rows.map(row => ({ ...row, result: { ...row.result, coverage: coverage(row.result.coverage) } })), evidence, ranking },
+      actors, rows: rows.map(row => ({ ...row, result: { ...row.result, coverage: coverage(row.result.coverage) } })), evidence,
+      ranking: ranking.filter(entry => !disabled.has(entry.metricId)), disabledMetrics, methodology },
   };
 }

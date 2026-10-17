@@ -31,6 +31,12 @@ Implement `PublicSnapshotSource.read(scope, snapshotId, signal)` atomically:
    approved metric-specific sort directions. Do not infer comparability or a
    universal score from unrelated metric families. Scope computation, identity
    verification and metric accuracy belong to their reviewed producers.
+   Optional `methodology` records bind each metric's policy version to a SHA-256
+   policy signature and a safe public policy link (or null). These are separate
+   from the current privacy-control epoch exposed as response `policyVersion`.
+   Optional current `disabledMetrics` provide a bounded machine-readable reason
+   and policy provenance; disabled board/export requests return 503 `metric_disabled`
+   and their rows/evidence are removed from every route, including historical pins.
 4. Respect AbortSignal and impose a backend query deadline. Do not hold database
    transactions while waiting for clients. Snapshots must be immutable within the
    same snapshot ID; replace the ID/revision after recomputation. Fail closed if

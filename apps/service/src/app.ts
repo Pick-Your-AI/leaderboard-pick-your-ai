@@ -101,7 +101,8 @@ export function createService(options: ServiceOptions = {}) {
     return { schemaVersion: snapshot.schemaVersion, snapshotId: snapshot.snapshotId, revision: snapshot.revision,
       generatedAt: snapshot.generatedAt, metricDefinitionVersion: snapshot.metricDefinitionVersion,
       computationVersion: snapshot.computationVersion, policyVersion: read.controls.version,
-      head: read.head, scope: read.selected.scope, coverage: snapshot.coverage };
+      head: read.head, scope: read.selected.scope, coverage: snapshot.coverage,
+      disabledMetrics: read.selected.disabledMetrics ?? [], methodology: read.selected.methodology ?? [] };
   }
   function sign(value: string) { return createHmac("sha256", secret).update(value).digest("base64url"); }
   function decodeCursor(cursor: string): { pin: string; policy: string; offset: number; binding: string; expires: number } {
@@ -144,6 +145,8 @@ export function createService(options: ServiceOptions = {}) {
     const cursor = q.cursor ? decodeCursor(q.cursor) : null;
     if (cursor && (cursor.binding !== binding || (q.snapshot !== null && q.snapshot !== cursor.pin))) fail(400, "cursor_scope_mismatch");
     const read = await load(q.scope, cursor?.pin ?? q.snapshot);
+    const disabled = read.selected.disabledMetrics?.find(entry => entry.id === q.metric);
+    if (disabled) return reply.code(503).header("Cache-Control", "no-store").send({ ...meta(read), error: "metric_disabled", metric: disabled });
     if (cursor && cursor.policy !== read.controls.version) fail(410, "cursor_policy_changed_refetch");
     const offset = cursor?.offset ?? 0;
     const rows = ranked(read, q.metric);
