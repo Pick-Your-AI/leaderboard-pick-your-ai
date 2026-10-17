@@ -1,0 +1,295 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BoardTable, MethodDisclosure, type BoardSort } from "../components/BoardTable.tsx";
+import { PageHeader } from "../components/Layout.tsx";
+import { ReceiptDrawer, ReceiptRow } from "../components/Receipt.tsx";
+import { ScopeBar } from "../components/ScopeBar.tsx";
+import {
+  CoverageNote,
+  EmptyState,
+  ErrorState,
+  FreshnessIndicator,
+  Loading,
+  Notice,
+  SnapshotNotices,
+} from "../components/status.tsx";
+import { familyLabel, getMetric, releaseEligibilityLabels } from "../data/registry.ts";
+import { buildBoard, type Board, type BoardRow } from "../data/source.ts";
+import { plural } from "../lib/format.ts";
+import { useLatestSnapshotId, useRead, useScope } from "../lib/hooks.ts";
+import { Link, useRouter } from "../lib/router.tsx";
+import { serializeScope } from "../lib/scope.ts";
+
+const PAGE_SIZE = 25;
+
+function changedRows(before: Board | null, after: Board | null): number {
+  if (!before || !after) return 0;
+  const previous = new Map(before.rows.map((row) => [row.person.actorId, `${row.rank}:${row.value}:${row.pending}`]));
+  let changed = 0;
+  for (const row of after.rows) if (previous.get(row.person.actorId) !== `${row.rank}:${row.value}:${row.pending}`) changed += 1;
+  return changed + Math.max(0, before.rows.length - after.rows.length);
+}
+
+/** Held-update control: new snapshots wait for the reader unless they opt in to follow. */
+function UpdateControl({
+  pendingId,
+  follow,
+  onFollow,
+  onApply,
+}: {
+  pendingId: string | null;
+  follow: boolean;
+  onFollow: (follow: boolean) => void;
+  onApply: () => void;
+}) {
+  return (
+    <div className="update-control">
+      {pendingId ? (
+        <p>
+          <span className="health health-warn">
+            <span aria-hidden="true">◑</span> Update held
+          </span>{" "}
+          Snapshot {pendingId} is ready.{" "}
+          <button type="button" className="button" onClick={onApply}>
+            Apply updates
+          </button>
+        </p>
+      ) : (
+        <p className="muted">Showing the latest snapshot. New snapshots are held until you apply them.</p>
+      )}
+      <label className="checkbox">
+        <input type="checkbox" checked={follow} onChange={(event) => onFollow(event.target.checked)} />
+        <span>Follow updates automatically when I am not reading the table</span>
+      </label>
+    </div>
+  );
+}
+
+export function BoardPage({ metricId }: { metricId: string }) {
+  const metric = getMetric(metricId);
+  const { scope, params, hrefWith } = useScope();
+  const { pathname, navigate } = useRouter();
+  const latest = useLatestSnapshotId();
+  const [shownLatest, setShownLatest] = useState(latest);
+  const [follow, setFollow] = useState(false);
+  const [engaged, setEngaged] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const regionRef = useRef<HTMLDivElement>(null);
+  const scopeKey = serializeScope(scope);
+  const state = useRead(() => buildBoard(metricId, scope, shownLatest), [metricId, scopeKey, shownLatest]);
+
+  const sort: BoardSort = params.sort === "name" ? "name" : "rank";
+  const limit = Math.max(PAGE_SIZE, Number.parseInt(params.rows ?? "", 10) || PAGE_SIZE);
+  const proof = params.proof ?? null;
+  const pendingId = !scope.snapshot && latest !== shownLatest ? latest : null;
+
+  const apply = useCallback(() => {
+    const before = buildBoard(metricId, scope, shownLatest);
+    const after = buildBoard(metricId, scope, latest);
+    setShownLatest(latest);
+    const changed = changedRows(before, after);
+    setAnnouncement(`Updated to snapshot ${latest}. ${changed === 0 ? "No ranked values changed." : `${plural(changed, "row")} changed.`}`);
+  }, [metricId, scope, shownLatest, latest]);
+
+  useEffect(() => {
+    if (pendingId && follow && !engaged && !proof) apply();
+  }, [pendingId, follow, engaged, proof, apply]);
+
+  const routeHref = useCallback(
+    (extra: Record<string, string | null>) => hrefWith(pathname, { ...params, ...extra }),
+    [hrefWith, pathname, params],
+  );
+
+  const proofRow = useMemo(() => {
+    if (state.status !== "ready" || !state.data || !proof) return null;
+    const row = state.data.rows.find((candidate) => candidate.person.login === proof);
+    if (row) return { person: row.person, ranked: row.ranked, pending: row.pendingRecords };
+    const pendingOnly = state.data.pendingOnly.find((candidate) => candidate.person.login === proof);
+    return pendingOnly ? { person: pendingOnly.person, ranked: [], pending: pendingOnly.records } : null;
+  }, [state, proof]);
+
+  if (!metric) return null;
+
+  const engagement = {
+    onFocus: () => setEngaged(true),
+    onBlur: (event: React.FocusEvent) => {
+      if (!regionRef.current?.contains(event.relatedTarget as Node | null)) setEngaged(false);
+    },
+    onPointerEnter: () => setEngaged(true),
+    onPointerLeave: () => setEngaged(false),
+  };
+
+  return (
+    <>
+      <PageHeader eyebrow={`${familyLabel(metric.family)} · leaderboard`} title={metric.name}>
+        <p>
+          {metric.counting_rule}. Unit: {metric.definition.unit}. Date basis: <span className="mono">{metric.event_clock}</span>.{" "}
+          {releaseEligibilityLabels[metric.definition.release_eligibility] ?? metric.definition.release_eligibility}.
+        </p>
+      </PageHeader>
+      <ScopeBar timeWindow={state.status === "ready" && state.data ? state.data.window : null} />
+      <div className="visually-hidden" aria-live="polite" role="status">
+        {announcement}
+      </div>
+      {state.status === "loading" && <Loading label="board" />}
+      {state.status === "error" && <ErrorState error={state.error} />}
+      {state.status === "ready" && state.data && (
+        <BoardBody
+          board={state.data}
+          scopeDensity={scope.density}
+          sort={sort}
+          limit={limit}
+          routeHref={routeHref}
+          regionRef={regionRef}
+          engagement={engagement}
+          update={
+            scope.snapshot ? (
+              <p className="muted">This link pins snapshot {scope.snapshot}. It never changes.</p>
+            ) : (
+              <UpdateControl pendingId={pendingId} follow={follow} onFollow={setFollow} onApply={apply} />
+            )
+          }
+        />
+      )}
+      {proof && state.status === "ready" && (
+        <ReceiptDrawer
+          title={proofRow ? `Evidence: ${proofRow.person.displayName}` : "Evidence not found"}
+          onClose={() => navigate(routeHref({ proof: null }))}
+          {...(proofRow ? { fullPageHref: hrefWith(`/contributors/${encodeURIComponent(proofRow.person.login)}`) } : {})}
+        >
+          {proofRow ? (
+            <>
+              <p>
+                {plural(proofRow.ranked.length, "contribution")} counted, {plural(proofRow.pending.length, "contribution")} pending and not
+                ranked, in this scope and snapshot.
+              </p>
+              <p className="muted">Fixture explanation: {state.data?.fixture?.explanation}</p>
+              <h3>Counted</h3>
+              {proofRow.ranked.length ? (
+                <ul className="receipt-list">
+                  {proofRow.ranked.map((record) => (
+                    <ReceiptRow key={record.id} record={record} />
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">None.</p>
+              )}
+              <h3>Pending, not ranked</h3>
+              {proofRow.pending.length ? (
+                <ul className="receipt-list">
+                  {proofRow.pending.map((record) => (
+                    <ReceiptRow key={record.id} record={record} />
+                  ))}
+                </ul>
+              ) : (
+                <p className="muted">None.</p>
+              )}
+            </>
+          ) : (
+            <p>No contributor "{proof}" appears on this board in the current scope.</p>
+          )}
+        </ReceiptDrawer>
+      )}
+    </>
+  );
+}
+
+function BoardBody({
+  board,
+  scopeDensity,
+  sort,
+  limit,
+  routeHref,
+  regionRef,
+  engagement,
+  update,
+}: {
+  board: Board;
+  scopeDensity: "comfortable" | "compact";
+  sort: BoardSort;
+  limit: number;
+  routeHref: (extra: Record<string, string | null>) => string;
+  regionRef: React.RefObject<HTMLDivElement | null>;
+  engagement: React.HTMLAttributes<HTMLDivElement>;
+  update: React.ReactNode;
+}) {
+  const proofHref = (row: BoardRow) => routeHref({ proof: row.person.login });
+  return (
+    <>
+      <div className="board-meta">
+        <FreshnessIndicator view={board.snapshot} />
+        <CoverageNote items={board.coverage} windowStart={board.window.start} />
+      </div>
+      <SnapshotNotices view={board.snapshot} />
+      {board.coverageState !== "complete" && board.status === "measured" && (
+        <Notice tone="warn" title="Partial history">
+          Some repositories in this scope have incomplete source history, so these values may be low. Missing activity is not counted as zero.
+        </Notice>
+      )}
+      {update}
+      <MethodDisclosure metric={board.metric} />
+
+      {board.status === "not_measured" && (
+        <EmptyState title={board.coverageState === "unavailable" ? "Unsupported source capability" : "Not measured in this prototype"}>
+          <p>
+            {board.coverageState === "unavailable"
+              ? `The source needed for this measure is unavailable in this scope (${board.coverage
+                  .flatMap((item) => item.permissionsMissing)
+                  .join(", ") || "no supported adapter"}). Nothing is shown as zero.`
+              : "This measure is defined in the metric registry, but the synthetic prototype has no fixture for it. It is not zero, and it is not ranked."}
+          </p>
+          <p>
+            <Link to={`/methodology/${board.metric.id}`}>Read its method sheet</Link> or{" "}
+            <Link to="/prototype">see which boards have prototype data</Link>.
+          </p>
+        </EmptyState>
+      )}
+      {board.status === "empty_complete" && (
+        <EmptyState title="No eligible activity in this complete scope">
+          Every source for this scope reports complete coverage for the whole window, and no eligible activity occurred. This is a true zero.
+        </EmptyState>
+      )}
+      {board.status === "empty_incomplete" && (
+        <EmptyState title="Nothing observed, but coverage is incomplete">
+          No activity was observed, but at least one source in this scope has partial or unknown coverage. This is not a zero.
+        </EmptyState>
+      )}
+      {board.rows.length > 0 && (
+        <div ref={regionRef} {...engagement}>
+          <BoardTable
+            board={board}
+            density={scopeDensity}
+            sort={sort}
+            limit={limit}
+            sortHref={(next) => routeHref({ sort: next === "rank" ? null : next })}
+            proofHref={proofHref}
+            moreHref={routeHref({ rows: String(limit + PAGE_SIZE) })}
+          />
+        </div>
+      )}
+      {board.pendingOnly.length > 0 && (
+        <section className="section" aria-labelledby="pending-only">
+          <h2 id="pending-only">Also active, not ranked</h2>
+          <p className="muted">These contributors have only pending work for this measure in this scope. They are listed, not ranked.</p>
+          <ul className="people-list">
+            {board.pendingOnly.map((entry) => (
+              <li key={entry.person.actorId}>
+                <Link to={routeHref({ proof: entry.person.login })}>{entry.person.displayName}</Link>:{" "}
+                {plural(entry.records.length, "pending contribution")}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {board.excluded.length > 0 && (
+        <section className="section" aria-labelledby="excluded">
+          <h2 id="excluded">Excluded under stated policy</h2>
+          <ul className="receipt-list">
+            {board.excluded.map((record) => (
+              <ReceiptRow key={record.id} record={record} />
+            ))}
+          </ul>
+        </section>
+      )}
+    </>
+  );
+}
