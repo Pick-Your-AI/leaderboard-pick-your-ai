@@ -78,3 +78,15 @@ test("HTTP 429 without quota headers uses the source retry fallback", () => {
     scope: "source",
   });
 });
+
+test("authorization errors retain their meaning when quota headers are also present", () => {
+  const headers = new Headers({ "x-ratelimit-remaining": "0", "retry-after": "12" });
+  assert.equal(classifyGithubFailure({ status: 401, headers }).kind, "authentication_required");
+  assert.equal(classifyGithubFailure({ status: 404, headers }).kind, "not_found_or_hidden");
+});
+
+test("invalid retry-after and unrelated primary reset cannot shorten secondary fallback", () => {
+  const headers = new Headers({ "retry-after": "1e300", "x-ratelimit-remaining": "42", "x-ratelimit-reset": "1767225601" });
+  assert.equal(classifyGithubFailure({ status: 429, headers, now: new Date("2026-01-01T00:00:00Z") }).retryAt,
+    "2026-01-01T00:01:00.000Z");
+});
