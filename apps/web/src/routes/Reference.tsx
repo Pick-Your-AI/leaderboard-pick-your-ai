@@ -21,17 +21,26 @@ export function MethodologyPage() {
     <>
       <PageHeader eyebrow="Methodology" title="How contributions are counted">
         <p>
-          Each measure has its own unit, attribution rule, date basis and sources. Nothing is combined into a single score, and there are no
-          streaks.
+          Each measure has its own unit, attribution rule, date basis and sources. Nothing is combined into a single
+          score, and there are no streaks.
         </p>
       </PageHeader>
       <section className="section" aria-labelledby="principles">
         <h2 id="principles">Principles</h2>
         <ul>
-          <li>Observed activity, accepted outcomes and reviewed recognition are separate states and never share a ranked value.</li>
-          <li>Unknown, unavailable and partial data are not zero. Zero is shown only when coverage is complete for the whole scope.</li>
+          <li>
+            Observed activity, accepted outcomes and reviewed recognition are separate states and never share a ranked
+            value.
+          </li>
+          <li>
+            Unknown, unavailable and partial data are not zero. Zero is shown only when coverage is complete for the
+            whole scope.
+          </li>
           <li>Ties share a dense rank (1, =2, =2, 3). Order within a tie is alphabetical and carries no credit.</li>
-          <li>User accounts and automation are separate. A user-account event does not prove manual work or the absence of AI assistance.</li>
+          <li>
+            User accounts and automation are separate. A user-account event does not prove manual work or the absence of
+            AI assistance.
+          </li>
           <li>Ingestion reads public sources only and never changes GitHub issues, labels or Projects.</li>
         </ul>
       </section>
@@ -51,7 +60,8 @@ export function MethodologyPage() {
       <section className="section" aria-labelledby="index">
         <h2 id="index">Measure index</h2>
         <p className="muted">
-          Registry {registry.contract_version}, policy {registry.policy_version}. <ScopedLink to="/methodology/changes">Policy changes</ScopedLink>
+          Registry {registry.contract_version}, policy {registry.policy_version}.{" "}
+          <ScopedLink to="/methodology/changes">Policy changes</ScopedLink>
         </p>
         {families.map((family) => (
           <div key={family.id}>
@@ -152,14 +162,20 @@ export function MethodologyChangesPage() {
           <div className="receipt-row-main">
             <span className="mono">{registry.policy_version}</span> Initial candidate registry of 98 measures
           </div>
-          <div className="receipt-row-meta muted">No published policy change yet. Comparisons across policy versions will say when they are unavailable.</div>
+          <div className="receipt-row-meta muted">
+            No published policy change yet. Comparisons across policy versions will say when they are unavailable.
+          </div>
         </li>
       </ol>
     </>
   );
 }
 
-const adapterNames = { github_rest: "Repository activity", reviewed_receipt: "Reviewed receipts", github_graphql: "Project history" } as const;
+const adapterNames = {
+  github_rest: "Repository activity",
+  reviewed_receipt: "Reviewed receipts",
+  github_graphql: "Project history",
+} as const;
 
 export function CoveragePage() {
   const adapters = Object.keys(adapterNames) as (keyof typeof adapterNames)[];
@@ -167,7 +183,8 @@ export function CoveragePage() {
     <>
       <PageHeader eyebrow="Source health" title="Coverage">
         <p>
-          What each source covers, from when, and where the gaps are. No completeness percentage is shown, because the true total is unknowable.
+          What each source covers, from when, and where the gaps are. No completeness percentage is shown, because the
+          true total is unknowable.
         </p>
       </PageHeader>
       <div className="table-region" role="region" aria-labelledby="coverage-caption" tabIndex={0}>
@@ -251,12 +268,17 @@ export function ProjectPage({ id }: { id: string }) {
           </li>
         ))}
       </ul>
-      <p className="muted">Historical attribution: a contribution belongs to a program by its repository at the time it happened. Unknown membership is not inferred.</p>
+      <p className="muted">
+        Historical attribution: a contribution belongs to a program by its repository at the time it happened. Unknown
+        membership is not inferred.
+      </p>
       <h2>Boards in this scope</h2>
       <ul className="inline-list">
         {Object.keys(fixtureMetrics).map((metricId) => (
           <li key={metricId}>
-            <Link to={hrefWith(`/leaderboards/${metricId}`, {}, { projects: [project.id] })}>{getMetric(metricId)?.name}</Link>
+            <Link to={hrefWith(`/leaderboards/${metricId}`, {}, { projects: [project.id] })}>
+              {getMetric(metricId)?.name}
+            </Link>
           </li>
         ))}
       </ul>
@@ -328,8 +350,9 @@ export function PrototypeGuidePage() {
     <>
       <PageHeader eyebrow="LB 13.04" title="Prototype guide">
         <p>
-          This is a design prototype on synthetic data ({SYNTHETIC_DATASET_ID}). It exists to evaluate journeys, states and accessibility before
-          the read API exists. It is not a production leaderboard, and none of its counts describe real people.
+          This is a design prototype on synthetic data ({SYNTHETIC_DATASET_ID}). It exists to evaluate journeys, states
+          and accessibility before the read API exists. It is not a production leaderboard, and none of its counts
+          describe real people.
         </p>
       </PageHeader>
       <section className="section" aria-labelledby="journeys">
@@ -360,8 +383,9 @@ export function PrototypeGuidePage() {
       <section className="section" aria-labelledby="fixture">
         <h2 id="fixture">What the fixture contains</h2>
         <p>
-          {Object.keys(fixtureMetrics).length} of 98 registry measures have synthetic rows. Every count on a board links to the rows behind it,
-          and every row carries a fixture explanation. The remaining measures render as not measured.
+          {Object.keys(fixtureMetrics).length} of 98 registry measures have synthetic rows. Every count on a board links
+          to the rows behind it, and every row carries a fixture explanation. The remaining measures render as not
+          measured.
         </p>
       </section>
     </>
@@ -373,7 +397,8 @@ export function NotFoundPage() {
     <>
       <PageHeader title="Page not found" />
       <EmptyState title="Nothing lives at this address">
-        <ScopedLink to="/">Go to the overview</ScopedLink> or <ScopedLink to="/leaderboards">browse leaderboards</ScopedLink>.
+        <ScopedLink to="/">Go to the overview</ScopedLink> or{" "}
+        <ScopedLink to="/leaderboards">browse leaderboards</ScopedLink>.
       </EmptyState>
     </>
   );

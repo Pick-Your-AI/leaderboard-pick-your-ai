@@ -10,13 +10,18 @@ function block(selector: string): Record<string, string> {
   const open = css.indexOf("{", start);
   const close = css.indexOf("}", open);
   const tokens: Record<string, string> = {};
-  for (const match of css.slice(open + 1, close).matchAll(/(--[\w-]+):\s*(#[0-9a-f]{6})/gi)) tokens[match[1]!] = match[2]!;
+  for (const match of css.slice(open + 1, close).matchAll(/(--[\w-]+):\s*(#[0-9a-f]{6})/gi))
+    tokens[match[1]!] = match[2]!;
   return tokens;
 }
 
 function luminance(hex: string): number {
   const channels = [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255);
-  const [r, g, b] = channels.map((value) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)) as [number, number, number];
+  const [r, g, b] = channels.map((value) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)) as [
+    number,
+    number,
+    number,
+  ];
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
@@ -56,7 +61,10 @@ for (const [name, selector] of [
     assert.ok(contrast(tokens["--color-on-accent"]!, tokens["--color-accent"]!) >= 4.5, `${name}: on-accent`);
     for (const surface of ["--color-bg", "--color-surface"]) {
       assert.ok(contrast(tokens["--color-focus"]!, tokens[surface]!) >= 3, `${name}: focus ring on ${surface}`);
-      assert.ok(contrast(tokens["--color-border-strong"]!, tokens[surface]!) >= 3, `${name}: control border on ${surface}`);
+      assert.ok(
+        contrast(tokens["--color-border-strong"]!, tokens[surface]!) >= 3,
+        `${name}: control border on ${surface}`,
+      );
     }
   });
 }

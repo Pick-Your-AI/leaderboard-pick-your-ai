@@ -22,7 +22,7 @@ There are seven single-select fields, including Status. Use built-in Assignees, 
 | Workstream | Program · 01 Product charter and contribution governance · 02 Repository, delivery Project and engineering foundation · 03 Metric contracts, identity and scope · 04 GitHub App and source capability verification · 05 Reliable live ingestion and event ledger · 06 Historical backfill, reconciliation and coverage · 07 Code, pull request and review recognition · 08 Issue, triage and project stewardship recognition · 09 Research, documentation and quality contributions · 10 Community evidence and editorial recognition · 11 Ranking, filters and fair comparison engine · 12 Read API, snapshots and integration contracts · 13 Information architecture and visual system · 14 Public boards, organization overview and evidence · 15 Contributor portfolios and sharing · 16 Live activity and public display modes · 17 Administration, moderation and contributor controls · 18 Security, privacy and operational safeguards · 19 Verification, accessibility and performance · 20 Hosting, observability and release operations |
 | Acceptance Gate | Approved decision · Verified source capability · Automated validation · Evidence review · Accessible user journey · Operational drill · Verified public release |
 
-All initial delivery issues remain Backlog and unassigned. Readiness distinguishes an unresolved decision, a missing prerequisite and a missing accepted owner. Ready requires both accepted ownership and usable inputs. A delivered documentation baseline does not close the package that also requires future implementation.
+The initial delivery baseline created issues in Backlog without assignees. Current issue and Project state records subsequent accepted work. Readiness distinguishes an unresolved decision, a missing prerequisite and a missing accepted owner. Ready requires both accepted ownership and usable inputs. A delivered documentation baseline does not close the package that also requires future implementation.
 
 ## Project views
 
@@ -148,7 +148,7 @@ P0 · Discovery · Awaiting decision · Acceptance gate: Approved decision.
 
 - [ ] `LB-01.04.T1` Reserve proposed pick-your-ai-leaderboard repository name in the plan
 - [ ] `LB-01.04.T2` Compare independent static frontend plus service host against approved shared infrastructure
-- [ ] `LB-01.04.T3` Evaluate contributors.pickyour.ai and website /contributors integration
+- [ ] `LB-01.04.T3` Configure approved leaderboard.pickyour.ai target and evaluate website integration
 - [ ] `LB-01.04.T4` Record cost ceiling, operational owner and deployment authorization procedure
 
 **Acceptance**

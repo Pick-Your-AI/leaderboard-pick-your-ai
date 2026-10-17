@@ -61,7 +61,14 @@ export function searchMetrics(query: string, family: string | null = null): Metr
     if (family && metric.family !== family) return false;
     if (terms.length === 0) return true;
     const haystack = normalize(
-      [metric.id, metric.name, metric.definition.unit, metric.counting_rule, metric.attribution, familyLabel(metric.family)].join(" "),
+      [
+        metric.id,
+        metric.name,
+        metric.definition.unit,
+        metric.counting_rule,
+        metric.attribution,
+        familyLabel(metric.family),
+      ].join(" "),
     );
     return terms.every((term) => haystack.includes(term));
   });

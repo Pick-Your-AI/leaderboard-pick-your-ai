@@ -3,7 +3,15 @@ import { RankCell } from "../components/BoardTable.tsx";
 import { PageHeader } from "../components/Layout.tsx";
 import { PersonName, ReceiptRow } from "../components/Receipt.tsx";
 import { ScopeBar } from "../components/ScopeBar.tsx";
-import { CoverageLabel, EmptyState, ErrorState, FreshnessIndicator, Loading, SnapshotNotices, StateLabel } from "../components/status.tsx";
+import {
+  CoverageLabel,
+  EmptyState,
+  ErrorState,
+  FreshnessIndicator,
+  Loading,
+  SnapshotNotices,
+  StateLabel,
+} from "../components/status.tsx";
 import {
   displayPolicyLabels,
   families,
@@ -12,13 +20,7 @@ import {
   metricsInFamily,
   searchMetrics,
 } from "../data/registry.ts";
-import {
-  buildBoard,
-  combinedCoverageState,
-  coverageFor,
-  listActivity,
-  listContributors,
-} from "../data/source.ts";
+import { buildBoard, combinedCoverageState, coverageFor, listActivity, listContributors } from "../data/source.ts";
 import { fixtureMetrics } from "../data/synthetic.ts";
 import { formatDate, formatNumber } from "../lib/format.ts";
 import { useLatestSnapshotId, useRead, useScope } from "../lib/hooks.ts";
@@ -50,7 +52,10 @@ export function OverviewPage() {
     const directory = listContributors(scope, latest);
     const activity = listActivity(scope, latest);
     // First observed anywhere in known history, not just in the selected repositories.
-    const history = listContributors({ ...scope, period: "all", from: null, to: null, repos: [], projects: [] }, latest).entries;
+    const history = listContributors(
+      { ...scope, period: "all", from: null, to: null, repos: [], projects: [] },
+      latest,
+    ).entries;
     const newcomers = history.filter(
       (entry) =>
         inWindow(entry.firstObservedAt, directory.window) &&
@@ -63,8 +68,8 @@ export function OverviewPage() {
     <>
       <PageHeader eyebrow="PickYour.AI organization" title="Contributions, with evidence">
         <p>
-          Many kinds of work, each on its own board with its own unit and source proof. There is no overall score. Every family below has
-          equal weight.
+          Many kinds of work, each on its own board with its own unit and source proof. There is no overall score. Every
+          family below has equal weight.
         </p>
       </PageHeader>
       <ScopeBar timeWindow={state.status === "ready" ? state.data.directory.window : null} />
@@ -79,8 +84,8 @@ export function OverviewPage() {
           <section aria-labelledby="families-heading" className="section">
             <h2 id="families-heading">Contribution families</h2>
             <p className="muted">
-              Grouped by the metric registry's own families. Department names and each family's lead metric are still open registry
-              decisions, so example boards are prototype choices.
+              Grouped by the metric registry's own families. Department names and each family's lead metric are still
+              open registry decisions, so example boards are prototype choices.
             </p>
             <ul className="family-grid">
               {families.map((family) => {
@@ -133,8 +138,8 @@ export function OverviewPage() {
           <section aria-labelledby="first-heading" className="section">
             <h2 id="first-heading">First observed contributions</h2>
             <p className="muted">
-              People whose first observed contribution falls in this window, alphabetically and unranked. "First observed" is bounded by
-              each source's known history.
+              People whose first observed contribution falls in this window, alphabetically and unranked. "First
+              observed" is bounded by each source's known history.
             </p>
             {state.data.newcomers.length ? (
               <ul className="people-list">
@@ -167,8 +172,10 @@ export function OverviewPage() {
           <section aria-labelledby="coverage-heading" className="section">
             <h2 id="coverage-heading">Source coverage</h2>
             <p>
-              Repository activity: <CoverageLabel state={combinedCoverageState(coverageFor(scope.repos, ["github_rest"]))} /> · Reviewed
-              receipts: <CoverageLabel state={combinedCoverageState(coverageFor(scope.repos, ["reviewed_receipt"]))} /> · Project history:{" "}
+              Repository activity:{" "}
+              <CoverageLabel state={combinedCoverageState(coverageFor(scope.repos, ["github_rest"]))} /> · Reviewed
+              receipts: <CoverageLabel state={combinedCoverageState(coverageFor(scope.repos, ["reviewed_receipt"]))} />{" "}
+              · Project history:{" "}
               <CoverageLabel state={combinedCoverageState(coverageFor(scope.repos, ["github_graphql"]))} />
             </p>
             <p>
@@ -193,7 +200,10 @@ export function LeaderboardsPage() {
   return (
     <>
       <PageHeader eyebrow="Metric catalog" title={family ? `${familyLabel(family)} measures` : "Leaderboards"}>
-        <p>Every defined measure from the metric registry, including ones that are not measured yet. Search by name, unit or rule.</p>
+        <p>
+          Every defined measure from the metric registry, including ones that are not measured yet. Search by name, unit
+          or rule.
+        </p>
       </PageHeader>
       {params.family && !family && (
         <div className="notice notice-warn" role="alert">
@@ -207,11 +217,22 @@ export function LeaderboardsPage() {
         </label>
         <fieldset className="chips">
           <legend>Family</legend>
-          <button type="button" className="chip" aria-pressed={family === null} onClick={() => setParam("family", null)}>
+          <button
+            type="button"
+            className="chip"
+            aria-pressed={family === null}
+            onClick={() => setParam("family", null)}
+          >
             All
           </button>
           {families.map((entry) => (
-            <button key={entry.id} type="button" className="chip" aria-pressed={family === entry.id} onClick={() => setParam("family", entry.id)}>
+            <button
+              key={entry.id}
+              type="button"
+              className="chip"
+              aria-pressed={family === entry.id}
+              onClick={() => setParam("family", entry.id)}
+            >
               {entry.label}
             </button>
           ))}
@@ -247,7 +268,9 @@ export function LeaderboardsPage() {
                   <td data-label="Family">{familyLabel(metric.family)}</td>
                   <td data-label="Unit">{metric.definition.unit}</td>
                   <td data-label="Display">{displayPolicyLabels[metric.display] ?? metric.display}</td>
-                  <td data-label="Prototype data">{fixtureMetrics[metric.id] ? "Synthetic fixture" : <StateLabel state="not_measured" />}</td>
+                  <td data-label="Prototype data">
+                    {fixtureMetrics[metric.id] ? "Synthetic fixture" : <StateLabel state="not_measured" />}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -257,7 +280,8 @@ export function LeaderboardsPage() {
       <p className="muted">
         Journeys: <Link to={hrefWith(`/leaderboards/${getMetric("pr_merged")!.id}`)}>PRs merged</Link> ·{" "}
         <Link to={hrefWith("/leaderboards/pr_lines_changed")}>Lines changed</Link> ·{" "}
-        <Link to={hrefWith("/leaderboards/labels_applied")}>Triage</Link> · <Link to={hrefWith("/leaderboards/decision_records")}>Research</Link> ·{" "}
+        <Link to={hrefWith("/leaderboards/labels_applied")}>Triage</Link> ·{" "}
+        <Link to={hrefWith("/leaderboards/decision_records")}>Research</Link> ·{" "}
         <Link to={hrefWith("/leaderboards/prs_reviewed")}>Review</Link>
       </p>
     </>

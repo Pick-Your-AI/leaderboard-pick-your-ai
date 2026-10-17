@@ -1,0 +1,827 @@
+import type { Actor, Contribution, Coverage } from "@pick-your-ai/contracts";
+import { getMetricDefinition } from "./v1/index.js";
+
+export type EvidenceState = "observed" | "qualified" | "reviewed" | "pending" | "excluded" | "unknown";
+export type Role = Contribution["roles"][number];
+export interface MetricFact {
+  id: string;
+  /** Same source action across adapters has the same explicit canonical key. */
+  canonicalKey: string | null;
+  metricId: string;
+  actorId: string | null;
+  artifactId: string | null;
+  repoId: string;
+  role: Role;
+  state: EvidenceState;
+  occurredAt: string | null;
+  acceptedAt: string | null;
+  observedAt: string;
+  revision: number;
+  /** Nonzero revisions require a reviewed correction receipt; inputs remain immutable. */
+  correctionReceipt: string | null;
+  acceptanceReceipt: string | null;
+  acceptedBy: string | null;
+  subjectActorId: string | null;
+  eventContext: { projects: string[]; workstreams: string[] } | null;
+  currentContext: { projects: string[]; workstreams: string[] } | null;
+  quantity?: number;
+  /** Literal source state, never an inferred classification. */
+  rawState?: string;
+  outcome?: "merged" | "closed_unmerged" | "pending";
+  readyAt?: string | null;
+  firstReviewAt?: string | null;
+}
+export interface EngineActor {
+  id: string;
+  login: string | null;
+  kind: Actor["kind"];
+  publicState: "visible" | "deleted" | "suppressed";
+}
+export interface MetricPolicy {
+  metricId: string;
+  version: string;
+  definitionVersion: string;
+  unit: string;
+  aggregation: "count" | "sum" | "ratio" | "duration";
+  dateBasis: "occurredAt" | "acceptedAt";
+  rankedStates: ("observed" | "qualified" | "reviewed")[];
+  roles: Role[];
+  groupBy: "canonical" | "actor_artifact" | "actor_artifact_state_interval";
+  /** Required for state-interval grouping. No interval is silently chosen. */
+  groupingSeconds?: number;
+  sources: Coverage["source"][];
+  minimumSamples: number;
+  rank: boolean;
+}
+export type MetricPeriod = "7d" | "30d" | "90d" | "all" | "month" | "quarter" | "year" | "custom";
+export interface MetricScope {
+  period?: MetricPeriod;
+  timezone: "UTC";
+  from: string | null;
+  to: string;
+  repos: string[];
+  projects: string[];
+  workstreams: string[];
+  roles: Role[];
+  actors: "user" | "automation" | "all";
+  context: "event" | "current";
+}
+export interface FrozenInput {
+  datasetId: string;
+  cutoff: string;
+  /** Changed by the collector for imports/reconciliation, not ordinary live progress. */
+  backfillRevision: string;
+  repositoryIds: string[];
+  actors: readonly EngineActor[];
+  facts: readonly MetricFact[];
+  coverage: readonly Coverage[];
+}
+export interface AuditEntry {
+  factIds: string[];
+  actorId: string | null;
+  reason: string;
+}
+export interface AggregateRow {
+  actorId: string;
+  login: string | null;
+  value: number | null;
+  state: "measured" | "partial" | "zero" | "unknown" | "insufficient_sample";
+  pending: number;
+  numerator: number | null;
+  denominator: number | null;
+  sampleCount: number;
+  samples: number[];
+  p75: number | null;
+  censored: number;
+  missingReadiness: number;
+  evidenceIds: string[];
+  evidence: { id: string; effectiveAt: string | null; observedAt: string }[];
+  rank: number | null;
+  tied: boolean;
+}
+export interface MetricAggregate {
+  metricId: string;
+  policyVersion: string;
+  policySignature: string;
+  definitionVersion: string;
+  unit: string;
+  aggregation: MetricPolicy["aggregation"];
+  /** The engine computes candidates. It never authorizes public release. */
+  publicEnabled: false;
+  scope: MetricScope;
+  datasetId: string;
+  cutoff: string;
+  backfillRevision: string;
+  coverage: "complete" | "incomplete";
+  rows: AggregateRow[];
+  /** Internal review receipts, excluded from any public projection. */
+  audit: AuditEntry[];
+}
+
+const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+const unique = (values: readonly string[]) => [...new Set(values)].sort(compare);
+const key = (...parts: unknown[]) => JSON.stringify(parts);
+const knownRoles = [
+  "author",
+  "coauthor",
+  "reviewer",
+  "merger",
+  "triager",
+  "reporter",
+  "resolver",
+  "nominator",
+  "automation",
+  "unknown",
+];
+const knownKinds = ["user", "bot", "github_app", "organization", "system", "unknown"];
+const knownSources = ["github_webhook", "github_rest", "github_graphql", "reviewed_receipt"];
+function required(value: string, name: string): void {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${name} is required`);
+}
+function instant(value: string): number {
+  if (typeof value !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?Z$/.test(value))
+    throw new Error("Expected an explicit UTC instant");
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms) || new Date(ms).toISOString().slice(0, 19) !== value.slice(0, 19))
+    throw new Error("Invalid UTC instant");
+  return ms;
+}
+function number(value: number, name: string): number {
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be finite and nonnegative`);
+  return value;
+}
+function canonicalScope(scope: MetricScope): MetricScope {
+  if (scope.timezone !== "UTC") throw new Error("Only explicit UTC scopes are supported");
+  if (scope.from !== null && instant(scope.from) >= instant(scope.to))
+    throw new Error("Window must be half-open with from < to");
+  instant(scope.to);
+  if (!["event", "current"].includes(scope.context) || !["user", "automation", "all"].includes(scope.actors))
+    throw new Error("Invalid filter semantics");
+  if (scope.period && scope.period !== "custom") {
+    const expected = resolveMetricWindow(scope.period, scope.to);
+    if ((scope.from === null ? null : instant(scope.from)) !== (expected.from === null ? null : instant(expected.from)))
+      throw new Error("Preset bounds must match their explicit UTC period");
+  }
+  if (scope.roles.some((role) => !knownRoles.includes(role))) throw new Error("Unknown role filter");
+  for (const id of [...scope.repos, ...scope.projects, ...scope.workstreams]) required(id, "Scope ID");
+  return {
+    ...scope,
+    repos: unique(scope.repos),
+    projects: unique(scope.projects),
+    workstreams: unique(scope.workstreams),
+    roles: unique(scope.roles) as Role[],
+  };
+}
+export function validateMetricPolicy(policy: MetricPolicy): void {
+  const metric = getMetricDefinition(policy.metricId);
+  if (!metric) throw new Error("Unknown metric ID");
+  required(policy.version, "Policy version");
+  required(policy.definitionVersion, "Definition version");
+  const implementedAggregation: Record<string, MetricPolicy["aggregation"]> = {
+    count_distinct_eligible_units: "count",
+    sum_eligible_line_units: "sum",
+    ratio: "ratio",
+    median_and_p75_of_elapsed_hours: "duration",
+  };
+  const expectedAggregation = implementedAggregation[metric.definition.aggregation];
+  if (!expectedAggregation || policy.aggregation !== expectedAggregation)
+    throw new Error("Aggregation must match implemented registry semantics; signed net changes are unsupported");
+  if (metric.definition.unit !== policy.unit) throw new Error("Unit must match the versioned registry");
+  if (!["count", "sum", "ratio", "duration"].includes(policy.aggregation)) throw new Error("Unsupported aggregation");
+  if (!["occurredAt", "acceptedAt"].includes(policy.dateBasis)) throw new Error("Unsupported date basis");
+  if (
+    policy.rankedStates.length !== 1 ||
+    policy.rankedStates.some((state) => !["observed", "qualified", "reviewed"].includes(state))
+  )
+    throw new Error("Exactly one evidence class is required; observed, qualified and reviewed values stay separate");
+  if (
+    !policy.roles.length ||
+    policy.roles.some((role) => !knownRoles.includes(role) || role === "unknown") ||
+    !policy.sources.length ||
+    policy.sources.some((source) => !knownSources.includes(source))
+  )
+    throw new Error("Explicit roles and known sources are required");
+  if (!Number.isSafeInteger(policy.minimumSamples) || policy.minimumSamples < 1)
+    throw new Error("Minimum sample size must be a positive integer");
+  if (!["canonical", "actor_artifact", "actor_artifact_state_interval"].includes(policy.groupBy))
+    throw new Error("Explicit grouping policy required");
+  if (
+    policy.groupBy === "actor_artifact_state_interval" &&
+    (!Number.isSafeInteger(policy.groupingSeconds) || policy.groupingSeconds! < 1)
+  )
+    throw new Error("State grouping requires an explicit positive interval");
+  if (policy.aggregation === "ratio" && policy.dateBasis !== "acceptedAt")
+    throw new Error("PR ratios use decision time, supplied as acceptedAt for merged and closed-unmerged decisions");
+  if (
+    policy.rank &&
+    (policy.aggregation === "ratio" ||
+      policy.aggregation === "duration" ||
+      metric.definition.release_eligibility === "descriptive-only")
+  )
+    throw new Error("Descriptive metrics cannot rank contributors");
+  if (policy.aggregation === "ratio" && policy.metricId !== "pr_accepted_rate")
+    throw new Error("Only decided-PR ratios have an implemented denominator");
+  if (policy.aggregation === "duration" && policy.metricId !== "review_wait")
+    throw new Error("Only ready-to-first-review durations are implemented");
+  if (
+    ["pr_accepted_rate", "review_wait"].includes(policy.metricId) &&
+    policy.aggregation !== (policy.metricId === "review_wait" ? "duration" : "ratio")
+  )
+    throw new Error("Diagnostic aggregation must match its metric");
+}
+
+export function resolveMetricWindow(
+  preset: MetricPeriod = "30d",
+  cutoff: string,
+  custom?: { from: string; to: string },
+): { timezone: "UTC"; period: MetricPeriod; from: string | null; to: string } {
+  const end = instant(cutoff),
+    date = new Date(end);
+  let start: number | null;
+  if (["7d", "30d", "90d"].includes(preset)) start = end - Number.parseInt(preset, 10) * 86400000;
+  else if (preset === "all") start = null;
+  else if (preset === "month") start = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
+  else if (preset === "quarter") start = Date.UTC(date.getUTCFullYear(), Math.floor(date.getUTCMonth() / 3) * 3, 1);
+  else if (preset === "year") start = Date.UTC(date.getUTCFullYear(), 0, 1);
+  else if (preset === "custom" && custom) {
+    start = instant(custom.from);
+    const to = instant(custom.to);
+    if (start >= to || to > end) throw new Error("Custom window must precede cutoff and have from < to");
+    return { timezone: "UTC", period: preset, from: new Date(start).toISOString(), to: new Date(to).toISOString() };
+  } else throw new Error("Unknown or incomplete window preset");
+  return {
+    timezone: "UTC",
+    period: preset,
+    from: start === null ? null : new Date(start).toISOString(),
+    to: new Date(end).toISOString(),
+  };
+}
+
+function coverageComplete(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): boolean {
+  if (scope.from === null) return false; // Known history is not proof of complete all-time history.
+  const repos = scope.repos.length ? scope.repos : input.repositoryIds;
+  if (!repos.length) return false;
+  return repos.every(
+    (repo) =>
+      input.repositoryIds.includes(repo) &&
+      policy.sources.every((source) =>
+        input.coverage.some(
+          (item) =>
+            item.scopeId === repo &&
+            item.source === source &&
+            item.state === "complete" &&
+            item.windowStart !== null &&
+            instant(item.windowStart) <= instant(scope.from!) &&
+            item.windowEnd !== null &&
+            instant(item.windowEnd) >= instant(scope.to) &&
+            item.knownStart !== null &&
+            instant(item.knownStart) <= instant(scope.from!) &&
+            item.missingPages === 0 &&
+            item.permissionsMissing.length === 0 &&
+            item.sourceErrors.length === 0,
+        ),
+      ),
+  );
+}
+
+interface Prepared {
+  facts: MetricFact[];
+  audit: AuditEntry[];
+}
+function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): Prepared {
+  const cutoff = instant(input.cutoff);
+  if (instant(scope.to) > cutoff) throw new Error("Scope cannot exceed the frozen cutoff");
+  required(input.datasetId, "Dataset ID");
+  required(input.backfillRevision, "Backfill revision");
+  if (new Set(input.actors.map((actor) => actor.id)).size !== input.actors.length)
+    throw new Error("Actor IDs must be unique");
+  for (const actor of input.actors) {
+    required(actor.id, "Actor ID");
+    if (!knownKinds.includes(actor.kind) || !["visible", "deleted", "suppressed"].includes(actor.publicState))
+      throw new Error("Unknown actor semantics");
+  }
+  for (const repo of input.repositoryIds) required(repo, "Allowed repository ID");
+  const actors = new Map(input.actors.map((actor) => [actor.id, actor]));
+  const audit: AuditEntry[] = [];
+  const reject = (facts: MetricFact[], reason: string) =>
+    audit.push({ factIds: unique(facts.map((fact) => fact.id)), actorId: facts[0]?.actorId ?? null, reason });
+  const versions = new Map<string, MetricFact[]>();
+  for (const fact of input.facts) {
+    if (fact.metricId !== policy.metricId) continue;
+    required(fact.id, "Fact ID");
+    required(fact.repoId, "Repository ID");
+    if (
+      !["observed", "qualified", "reviewed", "pending", "excluded", "unknown"].includes(fact.state) ||
+      !knownRoles.includes(fact.role)
+    )
+      throw new Error("Unknown fact semantics");
+    instant(fact.observedAt);
+    if (instant(fact.observedAt) > cutoff) continue;
+    if (!Number.isSafeInteger(fact.revision) || fact.revision < 0) throw new Error("Invalid fact revision");
+    if (fact.revision > 0 && !fact.correctionReceipt?.trim()) {
+      reject([fact], "unreviewed_revision");
+      continue;
+    }
+    for (const at of [fact.occurredAt, fact.acceptedAt, fact.readyAt, fact.firstReviewAt]) if (at != null) instant(at);
+    if (fact.quantity !== undefined) number(fact.quantity, "Quantity");
+    if (!fact.canonicalKey?.trim()) {
+      reject([fact], "unknown_canonical_identity");
+      continue;
+    }
+    const bucket = versions.get(fact.id) ?? [];
+    bucket.push(fact);
+    versions.set(fact.id, bucket);
+  }
+  const current: MetricFact[] = [];
+  for (const bucket of versions.values()) {
+    const revision = Math.max(...bucket.map((fact) => fact.revision));
+    const latest = bucket.filter((fact) => fact.revision === revision);
+    if (new Set(latest.map(stableJSON)).size !== 1) {
+      reject(latest, "conflicting_revision");
+      continue;
+    }
+    current.push(latest[0]!);
+  }
+  const canonical = new Map<string, MetricFact[]>();
+  for (const fact of current) {
+    const bucket = canonical.get(fact.canonicalKey!) ?? [];
+    bucket.push(fact);
+    canonical.set(fact.canonicalKey!, bucket);
+  }
+  const facts: MetricFact[] = [];
+  for (const bucket of canonical.values()) {
+    // Adapter receipts may differ; semantic fields must agree, including corrections.
+    const semantic = (fact: MetricFact) => {
+      const { id, observedAt, ...rest } = fact;
+      return stableJSON(rest);
+    };
+    if (new Set(bucket.map(semantic)).size !== 1) {
+      reject(bucket, "ambiguous_canonical_action");
+      continue;
+    }
+    const fact = [...bucket].sort((a, b) => compare(a.observedAt, b.observedAt) || compare(a.id, b.id))[0]!;
+    if (bucket.length > 1)
+      reject(
+        bucket.filter((item) => item !== fact),
+        "duplicate_observation",
+      );
+    const actor = fact.actorId === null ? undefined : actors.get(fact.actorId);
+    let reason: string | null = null;
+    if (!actor || actor.kind === "unknown") reason = "unknown_actor";
+    else if (actor.publicState === "suppressed") reason = "suppressed";
+    else if (!input.repositoryIds.includes(fact.repoId)) reason = "repository_not_allowed";
+    else if (scope.repos.length && !scope.repos.includes(fact.repoId)) reason = "repository_filter";
+    else if (scope.actors !== "all" && (scope.actors === "user") !== (actor.kind === "user")) reason = "actor_filter";
+    else if (!policy.roles.includes(fact.role) || (scope.roles.length && !scope.roles.includes(fact.role)))
+      reason = "role_filter";
+    else if (fact.state === "excluded") reason = "excluded_by_policy_or_correction";
+    const context = scope.context === "event" ? fact.eventContext : fact.currentContext;
+    if (!reason && (scope.projects.length || scope.workstreams.length)) {
+      if (!context) reason = "unknown_membership_context";
+      else if (scope.projects.length && !scope.projects.some((id) => context.projects.includes(id)))
+        reason = "project_filter";
+      else if (scope.workstreams.length && !scope.workstreams.some((id) => context.workstreams.includes(id)))
+        reason = "workstream_filter";
+    }
+    if (
+      !reason &&
+      ["qualified", "reviewed"].includes(fact.state) &&
+      (!fact.acceptanceReceipt?.trim() ||
+        !fact.acceptedBy ||
+        fact.acceptedBy === fact.actorId ||
+        (fact.subjectActorId === fact.actorId && fact.role === "reviewer"))
+    )
+      reason = "missing_independent_acceptance";
+    if (!reason && ["qualified", "reviewed"].includes(fact.state) && fact.acceptedAt === null)
+      reason = "unknown_acceptance_time";
+    const at =
+      policy.aggregation === "duration"
+        ? fact.readyAt
+        : fact.state === "pending" || (policy.aggregation === "ratio" && fact.outcome === "pending")
+          ? fact.occurredAt
+          : fact[policy.dateBasis];
+    if (!reason && at == null && policy.aggregation !== "duration") reason = "unknown_effective_time";
+    if (
+      !reason &&
+      at != null &&
+      ((scope.from !== null && instant(at) < instant(scope.from)) || instant(at) >= instant(scope.to))
+    )
+      reason = "outside_window";
+    if (
+      !reason &&
+      fact.acceptedAt !== null &&
+      instant(fact.acceptedAt) > cutoff &&
+      ["qualified", "reviewed"].includes(fact.state)
+    )
+      reason = "acceptance_after_cutoff";
+    if (reason) {
+      reject([fact], reason);
+      continue;
+    }
+    facts.push(fact);
+  }
+  const grouped = new Map<string, MetricFact[]>();
+  for (const fact of facts) {
+    let group = fact.canonicalKey!;
+    if (policy.groupBy !== "canonical") {
+      if (!fact.artifactId) {
+        reject([fact], "unknown_artifact_identity");
+        continue;
+      }
+      group = key(fact.actorId, fact.artifactId);
+      if (policy.groupBy === "actor_artifact_state_interval") {
+        if (!fact.rawState || !fact.occurredAt) {
+          reject([fact], "unknown_raw_state_or_time");
+          continue;
+        }
+        group = key(
+          fact.actorId,
+          fact.artifactId,
+          fact.rawState,
+          Math.floor(instant(fact.occurredAt) / (policy.groupingSeconds! * 1000)),
+        );
+      }
+    }
+    const bucket = grouped.get(group) ?? [];
+    bucket.push(fact);
+    grouped.set(group, bucket);
+  }
+  const retained: MetricFact[] = [];
+  for (const bucket of grouped.values()) {
+    // Qualified evidence takes precedence over pending work for the same unit.
+    const ordered = bucket.sort(
+      (a, b) =>
+        Number(!policy.rankedStates.includes(a.state as never)) -
+          Number(!policy.rankedStates.includes(b.state as never)) ||
+        compare(a.occurredAt ?? "", b.occurredAt ?? "") ||
+        compare(a.id, b.id),
+    );
+    retained.push(ordered[0]!);
+    if (ordered.length > 1) reject(ordered.slice(1), "repeated_policy_unit");
+  }
+  return {
+    facts: retained.sort((a, b) => compare(a.id, b.id)),
+    audit: audit.sort((a, b) => compare(key(a.reason, a.factIds), key(b.reason, b.factIds))),
+  };
+}
+
+export function aggregateMetric(
+  input: FrozenInput,
+  policy: MetricPolicy,
+  requestedScope: MetricScope,
+): MetricAggregate {
+  validateMetricPolicy(policy);
+  const scope = canonicalScope(requestedScope);
+  const prepared = prepare(input, policy, scope);
+  const complete =
+    coverageComplete(input, policy, scope) &&
+    !prepared.audit.some((entry) => /unknown|ambiguous|conflicting|unreviewed/.test(entry.reason));
+  const byActor = new Map<string, MetricFact[]>();
+  for (const fact of prepared.facts) {
+    const bucket = byActor.get(fact.actorId!) ?? [];
+    bucket.push(fact);
+    byActor.set(fact.actorId!, bucket);
+  }
+  const rows: AggregateRow[] = [];
+  for (const [actorId, facts] of byActor) {
+    const actor = input.actors.find((candidate) => candidate.id === actorId)!;
+    const eligible = facts.filter((fact) => policy.rankedStates.includes(fact.state as never));
+    const pending = facts.filter((fact) => fact.state === "pending").length;
+    const unknown = facts.some(
+      (fact) => fact.state === "unknown" || (policy.aggregation === "ratio" && fact.outcome === undefined),
+    );
+    const row: AggregateRow = {
+      actorId,
+      login: actor.publicState === "deleted" ? null : actor.login,
+      value: null,
+      state: "unknown",
+      pending,
+      numerator: null,
+      denominator: null,
+      sampleCount: 0,
+      samples: [],
+      p75: null,
+      censored: 0,
+      missingReadiness: 0,
+      evidenceIds: [],
+      evidence: [],
+      rank: null,
+      tied: false,
+    };
+    row.evidenceIds = eligible.map((fact) => fact.id);
+    row.evidence = eligible.map((fact) => ({
+      id: fact.id,
+      effectiveAt: policy.aggregation === "duration" ? (fact.readyAt ?? null) : fact[policy.dateBasis],
+      observedAt: fact.observedAt,
+    }));
+    if (policy.aggregation === "count" || policy.aggregation === "sum") {
+      const missing = policy.aggregation === "sum" && eligible.some((fact) => fact.quantity === undefined);
+      row.sampleCount = eligible.length;
+      if (!missing && eligible.length > 0)
+        row.value = number(
+          policy.aggregation === "count" ? eligible.length : eligible.reduce((sum, fact) => sum + fact.quantity!, 0),
+          "Aggregate",
+        );
+    } else if (policy.aggregation === "ratio") {
+      const decided = eligible.filter((fact) => fact.outcome === "merged" || fact.outcome === "closed_unmerged");
+      row.numerator = decided.filter((fact) => fact.outcome === "merged").length;
+      row.denominator = decided.length;
+      row.sampleCount = decided.length;
+      row.pending += eligible.filter((fact) => fact.outcome === "pending").length;
+      if (decided.length >= policy.minimumSamples) row.value = row.numerator / row.denominator;
+      else row.state = "insufficient_sample";
+    } else {
+      for (const fact of eligible) {
+        if (fact.readyAt == null) {
+          row.missingReadiness++;
+          continue;
+        }
+        if (fact.firstReviewAt == null || instant(fact.firstReviewAt) > instant(input.cutoff)) {
+          row.censored++;
+          continue;
+        }
+        if (instant(fact.firstReviewAt) < instant(fact.readyAt)) {
+          row.missingReadiness++;
+          continue;
+        }
+        row.samples.push((instant(fact.firstReviewAt) - instant(fact.readyAt)) / 3600000);
+      }
+      row.samples.sort((a, b) => a - b);
+      row.sampleCount = row.samples.length;
+      if (row.samples.length >= policy.minimumSamples) {
+        const n = row.samples.length,
+          middle = Math.floor(n / 2);
+        row.value = n % 2 ? row.samples[middle]! : (row.samples[middle - 1]! + row.samples[middle]!) / 2;
+        row.p75 = row.samples[Math.ceil(n * 0.75) - 1]!;
+      } else row.state = "insufficient_sample";
+    }
+    if (row.value !== null) {
+      if (row.value === 0 && (!complete || unknown)) row.value = null;
+      else row.state = complete && !unknown ? (row.value === 0 ? "zero" : "measured") : "partial";
+    }
+    rows.push(row);
+  }
+  rows.sort(
+    (a, b) =>
+      (policy.rank ? (b.value ?? -1) - (a.value ?? -1) : 0) ||
+      compare(a.login ?? a.actorId, b.login ?? b.actorId) ||
+      compare(a.actorId, b.actorId),
+  );
+  let rank = 0,
+    previous: number | null = null;
+  for (const row of rows) {
+    if (!policy.rank || row.value === null) continue;
+    if (previous !== row.value) rank++;
+    row.rank = rank;
+    previous = row.value;
+  }
+  for (const row of rows)
+    row.tied = row.rank !== null && rows.some((other) => other !== row && other.rank === row.rank);
+  const audit = [
+    ...prepared.audit,
+    ...rows.flatMap((row) =>
+      row.evidenceIds.map((id) => ({
+        factIds: [id],
+        actorId: row.actorId,
+        reason: `included_${policy.aggregation}_${policy.rankedStates[0]}`,
+      })),
+    ),
+  ].sort((a, b) => compare(key(a.reason, a.factIds), key(b.reason, b.factIds)));
+  return {
+    metricId: policy.metricId,
+    policyVersion: policy.version,
+    policySignature: stableJSON(policy),
+    definitionVersion: policy.definitionVersion,
+    unit: policy.unit,
+    aggregation: policy.aggregation,
+    publicEnabled: false,
+    scope,
+    datasetId: input.datasetId,
+    cutoff: input.cutoff,
+    backfillRevision: input.backfillRevision,
+    coverage: complete ? "complete" : "incomplete",
+    rows,
+    audit,
+  };
+}
+
+/** Stable JSON for replay receipts; object field order cannot change comparisons. */
+export function stableJSON(value: unknown): string {
+  if (value === undefined) return "null";
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJSON).join(",")}]`;
+  return `{${Object.keys(value)
+    .sort(compare)
+    .map((name) => `${JSON.stringify(name)}:${stableJSON((value as Record<string, unknown>)[name])}`)
+    .join(",")}}`;
+}
+
+function compatibleScopes(before: MetricAggregate, after: MetricAggregate): boolean {
+  if (stableJSON(before.scope) === stableJSON(after.scope)) return true;
+  const { from: beforeFrom, to: beforeTo, ...beforeFilters } = before.scope;
+  const { from: afterFrom, to: afterTo, ...afterFilters } = after.scope;
+  if (
+    stableJSON(beforeFilters) !== stableJSON(afterFilters) ||
+    !before.scope.period ||
+    before.scope.period === "custom"
+  )
+    return false;
+  if (instant(beforeTo) !== instant(before.cutoff) || instant(afterTo) !== instant(after.cutoff)) return false;
+  if (["month", "quarter", "year"].includes(before.scope.period)) return beforeFrom === afterFrom;
+  return true; // Validated rolling/all-time bounds of the same named preset.
+}
+
+export function compareRankMovement(
+  before: MetricAggregate,
+  after: MetricAggregate,
+): {
+  actorId: string;
+  state: "comparable" | "new_entrant" | "unavailable";
+  delta: number | null;
+  reason: string | null;
+}[] {
+  const reason =
+    before.metricId !== after.metricId || before.unit !== after.unit || before.aggregation !== after.aggregation
+      ? "different_metric"
+      : before.policySignature !== after.policySignature ||
+          before.policyVersion !== after.policyVersion ||
+          before.definitionVersion !== after.definitionVersion
+        ? "mixed_policy_versions"
+        : !compatibleScopes(before, after)
+          ? "different_scope_or_window"
+          : before.coverage !== "complete" || after.coverage !== "complete"
+            ? "insufficient_history"
+            : before.backfillRevision !== after.backfillRevision
+              ? "backfill_or_reconciliation"
+              : instant(before.cutoff) > instant(after.cutoff)
+                ? "reversed_snapshots"
+                : null;
+  const beforeEvidence = new Map(before.rows.flatMap((row) => row.evidence.map((item) => [item.id, item] as const)));
+  const afterEvidence = new Map(after.rows.flatMap((row) => row.evidence.map((item) => [item.id, item] as const)));
+  const lateHistory = [...afterEvidence.values()].some(
+    (item) =>
+      !beforeEvidence.has(item.id) && item.effectiveAt !== null && instant(item.effectiveAt) < instant(before.cutoff),
+  );
+  const corrected = [...beforeEvidence.values()].some(
+    (item) =>
+      !afterEvidence.has(item.id) &&
+      (after.scope.from === null ||
+        item.effectiveAt === null ||
+        instant(item.effectiveAt) >= instant(after.scope.from)),
+  );
+  return after.rows.map((row) => {
+    const previous = before.rows.find((item) => item.actorId === row.actorId);
+    if (reason || lateHistory || corrected || row.rank === null || previous?.rank === null)
+      return {
+        actorId: row.actorId,
+        state: "unavailable",
+        delta: null,
+        reason:
+          reason ?? (lateHistory ? "late_history" : corrected ? "corrected_or_removed_evidence" : "unranked_metric"),
+      };
+    if (!previous) return { actorId: row.actorId, state: "new_entrant", delta: null, reason: null };
+    return { actorId: row.actorId, state: "comparable", delta: previous.rank! - row.rank, reason: null };
+  });
+}
+
+export function comparePolicies(
+  input: FrozenInput,
+  beforePolicy: MetricPolicy,
+  afterPolicy: MetricPolicy,
+  scope: MetricScope,
+) {
+  if (beforePolicy.metricId !== afterPolicy.metricId)
+    throw new Error("Recalculation requires the same metric on one frozen dataset");
+  if (beforePolicy.version === afterPolicy.version && stableJSON(beforePolicy) !== stableJSON(afterPolicy))
+    throw new Error("Changed policy semantics require a new policy version");
+  const before = aggregateMetric(input, beforePolicy, scope),
+    after = aggregateMetric(input, afterPolicy, scope);
+  const changes = unique([...before.rows.map((row) => row.actorId), ...after.rows.map((row) => row.actorId)])
+    .map((actorId) => {
+      const old = before.rows.find((row) => row.actorId === actorId),
+        next = after.rows.find((row) => row.actorId === actorId);
+      return {
+        actorId,
+        beforeValue: old?.value ?? null,
+        afterValue: next?.value ?? null,
+        beforeRank: old?.rank ?? null,
+        afterRank: next?.rank ?? null,
+        included: (next?.evidenceIds ?? []).filter((id) => !old?.evidenceIds.includes(id)),
+        excluded: (old?.evidenceIds ?? []).filter((id) => !next?.evidenceIds.includes(id)),
+      };
+    })
+    .filter(
+      (change) =>
+        stableJSON([change.beforeValue, change.beforeRank]) !== stableJSON([change.afterValue, change.afterRank]) ||
+        change.included.length ||
+        change.excluded.length,
+    );
+  return {
+    datasetId: input.datasetId,
+    cutoff: input.cutoff,
+    before,
+    after,
+    changes,
+    approvalRequired: true as const,
+    releaseNotesRequired: true as const,
+  };
+}
+
+/** Pure release manifest validation. The caller must authenticate the approver and persist it atomically. */
+export function planPolicyRelease(
+  comparison: ReturnType<typeof comparePolicies>,
+  decision: {
+    approverId: string;
+    designatedApproverIds: readonly string[];
+    approvalReceipt: string;
+    releaseNotes: string;
+  },
+) {
+  required(decision.approverId, "Approver ID");
+  required(decision.approvalReceipt, "Approval receipt");
+  required(decision.releaseNotes, "Release notes");
+  if (!decision.designatedApproverIds.includes(decision.approverId)) throw new Error("Designated approval is required");
+  return {
+    metricId: comparison.after.metricId,
+    datasetId: comparison.datasetId,
+    cutoff: comparison.cutoff,
+    previousVersion: comparison.before.policyVersion,
+    targetVersion: comparison.after.policyVersion,
+    previousSignature: comparison.before.policySignature,
+    targetSignature: comparison.after.policySignature,
+    approverId: decision.approverId,
+    approvalReceipt: decision.approvalReceipt,
+    releaseNotes: decision.releaseNotes,
+    publicEnabled: false as const,
+  };
+}
+
+export function participationView(
+  input: FrozenInput,
+  policy: MetricPolicy,
+  requestedScope: MetricScope,
+  history?: { originAt: string; reviewReceipt: string },
+) {
+  validateMetricPolicy(policy);
+  const scope = canonicalScope(requestedScope);
+  // Newcomer discovery uses organization history, independent of the selected repository lens.
+  const historyScope: MetricScope = {
+    ...scope,
+    period: "custom",
+    from: history?.originAt ?? null,
+    repos: [],
+    projects: [],
+    workstreams: [],
+  };
+  if (history) {
+    instant(history.originAt);
+    required(history.reviewReceipt, "History origin review receipt");
+  }
+  const historical = prepare(input, policy, historyScope);
+  const all = historical.facts.filter((fact) => policy.rankedStates.includes(fact.state as never));
+  const current = prepare(input, policy, scope).facts.filter((fact) =>
+    policy.rankedStates.includes(fact.state as never),
+  );
+  const complete =
+    Boolean(history) &&
+    coverageComplete(input, policy, historyScope) &&
+    !historical.audit.some((entry) => /unknown|ambiguous|conflicting|unreviewed/.test(entry.reason));
+  const monday = (at: string) => {
+    const date = new Date(instant(at));
+    date.setUTCHours(0, 0, 0, 0);
+    date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+    return date.toISOString();
+  };
+  const weeks = new Set<string>();
+  if (scope.from !== null)
+    for (let at = instant(monday(scope.from)); at < instant(scope.to); at += 604800000)
+      weeks.add(new Date(at).toISOString());
+  return unique(current.map((fact) => fact.actorId!)).map((actorId) => {
+    const historyFacts = all
+      .filter((fact) => fact.actorId === actorId)
+      .sort((a, b) => compare(a[policy.dateBasis] ?? "", b[policy.dateBasis] ?? "") || compare(a.id, b.id));
+    const first = historyFacts[0];
+    const activeWeeks = unique(
+      current
+        .filter((fact) => fact.actorId === actorId)
+        .flatMap((fact) => (fact[policy.dateBasis] === null ? [] : [monday(fact[policy.dateBasis]!)])),
+    );
+    return {
+      actorId,
+      firstObservedAt: first?.observedAt ?? null,
+      firstContributionAt: first?.[policy.dateBasis] ?? null,
+      firstContributionId: first?.id ?? null,
+      newcomer:
+        !complete || !first || scope.from === null
+          ? null
+          : instant(first[policy.dateBasis]!) >= instant(scope.from) &&
+            instant(first[policy.dateBasis]!) < instant(scope.to),
+      historyCoverage: complete ? "complete_known_history" : "incomplete",
+      caveat:
+        "First observed qualifying contribution in reviewed known history; not employment start or proof of no earlier work.",
+      activeWeeks,
+      denominatorWeeks: scope.from === null ? null : weeks.size,
+      ranked: false as const,
+    };
+  });
+}

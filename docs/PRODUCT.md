@@ -49,7 +49,7 @@ These are intended boundaries for the leaderboard. Statements about the existing
 
 **New project:** Contributor Leaderboard Delivery; see docs/PUBLICATION.json
 
-**Public entry:** Proposed contributors.pickyour.ai plus links from organization profile and website
+**Public entry:** Approved target domain leaderboard.pickyour.ai; hosting, operations and launch acceptance remain unresolved
 
 **Research boundary:** Research repository supplies public evidence and ownership; its frozen builder contracts remain unchanged. Leaderboard contracts are a separate bounded schema.
 

@@ -11,19 +11,40 @@ const rows = [
 ];
 
 test("dense ranks share a rank and skip nothing", () => {
-  const ranked = denseRank(rows, (row) => row.value, (row) => row.id);
-  assert.deepEqual(ranked.map((entry) => `${entry.item.id}:${formatRank(entry)}`), ["a:1", "b:=2", "c:=2", "d:3", "e:4"]);
+  const ranked = denseRank(
+    rows,
+    (row) => row.value,
+    (row) => row.id,
+  );
+  assert.deepEqual(
+    ranked.map((entry) => `${entry.item.id}:${formatRank(entry)}`),
+    ["a:1", "b:=2", "c:=2", "d:3", "e:4"],
+  );
 });
 
 test("tie order is a stable key with no rank effect", () => {
-  const reversed = denseRank([...rows].reverse(), (row) => row.value, (row) => row.id);
-  assert.deepEqual(reversed.map((entry) => entry.item.id), ["a", "b", "c", "d", "e"]);
+  const reversed = denseRank(
+    [...rows].reverse(),
+    (row) => row.value,
+    (row) => row.id,
+  );
+  assert.deepEqual(
+    reversed.map((entry) => entry.item.id),
+    ["a", "b", "c", "d", "e"],
+  );
 });
 
 test("a top-N cut never splits a tie", () => {
-  const ranked = denseRank(rows, (row) => row.value, (row) => row.id);
+  const ranked = denseRank(
+    rows,
+    (row) => row.value,
+    (row) => row.id,
+  );
   const { shown, remaining } = cutWithTies(ranked, 2);
-  assert.deepEqual(shown.map((entry) => entry.item.id), ["a", "b", "c"]);
+  assert.deepEqual(
+    shown.map((entry) => entry.item.id),
+    ["a", "b", "c"],
+  );
   assert.equal(remaining, 2);
   assert.equal(cutWithTies(ranked, 10).remaining, 0);
 });

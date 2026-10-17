@@ -7,7 +7,11 @@ const navigation = [
   { to: "/", label: "Overview", match: (path: string) => path === "/" },
   { to: "/leaderboards", label: "Leaderboards", match: (path: string) => path.startsWith("/leaderboards") },
   { to: "/contributors", label: "Contributors", match: (path: string) => path.startsWith("/contributors") },
-  { to: "/activity", label: "Activity", match: (path: string) => path.startsWith("/activity") || path.startsWith("/contributions") },
+  {
+    to: "/activity",
+    label: "Activity",
+    match: (path: string) => path.startsWith("/activity") || path.startsWith("/contributions"),
+  },
   { to: "/methodology", label: "Methodology", match: (path: string) => path.startsWith("/methodology") },
   { to: "/coverage", label: "Coverage", match: (path: string) => path.startsWith("/coverage") },
   { to: "/live", label: "Live wall", match: (path: string) => path.startsWith("/live") },
@@ -51,12 +55,22 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
   useEffect(() => {
     if (previousPath.current === pathname) return;
     previousPath.current = pathname;
-    const heading = mainRef.current?.querySelector<HTMLElement>("h1");
-    if (heading) {
+    const focusHeading = () => {
+      const heading = mainRef.current?.querySelector<HTMLElement>("h1");
+      if (!heading) return false;
       heading.tabIndex = -1;
       heading.focus({ preventScroll: false });
-    }
+      return true;
+    };
     window.scrollTo({ top: 0 });
+    // Read-backed routes render a loading state before their heading exists.
+    // Observe only this route's main region and stop once the heading arrives.
+    if (focusHeading() || !mainRef.current) return;
+    const observer = new MutationObserver(() => {
+      if (focusHeading()) observer.disconnect();
+    });
+    observer.observe(mainRef.current, { childList: true, subtree: true });
+    return () => observer.disconnect();
   }, [pathname]);
 
   return (
@@ -93,11 +107,14 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
       <footer className="app-footer">
         <div className="footer-inner">
           <p>
-            Contributions, with evidence. No overall score, no streaks. <ScopedLink to="/methodology">How counting works</ScopedLink> ·{" "}
-            <ScopedLink to="/corrections">Corrections</ScopedLink> · <ScopedLink to="/prototype">Prototype guide</ScopedLink>
+            Contributions, with evidence. No overall score, no streaks.{" "}
+            <ScopedLink to="/methodology">How counting works</ScopedLink> ·{" "}
+            <ScopedLink to="/corrections">Corrections</ScopedLink> ·{" "}
+            <ScopedLink to="/prototype">Prototype guide</ScopedLink>
           </p>
           <p className="muted">
-            Browsing is anonymous. A user-account event does not establish manual authorship or the absence of AI assistance.
+            Browsing is anonymous. A user-account event does not establish manual authorship or the absence of AI
+            assistance.
           </p>
         </div>
       </footer>
@@ -105,7 +122,15 @@ export function Layout({ children, title }: { children: React.ReactNode; title: 
   );
 }
 
-export function PageHeader({ eyebrow, title, children }: { eyebrow?: string; title: string; children?: React.ReactNode }) {
+export function PageHeader({
+  eyebrow,
+  title,
+  children,
+}: {
+  eyebrow?: string;
+  title: string;
+  children?: React.ReactNode;
+}) {
   return (
     <div className="page-header">
       {eyebrow && <p className="eyebrow">{eyebrow}</p>}

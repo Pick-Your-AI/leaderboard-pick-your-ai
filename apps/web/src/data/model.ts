@@ -6,13 +6,7 @@
  */
 import type { Actor, Coverage } from "@pick-your-ai/contracts";
 
-export type EvidenceState =
-  | "observed"
-  | "provisional"
-  | "qualified"
-  | "reviewed"
-  | "excluded"
-  | "not_measured";
+export type EvidenceState = "observed" | "provisional" | "qualified" | "reviewed" | "excluded" | "not_measured";
 
 export type Freshness = "Fresh" | "Polling" | "Delayed" | "Reconciling" | "Stale" | "Error";
 

@@ -17,7 +17,8 @@ const MIN_INTERVAL = 20;
 const WALL_ROWS = 8;
 
 function readWallParams(params: Record<string, string>) {
-  const mode: WallMode | null = params.mode === "frozen" || params.mode === "single" || params.mode === "cycle" ? params.mode : null;
+  const mode: WallMode | null =
+    params.mode === "frozen" || params.mode === "single" || params.mode === "cycle" ? params.mode : null;
   const known = fixtureMetricIds();
   const boards = (params.boards ?? "").split(",").filter((id) => known.includes(id));
   const interval = Math.max(MIN_INTERVAL, Number.parseInt(params.interval ?? "", 10) || 30);
@@ -47,7 +48,10 @@ function WallConfigurator() {
   return (
     <>
       <PageHeader eyebrow="Public display" title="Live wall">
-        <p>Configure a public display URL for a screen or stream. Nothing is launched automatically. Avatars are off and only public data is shown.</p>
+        <p>
+          Configure a public display URL for a screen or stream. Nothing is launched automatically. Avatars are off and
+          only public data is shown.
+        </p>
       </PageHeader>
       <form className="wall-config" onSubmit={(event) => event.preventDefault()}>
         <fieldset>
@@ -55,7 +59,11 @@ function WallConfigurator() {
           {(
             [
               ["frozen", "Frozen snapshot", "Pins the current snapshot. It never changes and says so."],
-              ["single", "Single board, safe auto-refresh", "One board; new snapshots apply only between full renders."],
+              [
+                "single",
+                "Single board, safe auto-refresh",
+                "One board; new snapshots apply only between full renders.",
+              ],
               ["cycle", "Cycling live boards", "Rotates boards and an unranked credits roll."],
             ] as const
           ).map(([value, label, hint]) => (
@@ -76,7 +84,9 @@ function WallConfigurator() {
                 type="checkbox"
                 checked={boards.includes(metricId)}
                 onChange={(event) =>
-                  setBoards((current) => (event.target.checked ? [...current, metricId] : current.filter((id) => id !== metricId)))
+                  setBoards((current) =>
+                    event.target.checked ? [...current, metricId] : current.filter((id) => id !== metricId),
+                  )
                 }
               />
               <span>{getMetric(metricId)?.name}</span>
@@ -85,7 +95,13 @@ function WallConfigurator() {
         </fieldset>
         <label>
           <span>Seconds per page (minimum {MIN_INTERVAL})</span>
-          <input type="number" min={MIN_INTERVAL} max={300} value={interval} onChange={(event) => setIntervalSeconds(Math.max(MIN_INTERVAL, Number(event.target.value) || 30))} />
+          <input
+            type="number"
+            min={MIN_INTERVAL}
+            max={300}
+            value={interval}
+            onChange={(event) => setIntervalSeconds(Math.max(MIN_INTERVAL, Number(event.target.value) || 30))}
+          />
         </label>
         <label>
           <span>Format</span>
@@ -125,7 +141,17 @@ function WallConfigurator() {
   );
 }
 
-function WallPage({ mode, boards, interval, format }: { mode: WallMode; boards: string[]; interval: number; format: WallFormat }) {
+function WallPage({
+  mode,
+  boards,
+  interval,
+  format,
+}: {
+  mode: WallMode;
+  boards: string[];
+  interval: number;
+  format: WallFormat;
+}) {
   const { scope } = useScope();
   const latest = useLatestSnapshotId();
   const [appliedLatest, setAppliedLatest] = useState(latest);
@@ -169,7 +195,8 @@ function WallPage({ mode, boards, interval, format }: { mode: WallMode; boards: 
           <p className="wall-brand">PickYour.AI Credits</p>
           {snapshotView && <FreshnessIndicator view={snapshotView} compact />}
           <p className="wall-scope">
-            {content.kind !== "error" && content.data.window.label} · {wallScope.actor === "user" ? "User accounts" : wallScope.actor === "all" ? "All activity" : "Automation"}
+            {content.kind !== "error" && content.data.window.label} ·{" "}
+            {wallScope.actor === "user" ? "User accounts" : wallScope.actor === "all" ? "All activity" : "Automation"}
             {mode === "frozen" && " · Frozen snapshot: this display never changes"}
           </p>
         </header>
@@ -185,7 +212,9 @@ function WallPage({ mode, boards, interval, format }: { mode: WallMode; boards: 
               <p className="wall-sub">Alphabetical and unranked. Everyone with attributable public work.</p>
               <ul className="credits-roll">
                 {content.data.entries.map((entry) => (
-                  <li key={entry.person.actorId}>{entry.person.publicState === "deleted" ? "Deleted account" : entry.person.displayName}</li>
+                  <li key={entry.person.actorId}>
+                    {entry.person.publicState === "deleted" ? "Deleted account" : entry.person.displayName}
+                  </li>
                 ))}
               </ul>
             </>
@@ -220,7 +249,9 @@ function WallPage({ mode, boards, interval, format }: { mode: WallMode; boards: 
                             <td className="rank">
                               <RankCell row={row} />
                             </td>
-                            <th scope="row">{row.person.publicState === "deleted" ? "Deleted account" : row.person.displayName}</th>
+                            <th scope="row">
+                              {row.person.publicState === "deleted" ? "Deleted account" : row.person.displayName}
+                            </th>
                             <td className="numeric">{formatNumber(row.value)}</td>
                           </tr>
                         ))}
@@ -235,13 +266,26 @@ function WallPage({ mode, boards, interval, format }: { mode: WallMode; boards: 
         <footer className="wall-controls" aria-label="Wall controls">
           {mode === "cycle" && (
             <>
-              <button type="button" className="button button-ghost" onClick={() => setIndex((current) => (current - 1 + pages.length) % pages.length)}>
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={() => setIndex((current) => (current - 1 + pages.length) % pages.length)}
+              >
                 Previous
               </button>
-              <button type="button" className="button" aria-pressed={paused} onClick={() => setPaused((current) => !current)}>
+              <button
+                type="button"
+                className="button"
+                aria-pressed={paused}
+                onClick={() => setPaused((current) => !current)}
+              >
                 {paused ? "Play" : "Pause"}
               </button>
-              <button type="button" className="button button-ghost" onClick={() => setIndex((current) => (current + 1) % pages.length)}>
+              <button
+                type="button"
+                className="button button-ghost"
+                onClick={() => setIndex((current) => (current + 1) % pages.length)}
+              >
                 Next
               </button>
               <span className="muted">
@@ -250,7 +294,12 @@ function WallPage({ mode, boards, interval, format }: { mode: WallMode; boards: 
             </>
           )}
           {mode === "single" && (
-            <button type="button" className="button" aria-pressed={paused} onClick={() => setPaused((current) => !current)}>
+            <button
+              type="button"
+              className="button"
+              aria-pressed={paused}
+              onClick={() => setPaused((current) => !current)}
+            >
               {paused ? "Resume updates" : "Pause updates"}
             </button>
           )}

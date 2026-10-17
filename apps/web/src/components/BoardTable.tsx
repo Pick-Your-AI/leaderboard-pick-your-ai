@@ -9,7 +9,14 @@ import { Link, ScopedLink } from "../lib/router.tsx";
 import { PersonName } from "./Receipt.tsx";
 
 function ordinal(rank: number): string {
-  const suffix = rank % 10 === 1 && rank % 100 !== 11 ? "st" : rank % 10 === 2 && rank % 100 !== 12 ? "nd" : rank % 10 === 3 && rank % 100 !== 13 ? "rd" : "th";
+  const suffix =
+    rank % 10 === 1 && rank % 100 !== 11
+      ? "st"
+      : rank % 10 === 2 && rank % 100 !== 12
+        ? "nd"
+        : rank % 10 === 3 && rank % 100 !== 13
+          ? "rd"
+          : "th";
   return `${rank}${suffix}`;
 }
 
@@ -60,8 +67,8 @@ export function BoardTable({
     <div className={`table-region density-${density}`} role="region" aria-labelledby="board-caption" tabIndex={0}>
       <table className="board-table" role="table">
         <caption id="board-caption">
-          {board.metric.name}, ranked by {unit} ({board.fixture?.rankStates.join(" or ")} only). Pending work is shown separately and not
-          ranked. Ties share a rank; order within a tie is alphabetical and has no effect.
+          {board.metric.name}, ranked by {unit} ({board.fixture?.rankStates.join(" or ")} only). Pending work is shown
+          separately and not ranked. Ties share a rank; order within a tie is alphabetical and has no effect.
         </caption>
         <thead role="rowgroup">
           <tr role="row">
@@ -75,13 +82,23 @@ export function BoardTable({
             </th>
             {lines && (
               <>
-                <th scope="col" role="columnheader" className="numeric">Source</th>
-                <th scope="col" role="columnheader" className="numeric">Docs</th>
-                <th scope="col" role="columnheader" className="numeric">Tests</th>
-                <th scope="col" role="columnheader" className="numeric">Excluded lines</th>
+                <th scope="col" role="columnheader" className="numeric">
+                  Source
+                </th>
+                <th scope="col" role="columnheader" className="numeric">
+                  Docs
+                </th>
+                <th scope="col" role="columnheader" className="numeric">
+                  Tests
+                </th>
+                <th scope="col" role="columnheader" className="numeric">
+                  Excluded lines
+                </th>
               </>
             )}
-            <th scope="col" role="columnheader">Evidence</th>
+            <th scope="col" role="columnheader">
+              Evidence
+            </th>
           </tr>
         </thead>
         <tbody role="rowgroup">
@@ -101,9 +118,15 @@ export function BoardTable({
               </td>
               {lines && row.lines && (
                 <>
-                  <td role="cell" className="numeric" data-label="Source">{formatNumber(row.lines.source)}</td>
-                  <td role="cell" className="numeric" data-label="Docs">{formatNumber(row.lines.docs)}</td>
-                  <td role="cell" className="numeric" data-label="Tests">{formatNumber(row.lines.tests)}</td>
+                  <td role="cell" className="numeric" data-label="Source">
+                    {formatNumber(row.lines.source)}
+                  </td>
+                  <td role="cell" className="numeric" data-label="Docs">
+                    {formatNumber(row.lines.docs)}
+                  </td>
+                  <td role="cell" className="numeric" data-label="Tests">
+                    {formatNumber(row.lines.tests)}
+                  </td>
                   <td role="cell" className="numeric" data-label="Excluded lines">
                     {formatNumber(row.lines.generated + row.lines.vendor + row.lines.lockfile)}
                   </td>
@@ -111,7 +134,12 @@ export function BoardTable({
               )}
               <td role="cell" data-label="Evidence">
                 <Link to={proofHref(row)} className="proof-link">
-                  Proof<span className="visually-hidden"> for {row.person.displayName}: {plural(row.ranked.length + row.pendingRecords.length, "contribution")}</span>
+                  Proof
+                  <span className="visually-hidden">
+                    {" "}
+                    for {row.person.displayName}:{" "}
+                    {plural(row.ranked.length + row.pendingRecords.length, "contribution")}
+                  </span>
                 </Link>
               </td>
             </tr>

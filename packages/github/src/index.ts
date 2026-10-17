@@ -1,5 +1,10 @@
 export type Visibility = "public" | "private" | "unknown" | "unavailable";
 
+export * from "./client.js";
+export * from "./checkpoints.js";
+export * from "./normalizers.js";
+export * from "./physical-diff.js";
+
 export type EndpointOutcome =
   | { kind: "readable"; visibility: Visibility }
   | { kind: "authentication_required"; visibility: "unknown"; status: 401 }
@@ -22,7 +27,8 @@ function parseRetryAfter(value: string | null, now: Date): Date | undefined {
   if (!value) return undefined;
   const seconds = Number(value);
   if (Number.isFinite(seconds) && seconds >= 0) {
-    return new Date(now.getTime() + seconds * 1000);
+    const date = new Date(now.getTime() + seconds * 1000);
+    return Number.isNaN(date.getTime()) ? undefined : date;
   }
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? undefined : date;
@@ -41,23 +47,32 @@ export function classifyGithubFailure(input: GithubFailureInput): EndpointOutcom
   const retryAfter = parseRetryAfter(input.headers?.get("retry-after") ?? null, now);
   const reset = primaryReset(input.headers);
   const mentionsRateLimit = /rate limit|secondary rate/i.test(input.message ?? "");
-  const rateLimited = input.status === 429 || remaining === "0" || retryAfter !== undefined ||
-    ((input.status === 403 || input.status === 429) && mentionsRateLimit);
+  const rateLimited =
+    input.status === 429 ||
+    (input.status === 403 && (remaining === "0" || retryAfter !== undefined || mentionsRateLimit));
 
   if (rateLimited) {
     // GitHub's guidance is to wait at least 60 seconds when a secondary-limit
     // response gives neither Retry-After nor a primary reset time.
     const fallback = new Date(now.getTime() + 60_000);
-    const retryAt = retryAfter ?? reset ?? fallback;
+    const retryAt = retryAfter ?? (remaining === "0" ? reset : undefined) ?? fallback;
     return { kind: "rate_limited", visibility: "unknown", retryAt: retryAt.toISOString(), scope: "source" };
   }
   if (input.status === 401) return { kind: "authentication_required", visibility: "unknown", status: 401 };
   if (input.status === 404) return { kind: "not_found_or_hidden", visibility: "unknown", status: 404 };
   if (input.status === 403) return { kind: "permission_denied", visibility: "unknown", status: 403 };
   if (input.status === undefined || input.status === 408 || input.status === 425 || input.status >= 500) {
-    return { kind: "transient_failure", visibility: "unknown", ...(input.status === undefined ? {} : { status: input.status }) };
+    return {
+      kind: "transient_failure",
+      visibility: "unknown",
+      ...(input.status === undefined ? {} : { status: input.status }),
+    };
   }
-  return { kind: "unknown_failure", visibility: "unknown", ...(input.status === undefined ? {} : { status: input.status }) };
+  return {
+    kind: "unknown_failure",
+    visibility: "unknown",
+    ...(input.status === undefined ? {} : { status: input.status }),
+  };
 }
 
 export function readableOutcome(visibility: Visibility | null | undefined): EndpointOutcome {
@@ -100,8 +115,13 @@ export interface RestPaginationOptions {
 function assertTrustedApiUrl(raw: string, apiOrigin: string): string {
   const base = new URL(apiOrigin);
   const candidate = new URL(raw, base);
-  if (base.protocol !== "https:" || candidate.protocol !== "https:" ||
-      candidate.origin !== base.origin || candidate.username || candidate.password) {
+  if (
+    base.protocol !== "https:" ||
+    candidate.protocol !== "https:" ||
+    candidate.origin !== base.origin ||
+    candidate.username ||
+    candidate.password
+  ) {
     throw new Error("Refusing pagination URL outside the configured HTTPS GitHub API origin");
   }
   return candidate.toString();
@@ -158,7 +178,8 @@ export async function paginateGraphql<T>(
   let after: string | null = null;
   for (let pageCount = 0; pageCount < options.maxPages; pageCount += 1) {
     const page = await fetchPage({ first: options.first, after });
-    if (page.errors?.length) throw new Error(`GraphQL response included errors: ${page.errors.map((error) => error.message).join("; ")}`);
+    if (page.errors?.length)
+      throw new Error(`GraphQL response included errors: ${page.errors.map((error) => error.message).join("; ")}`);
     nodes.push(...page.nodes);
     if (!page.pageInfo.hasNextPage) return nodes;
     const nextCursor = page.pageInfo.endCursor;

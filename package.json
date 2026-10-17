@@ -12,21 +12,29 @@
     "packages/contracts",
     "packages/github",
     "packages/metrics",
+    "packages/ingestion",
     "apps/*"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "format": "node scripts/format-source.mjs --write",
+    "format:check": "node scripts/format-source.mjs --check",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "node --test \"packages/{contracts,github,metrics}/test/**/*.test.{js,mjs,ts}\" \"apps/*/test/**/*.test.{js,mjs,ts}\" \"infra/db/test/**/*.test.mjs\"",
+    "pretypecheck": "npm run format:check",
+    "test": "node --test \"packages/{contracts,github,metrics,ingestion}/test/**/*.test.{js,mjs,ts}\" \"apps/*/test/**/*.test.{js,mjs,ts}\" \"infra/{db,recovery,observability}/test/**/*.test.mjs\"",
     "dev:web": "npm run dev --workspace @pick-your-ai/web",
     "dev:service": "npm run dev --workspace @pick-your-ai/service",
     "dev:worker": "npm run dev --workspace @pick-your-ai/worker",
     "db:migrate": "node --env-file-if-exists=.env infra/db/migrate.mjs",
     "db:rollback": "node --env-file-if-exists=.env infra/db/rollback.mjs",
     "db:seed:synthetic": "node --env-file-if-exists=.env infra/db/seed-synthetic.mjs",
-    "db:validate": "node --env-file-if-exists=.env infra/db/validate.mjs"
+    "db:validate": "node --env-file-if-exists=.env infra/db/validate.mjs",
+    "test:browser": "tsc --noEmit -p apps/web/tsconfig.browser.json && playwright test --config apps/web/playwright.config.ts"
   },
   "devDependencies": {
-    "pg": "8.16.3"
+    "@axe-core/playwright": "4.14.0",
+    "@playwright/test": "1.64.1",
+    "pg": "8.16.3",
+    "prettier": "3.9.10"
   }
 }

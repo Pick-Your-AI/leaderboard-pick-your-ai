@@ -7,8 +7,16 @@ import { ScopedLink } from "../lib/router.tsx";
 
 /** Evidence states always carry a word; the glyph is decoration only. */
 export const evidenceLabels: Record<EvidenceState, { label: string; glyph: string; description: string }> = {
-  observed: { label: "Observed", glyph: "○", description: "The source recorded this action. Observation is not acceptance." },
-  provisional: { label: "Pending verification", glyph: "◐", description: "Seen, but not yet verified or accepted under the stated rule. Not ranked." },
+  observed: {
+    label: "Observed",
+    glyph: "○",
+    description: "The source recorded this action. Observation is not acceptance.",
+  },
+  provisional: {
+    label: "Pending verification",
+    glyph: "◐",
+    description: "Seen, but not yet verified or accepted under the stated rule. Not ranked.",
+  },
   qualified: { label: "Qualified", glyph: "●", description: "Accepted under the stated, automatic rule." },
   reviewed: { label: "Reviewed", glyph: "◆", description: "Accepted after reviewed evidence." },
   excluded: { label: "Excluded", glyph: "⊘", description: "Not counted under the stated policy." },
@@ -69,7 +77,9 @@ export function FreshnessIndicator({ view, compact = false }: { view: SnapshotVi
       </span>
       {!compact && (
         <>
-          <span>Snapshot {served.id} (revision {served.revision}){view.pinned ? ", pinned" : ""}</span>
+          <span>
+            Snapshot {served.id} (revision {served.revision}){view.pinned ? ", pinned" : ""}
+          </span>
           <span>Collector {requested.collectorConnected ? "connected" : "disconnected"}</span>
           <span>{requested.reconciliation}</span>
         </>
@@ -84,22 +94,31 @@ export function SnapshotNotices({ view }: { view: SnapshotView }) {
     <>
       {requested.status === "rebuilding" && (
         <Notice tone="warn" title="Rebuilding snapshot">
-          Snapshot {requested.id} is being rebuilt after a method change. You are seeing the last complete snapshot, {view.served.id},
-          until the rebuild publishes. No partial mixture of the two is shown.
+          Snapshot {requested.id} is being rebuilt after a method change. You are seeing the last complete snapshot,{" "}
+          {view.served.id}, until the rebuild publishes. No partial mixture of the two is shown.
         </Notice>
       )}
       {requested.freshness === "Stale" && (
         <Notice tone="error" title="Stale data">
           This snapshot was generated {formatDateTime(requested.generatedAt)} and has not been refreshed since.
-          {!requested.collectorConnected && " The source collector is disconnected, so newer activity is not reflected."} Values are
-          not zero for missing days; they are simply not yet observed.
+          {!requested.collectorConnected &&
+            " The source collector is disconnected, so newer activity is not reflected."}{" "}
+          Values are not zero for missing days; they are simply not yet observed.
         </Notice>
       )}
     </>
   );
 }
 
-export function Notice({ tone = "info", title, children }: { tone?: "info" | "warn" | "error"; title: string; children: React.ReactNode }) {
+export function Notice({
+  tone = "info",
+  title,
+  children,
+}: {
+  tone?: "info" | "warn" | "error";
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className={`notice notice-${tone}`} role="note">
       <p className="notice-title">
@@ -135,8 +154,8 @@ export function ErrorState({ error }: { error: Error & { detail?: string } }) {
       </p>
       {error.detail && <p>{error.detail}</p>}
       <p>
-        Nothing on this page has been replaced with zeros or estimates. Try the latest snapshot, or check <ScopedLink to="/coverage">source
-        coverage</ScopedLink>.
+        Nothing on this page has been replaced with zeros or estimates. Try the latest snapshot, or check{" "}
+        <ScopedLink to="/coverage">source coverage</ScopedLink>.
       </p>
     </div>
   );
@@ -150,8 +169,18 @@ export function CoverageNote({ items, windowStart }: { items: Coverage[]; window
   return (
     <details className="coverage-note">
       <summary>
-        <CoverageLabel state={gaps.length === 0 ? "complete" : gaps.some((item) => item.state === "unavailable") ? "unavailable" : "partial"} />{" "}
-        {gaps.length === 0 ? "for every repository in scope" : `${gaps.length} of ${items.length} source scopes have gaps`}
+        <CoverageLabel
+          state={
+            gaps.length === 0
+              ? "complete"
+              : gaps.some((item) => item.state === "unavailable")
+                ? "unavailable"
+                : "partial"
+          }
+        />{" "}
+        {gaps.length === 0
+          ? "for every repository in scope"
+          : `${gaps.length} of ${items.length} source scopes have gaps`}
       </summary>
       <ul>
         {items.map((item) => (
