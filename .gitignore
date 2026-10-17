@@ -12,3 +12,4 @@ __pycache__/
 .pytest_cache/
 *.log
 infra/db/.state/
+.vite/

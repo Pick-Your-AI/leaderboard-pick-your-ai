@@ -16,10 +16,10 @@ const navigation = [
 /** Persistent on every route: the prototype must never be mistaken for real rankings. */
 export function SyntheticDataBanner() {
   return (
-    <div className="synthetic-banner" role="note" aria-label="Synthetic data notice">
+    <aside className="synthetic-banner" aria-label="Synthetic data notice">
       <strong>Synthetic prototype data.</strong> Every person, repository, count and rank here is invented for design
       evaluation ({SYNTHETIC_DATASET_ID}). <Link to="/prototype">What this prototype shows</Link>
-    </div>
+    </aside>
   );
 }
 
