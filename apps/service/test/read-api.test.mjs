@@ -53,7 +53,7 @@ test("anonymous public board, complete metric discovery and snapshot metadata", 
   const body = result.json();
   assert.equal(body.snapshotId, "public-1");
   assert.equal(body.policyVersion, "policy-1");
-  assert.deepEqual(body.rows.map(row => [row.actorId, row.rank]), [["alice", 1], ["bob", 1], ["carol", 3]]);
+  assert.deepEqual(body.rows.map(row => [row.actorId, row.rank]), [["alice", 1], ["bob", 1], ["carol", 2]]);
   assert.equal(body.metric.id, "pr_opened");
   assert.equal(body.ranking.direction, "descending");
   assert.equal(calls.length, 1);
@@ -344,4 +344,14 @@ test("stream failure falls back to polling and missed notices request a current 
   await new Promise(resolve => setTimeout(resolve, 80));
   assert.ok(fetches >= 2);
   assert.equal(notices.length, 2, "out-of-order old polling response cannot undo newer stream notice");
+});
+
+test("approved descriptive-only metrics publish facts with no implied ranking", async t => {
+  const h = harness(t);
+  h.data.selected.ranking[0].rank = false;
+  h.data.selected.rows[2].result.value = 100;
+  const body = (await h.app.inject(boardUrl)).json();
+  assert.equal(body.ranking.rank, false);
+  assert.deepEqual(body.rows.map(row => [row.actorId, row.rank]), [["alice", null], ["bob", null], ["carol", null]]);
+  assert.equal(body.rows[2].result.value, 100);
 });

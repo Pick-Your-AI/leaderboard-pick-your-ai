@@ -36,7 +36,7 @@ export interface PublishedSnapshot {
   rows: PublicRow[];
   evidence: PublicEvidence[];
   /** Approved per-metric direction; the API does not infer comparability or scoring. */
-  ranking: { metricId: string; direction: "ascending" | "descending" }[];
+  ranking: { metricId: string; direction: "ascending" | "descending"; rank?: boolean }[];
 }
 /** Current controls must be read atomically even for a historical snapshot. */
 export interface PublicRead {
@@ -85,8 +85,9 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
       !Array.isArray(selected.evidence) || selected.evidence.length > 20000 ||
       !Array.isArray(selected.ranking) || selected.ranking.length > 98) return reject();
   const ranking = selected.ranking.map(entry => {
-    if (!id(entry.metricId) || !["ascending", "descending"].includes(entry.direction)) return reject();
-    return { metricId: entry.metricId, direction: entry.direction };
+    if (!id(entry.metricId) || !["ascending", "descending"].includes(entry.direction) ||
+        (entry.rank !== undefined && typeof entry.rank !== "boolean")) return reject();
+    return { metricId: entry.metricId, direction: entry.direction, rank: entry.rank !== false };
   });
   if (new Set(ranking.map(entry => entry.metricId)).size !== ranking.length) return reject();
   const snapshot = snapshotSchema.parse(selected.snapshot);

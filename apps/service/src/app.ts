@@ -121,17 +121,18 @@ export function createService(options: ServiceOptions = {}) {
   }
   function ranked(read: PublicRead, metric: string) {
     const actors = new Map(read.selected.actors.map(actor => [actor.actorId, actor.actor]));
-    const direction = read.selected.ranking.find(entry => entry.metricId === metric)?.direction;
+    const policy = read.selected.ranking.find(entry => entry.metricId === metric);
+    const direction = policy?.direction;
     const ordered = read.selected.rows.filter(row => row.result.metricId === metric)
       .sort((a, b) => {
         const av = a.result.value, bv = b.result.value;
         const delta = av === undefined ? (bv === undefined ? 0 : 1) : bv === undefined ? -1 : (direction === "ascending" ? av - bv : bv - av);
-        return delta || (a.actorId < b.actorId ? -1 : a.actorId > b.actorId ? 1 : 0);
+        return (policy?.rank === false ? 0 : delta) || (a.actorId < b.actorId ? -1 : a.actorId > b.actorId ? 1 : 0);
       });
     let rank = 0;
     return ordered.map((row, index) => {
-      if (index === 0 || row.result.value !== ordered[index - 1]?.result.value) rank = index + 1;
-      return { rank: row.result.value === undefined ? null : rank,
+      if (index === 0 || row.result.value !== ordered[index - 1]?.result.value) rank++;
+      return { rank: policy?.rank === false || row.result.value === undefined ? null : rank,
         actorId: row.actorId, actor: actors.get(row.actorId), result: row.result, evidenceIds: row.evidenceIds };
     });
   }

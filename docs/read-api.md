@@ -81,8 +81,10 @@ snapshot, current policy version and offset. Cursors expire within 10–15 minut
 deployment restart/key rotation may expire them earlier. Supply the original query
 and `cursor` to continue. A policy change returns 410 and requires restarting the
 view, preventing skipped rows after suppression. Rows sort using the explicitly
-approved direction, stable actor ID as the tie breaker and competition ranks for
-equal values. Unknown results have no rank or numeric value. Profiles use the same
+approved direction, stable actor ID as the tie breaker and dense ranks for
+equal values (1, 1, 2). Approved descriptive-only policies set `rank: false`; these
+rows have null ranks and stable actor-ID ordering. Unknown results have no rank or
+numeric value. Profiles use the same
 rows as boards. Timelines are bounded by `limit` and expose truncation plus IDs for
 individual evidence reads; they never silently imply that a truncated timeline is
 complete. Hidden, deleted, suppressed and unlinked profiles share a generic 404.
