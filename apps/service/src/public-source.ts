@@ -64,8 +64,9 @@ export function safePublicUrl(value: string | null | undefined): string | null {
   if (!value || value.length > 2048) return null;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && url.hostname === "github.com" && !url.username && !url.password &&
-      !url.search && !url.hash && /^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_./~-]+)?$/.test(url.pathname)
+    return url.origin === "https://github.com" && !url.username && !url.password && !url.search &&
+      (!url.hash || /^#(?:issuecomment-\d+|pullrequestreview-\d+|discussion_r\d+|r\d+|discussioncomment-\d+)$/.test(url.hash)) &&
+      /^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_./~-]+)?$/.test(url.pathname)
       ? url.href : null;
   } catch { return null; }
 }

@@ -36,7 +36,8 @@ export function startLiveUpdates(options: LiveOptions): () => void {
   function accept(value: unknown) {
     if (!value || typeof value !== "object") throw new Error("invalid_notice");
     const notice = value as { snapshotId: string; revision: number; policyVersion: string };
-    if (!/^[A-Za-z0-9_.:-]{1,200}$/.test(notice.snapshotId) || !Number.isSafeInteger(notice.revision) || notice.revision < 0 ||
+    if (typeof notice.snapshotId !== "string" || !/^[A-Za-z0-9_.:-]{1,200}$/.test(notice.snapshotId) ||
+        !Number.isSafeInteger(notice.revision) || notice.revision < 0 || typeof notice.policyVersion !== "string" ||
         !/^[A-Za-z0-9_.:-]{1,200}$/.test(notice.policyVersion)) throw new Error("invalid_notice");
     if (notice.revision < highestRevision) return;
     highestRevision = notice.revision;

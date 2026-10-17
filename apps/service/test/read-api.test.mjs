@@ -355,3 +355,24 @@ test("approved descriptive-only metrics publish facts with no implied ranking", 
   assert.deepEqual(body.rows.map(row => [row.actorId, row.rank]), [["alice", null], ["bob", null], ["carol", null]]);
   assert.equal(body.rows[2].result.value, 100);
 });
+
+test("public source URLs reject alternate ports and unapproved fragments but retain exact public review anchors", async t => {
+  const h = harness(t);
+  h.data.selected.evidence[0].artifact.publicUrl = "https://github.com:8443/synthetic/example/pull/1";
+  h.data.selected.evidence[1].artifact.publicUrl = "https://github.com/synthetic/example/pull/2#private-token";
+  h.data.selected.evidence[2].artifact.publicUrl = "https://github.com/synthetic/example/pull/3#pullrequestreview-123";
+  const body = (await h.app.inject(boardUrl)).json();
+  assert.deepEqual(body.rows.map(row => row.actorId), ["carol"]);
+  const detail = (await h.app.inject("/api/v1/evidence/e-carol")).json();
+  assert.match(detail.artifact.publicUrl, /#pullrequestreview-123$/);
+});
+
+test("malformed live identifiers never trigger snapshot replacement", async t => {
+  const states = [];
+  const stop = startLiveUpdates({ intervalMs: 50, onState: value => states.push(value), onSnapshot() { assert.fail("missing identifiers must not be accepted"); },
+    fetch: async () => new Response(JSON.stringify({ revision: 2, status: "recently_reconciled" })) });
+  t.after(stop);
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(states.at(-1).freshness, "unknown");
+  assert.equal(states.at(-1).transport, "unavailable");
+});

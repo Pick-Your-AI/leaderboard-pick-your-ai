@@ -48,7 +48,8 @@ hidden/deleted/unlinked actors and non-public/ineligible evidence, and applies t
 current suppression overlay before every response. Removing an artifact removes
 its dependent aggregate row; the service never subtracts evidence counts from
 ratios or weighted values. Public URLs must be HTTPS GitHub repository URLs without
-userinfo, query parameters or fragments. Excerpts, raw payloads and emails are not
+userinfo or query parameters; fragments are restricted to GitHub's numeric public
+comment/review anchors. Excerpts, raw payloads and emails are not
 public fields. Source exception strings and missing permission names become generic
 public capability/error codes. Revoked snapshots return 410, including exports.
 
