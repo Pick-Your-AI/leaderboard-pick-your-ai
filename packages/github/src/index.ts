@@ -2,6 +2,8 @@ export type Visibility = "public" | "private" | "unknown" | "unavailable";
 
 export * from "./client.js";
 export * from "./checkpoints.js";
+export * from "./normalizers.js";
+export * from "./physical-diff.js";
 
 export type EndpointOutcome =
   | { kind: "readable"; visibility: Visibility }

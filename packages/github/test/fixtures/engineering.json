@@ -1,0 +1,20 @@
+{
+  "fixture_notice": "Synthetic GitHub API/webhook data; never source evidence or production rankings.",
+  "repository": { "id": 2, "name": "repository", "full_name": "synthetic-owner/repository", "private": false, "default_branch": "main" },
+  "author": { "id": 101, "node_id": "U_synthetic_author", "login": "synthetic-author", "type": "User" },
+  "merger": { "id": 202, "node_id": "U_synthetic_merger", "login": "synthetic-merger", "type": "User" },
+  "reviewer": { "id": 303, "node_id": "U_synthetic_reviewer", "login": "synthetic-reviewer", "type": "User" },
+  "bot": { "id": 404, "node_id": "B_synthetic_bot", "login": "synthetic-bot", "type": "Bot" },
+  "pull_request": {
+    "id": 10, "node_id": "PR_synthetic_10", "number": 10,
+    "html_url": "https://github.com/synthetic-owner/repository/pull/10",
+    "created_at": "2026-10-01T10:00:00Z", "updated_at": "2026-10-07T10:00:00Z",
+    "merged_at": "2026-10-07T10:00:00Z", "closed_at": "2026-10-07T10:00:00Z", "state": "closed", "merged": true, "draft": false,
+    "base": { "ref": "main" }, "head": { "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+  },
+  "issue": {
+    "id": 20, "node_id": "I_synthetic_20", "number": 20,
+    "html_url": "https://github.com/synthetic-owner/repository/issues/20",
+    "created_at": "2026-10-01T10:00:00Z", "updated_at": "2026-10-07T10:00:00Z", "state": "closed"
+  }
+}
