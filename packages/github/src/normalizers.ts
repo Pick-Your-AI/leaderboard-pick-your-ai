@@ -43,6 +43,7 @@ export interface NormalizedGithubResult {
   physicalDiff?: ClassifiedPhysicalDiff;
   participation: Array<{ artifactId: string; actorId: string; role: "author" | "committer" | "coauthor"; conservedUnit: string }>;
   assistance: Array<{ artifactId: string; model: string; version: string | null }>;
+  decisions: Array<{ artifactId: string; outcome: "merged" | "closed_unmerged" | "pending"; decisionAt: string | null; selectedAsOf: string | null }>;
 }
 export interface GithubEvidenceEnvelope {
   repository: { id: number; slug: string; visibility: "public" | "private" | "unknown"; defaultBranch?: string };
@@ -63,12 +64,15 @@ export interface GithubEvidenceEnvelope {
   lineage?: readonly GithubLineage[];
   reviewCohort?: { verified: true; firstReadyAt: string | null; firstSubmittedReviewAt: string | null };
   reviewParticipation?: { verified: true; firstSubmittedAt: string | null; roundFirstSubmittedAt: string | null };
+  /** Host-selected current decision at one frozen cutoff, not a latest-field guess. */
+  decisionCohort?: { verified: true; asOf: string; outcome: "merged" | "closed_unmerged" | "pending"; decisionAt: string | null };
+  frozenCutoff?: string;
 }
 
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 const text = (value: unknown): string | null => typeof value === "string" && value.trim() ? value : null;
 const stable = (...parts: unknown[]) => `gh:${createHash("sha256").update(JSON.stringify(parts)).digest("hex")}`;
-const result = (): NormalizedGithubResult => ({ isSynthetic: false, facts: [], actors: [], evidence: [], observations: [], reasons: [], lineage: [], suppressArtifactIds: [], participation: [], assistance: [] });
+const result = (): NormalizedGithubResult => ({ isSynthetic: false, facts: [], actors: [], evidence: [], observations: [], reasons: [], lineage: [], suppressArtifactIds: [], participation: [], assistance: [], decisions: [] });
 function time(value: unknown): string | null {
   if (typeof value !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?Z$/.test(value)) return null;
   const date = new Date(value);
@@ -144,10 +148,11 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
     artifactId: id, occurredAt: at, observedAt, sourceRevision: proof.revision, sourceUrl: publicUrl, reasonCodes: [] });
   const emit = (metricId: string, who: NormalizedGithubActor | null, role: GithubRole, occurredAt: string | null,
     unit: string, extra: Partial<NormalizedGithubFact> = {}) => {
-    const canonicalKey = stable("metric-unit", metricId, unit, who?.id ?? "unknown", "observed");
+    const evidenceClass = extra.state ?? (who && occurredAt ? "observed" : "unknown");
+    const canonicalKey = stable("metric-unit", metricId, unit, who?.id ?? "unknown", evidenceClass);
     const fact: NormalizedGithubFact = { id: stable("fact", canonicalKey), canonicalKey, metricId,
       actorId: who?.id ?? null, artifactId: id, repoId: String(repository.id), role,
-      state: who && occurredAt ? "observed" : "unknown", occurredAt, acceptedAt: null, observedAt,
+      state: evidenceClass, occurredAt, acceptedAt: null, observedAt,
       revision: 0, correctionReceipt: null, acceptanceReceipt: null, acceptedBy: null, subjectActorId: author?.id ?? null,
       eventContext: envelope.eventContext ?? null, currentContext: envelope.currentContext ?? null, ...extra };
     if (!who) out.reasons.push("unknown_actor");
@@ -177,15 +182,21 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
       emit("pr_merged", author, "author", merged, `${id}:merged`, { rawState: branch ? `target:${branch}` : "target:unknown" });
       emit("maintainer_merges", register(resource.merged_by ?? resource.mergedBy), "merger", merged, `${id}:merged`);
     }
-    emit("pr_accepted_rate", author, "author", decision || created, `${id}:decision`, {
-      outcome: merged ? "merged" : decision ? "closed_unmerged" : "pending", acceptedAt: decision || null,
-      ...(!decision ? { state: author && created ? "pending" as const : "unknown" as const } : {}),
-    });
+    const outcome = merged ? "merged" : decision ? "closed_unmerged" : "pending";
+    const selectedDecision = envelope.decisionCohort;
+    out.decisions.push({ artifactId: id, outcome, decisionAt: decision || null, selectedAsOf: selectedDecision?.verified ? time(selectedDecision.asOf) : null });
+    if (selectedDecision?.verified && time(selectedDecision.asOf) && time(selectedDecision.asOf) === time(envelope.frozenCutoff) && Date.parse(selectedDecision.asOf) <= Date.parse(observedAt) &&
+      selectedDecision.outcome === outcome && time(selectedDecision.decisionAt) === (decision || null)) {
+      emit("pr_accepted_rate", author, "author", decision || created, `${id}:decision:${outcome}:${decision ?? "pending"}`, {
+        outcome, acceptedAt: decision || null,
+        ...(!decision ? { state: author && created ? "pending" as const : "unknown" as const } : {}),
+      });
+    } else out.reasons.push("decided_share_requires_verified_selected_as_of_history");
     const coauthors = envelope.verifiedCoauthors ?? [];
     if (author) out.participation.push({ artifactId: id, actorId: author.id, role: "author", conservedUnit: `${id}:merged` });
     for (const entry of coauthors) {
       const coauthor = entry.verificationReceipt.trim() ? register(entry.actor) : null;
-      if (coauthor) {
+      if (coauthor && coauthor.id !== author?.id && !out.participation.some(item => item.artifactId === id && item.actorId === coauthor.id)) {
         out.participation.push({ artifactId: id, actorId: coauthor.id, role: "coauthor", conservedUnit: `${id}:merged` });
         emit("pr_coauthored", coauthor, "coauthor", merged || null, `${id}:participation`, !merged ? { state: "pending" } : {});
       }
@@ -227,7 +238,9 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
     if (committer) out.participation.push({ artifactId: id, actorId: committer.id, role: "committer", conservedUnit: id });
     for (const linked of envelope.verifiedCoauthors ?? []) {
       const coauthor = linked.verificationReceipt.trim() ? register(linked.actor) : null;
-      if (coauthor) out.participation.push({ artifactId: id, actorId: coauthor.id, role: "coauthor", conservedUnit: id });
+      if (coauthor && coauthor.id !== commitAuthor?.id && !out.participation.some(item => item.role === "coauthor" && item.actorId === coauthor.id)) {
+        out.participation.push({ artifactId: id, actorId: coauthor.id, role: "coauthor", conservedUnit: id });
+      }
     }
     const integration = envelope.integration;
     if (!sha || !pinnedSha(sha) || !integration || integration.targetBranch !== integration.defaultBranch || !integration.commitShas.includes(sha)) {

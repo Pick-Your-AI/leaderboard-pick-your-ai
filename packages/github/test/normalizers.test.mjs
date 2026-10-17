@@ -15,6 +15,8 @@ const envelope = (patch = {}) => ({
   repository: { id: 2, slug: "synthetic-owner/repository", visibility: "public", defaultBranch: "main" },
   proof: { verified: true, source: "github_webhook", revision: at, eventId: "synthetic-event-1", isSynthetic: true },
   family: "pull_request", action: "closed", occurredAt: at, observedAt,
+  decisionCohort: { verified: true, asOf: observedAt, outcome: "merged", decisionAt: at },
+  frozenCutoff: observedAt,
   payload: { repository: fixture.repository, pull_request: pr(), sender: fixture.merger }, ...patch,
 });
 const metrics = (out, id) => out.facts.filter(fact => fact.metricId === id);
@@ -37,11 +39,11 @@ test("PR authorship, merger operation and decided denominator remain separate st
 
 test("closed-unmerged and pending PRs never become merged delivery", () => {
   const closed = pr(); closed.merged = false; closed.merged_at = null;
-  const out = normalizeGithubObservation(envelope({ payload: { pull_request: closed } }));
+  const out = normalizeGithubObservation(envelope({ payload: { pull_request: closed }, decisionCohort: { verified: true, asOf: observedAt, outcome: "closed_unmerged", decisionAt: at } }));
   assert.equal(metrics(out, "pr_merged").length, 0);
   assert.equal(metrics(out, "pr_accepted_rate")[0].outcome, "closed_unmerged");
   closed.state = "open"; closed.closed_at = null;
-  const pending = normalizeGithubObservation(envelope({ payload: { pull_request: closed } }));
+  const pending = normalizeGithubObservation(envelope({ payload: { pull_request: closed }, decisionCohort: { verified: true, asOf: observedAt, outcome: "pending", decisionAt: null } }));
   assert.equal(metrics(pending, "pr_accepted_rate")[0].state, "pending");
   assert.equal(metrics(pending, "pr_accepted_rate")[0].acceptedAt, null);
   assert.equal(metrics(pending, "pr_ready").length, 0);
@@ -74,6 +76,13 @@ test("verified coauthors conserve the object and model trailers never create peo
   assert.equal(out.assistance[0].model, "Claude Opus");
   assert.equal(out.actors.some(person => /Claude/.test(person.login ?? "")), false);
   assert.equal(JSON.stringify(out).includes("email"), false);
+  const primaryOverlap = normalizeGithubObservation(envelope({ verifiedCoauthors: [
+    { actor: fixture.author, verificationReceipt: "synthetic-primary-link" },
+    { actor: fixture.reviewer, verificationReceipt: "synthetic-other-link" },
+    { actor: fixture.reviewer, verificationReceipt: "synthetic-other-link" },
+  ] }));
+  assert.equal(metrics(primaryOverlap, "pr_coauthored").length, 1);
+  assert.equal(primaryOverlap.participation.filter(item => item.actorId === "101").length, 1);
 });
 
 test("submitted COMMENTED review is raw feedback, distinct PR grouping excludes spam and dismissal is explicit", () => {
@@ -258,11 +267,13 @@ test("commit author/committer and verified lineage stay separate and integration
   assert.equal(noIntegration.facts.length, 0);
   assert.deepEqual(noIntegration.participation.map(item => item.role), ["author", "committer"]);
   const integrated = normalizeGithubObservation(envelope({ family: "commit", payload, integration: { before, after, canonicalChangeId: "one-change", targetBranch: "main", defaultBranch: "main", commitShas: [after] },
-    verifiedCoauthors: [{ actor: fixture.reviewer, verificationReceipt: "synthetic-account-link" }],
+    verifiedCoauthors: [{ actor: fixture.author, verificationReceipt: "synthetic-primary-link" },
+      { actor: fixture.reviewer, verificationReceipt: "synthetic-account-link" }, { actor: fixture.reviewer, verificationReceipt: "synthetic-account-link" }],
     lineage: [{ relation: "squash_of", sourceIds: ["original:a", "original:b"], targetId: after, evidenceIds: ["verified-pr-merge"] }] }));
   assert.equal(integrated.facts[0].actorId, "101");
   assert.equal(integrated.lineage[0].relation, "squash_of");
   assert.equal(integrated.participation.find(item => item.role === "coauthor").actorId, "303");
+  assert.equal(integrated.participation.filter(item => item.role === "coauthor").length, 1);
 });
 
 test("release publication keeps automation sender separate from notes author; green CI is unsupported", () => {
@@ -383,4 +394,23 @@ test("files_changed emits one canonical count unit per eligible path, never a qu
   assert.equal(files.length, 2);
   assert.equal(new Set(files.map(fact => fact.canonicalKey)).size, 2);
   assert.ok(files.every(fact => fact.quantity === undefined));
+});
+
+test("pending, unknown and observed facts retain independent canonical evidence classes through merge", () => {
+  const unmerged = pr(); unmerged.merged = false; unmerged.merged_at = null; unmerged.closed_at = null; unmerged.state = "open";
+  const coauthors = [{ actor: fixture.reviewer, verificationReceipt: "synthetic-link" }];
+  const pending = normalizeGithubObservation(envelope({ payload: { pull_request: unmerged }, verifiedCoauthors: coauthors,
+    decisionCohort: { verified: true, asOf: observedAt, outcome: "pending", decisionAt: null } }));
+  const merged = normalizeGithubObservation(envelope({ verifiedCoauthors: coauthors }));
+  for (const metric of ["pr_coauthored", "pr_accepted_rate"]) {
+    assert.notEqual(metrics(pending, metric)[0].canonicalKey, metrics(merged, metric)[0].canonicalKey);
+    assert.notEqual(metrics(pending, metric)[0].id, metrics(merged, metric)[0].id);
+  }
+  const unknown = normalizeGithubObservation(envelope({ payload: { pull_request: { ...pr(), user: null } } }));
+  assert.notEqual(metrics(unknown, "pr_merged")[0].canonicalKey, metrics(merged, "pr_merged")[0].canonicalKey);
+  const unselected = normalizeGithubObservation(envelope({ decisionCohort: undefined }));
+  assert.equal(metrics(unselected, "pr_accepted_rate").length, 0);
+  assert.match(unselected.reasons.join(), /selected_as_of_history/);
+  assert.equal(unselected.decisions[0].outcome, "merged");
+  assert.equal(metrics(normalizeGithubObservation(envelope({ frozenCutoff: "2026-10-06T10:00:00Z" })), "pr_accepted_rate").length, 0);
 });
