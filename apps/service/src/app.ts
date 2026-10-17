@@ -432,12 +432,10 @@ export function createService(options: ServiceOptions = {}) {
         read.selected.diagnostics?.filter(
           (entry) => entry.actorId === actor.actorId && rows.some((row) => row.result.metricId === entry.metricId),
         ) ?? [],
-      roleBreakdown: [...new Set(evidence.flatMap((entry) => entry.contribution.roles))]
-        .sort()
-        .map((role) => ({
-          role,
-          contributions: evidence.filter((entry) => entry.contribution.roles.includes(role)).length,
-        })),
+      roleBreakdown: [...new Set(evidence.flatMap((entry) => entry.contribution.roles))].sort().map((role) => ({
+        role,
+        contributions: evidence.filter((entry) => entry.contribution.roles.includes(role)).length,
+      })),
       timeline: evidence.slice(0, q.limit),
       timelineTruncated: evidence.length > q.limit,
       evidenceCount: evidence.length,

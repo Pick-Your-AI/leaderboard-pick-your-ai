@@ -148,7 +148,7 @@ P0 · Discovery · Awaiting decision · Acceptance gate: Approved decision.
 
 - [ ] `LB-01.04.T1` Reserve proposed pick-your-ai-leaderboard repository name in the plan
 - [ ] `LB-01.04.T2` Compare independent static frontend plus service host against approved shared infrastructure
-- [ ] `LB-01.04.T3` Evaluate contributors.pickyour.ai and website /contributors integration
+- [ ] `LB-01.04.T3` Configure approved leaderboard.pickyour.ai target and evaluate website integration
 - [ ] `LB-01.04.T4` Record cost ceiling, operational owner and deployment authorization procedure
 
 **Acceptance**
