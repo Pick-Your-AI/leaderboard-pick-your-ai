@@ -400,3 +400,24 @@ test("public evidence times use the frozen source timestamp contract and reject 
   assert.equal(response.statusCode, 503);
   assert.equal(response.json().error, "public_projection_unavailable");
 });
+
+test("diagnostic denominators/samples stay bound to visible selected rows and retain null unknowns", async t => {
+  const h = harness(t);
+  h.data.selected.diagnostics = ["alice", "bob", "carol"].map(actorId => ({ metricId: "pr_opened", actorId,
+    numerator: 2, denominator: 3, sampleCount: 3, censored: 1, missingReadiness: 0, p75: null }));
+  const page = (await h.app.inject(`${boardUrl}&limit=1`)).json();
+  assert.equal(page.diagnostics.length, 1);
+  assert.equal(page.diagnostics[0].actorId, "alice");
+  assert.equal(page.diagnostics[0].denominator, 3);
+  assert.equal(page.diagnostics[0].p75, null);
+  const profile = (await h.app.inject("/api/v1/contributors/bob")).json();
+  assert.equal(profile.diagnostics.length, 1);
+  assert.equal(profile.diagnostics[0].actorId, "bob");
+  const exported = await h.app.inject("/api/v1/exports?metric=pr_opened&format=csv&limit=1");
+  assert.match(exported.body, /"numerator","denominator","sample_count","censored","missing_readiness","p75"/);
+  assert.match(exported.body, /"2","3","3","1","0",""\r\n/);
+  h.data.controls.suppressedActorIds = ["alice"];
+  assert.ok((await h.app.inject(boardUrl)).json().diagnostics.every(entry => entry.actorId !== "alice"));
+  h.data.selected.diagnostics[0].sampleCount = -1;
+  assert.equal((await h.app.inject(boardUrl)).statusCode, 503);
+});

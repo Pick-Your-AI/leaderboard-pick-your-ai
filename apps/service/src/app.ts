@@ -161,14 +161,19 @@ export function createService(options: ServiceOptions = {}) {
     const share = new URLSearchParams({ organization: q.scope.organization, metric: q.metric, snapshot: read.selected.snapshot.snapshotId });
     for (const key of ["repository", "workstream", "start", "end"] as const) if (q.scope[key] !== null) share.set(key, q.scope[key]);
     const body = { ...meta(read), metric: definition(q.metric), ranking: read.selected.ranking.find(entry => entry.metricId === q.metric) ?? null,
+      diagnostics: read.selected.diagnostics?.filter(entry => entry.metricId === q.metric && page.some(row => row.actorId === entry.actorId)) ?? [],
       rows: page, totalRows: rows.length, nextCursor,
       shareUrl: `/api/v1/boards?${share.toString()}` };
     if (exporting && q.format === "csv") {
       const evidence = new Map(read.selected.evidence.map(entry => [entry.contribution.contributionId, entry]));
-      const lines: unknown[][] = [["snapshot", "revision", "policy", "metric", "definition", "unit", "start", "end", "repository", "workstream", "actor", "rank", "state", "value", "sources", "generated_at", "next_cursor"]];
-      for (const row of page) lines.push([body.snapshotId, body.revision, body.policyVersion, q.metric, body.metric.counting_rule,
+      const lines: unknown[][] = [["snapshot", "revision", "policy", "metric", "definition", "unit", "start", "end", "repository", "workstream", "actor", "rank", "state", "value", "sources", "generated_at", "next_cursor", "numerator", "denominator", "sample_count", "censored", "missing_readiness", "p75"]];
+      for (const row of page) {
+        const diagnostic = body.diagnostics.find(entry => entry.actorId === row.actorId);
+        lines.push([body.snapshotId, body.revision, body.policyVersion, q.metric, body.metric.counting_rule,
         body.metric.definition.unit, q.scope.start, q.scope.end, q.scope.repository, q.scope.workstream, row.actor?.login ?? row.actorId,
-        row.rank, row.result.state, row.result.value, row.evidenceIds.map(id => evidence.get(id)!.artifact.publicUrl).join(" "), body.generatedAt, nextCursor]);
+        row.rank, row.result.state, row.result.value, row.evidenceIds.map(id => evidence.get(id)!.artifact.publicUrl).join(" "), body.generatedAt, nextCursor,
+        diagnostic?.numerator, diagnostic?.denominator, diagnostic?.sampleCount, diagnostic?.censored, diagnostic?.missingReadiness, diagnostic?.p75]);
+      }
       reply.header("Content-Disposition", 'attachment; filename="leaderboard.csv"');
       return send(request, reply, lines.map(line => line.map(csv).join(",")).join("\r\n") + "\r\n", "text/csv; charset=utf-8");
     }
@@ -197,6 +202,7 @@ export function createService(options: ServiceOptions = {}) {
     const evidence = read.selected.evidence.filter(entry => ids.has(entry.contribution.contributionId))
       .sort((a, b) => (b.occurredAt ?? "").localeCompare(a.occurredAt ?? "") || a.contribution.contributionId.localeCompare(b.contribution.contributionId));
     return send(request, reply, { ...meta(read), actor: actor.actor, actorId: actor.actorId, results: rows.map(row => row.result),
+      diagnostics: read.selected.diagnostics?.filter(entry => entry.actorId === actor.actorId && rows.some(row => row.result.metricId === entry.metricId)) ?? [],
       roleBreakdown: [...new Set(evidence.flatMap(entry => entry.contribution.roles))].sort().map(role => ({ role,
         contributions: evidence.filter(entry => entry.contribution.roles.includes(role)).length })),
       timeline: evidence.slice(0, q.limit), timelineTruncated: evidence.length > q.limit,

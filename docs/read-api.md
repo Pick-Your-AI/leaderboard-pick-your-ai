@@ -37,6 +37,10 @@ Implement `PublicSnapshotSource.read(scope, snapshotId, signal)` atomically:
    Optional current `disabledMetrics` provide a bounded machine-readable reason
    and policy provenance; disabled board/export requests return 503 `metric_disabled`
    and their rows/evidence are removed from every route, including historical pins.
+   Optional row-bound `diagnostics` preserve ratio numerators/denominators and
+   duration sample counts, censoring, missing readiness and p75. Unknown diagnostic
+   values remain null. Boards expose only their selected page's diagnostics, profiles
+   only that contributor's visible measures; suppressed/disabled rows have none.
 4. Respect AbortSignal and impose a backend query deadline. Do not hold database
    transactions while waiting for clients. Snapshots must be immutable within the
    same snapshot ID; replace the ID/revision after recomputation. Fail closed if

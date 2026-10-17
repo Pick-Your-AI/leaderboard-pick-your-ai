@@ -28,6 +28,16 @@ export interface PublicRow {
   result: MetricResult;
   evidenceIds: string[];
 }
+export interface PublicDiagnostic {
+  metricId: string;
+  actorId: string;
+  numerator: number | null;
+  denominator: number | null;
+  sampleCount: number;
+  censored: number;
+  missingReadiness: number;
+  p75: number | null;
+}
 export interface PublishedSnapshot {
   approvedPublic: true;
   scope: PublicScope;
@@ -39,6 +49,7 @@ export interface PublishedSnapshot {
   ranking: { metricId: string; direction: "ascending" | "descending"; rank?: boolean }[];
   disabledMetrics?: { id: string; reason: string; policyVersion: string; policyLink: string | null }[];
   methodology?: { metricId: string; policyVersion: string; policySignature: string; policyLink: string | null }[];
+  diagnostics?: PublicDiagnostic[];
 }
 /** Current controls must be read atomically even for a historical snapshot. */
 export interface PublicRead {
@@ -153,6 +164,16 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
       return evidence?.contribution.actorId === entry.actorId && evidence.contribution.metricIds.includes(entry.result.metricId);
     }) && (entry.result.value === undefined || entry.result.value === 0 || entry.evidenceIds.length > 0));
   if (new Set(rows.map(row => JSON.stringify([row.actorId, row.result.metricId]))).size !== rows.length) return reject();
+  if (selected.diagnostics !== undefined && (!Array.isArray(selected.diagnostics) || selected.diagnostics.length > 10000)) return reject();
+  const visibleRows = new Set(rows.map(row => JSON.stringify([row.actorId, row.result.metricId])));
+  const diagnostics = (selected.diagnostics ?? []).map(entry => {
+    if (!id(entry.metricId) || !id(entry.actorId) ||
+        ![entry.sampleCount, entry.censored, entry.missingReadiness].every(value => Number.isSafeInteger(value) && value >= 0) ||
+        ![entry.numerator, entry.denominator, entry.p75].every(value => value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0))) return reject();
+    return { metricId: entry.metricId, actorId: entry.actorId, numerator: entry.numerator, denominator: entry.denominator,
+      sampleCount: entry.sampleCount, censored: entry.censored, missingReadiness: entry.missingReadiness, p75: entry.p75 };
+  }).filter(entry => visibleRows.has(JSON.stringify([entry.actorId, entry.metricId])));
+  if (new Set(diagnostics.map(entry => JSON.stringify([entry.actorId, entry.metricId]))).size !== diagnostics.length) return reject();
   // Raw exception strings and permission details never enter the public projection.
   const coverage = (value: MetricResult["coverage"]) => ({ ...value,
     permissionsMissing: value.permissionsMissing.length ? ["source_capability_unavailable"] : [],
@@ -163,6 +184,6 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
     selected: { approvedPublic: true, scope: { ...scope },
       snapshot: { ...snapshot, coverage: snapshot.coverage.map(coverage), results: [] },
       actors, rows: rows.map(row => ({ ...row, result: { ...row.result, coverage: coverage(row.result.coverage) } })), evidence,
-      ranking: ranking.filter(entry => !disabled.has(entry.metricId)), disabledMetrics, methodology },
+      ranking: ranking.filter(entry => !disabled.has(entry.metricId)), disabledMetrics, methodology, diagnostics },
   };
 }
