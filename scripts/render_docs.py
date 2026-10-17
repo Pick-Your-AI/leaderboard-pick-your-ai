@@ -145,7 +145,7 @@ There are seven single-select fields, including Status. Use built-in Assignees, 
 
 {table(['Field', 'Options'], [(k, ' · '.join(v)) for k, v in backlog['project_fields'].items()])}
 
-All initial delivery issues remain Backlog and unassigned. Readiness distinguishes an unresolved decision, a missing prerequisite and a missing accepted owner. Ready requires both accepted ownership and usable inputs. A delivered documentation baseline does not close the package that also requires future implementation.
+The initial delivery baseline created issues in Backlog without assignees. Current issue and Project state records subsequent accepted work. Readiness distinguishes an unresolved decision, a missing prerequisite and a missing accepted owner. Ready requires both accepted ownership and usable inputs. A delivered documentation baseline does not close the package that also requires future implementation.
 
 ## Project views
 

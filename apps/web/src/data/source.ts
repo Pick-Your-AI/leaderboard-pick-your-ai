@@ -3,30 +3,10 @@
  * functions here, so the read API (LB-12.01/12.02) can replace this module
  * without changing components. Nothing here talks to GitHub.
  */
-import type {
-  Contribution,
-  Coverage,
-  MetricDefinition,
-  MetricResult,
-  SourceEvent,
-} from "@pick-your-ai/contracts";
-import type {
-  ContributionRecord,
-  FixtureMetric,
-  LineBreakdown,
-  Person,
-  SnapshotMeta,
-} from "./model.ts";
+import type { Contribution, Coverage, MetricDefinition, MetricResult, SourceEvent } from "@pick-your-ai/contracts";
+import type { ContributionRecord, FixtureMetric, LineBreakdown, Person, SnapshotMeta } from "./model.ts";
 import { excludedLineCategories } from "./model.ts";
-import {
-  contributions,
-  coverage,
-  fixtureMetrics,
-  people,
-  projects,
-  repositories,
-  snapshots,
-} from "./synthetic.ts";
+import { contributions, coverage, fixtureMetrics, people, projects, repositories, snapshots } from "./synthetic.ts";
 import { getMetric, metrics } from "./registry.ts";
 import { denseRank } from "../lib/ranking.ts";
 import { inWindow, resolveWindow, type Scope, type ScopeContext, type TimeWindow } from "../lib/scope.ts";
@@ -52,7 +32,7 @@ export { coverage, repositories, projects, snapshots };
 const peopleById = new Map(people.map((person) => [person.actorId, person]));
 
 export function personFor(actorId: string | null): Person | null {
-  return actorId ? peopleById.get(actorId) ?? null : null;
+  return actorId ? (peopleById.get(actorId) ?? null) : null;
 }
 
 export function isAutomation(person: Person | null): boolean {
@@ -86,7 +66,11 @@ export function resolveSnapshot(scope: Scope, latestId: string): SnapshotView {
 
 /** The time a record is placed in a period for a given board. */
 function basisTime(record: ContributionRecord, fixture: FixtureMetric | null): string {
-  if (fixture && record.acceptedAt && fixture.rankStates.some((state) => state === "qualified" || state === "reviewed")) {
+  if (
+    fixture &&
+    record.acceptedAt &&
+    fixture.rankStates.some((state) => state === "qualified" || state === "reviewed")
+  ) {
     return record.acceptedAt;
   }
   return record.occurredAt;
@@ -192,7 +176,11 @@ function windowCoverage(items: Coverage[], window: TimeWindow): Coverage[] {
     if (item.state !== "complete" || !item.knownStart) return item;
     const startsLate = window.start === null || Date.parse(item.knownStart) > window.start.getTime();
     return startsLate
-      ? { ...item, state: "partial" as const, sourceErrors: [`Source history starts ${item.knownStart.slice(0, 10)}, after the requested window start.`] }
+      ? {
+          ...item,
+          state: "partial" as const,
+          sourceErrors: [`Source history starts ${item.knownStart.slice(0, 10)}, after the requested window start.`],
+        }
       : item;
   });
 }
@@ -211,7 +199,18 @@ export function buildBoard(metricId: string, scope: Scope, latestId: string): Bo
   const coverageState = combinedCoverageState(boardCoverage);
 
   if (!fixture) {
-    return { metric, fixture, snapshot, window, rows: [], pendingOnly: [], excluded: [], coverage: boardCoverage, coverageState, status: "not_measured" };
+    return {
+      metric,
+      fixture,
+      snapshot,
+      window,
+      rows: [],
+      pendingOnly: [],
+      excluded: [],
+      coverage: boardCoverage,
+      coverageState,
+      status: "not_measured",
+    };
   }
 
   const relevant = records.filter((record) => record.metricIds.includes(metric.id));
@@ -265,13 +264,37 @@ export function buildBoard(metricId: string, scope: Scope, latestId: string): Bo
         metricId: metric.id,
         state: coverageState === "complete" ? "measured" : "partial",
         value,
-        coverage: { ...resultCoverage, state: coverageState === "complete" ? "complete" : resultCoverage.state === "complete" ? "partial" : resultCoverage.state },
+        coverage: {
+          ...resultCoverage,
+          state:
+            coverageState === "complete"
+              ? "complete"
+              : resultCoverage.state === "complete"
+                ? "partial"
+                : resultCoverage.state,
+        },
       },
     };
   });
 
-  const status = rows.length || pendingOnly.length ? "measured" : coverageState === "complete" ? "empty_complete" : "empty_incomplete";
-  return { metric, fixture, snapshot, window, rows, pendingOnly, excluded, coverage: boardCoverage, coverageState, status };
+  const status =
+    rows.length || pendingOnly.length
+      ? "measured"
+      : coverageState === "complete"
+        ? "empty_complete"
+        : "empty_incomplete";
+  return {
+    metric,
+    fixture,
+    snapshot,
+    window,
+    rows,
+    pendingOnly,
+    excluded,
+    coverage: boardCoverage,
+    coverageState,
+    status,
+  };
 }
 
 export interface DirectoryEntry {
@@ -282,14 +305,22 @@ export interface DirectoryEntry {
 }
 
 /** Inclusive alphabetical directory: anyone with attributable public work in scope. */
-export function listContributors(scope: Scope, latestId: string): { entries: DirectoryEntry[]; snapshot: SnapshotView; window: TimeWindow } {
+export function listContributors(
+  scope: Scope,
+  latestId: string,
+): { entries: DirectoryEntry[]; snapshot: SnapshotView; window: TimeWindow } {
   const { records, snapshot, window } = scopedRecords(scope, latestId);
   const map = new Map<string, DirectoryEntry>();
   for (const record of records) {
     if (record.evidence === "excluded") continue;
     const person = personFor(record.actorId);
     if (!person) continue;
-    const entry = map.get(person.actorId) ?? { person, families: [], firstObservedAt: record.observedAt, observedCount: 0 };
+    const entry = map.get(person.actorId) ?? {
+      person,
+      families: [],
+      firstObservedAt: record.observedAt,
+      observedCount: 0,
+    };
     entry.observedCount += 1;
     if (record.observedAt < entry.firstObservedAt) entry.firstObservedAt = record.observedAt;
     for (const metricId of record.metricIds) {
@@ -349,7 +380,12 @@ export function buildProfile(login: string, scope: Scope, latestId: string): Pro
     measures.set(board.metric.family, list);
   }
   const everything = contributions
-    .filter((record) => record.actorId === person.actorId && record.evidence !== "excluded" && Date.parse(record.observedAt) <= Date.parse(snapshot.served.cutoff))
+    .filter(
+      (record) =>
+        record.actorId === person.actorId &&
+        record.evidence !== "excluded" &&
+        Date.parse(record.observedAt) <= Date.parse(snapshot.served.cutoff),
+    )
     .sort((a, b) => a.observedAt.localeCompare(b.observedAt));
   return { person, snapshot, window, measures, records: own, firstObserved: everything[0] ?? null };
 }
@@ -373,7 +409,9 @@ export function getContribution(id: string, snapshotId?: string): ContributionVi
   return {
     record,
     person,
-    metrics: record.metricIds.map((metricId) => getMetric(metricId)).filter((metric): metric is MetricDefinition => Boolean(metric)),
+    metrics: record.metricIds
+      .map((metricId) => getMetric(metricId))
+      .filter((metric): metric is MetricDefinition => Boolean(metric)),
     repository: repositories.find((repo) => repo.id === record.repoId)?.name ?? record.repoId,
   };
 }

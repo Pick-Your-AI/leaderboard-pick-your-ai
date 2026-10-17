@@ -53,13 +53,15 @@ function subscribe(listener: () => void) {
 }
 
 export function useLatestSnapshotId(): string {
-  return useSyncExternalStore(subscribe, () => latestSnapshotId, () => latestSnapshotId);
+  return useSyncExternalStore(
+    subscribe,
+    () => latestSnapshotId,
+    () => latestSnapshotId,
+  );
 }
 
 export type AsyncState<T> =
-  | { status: "loading" }
-  | { status: "error"; error: SourceError | Error }
-  | { status: "ready"; data: T };
+  { status: "loading" } | { status: "error"; error: SourceError | Error } | { status: "ready"; data: T };
 
 /**
  * Run a synchronous prototype read as if it were a network request so the

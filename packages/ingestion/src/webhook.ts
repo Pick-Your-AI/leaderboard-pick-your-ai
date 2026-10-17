@@ -28,8 +28,15 @@ export interface WebhookOptions {
   /** Explicit installation -> repository database-ID allowlist; empty means deny all. */
   scope: ReadonlyMap<number, ReadonlySet<number>>;
   store: IntakeStore;
-  lifecycle?: { suppress(deliveryId: string, bodyHash: string, installationId: number,
-    repositoryIds: number[], reason: "private" | "removed" | "revoked"): Promise<"accepted" | "duplicate" | "conflict"> };
+  lifecycle?: {
+    suppress(
+      deliveryId: string,
+      bodyHash: string,
+      installationId: number,
+      repositoryIds: number[],
+      reason: "private" | "removed" | "revoked",
+    ): Promise<"accepted" | "duplicate" | "conflict">;
+  };
   maxBodyBytes?: number;
 }
 
@@ -45,7 +52,12 @@ export function verifySignature(body: Uint8Array, signature: string | null, secr
 }
 
 class IntakeError extends Error {
-  constructor(readonly status: number, readonly code: string) { super(code); }
+  constructor(
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(code);
+  }
 }
 
 async function boundedBody(request: Request, max: number): Promise<Buffer> {
@@ -68,7 +80,9 @@ async function boundedBody(request: Request, max: number): Promise<Buffer> {
       }
       chunks.push(value);
     }
-  } finally { reader.releaseLock(); }
+  } finally {
+    reader.releaseLock();
+  }
   return Buffer.concat(chunks);
 }
 
@@ -78,28 +92,39 @@ function object(value: unknown): Record<string, unknown> {
 }
 
 function integer(value: unknown): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) throw new IntakeError(400, "invalid_payload");
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0)
+    throw new IntakeError(400, "invalid_payload");
   return value;
 }
 
 function stableId(value: unknown): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9_=-]{1,200}$/.test(value)) throw new IntakeError(400, "invalid_payload");
+  if (typeof value !== "string" || !/^[A-Za-z0-9_=-]{1,200}$/.test(value))
+    throw new IntakeError(400, "invalid_payload");
   return value;
 }
 
 const actions = new Set(["opened", "closed", "reopened", "edited"]);
 
-function minimize(payload: unknown, event: string | null, deliveryId: string, scope: WebhookOptions["scope"]): Envelope {
+function minimize(
+  payload: unknown,
+  event: string | null,
+  deliveryId: string,
+  scope: WebhookOptions["scope"],
+): Envelope {
   if (event !== "issues" && event !== "pull_request") throw new IntakeError(422, "unsupported_event");
   const data = object(payload);
   const installationId = integer(object(data.installation).id);
   const repository = object(data.repository);
   const repositoryId = integer(repository.id);
   if (!scope.get(installationId)?.has(repositoryId)) throw new IntakeError(403, "outside_scope");
-  if (repository.private !== false || repository.visibility !== "public") throw new IntakeError(403, "not_explicitly_public");
+  if (repository.private !== false || repository.visibility !== "public")
+    throw new IntakeError(403, "not_explicitly_public");
   if (typeof data.action !== "string" || !actions.has(data.action)) throw new IntakeError(422, "unsupported_action");
-  if (typeof repository.full_name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(repository.full_name) ||
-      [".", ".."].includes(repository.full_name.split("/")[1] ?? "")) {
+  if (
+    typeof repository.full_name !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(repository.full_name) ||
+    [".", ".."].includes(repository.full_name.split("/")[1] ?? "")
+  ) {
     throw new IntakeError(400, "invalid_payload");
   }
   const subject = object(event === "issues" ? data.issue : data.pull_request);
@@ -110,11 +135,17 @@ function minimize(payload: unknown, event: string | null, deliveryId: string, sc
   const clock = data.action === "opened" ? subject.created_at : data.action === "closed" ? subject.closed_at : null;
   if (typeof clock === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(clock)) {
     const date = new Date(clock);
-    if (Number.isFinite(date.getTime()) && date.toISOString().replace(".000Z", "Z") === clock) occurredAt = date.toISOString();
+    if (Number.isFinite(date.getTime()) && date.toISOString().replace(".000Z", "Z") === clock)
+      occurredAt = date.toISOString();
   }
   return {
-    version: "github-delivery/v1", deliveryId, event, action: data.action,
-    installationId, repositoryId, subjectId: stableId(subject.node_id),
+    version: "github-delivery/v1",
+    deliveryId,
+    event,
+    action: data.action,
+    installationId,
+    repositoryId,
+    subjectId: stableId(subject.node_id),
     sourceUrl: `https://github.com/${repository.full_name}/${event === "issues" ? "issues" : "pull"}/${number}`,
     actorId: data.sender == null ? null : stableId(object(data.sender).node_id),
     occurredAt,
@@ -123,7 +154,7 @@ function minimize(payload: unknown, event: string | null, deliveryId: string, sc
 
 /** Transport-neutral handler: the host must route only its webhook endpoint here. */
 export function createWebhookHandler(options: WebhookOptions): (request: Request) => Promise<Response> {
-  if (options.secrets.length < 1 || options.secrets.length > 2 || options.secrets.some(key => key.length < 32)) {
+  if (options.secrets.length < 1 || options.secrets.length > 2 || options.secrets.some((key) => key.length < 32)) {
     throw new Error("Configure one or two webhook secrets of at least 32 characters");
   }
   const max = options.maxBodyBytes ?? 1_048_576;
@@ -134,17 +165,24 @@ export function createWebhookHandler(options: WebhookOptions): (request: Request
   return async (request) => {
     try {
       if (request.method !== "POST") throw new IntakeError(405, "method_not_allowed");
-      if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(request.headers.get("content-type") ?? "") ||
-          request.headers.has("content-encoding")) throw new IntakeError(415, "unsupported_encoding");
+      if (
+        !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(request.headers.get("content-type") ?? "") ||
+        request.headers.has("content-encoding")
+      )
+        throw new IntakeError(415, "unsupported_encoding");
       const deliveryId = request.headers.get("x-github-delivery");
       if (!deliveryId || !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(deliveryId)) {
         throw new IntakeError(400, "invalid_delivery_id");
       }
       const body = await boundedBody(request, max);
-      if (!verifySignature(body, request.headers.get("x-hub-signature-256"), secrets)) throw new IntakeError(401, "invalid_signature");
+      if (!verifySignature(body, request.headers.get("x-hub-signature-256"), secrets))
+        throw new IntakeError(401, "invalid_signature");
       let payload: unknown;
-      try { payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)); }
-      catch { throw new IntakeError(400, "invalid_json"); }
+      try {
+        payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body));
+      } catch {
+        throw new IntakeError(400, "invalid_json");
+      }
       const event = request.headers.get("x-github-event");
       const bodyHash = createHash("sha256").update(body).digest("hex");
       if (["installation", "installation_repositories", "repository"].includes(event ?? "")) {
@@ -155,16 +193,27 @@ export function createWebhookHandler(options: WebhookOptions): (request: Request
         let ids: number[];
         let reason: "private" | "removed" | "revoked";
         if (event === "installation" && ["deleted", "suspend"].includes(String(data.action))) {
-          ids = [...scope.get(installationId)!]; reason = "revoked";
+          ids = [...scope.get(installationId)!];
+          reason = "revoked";
         } else if (event === "installation_repositories" && data.action === "removed") {
-          if (!Array.isArray(data.repositories_removed) || data.repositories_removed.length > 1000) throw new IntakeError(400, "invalid_payload");
-          ids = data.repositories_removed.map(value => integer(object(value).id)).filter(value => scope.get(installationId)!.has(value));
+          if (!Array.isArray(data.repositories_removed) || data.repositories_removed.length > 1000)
+            throw new IntakeError(400, "invalid_payload");
+          ids = data.repositories_removed
+            .map((value) => integer(object(value).id))
+            .filter((value) => scope.get(installationId)!.has(value));
           reason = "removed";
         } else if (event === "repository" && ["privatized", "deleted"].includes(String(data.action))) {
-          ids = [integer(object(data.repository).id)]; reason = data.action === "privatized" ? "private" : "removed";
+          ids = [integer(object(data.repository).id)];
+          reason = data.action === "privatized" ? "private" : "removed";
           if (!scope.get(installationId)!.has(ids[0]!)) throw new IntakeError(403, "outside_scope");
         } else throw new IntakeError(422, "unsupported_action");
-        const result = await options.lifecycle.suppress(deliveryId.toLowerCase(), bodyHash, installationId, ids, reason);
+        const result = await options.lifecycle.suppress(
+          deliveryId.toLowerCase(),
+          bodyHash,
+          installationId,
+          ids,
+          reason,
+        );
         if (result === "conflict") throw new IntakeError(409, "delivery_conflict");
         return Response.json({ status: result }, { status: result === "accepted" ? 202 : 200 });
       }
@@ -175,8 +224,10 @@ export function createWebhookHandler(options: WebhookOptions): (request: Request
       return Response.json({ status: result }, { status: result === "accepted" ? 202 : 200 });
     } catch (error) {
       // Never reflect a source payload, secret, database message or SQL in the response.
-      return Response.json({ error: error instanceof IntakeError ? error.code : "intake_unavailable" },
-        { status: error instanceof IntakeError ? error.status : 503 });
+      return Response.json(
+        { error: error instanceof IntakeError ? error.code : "intake_unavailable" },
+        { status: error instanceof IntakeError ? error.status : 503 },
+      );
     }
   };
 }

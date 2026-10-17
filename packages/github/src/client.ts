@@ -3,8 +3,10 @@ import { classifyGithubFailure, nextRestLink, type EndpointOutcome, type Graphql
 import type { CheckpointStore } from "./checkpoints.js";
 
 export class GithubClientError extends Error {
-  constructor(public readonly outcome: EndpointOutcome | { kind: "invalid_response" | "unsafe_request" | "invalid_checkpoint" },
-    public readonly source: string) {
+  constructor(
+    public readonly outcome: EndpointOutcome | { kind: "invalid_response" | "unsafe_request" | "invalid_checkpoint" },
+    public readonly source: string,
+  ) {
     super(`GitHub source request failed: ${outcome.kind}`);
     this.name = "GithubClientError";
   }
@@ -28,7 +30,12 @@ export interface GithubClientOptions {
   random?: () => number;
 }
 
-interface CachedResponse { version: 1; etag: string; body: unknown; link: string | null }
+interface CachedResponse {
+  version: 1;
+  etag: string;
+  body: unknown;
+  link: string | null;
+}
 interface ScanCheckpoint {
   version: 1;
   fingerprint: string;
@@ -78,7 +85,8 @@ function readOnlyQuery(query: string): boolean {
 /** Read-only, credential-scoped transport. No upstream mutation entry points. */
 export class GithubReadClient {
   private readonly origin: URL;
-  private readonly options: Required<Omit<GithubClientOptions, "checkpoints" | "token">> & Pick<GithubClientOptions, "checkpoints" | "token">;
+  private readonly options: Required<Omit<GithubClientOptions, "checkpoints" | "token">> &
+    Pick<GithubClientOptions, "checkpoints" | "token">;
   private readonly pauses = new Map<string, number>();
   private readonly pauseWrites = new Map<string, Promise<void>>();
   private active = 0;
@@ -87,8 +95,14 @@ export class GithubReadClient {
 
   constructor(options: GithubClientOptions) {
     this.origin = new URL(options.apiOrigin ?? "https://api.github.com");
-    if (this.origin.protocol !== "https:" || this.origin.username || this.origin.password ||
-      this.origin.pathname !== "/" || this.origin.search || this.origin.hash) {
+    if (
+      this.origin.protocol !== "https:" ||
+      this.origin.username ||
+      this.origin.password ||
+      this.origin.pathname !== "/" ||
+      this.origin.search ||
+      this.origin.hash
+    ) {
       throw new Error("Configure an HTTPS GitHub API origin without credentials, path, or query");
     }
     this.options = {
@@ -102,13 +116,17 @@ export class GithubReadClient {
       maxResponseBytes: options.maxResponseBytes ?? 16 * 1024 * 1024,
       fetch: options.fetch ?? globalThis.fetch,
       now: options.now ?? Date.now,
-      sleep: options.sleep ?? ((ms) => new Promise(resolve => setTimeout(resolve, ms))),
+      sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
       random: options.random ?? Math.random,
     };
     for (const name of ["concurrency", "timeoutMs", "maxResponseBytes"] as const) {
       if (!Number.isSafeInteger(this.options[name]) || this.options[name] < 1) throw new RangeError(`Invalid ${name}`);
     }
-    if (this.options.concurrency > 100 || !Number.isSafeInteger(this.options.maxRetries) || this.options.maxRetries < 0) {
+    if (
+      this.options.concurrency > 100 ||
+      !Number.isSafeInteger(this.options.maxRetries) ||
+      this.options.maxRetries < 0
+    ) {
       throw new RangeError("Invalid concurrency or retry bound");
     }
     this.trustedUrl(this.options.graphqlPath, "configuration");
@@ -116,8 +134,11 @@ export class GithubReadClient {
 
   private trustedUrl(raw: string, source: string): string {
     let url: URL;
-    try { url = new URL(raw, this.origin); }
-    catch { throw new GithubClientError({ kind: "unsafe_request" }, source); }
+    try {
+      url = new URL(raw, this.origin);
+    } catch {
+      throw new GithubClientError({ kind: "unsafe_request" }, source);
+    }
     if (url.protocol !== "https:" || url.origin !== this.origin.origin || url.username || url.password || url.hash) {
       throw new GithubClientError({ kind: "unsafe_request" }, source);
     }
@@ -125,7 +146,7 @@ export class GithubReadClient {
   }
 
   private async acquire(): Promise<() => void> {
-    if (this.active >= this.options.concurrency) await new Promise<void>(resolve => this.waiters.push(resolve));
+    if (this.active >= this.options.concurrency) await new Promise<void>((resolve) => this.waiters.push(resolve));
     else this.active += 1;
     return () => {
       const next = this.waiters.shift();
@@ -140,8 +161,11 @@ export class GithubReadClient {
     // Concurrent responses must not persist an older, shorter pause after a
     // newer one. Serialize source writes and read the latest deadline at save.
     const previous = this.pauseWrites.get(source) ?? Promise.resolve();
-    const write = previous.catch(() => undefined).then(() =>
-      this.options.checkpoints.save(`pause:${hash(source)}`, { version: 1, until: this.pauses.get(source)! }));
+    const write = previous
+      .catch(() => undefined)
+      .then(() =>
+        this.options.checkpoints.save(`pause:${hash(source)}`, { version: 1, until: this.pauses.get(source)! }),
+      );
     this.pauseWrites.set(source, write);
     await write;
   }
@@ -168,7 +192,10 @@ export class GithubReadClient {
       }
       const bytes = new Uint8Array(length);
       let offset = 0;
-      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.length;
+      }
       return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
     } catch (error) {
       if (error instanceof GithubClientError) throw error;
@@ -182,19 +209,34 @@ export class GithubReadClient {
     }
   }
 
-  private async request(source: string, rawUrl: string, query?: { query: string; variables: Record<string, unknown> }): Promise<{ body: unknown; link: string | null }> {
+  private async request(
+    source: string,
+    rawUrl: string,
+    query?: { query: string; variables: Record<string, unknown> },
+  ): Promise<{ body: unknown; link: string | null }> {
     const url = this.trustedUrl(rawUrl, source);
     const persistedPause = await this.options.checkpoints.load(`pause:${hash(source)}`);
     if (persistedPause !== undefined) {
-      if (!object(persistedPause) || persistedPause.version !== 1 || typeof persistedPause.until !== "number" || !Number.isFinite(persistedPause.until)) {
+      if (
+        !object(persistedPause) ||
+        persistedPause.version !== 1 ||
+        typeof persistedPause.until !== "number" ||
+        !Number.isFinite(persistedPause.until)
+      ) {
         throw new GithubClientError({ kind: "invalid_checkpoint" }, source);
       }
       this.pauses.set(source, Math.max(this.pauses.get(source) ?? 0, persistedPause.until));
     }
     const cacheKey = `http:${hash([source, this.options.apiVersion, url])}`;
     const cached = query ? undefined : await this.options.checkpoints.load(cacheKey);
-    if (cached !== undefined && (!object(cached) || cached.version !== 1 || typeof cached.etag !== "string" ||
-      !(cached.link === null || typeof cached.link === "string") || !("body" in cached))) {
+    if (
+      cached !== undefined &&
+      (!object(cached) ||
+        cached.version !== 1 ||
+        typeof cached.etag !== "string" ||
+        !(cached.link === null || typeof cached.link === "string") ||
+        !("body" in cached))
+    ) {
       throw new GithubClientError({ kind: "invalid_checkpoint" }, source);
     }
     const cache = cached as CachedResponse | undefined;
@@ -204,7 +246,10 @@ export class GithubReadClient {
       let outcome: EndpointOutcome | undefined;
       try {
         // Another request may have paused this source while this one queued.
-        if ((this.pauses.get(source) ?? 0) > this.options.now()) { attempt -= 1; continue; }
+        if ((this.pauses.get(source) ?? 0) > this.options.now()) {
+          attempt -= 1;
+          continue;
+        }
         const headers = new Headers({
           Accept: "application/vnd.github+json",
           "X-GitHub-Api-Version": this.options.apiVersion,
@@ -215,7 +260,9 @@ export class GithubReadClient {
         if (cache) headers.set("If-None-Match", cache.etag);
         if (query) headers.set("Content-Type", "application/json");
         const response = await this.options.fetch(url, {
-          method: query ? "POST" : "GET", headers, redirect: "manual",
+          method: query ? "POST" : "GET",
+          headers,
+          redirect: "manual",
           signal: AbortSignal.timeout(this.options.timeoutMs),
           ...(query ? { body: JSON.stringify(query) } : {}),
         });
@@ -227,7 +274,10 @@ export class GithubReadClient {
         // returning a cached representation, just as for a fresh HTTP 200.
         if ((response.ok || response.status === 304) && response.headers.get("x-ratelimit-remaining") === "0") {
           const reset = Number(response.headers.get("x-ratelimit-reset")) * 1000;
-          await this.pause(source, Number.isFinite(reset) && reset > this.options.now() ? reset : this.options.now() + 60_000);
+          await this.pause(
+            source,
+            Number.isFinite(reset) && reset > this.options.now() ? reset : this.options.now() + 60_000,
+          );
         }
         if (response.status === 304) {
           await response.body?.cancel();
@@ -246,21 +296,42 @@ export class GithubReadClient {
         if (response.ok && !(query && object(body) && Array.isArray(body.errors) && body.errors.length)) {
           const link = response.headers.get("link");
           if (!query && response.headers.get("etag")) {
-            await this.options.checkpoints.save(cacheKey, { version: 1, etag: response.headers.get("etag"), body, link });
+            await this.options.checkpoints.save(cacheKey, {
+              version: 1,
+              etag: response.headers.get("etag"),
+              body,
+              link,
+            });
           }
           return { body, link };
         }
         const errors = object(body) && Array.isArray(body.errors) ? body.errors : [];
-        const rateError = errors.some(error => object(error) && (error.type === "RATE_LIMITED" ||
-          (object(error.extensions) && error.extensions.code === "RATE_LIMITED")));
-        const hasErrorType = (type: string) => errors.some(error => object(error) && (error.type === type ||
-          (object(error.extensions) && error.extensions.code === type)));
+        const rateError = errors.some(
+          (error) =>
+            object(error) &&
+            (error.type === "RATE_LIMITED" || (object(error.extensions) && error.extensions.code === "RATE_LIMITED")),
+        );
+        const hasErrorType = (type: string) =>
+          errors.some(
+            (error) =>
+              object(error) && (error.type === type || (object(error.extensions) && error.extensions.code === type)),
+          );
         const message = object(body) && typeof body.message === "string" ? body.message : rateError ? "rate limit" : "";
-        const graphqlStatus = hasErrorType("FORBIDDEN") ? 403 : hasErrorType("NOT_FOUND") ? 404 :
-          hasErrorType("UNAUTHENTICATED") ? 401 : undefined;
-        outcome = classifyGithubFailure({ status: rateError ? 429 : graphqlStatus ?? response.status, headers: response.headers, message,
-          now: new Date(this.options.now()) });
-        if (response.ok && !rateError && graphqlStatus === undefined) throw new GithubClientError({ kind: "invalid_response" }, source);
+        const graphqlStatus = hasErrorType("FORBIDDEN")
+          ? 403
+          : hasErrorType("NOT_FOUND")
+            ? 404
+            : hasErrorType("UNAUTHENTICATED")
+              ? 401
+              : undefined;
+        outcome = classifyGithubFailure({
+          status: rateError ? 429 : (graphqlStatus ?? response.status),
+          headers: response.headers,
+          message,
+          now: new Date(this.options.now()),
+        });
+        if (response.ok && !rateError && graphqlStatus === undefined)
+          throw new GithubClientError({ kind: "invalid_response" }, source);
       } catch (error) {
         if (error instanceof GithubClientError) {
           if (error.outcome.kind !== "transient_failure") throw error;
@@ -277,7 +348,10 @@ export class GithubReadClient {
       if (retryable) {
         const jitter = Math.floor(Math.max(0, Math.min(1, this.options.random())) * 1000);
         const backoff = Math.min(60_000, 1000 * 2 ** Math.min(attempt, 6));
-        const retryAt = outcome.kind === "rate_limited" ? Math.max(this.options.now() + backoff, Date.parse(outcome.retryAt)) : this.options.now() + backoff;
+        const retryAt =
+          outcome.kind === "rate_limited"
+            ? Math.max(this.options.now() + backoff, Date.parse(outcome.retryAt))
+            : this.options.now() + backoff;
         await this.pause(source, retryAt + jitter);
       }
       if (!retryable || attempt >= this.options.maxRetries) throw new GithubClientError(outcome, source);
@@ -291,28 +365,54 @@ export class GithubReadClient {
   async graphql<T = unknown>(source: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
     if (!readOnlyQuery(query)) throw new GithubClientError({ kind: "unsafe_request" }, source);
     const { body } = await this.request(source, this.options.graphqlPath, { query, variables });
-    if (!object(body) || !("data" in body) || body.data === null) throw new GithubClientError({ kind: "invalid_response" }, source);
+    if (!object(body) || !("data" in body) || body.data === null)
+      throw new GithubClientError({ kind: "invalid_response" }, source);
     return body.data as T;
   }
 
-  private async scan<T>(source: string, key: string, fingerprint: string, start: string, maxPages: number,
-    refresh: boolean | undefined, fetchPage: (next: string) => Promise<{ items: readonly T[]; next: string | null }>): Promise<T[]> {
-    if (!Number.isSafeInteger(maxPages) || maxPages < 1) throw new RangeError("maxPages must be a positive safe integer");
+  private async scan<T>(
+    source: string,
+    key: string,
+    fingerprint: string,
+    start: string,
+    maxPages: number,
+    refresh: boolean | undefined,
+    fetchPage: (next: string) => Promise<{ items: readonly T[]; next: string | null }>,
+  ): Promise<T[]> {
+    if (!Number.isSafeInteger(maxPages) || maxPages < 1)
+      throw new RangeError("maxPages must be a positive safe integer");
     const storageKey = `scan:${hash([source, key])}`;
     if (this.scans.has(storageKey)) throw new Error("A scan with this source/key is already running");
     this.scans.add(storageKey);
     try {
       const loaded = refresh ? undefined : await this.options.checkpoints.load(storageKey);
-      if (loaded !== undefined && (!object(loaded) || loaded.version !== 1 || loaded.fingerprint !== fingerprint ||
-        !Array.isArray(loaded.visited) || !loaded.visited.every(value => typeof value === "string") ||
-        !Array.isArray(loaded.items) || typeof loaded.complete !== "boolean" ||
-        !(loaded.next === null || typeof loaded.next === "string") || loaded.complete !== (loaded.next === null))) {
+      if (
+        loaded !== undefined &&
+        (!object(loaded) ||
+          loaded.version !== 1 ||
+          loaded.fingerprint !== fingerprint ||
+          !Array.isArray(loaded.visited) ||
+          !loaded.visited.every((value) => typeof value === "string") ||
+          !Array.isArray(loaded.items) ||
+          typeof loaded.complete !== "boolean" ||
+          !(loaded.next === null || typeof loaded.next === "string") ||
+          loaded.complete !== (loaded.next === null))
+      ) {
         throw new GithubClientError({ kind: "invalid_checkpoint" }, source);
       }
-      const state: ScanCheckpoint = loaded as unknown as ScanCheckpoint ?? { version: 1, fingerprint, next: start, visited: [], items: [], complete: false };
+      const state: ScanCheckpoint = (loaded as unknown as ScanCheckpoint) ?? {
+        version: 1,
+        fingerprint,
+        next: start,
+        visited: [],
+        items: [],
+        complete: false,
+      };
       while (state.next !== null) {
-        if (state.visited.length >= maxPages) throw new Error("Source pagination exceeded maxPages; checkpoint retained");
-        if (state.visited.includes(state.next)) throw new Error("Source pagination repeated a page; checkpoint retained");
+        if (state.visited.length >= maxPages)
+          throw new Error("Source pagination exceeded maxPages; checkpoint retained");
+        if (state.visited.includes(state.next))
+          throw new Error("Source pagination repeated a page; checkpoint retained");
         const next = state.next;
         const page = await fetchPage(next);
         if (!Array.isArray(page.items)) throw new GithubClientError({ kind: "invalid_response" }, source);
@@ -333,30 +433,70 @@ export class GithubReadClient {
   async scanRest<T>(options: RestScan<T>): Promise<T[]> {
     const initialUrl = this.trustedUrl(options.url, options.source);
     const fingerprint = hash(["rest/v1", initialUrl, this.options.apiVersion, options.key]);
-    return this.scan(options.source, options.key, fingerprint, initialUrl, options.maxPages, options.refresh, async url => {
-      const page = await this.request(options.source, url);
-      const link = nextRestLink(page.link);
-      return { items: options.select(page.body), next: link ? this.trustedUrl(link, options.source) : null };
-    });
+    return this.scan(
+      options.source,
+      options.key,
+      fingerprint,
+      initialUrl,
+      options.maxPages,
+      options.refresh,
+      async (url) => {
+        const page = await this.request(options.source, url);
+        const link = nextRestLink(page.link);
+        return { items: options.select(page.body), next: link ? this.trustedUrl(link, options.source) : null };
+      },
+    );
   }
 
   async scanGraphql<T>(options: GraphqlScan<T>): Promise<T[]> {
     const first = options.first ?? 100;
-    if (!Number.isInteger(first) || first < 1 || first > 100) throw new RangeError("GraphQL first must be 1 through 100");
-    if (options.variables && ("first" in options.variables || "after" in options.variables)) throw new Error("first and after are managed scan variables");
-    const fingerprint = hash(["graphql/v1", this.options.apiOrigin, this.options.graphqlPath, this.options.apiVersion, options.query, options.variables ?? {}, first, options.key]);
-    return this.scan(options.source, options.key, fingerprint, "", options.maxPages, options.refresh, async cursor => {
-      const data = await this.graphql(options.source, options.query, { ...options.variables, first, after: cursor || null });
-      const page = options.select(data);
-      if (!object(page) || page.errors?.length || !object(page.pageInfo) || typeof page.pageInfo.hasNextPage !== "boolean" ||
-        !(page.pageInfo.endCursor === null || typeof page.pageInfo.endCursor === "string") ||
-        (page.pageInfo.hasNextPage && !page.pageInfo.endCursor)) throw new GithubClientError({ kind: "invalid_response" }, options.source);
-      return { items: page.nodes, next: page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null };
-    });
+    if (!Number.isInteger(first) || first < 1 || first > 100)
+      throw new RangeError("GraphQL first must be 1 through 100");
+    if (options.variables && ("first" in options.variables || "after" in options.variables))
+      throw new Error("first and after are managed scan variables");
+    const fingerprint = hash([
+      "graphql/v1",
+      this.options.apiOrigin,
+      this.options.graphqlPath,
+      this.options.apiVersion,
+      options.query,
+      options.variables ?? {},
+      first,
+      options.key,
+    ]);
+    return this.scan(
+      options.source,
+      options.key,
+      fingerprint,
+      "",
+      options.maxPages,
+      options.refresh,
+      async (cursor) => {
+        const data = await this.graphql(options.source, options.query, {
+          ...options.variables,
+          first,
+          after: cursor || null,
+        });
+        const page = options.select(data);
+        if (
+          !object(page) ||
+          page.errors?.length ||
+          !object(page.pageInfo) ||
+          typeof page.pageInfo.hasNextPage !== "boolean" ||
+          !(page.pageInfo.endCursor === null || typeof page.pageInfo.endCursor === "string") ||
+          (page.pageInfo.hasNextPage && !page.pageInfo.endCursor)
+        )
+          throw new GithubClientError({ kind: "invalid_response" }, options.source);
+        return { items: page.nodes, next: page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null };
+      },
+    );
   }
 
   /** Each parent gets its own durable child cursor; parent cursors never substitute for child cursors. */
-  async scanNestedGraphql<P, T>(parents: readonly P[], child: (parent: P) => GraphqlScan<T>): Promise<Array<{ parent: P; items: T[] }>> {
+  async scanNestedGraphql<P, T>(
+    parents: readonly P[],
+    child: (parent: P) => GraphqlScan<T>,
+  ): Promise<Array<{ parent: P; items: T[] }>> {
     const result: Array<{ parent: P; items: T[] }> = new Array(parents.length);
     let index = 0;
     const worker = async () => {
@@ -366,8 +506,10 @@ export class GithubReadClient {
         result[current] = { parent, items: await this.scanGraphql(child(parent)) };
       }
     };
-    const settled = await Promise.allSettled(Array.from({ length: Math.min(this.options.concurrency, parents.length) }, worker));
-    const failure = settled.find(outcome => outcome.status === "rejected");
+    const settled = await Promise.allSettled(
+      Array.from({ length: Math.min(this.options.concurrency, parents.length) }, worker),
+    );
+    const failure = settled.find((outcome) => outcome.status === "rejected");
     if (failure?.status === "rejected") throw failure.reason;
     return result;
   }

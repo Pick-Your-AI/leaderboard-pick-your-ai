@@ -4,22 +4,9 @@ const nonEmpty = z.string().trim().min(1);
 const id = nonEmpty;
 const isoDateTime = z.string().datetime({ offset: true });
 
-export const actorKindSchema = z.enum([
-  "user",
-  "bot",
-  "github_app",
-  "organization",
-  "system",
-  "unknown",
-]);
+export const actorKindSchema = z.enum(["user", "bot", "github_app", "organization", "system", "unknown"]);
 export const executionModeSchema = z.enum(["automated", "unknown"]);
-export const actorIdentityStateSchema = z.enum([
-  "resolved",
-  "unresolved",
-  "deleted",
-  "suspended",
-  "unavailable",
-]);
+export const actorIdentityStateSchema = z.enum(["resolved", "unresolved", "deleted", "suspended", "unavailable"]);
 
 export const actorSchema = z
   .object({
@@ -34,11 +21,7 @@ export const actorSchema = z
   })
   .strict()
   .superRefine((actor, ctx) => {
-    if (
-      actor.identityState === "resolved" &&
-      !actor.githubNodeId &&
-      actor.githubDatabaseId === undefined
-    ) {
+    if (actor.identityState === "resolved" && !actor.githubNodeId && actor.githubDatabaseId === undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Resolved actors require a stable GitHub node or database ID; login alone is not identity.",
@@ -58,13 +41,7 @@ export const artifactKindSchema = z.enum([
   "other",
   "unknown",
 ]);
-export const visibilityStateSchema = z.enum([
-  "public",
-  "private",
-  "unknown",
-  "deleted",
-  "unavailable",
-]);
+export const visibilityStateSchema = z.enum(["public", "private", "unknown", "deleted", "unavailable"]);
 
 export const artifactSchema = z
   .object({
@@ -78,10 +55,7 @@ export const artifactSchema = z
   })
   .strict()
   .superRefine((artifact, ctx) => {
-    if (
-      artifact.visibility === "public" &&
-      (!artifact.stableId || !artifact.publicUrl)
-    ) {
+    if (artifact.visibility === "public" && (!artifact.stableId || !artifact.publicUrl)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "A public artifact needs a stable source ID and public URL.",
@@ -116,12 +90,7 @@ export const sourceAdapterSchema = z.enum([
   "reviewed_receipt",
   "unknown",
 ]);
-export const deduplicationStateSchema = z.enum([
-  "unique",
-  "duplicate",
-  "ambiguous",
-  "unknown",
-]);
+export const deduplicationStateSchema = z.enum(["unique", "duplicate", "ambiguous", "unknown"]);
 
 export const sourceEventSchema = z
   .object({
@@ -141,12 +110,7 @@ export const sourceEventSchema = z
   })
   .strict();
 
-export const attributionStateSchema = z.enum([
-  "verified",
-  "ambiguous",
-  "unknown",
-  "unavailable",
-]);
+export const attributionStateSchema = z.enum(["verified", "ambiguous", "unknown", "unavailable"]);
 export const attributionSchema = z
   .object({
     schemaVersion: z.literal("leaderboard/v1"),
@@ -164,20 +128,14 @@ export const attributionSchema = z
   })
   .strict()
   .superRefine((attribution, ctx) => {
-    if (
-      attribution.state === "verified" &&
-      (!attribution.actorId || attribution.evidenceEventIds.length === 0)
-    ) {
+    if (attribution.state === "verified" && (!attribution.actorId || attribution.evidenceEventIds.length === 0)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Verified attribution requires an actor ID and evidence event.",
         path: ["actorId"],
       });
     }
-    if (
-      attribution.state !== "verified" &&
-      attribution.method === "stable_source_actor_id"
-    ) {
+    if (attribution.state !== "verified" && attribution.method === "stable_source_actor_id") {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Stable source identity alone cannot certify a non-verified attribution state.",
@@ -203,9 +161,7 @@ export const identityCorrectionSchema = z
   .superRefine((correction, ctx) => {
     if (
       correction.state === "accepted" &&
-      (!correction.reviewerActorId ||
-        !correction.reviewedAt ||
-        correction.evidenceEventIds.length === 0)
+      (!correction.reviewerActorId || !correction.reviewedAt || correction.evidenceEventIds.length === 0)
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -226,14 +182,7 @@ export const artifactLineageSchema = z
   .object({
     schemaVersion: z.literal("leaderboard/v1"),
     lineageId: id,
-    relation: z.enum([
-      "same_change",
-      "squash_of",
-      "cherry_pick_of",
-      "mirror_of",
-      "imported_from",
-      "unknown",
-    ]),
+    relation: z.enum(["same_change", "squash_of", "cherry_pick_of", "mirror_of", "imported_from", "unknown"]),
     sourceArtifactIds: z.array(id).min(1),
     targetArtifactId: id,
     state: z.enum(["verified", "pending", "ambiguous", "unknown", "unavailable"]),
@@ -250,12 +199,7 @@ export const artifactLineageSchema = z
     }
   });
 
-export const coverageStateSchema = z.enum([
-  "complete",
-  "partial",
-  "unknown",
-  "unavailable",
-]);
+export const coverageStateSchema = z.enum(["complete", "partial", "unknown", "unavailable"]);
 export const coverageSchema = z
   .object({
     schemaVersion: z.literal("leaderboard/v1"),
@@ -286,9 +230,7 @@ export const coverageSchema = z
     }
     if (
       coverage.state === "complete" &&
-      (coverage.missingPages > 0 ||
-        coverage.permissionsMissing.length > 0 ||
-        coverage.sourceErrors.length > 0)
+      (coverage.missingPages > 0 || coverage.permissionsMissing.length > 0 || coverage.sourceErrors.length > 0)
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -298,13 +240,7 @@ export const coverageSchema = z
     }
   });
 
-export const qualificationStateSchema = z.enum([
-  "eligible",
-  "ineligible",
-  "pending",
-  "unavailable",
-  "unknown",
-]);
+export const qualificationStateSchema = z.enum(["eligible", "ineligible", "pending", "unavailable", "unknown"]);
 export const contributionSchema = z
   .object({
     schemaVersion: z.literal("leaderboard/v1"),
@@ -319,14 +255,7 @@ export const contributionSchema = z
   })
   .strict();
 
-export const metricValueStateSchema = z.enum([
-  "measured",
-  "zero",
-  "partial",
-  "unsupported",
-  "unknown",
-  "unavailable",
-]);
+export const metricValueStateSchema = z.enum(["measured", "zero", "partial", "unsupported", "unknown", "unavailable"]);
 export const metricResultSchema = z
   .object({
     schemaVersion: z.literal("leaderboard/v1"),
@@ -357,10 +286,7 @@ export const metricResultSchema = z
         path: ["coverage", "state"],
       });
     }
-    if (
-      ["measured", "zero", "partial"].includes(result.state) !==
-      (result.value !== undefined)
-    ) {
+    if (["measured", "zero", "partial"].includes(result.state) !== (result.value !== undefined)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Only measured, zero, or partial results carry a numeric value.",

@@ -7,16 +7,7 @@
  * documented default is used in their place.
  */
 
-export const periodPresets = [
-  "7d",
-  "30d",
-  "90d",
-  "all",
-  "month",
-  "quarter",
-  "year",
-  "custom",
-] as const;
+export const periodPresets = ["7d", "30d", "90d", "all", "month", "quarter", "year", "custom"] as const;
 export type PeriodPreset = (typeof periodPresets)[number];
 
 export const actorClasses = ["user", "automation", "all"] as const;
@@ -63,16 +54,7 @@ export const defaultScope: Scope = {
 };
 
 /** Parameters owned by the scope; route-specific parameters pass through. */
-export const scopeParams = [
-  "period",
-  "from",
-  "to",
-  "repo",
-  "project",
-  "actor",
-  "snapshot",
-  "density",
-] as const;
+export const scopeParams = ["period", "from", "to", "repo", "project", "actor", "snapshot", "density"] as const;
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -94,10 +76,7 @@ function splitList(params: URLSearchParams, name: string): string[] {
     .filter((value) => value.length > 0);
 }
 
-export function parseScope(
-  search: string,
-  context: ScopeContext = {},
-): { scope: Scope; issues: ScopeIssue[] } {
+export function parseScope(search: string, context: ScopeContext = {}): { scope: Scope; issues: ScopeIssue[] } {
   const params = new URLSearchParams(search);
   const issues: ScopeIssue[] = [];
   const scope: Scope = { ...defaultScope, repos: [], projects: [] };
@@ -146,11 +125,7 @@ export function parseScope(
     scope.period = "30d";
   }
 
-  const checkIds = (
-    name: "repo" | "project",
-    known: readonly string[] | undefined,
-    label: string,
-  ): string[] => {
+  const checkIds = (name: "repo" | "project", known: readonly string[] | undefined, label: string): string[] => {
     const values = [...new Set(splitList(params, name))];
     if (!known) return values.sort();
     const accepted: string[] = [];
@@ -209,10 +184,7 @@ export function parseScope(
  * same scope always produces the same shareable URL. Route parameters in
  * `extra` are appended after scope parameters in key order.
  */
-export function serializeScope(
-  scope: Scope,
-  extra: Record<string, string | null | undefined> = {},
-): string {
+export function serializeScope(scope: Scope, extra: Record<string, string | null | undefined> = {}): string {
   const params = new URLSearchParams();
   if (scope.period === "custom" && scope.from && scope.to) {
     params.set("from", scope.from);

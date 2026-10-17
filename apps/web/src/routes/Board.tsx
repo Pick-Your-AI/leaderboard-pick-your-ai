@@ -25,7 +25,8 @@ function changedRows(before: Board | null, after: Board | null): number {
   if (!before || !after) return 0;
   const previous = new Map(before.rows.map((row) => [row.person.actorId, `${row.rank}:${row.value}:${row.pending}`]));
   let changed = 0;
-  for (const row of after.rows) if (previous.get(row.person.actorId) !== `${row.rank}:${row.value}:${row.pending}`) changed += 1;
+  for (const row of after.rows)
+    if (previous.get(row.person.actorId) !== `${row.rank}:${row.value}:${row.pending}`) changed += 1;
   return changed + Math.max(0, before.rows.length - after.rows.length);
 }
 
@@ -88,14 +89,17 @@ export function BoardPage({ metricId }: { metricId: string }) {
     const after = buildBoard(metricId, scope, latest);
     setShownLatest(latest);
     const changed = changedRows(before, after);
-    setAnnouncement(`Updated to snapshot ${latest}. ${changed === 0 ? "No ranked values changed." : `${plural(changed, "row")} changed.`}`);
+    setAnnouncement(
+      `Updated to snapshot ${latest}. ${changed === 0 ? "No ranked values changed." : `${plural(changed, "row")} changed.`}`,
+    );
   }, [metricId, scope, shownLatest, latest]);
 
   useEffect(() => {
     // Drawer cleanup restores focus before React processes its focus event.
     // Consult the DOM as well so closing proof cannot apply an update in that gap.
     const focusReturnedToTable = regionRef.current?.contains(document.activeElement) ?? false;
-    if (pendingId && follow && mayFollowUpdates(pointerInside, focusInside || focusReturnedToTable, Boolean(proof))) apply();
+    if (pendingId && follow && mayFollowUpdates(pointerInside, focusInside || focusReturnedToTable, Boolean(proof)))
+      apply();
   }, [pendingId, follow, pointerInside, focusInside, proof, apply]);
 
   const routeHref = useCallback(
@@ -126,7 +130,8 @@ export function BoardPage({ metricId }: { metricId: string }) {
     <>
       <PageHeader eyebrow={`${familyLabel(metric.family)} · leaderboard`} title={metric.name}>
         <p>
-          {metric.counting_rule}. Unit: {metric.definition.unit}. Date basis: <span className="mono">{metric.event_clock}</span>.{" "}
+          {metric.counting_rule}. Unit: {metric.definition.unit}. Date basis:{" "}
+          <span className="mono">{metric.event_clock}</span>.{" "}
           {releaseEligibilityLabels[metric.definition.release_eligibility] ?? metric.definition.release_eligibility}.
         </p>
       </PageHeader>
@@ -158,13 +163,15 @@ export function BoardPage({ metricId }: { metricId: string }) {
         <ReceiptDrawer
           title={proofRow ? `Evidence: ${proofRow.person.displayName}` : "Evidence not found"}
           onClose={() => navigate(routeHref({ proof: null }))}
-          {...(proofRow ? { fullPageHref: hrefWith(`/contributors/${encodeURIComponent(proofRow.person.login)}`) } : {})}
+          {...(proofRow
+            ? { fullPageHref: hrefWith(`/contributors/${encodeURIComponent(proofRow.person.login)}`) }
+            : {})}
         >
           {proofRow ? (
             <>
               <p>
-                {plural(proofRow.ranked.length, "contribution")} counted, {plural(proofRow.pending.length, "contribution")} pending and not
-                ranked, in this scope and snapshot.
+                {plural(proofRow.ranked.length, "contribution")} counted,{" "}
+                {plural(proofRow.pending.length, "contribution")} pending and not ranked, in this scope and snapshot.
               </p>
               <p className="muted">Fixture explanation: {state.data?.fixture?.explanation}</p>
               <h3>Counted</h3>
@@ -226,19 +233,24 @@ function BoardBody({
       <SnapshotNotices view={board.snapshot} />
       {board.coverageState !== "complete" && board.status === "measured" && (
         <Notice tone="warn" title="Partial history">
-          Some repositories in this scope have incomplete source history, so these values may be low. Missing activity is not counted as zero.
+          Some repositories in this scope have incomplete source history, so these values may be low. Missing activity
+          is not counted as zero.
         </Notice>
       )}
       {update}
       <MethodDisclosure metric={board.metric} />
 
       {board.status === "not_measured" && (
-        <EmptyState title={board.coverageState === "unavailable" ? "Unsupported source capability" : "Not measured in this prototype"}>
+        <EmptyState
+          title={
+            board.coverageState === "unavailable" ? "Unsupported source capability" : "Not measured in this prototype"
+          }
+        >
           <p>
             {board.coverageState === "unavailable"
-              ? `The source needed for this measure is unavailable in this scope (${board.coverage
-                  .flatMap((item) => item.permissionsMissing)
-                  .join(", ") || "no supported adapter"}). Nothing is shown as zero.`
+              ? `The source needed for this measure is unavailable in this scope (${
+                  board.coverage.flatMap((item) => item.permissionsMissing).join(", ") || "no supported adapter"
+                }). Nothing is shown as zero.`
               : "This measure is defined in the metric registry, but the synthetic prototype has no fixture for it. It is not zero, and it is not ranked."}
           </p>
           <p>
@@ -249,12 +261,14 @@ function BoardBody({
       )}
       {board.status === "empty_complete" && (
         <EmptyState title="No eligible activity in this complete scope">
-          Every source for this scope reports complete coverage for the whole window, and no eligible activity occurred. This is a true zero.
+          Every source for this scope reports complete coverage for the whole window, and no eligible activity occurred.
+          This is a true zero.
         </EmptyState>
       )}
       {board.status === "empty_incomplete" && (
         <EmptyState title="Nothing observed, but coverage is incomplete">
-          No activity was observed, but at least one source in this scope has partial or unknown coverage. This is not a zero.
+          No activity was observed, but at least one source in this scope has partial or unknown coverage. This is not a
+          zero.
         </EmptyState>
       )}
       {board.rows.length > 0 && (
@@ -273,7 +287,9 @@ function BoardBody({
       {board.pendingOnly.length > 0 && (
         <section className="section" aria-labelledby="pending-only">
           <h2 id="pending-only">Also active, not ranked</h2>
-          <p className="muted">These contributors have only pending work for this measure in this scope. They are listed, not ranked.</p>
+          <p className="muted">
+            These contributors have only pending work for this measure in this scope. They are listed, not ranked.
+          </p>
           <ul className="people-list">
             {board.pendingOnly.map((entry) => (
               <li key={entry.person.actorId}>

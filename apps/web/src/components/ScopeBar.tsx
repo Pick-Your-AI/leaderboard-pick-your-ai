@@ -40,7 +40,13 @@ export function ScopeIssues({ issues }: { issues: ScopeIssue[] }) {
  * Scope controls shared by every scoped route. Each change writes the URL, so
  * the scope survives navigation and can be copied.
  */
-export function ScopeBar({ timeWindow, showSnapshot = true }: { timeWindow: TimeWindow | null; showSnapshot?: boolean }) {
+export function ScopeBar({
+  timeWindow,
+  showSnapshot = true,
+}: {
+  timeWindow: TimeWindow | null;
+  showSnapshot?: boolean;
+}) {
   const { scope, issues, setScope } = useScope();
   const id = useId();
   const [customFrom, setCustomFrom] = useState(scope.from ?? "");
@@ -100,7 +106,9 @@ export function ScopeBar({ timeWindow, showSnapshot = true }: { timeWindow: Time
             onChange={(event) => update({ repos: event.target.value ? [event.target.value] : [] })}
           >
             <option value="">All repositories</option>
-            {scope.repos.length > 1 && <option value="__multiple" disabled>{`${scope.repos.length} selected from link`}</option>}
+            {scope.repos.length > 1 && (
+              <option value="__multiple" disabled>{`${scope.repos.length} selected from link`}</option>
+            )}
             {repositories.map((repo) => (
               <option key={repo.id} value={repo.id}>
                 {repo.name}
@@ -132,7 +140,13 @@ export function ScopeBar({ timeWindow, showSnapshot = true }: { timeWindow: Time
             ] as const
           ).map(([value, label]) => (
             <label key={value}>
-              <input type="radio" name={`${id}-actor`} value={value} checked={scope.actor === value} onChange={() => update({ actor: value })} />
+              <input
+                type="radio"
+                name={`${id}-actor`}
+                value={value}
+                checked={scope.actor === value}
+                onChange={() => update({ actor: value })}
+              />
               <span>{label}</span>
             </label>
           ))}
@@ -144,7 +158,8 @@ export function ScopeBar({ timeWindow, showSnapshot = true }: { timeWindow: Time
               <option value="">Latest published</option>
               {snapshots.map((snapshot) => (
                 <option key={snapshot.id} value={snapshot.id}>
-                  Pin {snapshot.id} ({snapshot.status === "published" ? snapshot.freshness.toLowerCase() : snapshot.status})
+                  Pin {snapshot.id} (
+                  {snapshot.status === "published" ? snapshot.freshness.toLowerCase() : snapshot.status})
                 </option>
               ))}
             </select>
@@ -154,8 +169,13 @@ export function ScopeBar({ timeWindow, showSnapshot = true }: { timeWindow: Time
       {timeWindow && (
         <p className="scope-window">
           <span className="muted">Window:</span> {timeWindow.label} ·{" "}
-          {timeWindow.start ? <time dateTime={timeWindow.start.toISOString()}>{formatDateTime(timeWindow.start.toISOString())}</time> : "start of known history"}{" "}
-          to <time dateTime={timeWindow.end.toISOString()}>{formatDateTime(timeWindow.end.toISOString())}</time>, end exclusive ·{" "}
+          {timeWindow.start ? (
+            <time dateTime={timeWindow.start.toISOString()}>{formatDateTime(timeWindow.start.toISOString())}</time>
+          ) : (
+            "start of known history"
+          )}{" "}
+          to <time dateTime={timeWindow.end.toISOString()}>{formatDateTime(timeWindow.end.toISOString())}</time>, end
+          exclusive ·{" "}
           {scope.actor === "user" ? "user accounts" : scope.actor === "automation" ? "automation only" : "all activity"}
         </p>
       )}

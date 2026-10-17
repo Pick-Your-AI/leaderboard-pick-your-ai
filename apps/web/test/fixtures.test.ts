@@ -36,7 +36,8 @@ test("fixture records map onto the v1 contracts", () => {
   for (const record of contributions) {
     sourceEventSchema.parse(toSourceEvent(record));
     contributionSchema.parse(toContribution(record));
-    for (const metricId of record.metricIds) assert.ok(getMetric(metricId), `${record.id} uses unknown metric ${metricId}`);
+    for (const metricId of record.metricIds)
+      assert.ok(getMetric(metricId), `${record.id} uses unknown metric ${metricId}`);
   }
   for (const metricId of Object.keys(fixtureMetrics)) assert.ok(getMetric(metricId), metricId);
 });
@@ -87,7 +88,10 @@ test("automation is separate from user-account boards", () => {
   const users = buildBoard("labels_applied", scope(), latest)!;
   assert.ok(!users.rows.some((row) => row.person.actor.kind !== "user"));
   const automation = buildBoard("labels_applied", scope({ actor: "automation" }), latest)!;
-  assert.deepEqual(automation.rows.map((row) => row.person.login), ["synthetic-ci-bot"]);
+  assert.deepEqual(
+    automation.rows.map((row) => row.person.login),
+    ["synthetic-ci-bot"],
+  );
 });
 
 test("LOC excludes generated, vendor and lockfile lines", () => {
@@ -127,7 +131,6 @@ test("the directory includes observed-only newcomers alphabetically", () => {
   assert.ok(logins.includes("synthetic-gale"));
   assert.deepEqual(logins, [...logins].sort());
 });
-
 
 test("a pinned contribution page cannot expose records first observed in a later snapshot", () => {
   assert.equal(getContribution("syn-c-009", "syn-r42"), null);

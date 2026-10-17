@@ -47,7 +47,8 @@ export function classifyGithubFailure(input: GithubFailureInput): EndpointOutcom
   const retryAfter = parseRetryAfter(input.headers?.get("retry-after") ?? null, now);
   const reset = primaryReset(input.headers);
   const mentionsRateLimit = /rate limit|secondary rate/i.test(input.message ?? "");
-  const rateLimited = input.status === 429 ||
+  const rateLimited =
+    input.status === 429 ||
     (input.status === 403 && (remaining === "0" || retryAfter !== undefined || mentionsRateLimit));
 
   if (rateLimited) {
@@ -61,9 +62,17 @@ export function classifyGithubFailure(input: GithubFailureInput): EndpointOutcom
   if (input.status === 404) return { kind: "not_found_or_hidden", visibility: "unknown", status: 404 };
   if (input.status === 403) return { kind: "permission_denied", visibility: "unknown", status: 403 };
   if (input.status === undefined || input.status === 408 || input.status === 425 || input.status >= 500) {
-    return { kind: "transient_failure", visibility: "unknown", ...(input.status === undefined ? {} : { status: input.status }) };
+    return {
+      kind: "transient_failure",
+      visibility: "unknown",
+      ...(input.status === undefined ? {} : { status: input.status }),
+    };
   }
-  return { kind: "unknown_failure", visibility: "unknown", ...(input.status === undefined ? {} : { status: input.status }) };
+  return {
+    kind: "unknown_failure",
+    visibility: "unknown",
+    ...(input.status === undefined ? {} : { status: input.status }),
+  };
 }
 
 export function readableOutcome(visibility: Visibility | null | undefined): EndpointOutcome {
@@ -106,8 +115,13 @@ export interface RestPaginationOptions {
 function assertTrustedApiUrl(raw: string, apiOrigin: string): string {
   const base = new URL(apiOrigin);
   const candidate = new URL(raw, base);
-  if (base.protocol !== "https:" || candidate.protocol !== "https:" ||
-      candidate.origin !== base.origin || candidate.username || candidate.password) {
+  if (
+    base.protocol !== "https:" ||
+    candidate.protocol !== "https:" ||
+    candidate.origin !== base.origin ||
+    candidate.username ||
+    candidate.password
+  ) {
     throw new Error("Refusing pagination URL outside the configured HTTPS GitHub API origin");
   }
   return candidate.toString();
@@ -164,7 +178,8 @@ export async function paginateGraphql<T>(
   let after: string | null = null;
   for (let pageCount = 0; pageCount < options.maxPages; pageCount += 1) {
     const page = await fetchPage({ first: options.first, after });
-    if (page.errors?.length) throw new Error(`GraphQL response included errors: ${page.errors.map((error) => error.message).join("; ")}`);
+    if (page.errors?.length)
+      throw new Error(`GraphQL response included errors: ${page.errors.map((error) => error.message).join("; ")}`);
     nodes.push(...page.nodes);
     if (!page.pageInfo.hasNextPage) return nodes;
     const nextCursor = page.pageInfo.endCursor;

@@ -41,7 +41,11 @@ export class FileCheckpointStore implements CheckpointStore {
       // Persist the directory entry on systems supporting directory fsync.
       if (process.platform !== "win32") {
         const directory = await open(this.directory, "r");
-        try { await directory.sync(); } finally { await directory.close(); }
+        try {
+          await directory.sync();
+        } finally {
+          await directory.close();
+        }
       }
     } finally {
       await unlink(temporary).catch((error: NodeJS.ErrnoException) => {

@@ -13,9 +13,7 @@ export function denseRank<T>(
   value: (item: T) => number,
   tieKey: (item: T) => string,
 ): Ranked<T>[] {
-  const ordered = [...items].sort(
-    (a, b) => value(b) - value(a) || tieKey(a).localeCompare(tieKey(b), "en"),
-  );
+  const ordered = [...items].sort((a, b) => value(b) - value(a) || tieKey(a).localeCompare(tieKey(b), "en"));
   const counts = new Map<number, number>();
   for (const item of ordered) counts.set(value(item), (counts.get(value(item)) ?? 0) + 1);
 
@@ -37,7 +35,10 @@ export function denseRank<T>(
  * Cut a ranked list after `limit` rows, extending the cut so that a tie at the
  * boundary is never split. Returns the rows shown and how many remain.
  */
-export function cutWithTies<T extends { rank: number }>(ranked: readonly T[], limit: number): {
+export function cutWithTies<T extends { rank: number }>(
+  ranked: readonly T[],
+  limit: number,
+): {
   shown: T[];
   remaining: number;
 } {

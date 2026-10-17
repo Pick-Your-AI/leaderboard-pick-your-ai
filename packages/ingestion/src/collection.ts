@@ -1,21 +1,43 @@
 import { createHash } from "node:crypto";
 import type { SqlDatabase, SqlSession } from "./store.js";
 
-export const sourceFamilies = ["issues", "pull_requests", "commits", "reviews", "comments", "releases", "discussions", "timelines", "content_edits", "project_history", "relationships", "project_current"] as const;
-export type SourceFamily = typeof sourceFamilies[number];
+export const sourceFamilies = [
+  "issues",
+  "pull_requests",
+  "commits",
+  "reviews",
+  "comments",
+  "releases",
+  "discussions",
+  "timelines",
+  "content_edits",
+  "project_history",
+  "relationships",
+  "project_current",
+] as const;
+export type SourceFamily = (typeof sourceFamilies)[number];
 export interface ScanRequest {
-  runId: string; repositoryId: number; family: SourceFamily;
-  mode: "backfill" | "reconcile" | "audit"; since: string | null; until: string;
+  runId: string;
+  repositoryId: number;
+  family: SourceFamily;
+  mode: "backfill" | "reconcile" | "audit";
+  since: string | null;
+  until: string;
 }
 export interface SourceFact {
-  subjectId: string; sourceRevision: string; sourceUrl: string;
+  subjectId: string;
+  sourceRevision: string;
+  sourceUrl: string;
   /** Snapshot state never establishes a transition's actor or occurrence time. */
   evidence: "current_state" | "observed_transition";
-  actorId: string | null; occurredAt: string | null;
+  actorId: string | null;
+  occurredAt: string | null;
   state: "open" | "closed" | "merged" | "deleted" | "reverted" | "present" | "unavailable";
 }
 export interface SourcePage {
-  repositoryId: number; visibility: "public"; facts: SourceFact[];
+  repositoryId: number;
+  visibility: "public";
+  facts: SourceFact[];
   nextCursor: string | null;
   /** Exact count for this fixed scan, or null when the source cannot establish it. */
   expectedCount: number | null;
@@ -32,31 +54,68 @@ function repository(value: number): void {
   if (!Number.isSafeInteger(value) || value < 1) throw new Error("invalid_repository_id");
 }
 function timestamp(value: string): void {
-  if (typeof value !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value) || new Date(value).toISOString() !== value) throw new Error("invalid_collection_time");
+  if (
+    typeof value !== "string" ||
+    !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value) ||
+    new Date(value).toISOString() !== value
+  )
+    throw new Error("invalid_collection_time");
 }
 function cursor(value: string | null): void {
-  if (value !== null && (typeof value !== "string" || !/^[A-Za-z0-9_=.:/-]{1,1024}$/.test(value))) throw new Error("invalid_collection_cursor");
+  if (value !== null && (typeof value !== "string" || !/^[A-Za-z0-9_=.:/-]{1,1024}$/.test(value)))
+    throw new Error("invalid_collection_cursor");
 }
 function normalizeFact(value: SourceFact): SourceFact {
-  id(value.subjectId); id(value.sourceRevision);
+  id(value.subjectId);
+  id(value.sourceRevision);
   const url = new URL(value.sourceUrl);
-  if (url.origin !== "https://github.com" || url.username || url.password || url.search ||
-      (url.hash !== "" && !/^#(?:issuecomment-\d+|pullrequestreview-\d+|discussion_r\d+|r\d+|discussioncomment-\d+)$/.test(url.hash)) ||
-      !/^\/[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+\/(issues|pull|commit|releases(?:\/tag)?|discussions)\/[A-Za-z0-9_.-]+$/.test(url.pathname)) throw new Error("invalid_source_url");
-  if (!["current_state", "observed_transition"].includes(value.evidence) ||
-      !["open", "closed", "merged", "deleted", "reverted", "present", "unavailable"].includes(value.state)) throw new Error("invalid_source_fact");
+  if (
+    url.origin !== "https://github.com" ||
+    url.username ||
+    url.password ||
+    url.search ||
+    (url.hash !== "" &&
+      !/^#(?:issuecomment-\d+|pullrequestreview-\d+|discussion_r\d+|r\d+|discussioncomment-\d+)$/.test(url.hash)) ||
+    !/^\/[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+\/(issues|pull|commit|releases(?:\/tag)?|discussions)\/[A-Za-z0-9_.-]+$/.test(
+      url.pathname,
+    )
+  )
+    throw new Error("invalid_source_url");
+  if (
+    !["current_state", "observed_transition"].includes(value.evidence) ||
+    !["open", "closed", "merged", "deleted", "reverted", "present", "unavailable"].includes(value.state)
+  )
+    throw new Error("invalid_source_fact");
   if (value.actorId !== null) id(value.actorId);
   if (value.occurredAt !== null) timestamp(value.occurredAt);
-  if (value.evidence === "current_state" && (value.actorId !== null || value.occurredAt !== null)) throw new Error("snapshot_attribution_forbidden");
+  if (value.evidence === "current_state" && (value.actorId !== null || value.occurredAt !== null))
+    throw new Error("snapshot_attribution_forbidden");
   // Pick fields explicitly. Repository text and adapter extras are never retained or executed.
-  return { subjectId: value.subjectId, sourceRevision: value.sourceRevision, sourceUrl: url.href,
-    evidence: value.evidence, actorId: value.actorId, occurredAt: value.occurredAt, state: value.state };
+  return {
+    subjectId: value.subjectId,
+    sourceRevision: value.sourceRevision,
+    sourceUrl: url.href,
+    evidence: value.evidence,
+    actorId: value.actorId,
+    occurredAt: value.occurredAt,
+    state: value.state,
+  };
 }
 
-export async function assertRepositoryAvailable(db: SqlSession, repositoryId: number, subjectId: string | null = null): Promise<void> {
-  const access = await db.query("SELECT repository_id FROM leaderboard_ingestion.repository_access WHERE repository_id = $1 AND state = 'public' FOR SHARE", [repositoryId]);
+export async function assertRepositoryAvailable(
+  db: SqlSession,
+  repositoryId: number,
+  subjectId: string | null = null,
+): Promise<void> {
+  const access = await db.query(
+    "SELECT repository_id FROM leaderboard_ingestion.repository_access WHERE repository_id = $1 AND state = 'public' FOR SHARE",
+    [repositoryId],
+  );
   if (!access.rows.length) throw new Error("repository_unavailable");
-  const denied = await db.query("SELECT repository_id FROM leaderboard_ingestion.object_suppressions WHERE repository_id = $1 AND subject_id = $2", [repositoryId, subjectId]);
+  const denied = await db.query(
+    "SELECT repository_id FROM leaderboard_ingestion.object_suppressions WHERE repository_id = $1 AND subject_id = $2",
+    [repositoryId, subjectId],
+  );
   if (denied.rows.length) throw new Error("repository_unavailable");
 }
 
@@ -64,134 +123,271 @@ export class CollectionStore {
   constructor(readonly db: SqlDatabase) {}
 
   /** Host supplies a fresh read-only visibility probe. A stale probe cannot undo a revocation. */
-  async verifyPublic(repositoryId: number, installationId: number, expectedGeneration: string | null): Promise<boolean> {
-    repository(repositoryId); repository(installationId);
-    if (expectedGeneration !== null && !/^[1-9]\d{0,18}$/.test(expectedGeneration)) throw new Error("invalid_access_generation");
-    return this.db.transaction(async tx => {
+  async verifyPublic(
+    repositoryId: number,
+    installationId: number,
+    expectedGeneration: string | null,
+  ): Promise<boolean> {
+    repository(repositoryId);
+    repository(installationId);
+    if (expectedGeneration !== null && !/^[1-9]\d{0,18}$/.test(expectedGeneration))
+      throw new Error("invalid_access_generation");
+    return this.db.transaction(async (tx) => {
       await tx.query("SELECT pg_advisory_xact_lock($1)", [installationId]);
-      const revoked = await tx.query("SELECT installation_id FROM leaderboard_ingestion.lifecycle_receipts WHERE installation_id = $1 AND reason = 'revoked' LIMIT 1", [installationId]);
+      const revoked = await tx.query(
+        "SELECT installation_id FROM leaderboard_ingestion.lifecycle_receipts WHERE installation_id = $1 AND reason = 'revoked' LIMIT 1",
+        [installationId],
+      );
       if (revoked.rows.length) return false;
       if (expectedGeneration !== null) {
-        const updated = await tx.query(`UPDATE leaderboard_ingestion.repository_access SET state = 'public',
+        const updated = await tx.query(
+          `UPDATE leaderboard_ingestion.repository_access SET state = 'public',
         installation_id = $2, generation = generation + 1, checked_at = clock_timestamp()
-        WHERE repository_id = $1 AND generation::text = $3 RETURNING repository_id`, [repositoryId, installationId, expectedGeneration]);
+        WHERE repository_id = $1 AND generation::text = $3 RETURNING repository_id`,
+          [repositoryId, installationId, expectedGeneration],
+        );
         return updated.rows.length > 0;
       }
-      const result = await tx.query(`INSERT INTO leaderboard_ingestion.repository_access (repository_id, installation_id, state)
-        VALUES ($1, $2, 'public') ON CONFLICT (repository_id) DO NOTHING RETURNING repository_id`, [repositoryId, installationId]);
+      const result = await tx.query(
+        `INSERT INTO leaderboard_ingestion.repository_access (repository_id, installation_id, state)
+        VALUES ($1, $2, 'public') ON CONFLICT (repository_id) DO NOTHING RETURNING repository_id`,
+        [repositoryId, installationId],
+      );
       return result.rows.length > 0;
     });
   }
 
   /** Verified webhook delivery. Suppression is monotonic until a fresh visibility/access probe. */
-  async suppress(deliveryId: string, bodyHash: string, installationId: number, repositoryIds: number[], reason: "private" | "removed" | "revoked"): Promise<"accepted" | "duplicate" | "conflict"> {
-    if (!/^[a-f0-9-]{36}$/i.test(deliveryId) || !/^[a-f0-9]{64}$/.test(bodyHash)) throw new Error("invalid_lifecycle_receipt");
+  async suppress(
+    deliveryId: string,
+    bodyHash: string,
+    installationId: number,
+    repositoryIds: number[],
+    reason: "private" | "removed" | "revoked",
+  ): Promise<"accepted" | "duplicate" | "conflict"> {
+    if (!/^[a-f0-9-]{36}$/i.test(deliveryId) || !/^[a-f0-9]{64}$/.test(bodyHash))
+      throw new Error("invalid_lifecycle_receipt");
     repository(installationId);
-    if (!Array.isArray(repositoryIds) || repositoryIds.length > 1000 || !["private", "removed", "revoked"].includes(reason)) throw new Error("invalid_lifecycle_scope");
+    if (
+      !Array.isArray(repositoryIds) ||
+      repositoryIds.length > 1000 ||
+      !["private", "removed", "revoked"].includes(reason)
+    )
+      throw new Error("invalid_lifecycle_scope");
     repositoryIds.forEach(repository);
-    return this.db.transaction(async tx => {
+    return this.db.transaction(async (tx) => {
       // Installation lock serializes repository discovery and revocation in this API.
       await tx.query("SELECT pg_advisory_xact_lock($1)", [installationId]);
-      const receipt = await tx.query(`INSERT INTO leaderboard_ingestion.lifecycle_receipts
+      const receipt = await tx.query(
+        `INSERT INTO leaderboard_ingestion.lifecycle_receipts
         (delivery_id, body_hash, installation_id, repository_ids, reason) VALUES ($1,$2,$3,$4::jsonb,$5)
-        ON CONFLICT (delivery_id) DO NOTHING RETURNING delivery_id`, [deliveryId, bodyHash, installationId, JSON.stringify(repositoryIds), reason]);
+        ON CONFLICT (delivery_id) DO NOTHING RETURNING delivery_id`,
+        [deliveryId, bodyHash, installationId, JSON.stringify(repositoryIds), reason],
+      );
       if (!receipt.rows.length) {
-        const prior = await tx.query("SELECT body_hash FROM leaderboard_ingestion.lifecycle_receipts WHERE delivery_id = $1", [deliveryId]);
+        const prior = await tx.query(
+          "SELECT body_hash FROM leaderboard_ingestion.lifecycle_receipts WHERE delivery_id = $1",
+          [deliveryId],
+        );
         return prior.rows[0]?.body_hash === bodyHash ? "duplicate" : "conflict";
       }
-      if (reason === "revoked") await tx.query(`UPDATE leaderboard_ingestion.repository_access SET state = 'unavailable',
-        generation = generation + 1, checked_at = clock_timestamp() WHERE installation_id = $1`, [installationId]);
-      for (const repositoryId of new Set(repositoryIds)) await tx.query(`INSERT INTO leaderboard_ingestion.repository_access
+      if (reason === "revoked")
+        await tx.query(
+          `UPDATE leaderboard_ingestion.repository_access SET state = 'unavailable',
+        generation = generation + 1, checked_at = clock_timestamp() WHERE installation_id = $1`,
+          [installationId],
+        );
+      for (const repositoryId of new Set(repositoryIds))
+        await tx.query(
+          `INSERT INTO leaderboard_ingestion.repository_access
         (repository_id, installation_id, state) VALUES ($1,$2,'unavailable') ON CONFLICT (repository_id)
-        DO UPDATE SET state = 'unavailable', generation = repository_access.generation + 1, checked_at = clock_timestamp()`, [repositoryId, installationId]);
+        DO UPDATE SET state = 'unavailable', generation = repository_access.generation + 1, checked_at = clock_timestamp()`,
+          [repositoryId, installationId],
+        );
       return "accepted";
     });
   }
 
   async start(request: ScanRequest): Promise<void> {
-    id(request.runId); repository(request.repositoryId); timestamp(request.until);
-    if (request.since !== null) { timestamp(request.since); if (request.since >= request.until) throw new Error("invalid_scan_window"); }
-    if (!sourceFamilies.includes(request.family) || !["backfill", "reconcile", "audit"].includes(request.mode)) throw new Error("invalid_scan_scope");
-    await this.db.transaction(async tx => {
-      const access = await tx.query("SELECT generation FROM leaderboard_ingestion.repository_access WHERE repository_id = $1 AND state = 'public' FOR SHARE", [request.repositoryId]);
+    id(request.runId);
+    repository(request.repositoryId);
+    timestamp(request.until);
+    if (request.since !== null) {
+      timestamp(request.since);
+      if (request.since >= request.until) throw new Error("invalid_scan_window");
+    }
+    if (!sourceFamilies.includes(request.family) || !["backfill", "reconcile", "audit"].includes(request.mode))
+      throw new Error("invalid_scan_scope");
+    await this.db.transaction(async (tx) => {
+      const access = await tx.query(
+        "SELECT generation FROM leaderboard_ingestion.repository_access WHERE repository_id = $1 AND state = 'public' FOR SHARE",
+        [request.repositoryId],
+      );
       if (!access.rows[0]) throw new Error("repository_unverified");
-      await tx.query(`INSERT INTO leaderboard_ingestion.collection_runs
+      await tx.query(
+        `INSERT INTO leaderboard_ingestion.collection_runs
         (run_id, repository_id, family, mode, since_at, until_at, access_generation) VALUES ($1,$2,$3,$4,$5,$6,$7)
-        ON CONFLICT (run_id) DO NOTHING`, [request.runId, request.repositoryId, request.family, request.mode, request.since, request.until, access.rows[0].generation]);
-      const prior = (await tx.query("SELECT * FROM leaderboard_ingestion.collection_runs WHERE run_id = $1", [request.runId])).rows[0]!;
-      if (String(prior.repository_id) !== String(request.repositoryId) || prior.family !== request.family || prior.mode !== request.mode ||
-          new Date(prior.until_at as string).toISOString() !== request.until ||
-          (prior.since_at === null ? null : new Date(prior.since_at as string).toISOString()) !== request.since) throw new Error("scan_id_conflict");
+        ON CONFLICT (run_id) DO NOTHING`,
+        [
+          request.runId,
+          request.repositoryId,
+          request.family,
+          request.mode,
+          request.since,
+          request.until,
+          access.rows[0].generation,
+        ],
+      );
+      const prior = (
+        await tx.query("SELECT * FROM leaderboard_ingestion.collection_runs WHERE run_id = $1", [request.runId])
+      ).rows[0]!;
+      if (
+        String(prior.repository_id) !== String(request.repositoryId) ||
+        prior.family !== request.family ||
+        prior.mode !== request.mode ||
+        new Date(prior.until_at as string).toISOString() !== request.until ||
+        (prior.since_at === null ? null : new Date(prior.since_at as string).toISOString()) !== request.since
+      )
+        throw new Error("scan_id_conflict");
     });
   }
 
   /** One network page per call. Concurrent workers converge through the locked checkpoint. */
-  async step(runId: string, source: ReadOnlySource, limit = 100): Promise<"complete" | "progress" | "superseded" | "failed"> {
+  async step(
+    runId: string,
+    source: ReadOnlySource,
+    limit = 100,
+  ): Promise<"complete" | "progress" | "superseded" | "failed"> {
     id(runId);
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("invalid_page_limit");
-    const run = (await this.db.query("SELECT * FROM leaderboard_ingestion.collection_runs WHERE run_id = $1", [runId])).rows[0];
+    const run = (await this.db.query("SELECT * FROM leaderboard_ingestion.collection_runs WHERE run_id = $1", [runId]))
+      .rows[0];
     if (!run) throw new Error("unknown_scan");
     if (run.state === "complete") return "complete";
-    const request: ScanRequest = { runId, repositoryId: Number(run.repository_id), family: run.family as SourceFamily,
-      mode: run.mode as ScanRequest["mode"], since: run.since_at === null ? null : new Date(run.since_at as string).toISOString(), until: new Date(run.until_at as string).toISOString() };
+    const request: ScanRequest = {
+      runId,
+      repositoryId: Number(run.repository_id),
+      family: run.family as SourceFamily,
+      mode: run.mode as ScanRequest["mode"],
+      since: run.since_at === null ? null : new Date(run.since_at as string).toISOString(),
+      until: new Date(run.until_at as string).toISOString(),
+    };
     let failureCode = "source_read_failed";
     try {
       if (Number(run.page_count) >= 10_000) throw new Error("scan_page_budget_exceeded");
       await assertRepositoryAvailable(this.db, request.repositoryId);
       const page = await source.readPage({ ...request, cursor: run.cursor as string | null, limit });
       failureCode = "source_schema_drift";
-      if (page.repositoryId !== request.repositoryId || page.visibility !== "public" || !Array.isArray(page.facts) || page.facts.length > limit) throw new Error("invalid_source_page");
+      if (
+        page.repositoryId !== request.repositoryId ||
+        page.visibility !== "public" ||
+        !Array.isArray(page.facts) ||
+        page.facts.length > limit
+      )
+        throw new Error("invalid_source_page");
       cursor(page.nextCursor);
-      if (page.nextCursor !== null && (page.nextCursor === run.cursor || page.facts.length === 0)) throw new Error("nonadvancing_source_page");
-      if (page.expectedCount !== null && (!Number.isSafeInteger(page.expectedCount) || page.expectedCount < 0)) throw new Error("invalid_source_count");
+      if (page.nextCursor !== null && (page.nextCursor === run.cursor || page.facts.length === 0))
+        throw new Error("nonadvancing_source_page");
+      if (page.expectedCount !== null && (!Number.isSafeInteger(page.expectedCount) || page.expectedCount < 0))
+        throw new Error("invalid_source_count");
       const facts = page.facts.map(normalizeFact);
-      if (facts.some(fact => fact.occurredAt !== null && (fact.occurredAt > request.until ||
-          (request.since !== null && fact.occurredAt < request.since)))) throw new Error("source_event_outside_window");
-      if (request.family === "project_current" && facts.some(fact => fact.evidence !== "current_state")) throw new Error("invalid_current_project_evidence");
+      if (
+        facts.some(
+          (fact) =>
+            fact.occurredAt !== null &&
+            (fact.occurredAt > request.until || (request.since !== null && fact.occurredAt < request.since)),
+        )
+      )
+        throw new Error("source_event_outside_window");
+      if (request.family === "project_current" && facts.some((fact) => fact.evidence !== "current_state"))
+        throw new Error("invalid_current_project_evidence");
       failureCode = "source_commit_failed";
-      return await this.db.transaction(async tx => {
+      return await this.db.transaction(async (tx) => {
         // Public readers share this repository gate while reading current controls.
         // Suppression writes must exclude them; ordinary collection remains concurrent.
-        const gateLock = facts.some(fact => fact.state === "deleted" || fact.state === "unavailable") ? "FOR UPDATE" : "FOR SHARE";
-        const access = (await tx.query(`SELECT state, generation FROM leaderboard_ingestion.repository_access WHERE repository_id = $1 ${gateLock}`, [request.repositoryId])).rows[0];
-        if (access?.state !== "public" || String(access.generation) !== String(run.access_generation)) throw new Error("source_access_changed");
-        const current = (await tx.query("SELECT * FROM leaderboard_ingestion.collection_runs WHERE run_id = $1 FOR UPDATE", [runId])).rows[0]!;
+        const gateLock = facts.some((fact) => fact.state === "deleted" || fact.state === "unavailable")
+          ? "FOR UPDATE"
+          : "FOR SHARE";
+        const access = (
+          await tx.query(
+            `SELECT state, generation FROM leaderboard_ingestion.repository_access WHERE repository_id = $1 ${gateLock}`,
+            [request.repositoryId],
+          )
+        ).rows[0];
+        if (access?.state !== "public" || String(access.generation) !== String(run.access_generation))
+          throw new Error("source_access_changed");
+        const current = (
+          await tx.query("SELECT * FROM leaderboard_ingestion.collection_runs WHERE run_id = $1 FOR UPDATE", [runId])
+        ).rows[0]!;
         if (current.page_count !== run.page_count || current.state === "complete") return "superseded";
-        if (current.expected_count !== null && current.expected_count !== page.expectedCount) throw new Error("source_count_changed");
+        if (current.expected_count !== null && current.expected_count !== page.expectedCount)
+          throw new Error("source_count_changed");
         const count = Number(current.item_count) + facts.length;
-        if (page.nextCursor === null && page.expectedCount !== null && count !== page.expectedCount) throw new Error("source_count_mismatch");
+        if (page.nextCursor === null && page.expectedCount !== null && count !== page.expectedCount)
+          throw new Error("source_count_mismatch");
         let changed = 0;
         for (const fact of facts) {
           const document = JSON.stringify(fact);
-          const key = createHash("sha256").update(JSON.stringify([request.repositoryId, request.family, fact.subjectId, fact.sourceRevision, document])).digest("hex");
-          const inserted = await tx.query(`INSERT INTO leaderboard_ingestion.source_facts
+          const key = createHash("sha256")
+            .update(
+              JSON.stringify([request.repositoryId, request.family, fact.subjectId, fact.sourceRevision, document]),
+            )
+            .digest("hex");
+          const inserted = await tx.query(
+            `INSERT INTO leaderboard_ingestion.source_facts
             (fact_key, repository_id, family, subject_id, source_revision, document, first_run_id) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)
-            ON CONFLICT (fact_key) DO NOTHING RETURNING fact_key`, [key, request.repositoryId, request.family, fact.subjectId, fact.sourceRevision, document, runId]);
+            ON CONFLICT (fact_key) DO NOTHING RETURNING fact_key`,
+            [key, request.repositoryId, request.family, fact.subjectId, fact.sourceRevision, document, runId],
+          );
           changed += inserted.rows.length;
-          if (fact.state === "deleted" || fact.state === "unavailable") await tx.query(`INSERT INTO leaderboard_ingestion.object_suppressions
-            (repository_id, subject_id, reason) VALUES ($1,$2,$3) ON CONFLICT (repository_id, subject_id) DO NOTHING`, [request.repositoryId, fact.subjectId, fact.state]);
+          if (fact.state === "deleted" || fact.state === "unavailable")
+            await tx.query(
+              `INSERT INTO leaderboard_ingestion.object_suppressions
+            (repository_id, subject_id, reason) VALUES ($1,$2,$3) ON CONFLICT (repository_id, subject_id) DO NOTHING`,
+              [request.repositoryId, fact.subjectId, fact.state],
+            );
           // A repeated page or duplicate item cannot inflate reconciled source totals.
-          await tx.query("INSERT INTO leaderboard_ingestion.collection_items (run_id, fact_key) VALUES ($1,$2)", [runId, key]);
+          await tx.query("INSERT INTO leaderboard_ingestion.collection_items (run_id, fact_key) VALUES ($1,$2)", [
+            runId,
+            key,
+          ]);
         }
-        await tx.query(`INSERT INTO leaderboard_ingestion.collection_pages (run_id,page_number,item_count,changed_count,cursor_hash) VALUES ($1,$2,$3,$4,$5)`, [runId, Number(current.page_count) + 1, facts.length, changed,
-          createHash("sha256").update(JSON.stringify(run.cursor)).digest("hex")]);
-        await tx.query(`UPDATE leaderboard_ingestion.collection_runs SET cursor = $2, page_count = page_count + 1,
+        await tx.query(
+          `INSERT INTO leaderboard_ingestion.collection_pages (run_id,page_number,item_count,changed_count,cursor_hash) VALUES ($1,$2,$3,$4,$5)`,
+          [
+            runId,
+            Number(current.page_count) + 1,
+            facts.length,
+            changed,
+            createHash("sha256").update(JSON.stringify(run.cursor)).digest("hex"),
+          ],
+        );
+        await tx.query(
+          `UPDATE leaderboard_ingestion.collection_runs SET cursor = $2, page_count = page_count + 1,
           item_count = $3, expected_count = $4, state = $5, reason = NULL,
-          last_success_at = clock_timestamp(), attempted_at = clock_timestamp() WHERE run_id = $1`, [runId, page.nextCursor, count, page.expectedCount, page.nextCursor === null ? "complete" : "pending"]);
+          last_success_at = clock_timestamp(), attempted_at = clock_timestamp() WHERE run_id = $1`,
+          [runId, page.nextCursor, count, page.expectedCount, page.nextCursor === null ? "complete" : "pending"],
+        );
         return page.nextCursor === null ? "complete" : "progress";
       });
     } catch {
       // Never retain adapter exceptions, URLs with credentials, or source payloads.
-      await this.db.query(`UPDATE leaderboard_ingestion.collection_runs SET state = 'failed', reason = $3,
-        attempted_at = clock_timestamp() WHERE run_id = $1 AND page_count = $2 AND state <> 'complete'`, [runId, run.page_count, failureCode]);
+      await this.db.query(
+        `UPDATE leaderboard_ingestion.collection_runs SET state = 'failed', reason = $3,
+        attempted_at = clock_timestamp() WHERE run_id = $1 AND page_count = $2 AND state <> 'complete'`,
+        [runId, run.page_count, failureCode],
+      );
       return "failed";
     }
   }
 
   async diagnostics(repositoryId: number, staleSeconds = 3600): Promise<Record<string, unknown>[]> {
     repository(repositoryId);
-    if (!Number.isInteger(staleSeconds) || staleSeconds < 1 || staleSeconds > 86400) throw new Error("invalid_stale_threshold");
-    return (await this.db.query(`SELECT family, mode, run.state, reason, since_at, until_at, page_count, item_count,
+    if (!Number.isInteger(staleSeconds) || staleSeconds < 1 || staleSeconds > 86400)
+      throw new Error("invalid_stale_threshold");
+    return (
+      await this.db.query(
+        `SELECT family, mode, run.state, reason, since_at, until_at, page_count, item_count,
       expected_count, last_success_at, attempted_at,
       access.state AS access_state,
       (SELECT count(*)::integer FROM leaderboard_ingestion.object_suppressions AS removed WHERE removed.repository_id = run.repository_id) AS suppressed_objects,
@@ -203,6 +399,9 @@ export class CollectionStore {
       WHEN last_success_at IS NULL THEN 'unproven' WHEN run.state = 'complete' AND item_count = 0 THEN 'no_activity_in_window'
       ELSE 'observed_progress' END AS health
       FROM leaderboard_ingestion.collection_runs AS run JOIN leaderboard_ingestion.repository_access AS access USING (repository_id)
-      WHERE repository_id = $1 ORDER BY family, until_at DESC, run_id`, [repositoryId, staleSeconds])).rows;
+      WHERE repository_id = $1 ORDER BY family, until_at DESC, run_id`,
+        [repositoryId, staleSeconds],
+      )
+    ).rows;
   }
 }

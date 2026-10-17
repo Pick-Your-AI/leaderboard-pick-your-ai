@@ -33,7 +33,11 @@ export function PersonName({ person, link = true }: { person: Person | null; lin
       {person.actor.kind !== "user" && <span className="tag">Automation</span>}
     </>
   );
-  return link ? <ScopedLink to={`/contributors/${encodeURIComponent(person.login)}`}>{label}</ScopedLink> : <span>{label}</span>;
+  return link ? (
+    <ScopedLink to={`/contributors/${encodeURIComponent(person.login)}`}>{label}</ScopedLink>
+  ) : (
+    <span>{label}</span>
+  );
 }
 
 export function SourceLink({ record }: { record: ContributionRecord }) {
@@ -85,7 +89,13 @@ export function ReceiptBody({ record, person }: { record: ContributionRecord; pe
         <time dateTime={record.occurredAt}>{formatDateTime(record.occurredAt)}</time>
       </dd>
       <dt>Accepted</dt>
-      <dd>{record.acceptedAt ? <time dateTime={record.acceptedAt}>{formatDateTime(record.acceptedAt)}</time> : "Not accepted (no acceptance time is invented)"}</dd>
+      <dd>
+        {record.acceptedAt ? (
+          <time dateTime={record.acceptedAt}>{formatDateTime(record.acceptedAt)}</time>
+        ) : (
+          "Not accepted (no acceptance time is invented)"
+        )}
+      </dd>
       <dt>Counts toward</dt>
       <dd>
         <ul className="inline-list">
@@ -106,8 +116,9 @@ export function ReceiptBody({ record, person }: { record: ContributionRecord; pe
         <>
           <dt>Lines changed</dt>
           <dd>
-            source {record.lines.source}, docs {record.lines.docs}, tests {record.lines.tests}, other {record.lines.other}; excluded:
-            generated {record.lines.generated}, vendor {record.lines.vendor}, lockfile {record.lines.lockfile}
+            source {record.lines.source}, docs {record.lines.docs}, tests {record.lines.tests}, other{" "}
+            {record.lines.other}; excluded: generated {record.lines.generated}, vendor {record.lines.vendor}, lockfile{" "}
+            {record.lines.lockfile}
           </dd>
         </>
       )}
@@ -119,7 +130,8 @@ export function ReceiptBody({ record, person }: { record: ContributionRecord; pe
       </dd>
       <dt>Ingestion</dt>
       <dd>
-        {adapterLabels[record.adapter]}, first observed <time dateTime={record.observedAt}>{formatDateTime(record.observedAt)}</time>
+        {adapterLabels[record.adapter]}, first observed{" "}
+        <time dateTime={record.observedAt}>{formatDateTime(record.observedAt)}</time>
       </dd>
       <dt>Corrections</dt>
       <dd>
@@ -177,7 +189,9 @@ export function ReceiptDrawer({
         return;
       }
       if (!modal || event.key !== "Tab" || !panelRef.current) return;
-      const focusable = panelRef.current.querySelectorAll<HTMLElement>("a[href], button, [tabindex='-1'], input, select");
+      const focusable = panelRef.current.querySelectorAll<HTMLElement>(
+        "a[href], button, [tabindex='-1'], input, select",
+      );
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       if (!first || !last) return;

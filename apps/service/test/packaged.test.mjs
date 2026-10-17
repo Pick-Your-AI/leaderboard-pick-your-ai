@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url);
 const execute = promisify(execFile);
 const repository = fileURLToPath(new URL("../../../", import.meta.url));
 
-test("built service starts from dist-only workspace packages with no metrics source tree", async t => {
+test("built service starts from dist-only workspace packages with no metrics source tree", async (t) => {
   const temporary = await mkdtemp(join(resolve(tmpdir()), "leaderboard-api-package-"));
   t.after(async () => {
     assert.equal(dirname(temporary), resolve(tmpdir()));
@@ -40,6 +40,9 @@ test("built service starts from dist-only workspace packages with no metrics sou
     const response = await app.inject('/api/v1/metrics');
     console.log(JSON.stringify({ status: response.statusCode, metrics: response.json().metrics.length }));
     await app.close();`;
-  const result = await execute(process.execPath, ["--input-type=module", "--eval", script], { cwd: temporary, timeout: 15000 });
+  const result = await execute(process.execPath, ["--input-type=module", "--eval", script], {
+    cwd: temporary,
+    timeout: 15000,
+  });
   assert.deepEqual(JSON.parse(result.stdout), { status: 200, metrics: 98 });
 });
