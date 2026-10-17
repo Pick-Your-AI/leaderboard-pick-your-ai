@@ -854,6 +854,8 @@ tbody th {
 /* Live wall */
 .wall-config {
   display: grid;
+  /* A native select's min-content width must not enlarge the form's track. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-5);
   max-width: 48rem;
 }

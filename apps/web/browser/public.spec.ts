@@ -44,7 +44,7 @@ async function ready(page: Page, route: string) {
   await page.waitForTimeout(180);
 }
 
-async function expectNoHorizontalOverflow(page: Page, context: string) {
+async function expectNoHorizontalOverflow(page: Page, context: string, collectFailure = false) {
   const layout = await page.evaluate(() => ({
     viewport: innerWidth,
     pageWidth: document.documentElement.scrollWidth,
@@ -56,7 +56,9 @@ async function expectNoHorizontalOverflow(page: Page, context: string) {
         right: element.getBoundingClientRect().right,
       })),
   }));
-  expect(layout.pageWidth, `${context}: ${JSON.stringify(layout)}`).toBeLessThanOrEqual(layout.viewport + 1);
+  const message = `${context}: ${JSON.stringify(layout)}`;
+  const assertion = collectFailure ? expect.soft(layout.pageWidth, message) : expect(layout.pageWidth, message);
+  assertion.toBeLessThanOrEqual(layout.viewport + 1);
 }
 
 for (const width of [320, 360, 768, 1024, 1280]) {
@@ -71,14 +73,17 @@ for (const width of [320, 360, 768, 1024, 1280]) {
         await test.step(route, async () => {
           await ready(page, route);
           await expect(page.getByRole("complementary", { name: "Synthetic data notice" })).toBeVisible();
-          await expectNoHorizontalOverflow(page, route);
+          // Collect every route failure; soft assertions still fail the complete test.
+          await expectNoHorizontalOverflow(page, route, true);
           const results = await new AxeBuilder({ page })
             .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"])
             .analyze();
-          expect(
-            results.violations,
-            `${route}: ${JSON.stringify(results.violations.map((v) => ({ id: v.id, targets: v.nodes.map((n) => n.target) })))}`,
-          ).toEqual([]);
+          expect
+            .soft(
+              results.violations,
+              `${route}: ${JSON.stringify(results.violations.map((v) => ({ id: v.id, targets: v.nodes.map((n) => n.target) })))}`,
+            )
+            .toEqual([]);
         });
       }
       expect(errors).toEqual([]);
@@ -118,6 +123,40 @@ test("320px scope labels contain the longest selected snapshot without clipping 
     expect(bounds.right).toBeLessThanOrEqual(bounds.regionRight + 1);
     expect(bounds.height).toBeGreaterThanOrEqual(44);
     await expectNoHorizontalOverflow(page, JSON.stringify(media));
+  }
+});
+
+test("320px wall configuration keeps every control within its grid track", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  for (const media of [
+    { colorScheme: "light", forcedColors: "none" },
+    { colorScheme: "dark", forcedColors: "none" },
+    { colorScheme: "light", forcedColors: "active" },
+  ] as const) {
+    await page.emulateMedia(media);
+    await ready(page, "/live");
+    const format = page.getByRole("combobox", { name: "Format", exact: true });
+    await expect(format).toHaveValue("landscape");
+    const bounds = await page.locator(".wall-config").evaluate((form) => {
+      const region = form.getBoundingClientRect();
+      return Array.from(form.querySelectorAll("fieldset, label, input, select")).map((element) => {
+        const control = element.getBoundingClientRect();
+        return {
+          tag: element.tagName,
+          left: control.left,
+          right: control.right,
+          regionLeft: region.left,
+          regionRight: region.right,
+        };
+      });
+    });
+    for (const control of bounds) {
+      expect(control.left, JSON.stringify(control)).toBeGreaterThanOrEqual(control.regionLeft);
+      expect(control.right, JSON.stringify(control)).toBeLessThanOrEqual(control.regionRight + 1);
+    }
+    await format.selectOption("portrait");
+    await expect(format).toHaveValue("portrait");
+    await expectNoHorizontalOverflow(page, `wall configuration ${JSON.stringify(media)}`);
   }
 });
 
