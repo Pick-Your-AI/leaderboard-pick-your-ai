@@ -24,7 +24,11 @@ host's verification; it cannot establish visibility by itself.
 
 All snapshot publication, latest/pinned reads, notices and object replay require
 an explicit public access row. Missing access rows fail closed. Publication and
-replay hold a shared access lock for their transaction. Signed repository
+replay hold a shared access lock for their transaction. Public projection readers
+must hold that same shared repository gate while reading current controls. Scans
+with deleted/unavailable facts take an exclusive repository gate before inserting
+object suppressions, so a public reader cannot mix pre-suppression database state
+with later controls. Ordinary scan pages retain shared access. Signed repository
 `privatized`/`deleted`, installation repository `removed`, and installation
 `deleted`/`suspend` deliveries suppress affected scopes immediately on durable
 acknowledgement. Removed/unavailable evidence from reconciliation additionally

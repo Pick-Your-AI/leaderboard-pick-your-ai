@@ -150,7 +150,10 @@ export class CollectionStore {
       if (request.family === "project_current" && facts.some(fact => fact.evidence !== "current_state")) throw new Error("invalid_current_project_evidence");
       failureCode = "source_commit_failed";
       return await this.db.transaction(async tx => {
-        const access = (await tx.query("SELECT state, generation FROM leaderboard_ingestion.repository_access WHERE repository_id = $1 FOR SHARE", [request.repositoryId])).rows[0];
+        // Public readers share this repository gate while reading current controls.
+        // Suppression writes must exclude them; ordinary collection remains concurrent.
+        const gateLock = facts.some(fact => fact.state === "deleted" || fact.state === "unavailable") ? "FOR UPDATE" : "FOR SHARE";
+        const access = (await tx.query(`SELECT state, generation FROM leaderboard_ingestion.repository_access WHERE repository_id = $1 ${gateLock}`, [request.repositoryId])).rows[0];
         if (access?.state !== "public" || String(access.generation) !== String(run.access_generation)) throw new Error("source_access_changed");
         const current = (await tx.query("SELECT * FROM leaderboard_ingestion.collection_runs WHERE run_id = $1 FOR UPDATE", [runId])).rows[0]!;
         if (current.page_count !== run.page_count || current.state === "complete") return "superseded";

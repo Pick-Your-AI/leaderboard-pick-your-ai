@@ -708,3 +708,60 @@ test('health and replay audit retain operator-supplied identity, policy and unkn
   assert.equal((await store.health()).oldest_unfinished_seconds, null);
   assert.deepEqual(await counts(), { observations: 1, notices: 1 });
 });
+
+test('PostgreSQL shared public-read gate permits ordinary scans but blocks deletion and unavailability commits', { skip: !url }, async () => {
+  const collect = await collection();
+  const bounded = new CollectionStore({ ...db, transaction: work => db.transaction(async tx => {
+    await tx.query("SET LOCAL lock_timeout = '100ms'");
+    return work(tx);
+  }) });
+  const reader = await engine.connect();
+  try {
+    await reader.query('BEGIN');
+    await reader.query('SELECT repository_id FROM leaderboard_ingestion.repository_access WHERE repository_id = 2 FOR SHARE');
+    await collect.start(scan('synthetic-ordinary'));
+    assert.equal(await bounded.step('synthetic-ordinary', { async readPage() { return page([fact()]); } }), 'complete', 'ordinary page retains a shared gate');
+    for (const state of ['deleted', 'unavailable']) {
+      const runId = `synthetic-gated-${state}`;
+      await collect.start(scan(runId));
+      assert.equal(await bounded.step(runId, { async readPage() { return page([fact(`SYNTHETIC_${state}`, { state })]); } }), 'failed', 'suppression transaction must wait for existing public reader');
+      assert.equal((await db.query('SELECT count(*)::integer AS count FROM leaderboard_ingestion.object_suppressions')).rows[0].count, 0);
+      const checkpoint = (await collect.diagnostics(2)).find(row => row.reason === 'source_commit_failed' && row.item_count === 0);
+      assert.ok(checkpoint, 'blocked suppression does not advance its checkpoint');
+    }
+    await reader.query('COMMIT');
+    for (const state of ['deleted', 'unavailable']) {
+      assert.equal(await bounded.step(`synthetic-gated-${state}`, { async readPage() { return page([fact(`SYNTHETIC_${state}`, { state })]); } }), 'complete');
+    }
+    assert.equal((await db.query('SELECT count(*)::integer AS count FROM leaderboard_ingestion.object_suppressions')).rows[0].count, 2);
+  } finally { await reader.query('ROLLBACK'); reader.release(); }
+});
+
+test('PostgreSQL suppression writer excludes a new shared public reader until the complete page commits', { skip: !url }, async () => {
+  const collect = await collection();
+  await collect.start(scan('synthetic-exclusive-writer'));
+  let enter, release;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const writer = new CollectionStore({ ...db, transaction: work => db.transaction(tx => work({ async query(sql, params) {
+    const result = await tx.query(sql, params);
+    if (sql.startsWith('SELECT state, generation') && sql.endsWith('FOR UPDATE')) { enter(); await gate; }
+    return result;
+  } })) });
+  const pending = writer.step('synthetic-exclusive-writer', { async readPage() { return page([fact('SYNTHETIC_REMOVED', { state: 'deleted' })]); } });
+  const reader = await engine.connect();
+  try {
+    await Promise.race([entered, pending.then(() => { throw new Error('suppression page did not acquire exclusive gate'); })]);
+    await reader.query('BEGIN');
+    await reader.query("SET LOCAL lock_timeout = '100ms'");
+    await assert.rejects(reader.query('SELECT repository_id FROM leaderboard_ingestion.repository_access WHERE repository_id = 2 FOR SHARE'), { code: '55P03' });
+    await reader.query('ROLLBACK');
+    assert.equal((await db.query('SELECT count(*)::integer AS count FROM leaderboard_ingestion.object_suppressions')).rows[0].count, 0, 'uncommitted suppression cannot leak ahead of page commit');
+  } finally { release(); await reader.query('ROLLBACK'); reader.release(); }
+  assert.equal(await pending, 'complete');
+  const result = await db.transaction(async tx => {
+    await tx.query('SELECT repository_id FROM leaderboard_ingestion.repository_access WHERE repository_id = 2 FOR SHARE');
+    return tx.query('SELECT subject_id FROM leaderboard_ingestion.object_suppressions WHERE repository_id = 2');
+  });
+  assert.deepEqual(result.rows, [{ subject_id: 'SYNTHETIC_REMOVED' }]);
+});
