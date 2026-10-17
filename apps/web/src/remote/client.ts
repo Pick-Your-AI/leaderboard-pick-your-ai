@@ -16,11 +16,12 @@ import {
 } from "@pick-your-ai/contracts";
 
 export class ReadFailure extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-  ) {
+  readonly status: number;
+  readonly code: string;
+  constructor(status: number, code: string) {
     super(code);
+    this.status = status;
+    this.code = code;
   }
 }
 const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
@@ -218,7 +219,7 @@ export async function exportPage(
   const raw = new TextDecoder().decode(await readBytes(response));
   if (format === "json") {
     try {
-      board(JSON.parse(raw), selected);
+      validateExport(JSON.parse(raw), selected);
     } catch {
       throw new ReadFailure(502, "invalid_export_response");
     }
@@ -246,6 +247,76 @@ const array = (value: unknown, maximum = 10000): unknown[] => {
   if (!Array.isArray(value) || value.length > maximum) throw new ReadFailure(502, "invalid_api_response");
   return value;
 };
+/** Validate the minimized export contract, which intentionally has no actor profile or live head. */
+export function validateExport(value: unknown, selected: Selection): void {
+  const data = object(value),
+    scope = object(data.scope);
+  if (data.exportSchemaVersion !== "public-export/v1" || data.schemaVersion !== "leaderboard/v1")
+    throw new ReadFailure(502, "invalid_export_response");
+  for (const key of scopeKeys) if (scope[key] !== selected[key]) throw new ReadFailure(502, "api_scope_mismatch");
+  if (!selected.snapshot || identity(data.snapshotId) !== selected.snapshot)
+    throw new ReadFailure(502, "api_snapshot_mismatch");
+  integer(data.revision);
+  string(data.generatedAt);
+  identity(data.metricDefinitionVersion);
+  identity(data.computationVersion);
+  identity(data.policyVersion);
+  const metric = metricDefinitionSchema.parse(data.metric);
+  if (metric.id !== selected.metric) throw new ReadFailure(502, "api_metric_mismatch");
+  const ranking = data.ranking === null ? null : object(data.ranking);
+  if (
+    ranking &&
+    (!["ascending", "descending"].includes(String(ranking.direction)) || typeof ranking.rank !== "boolean")
+  )
+    throw new ReadFailure(502, "invalid_export_response");
+  array(data.coverage, 500).forEach((item) => coverageSchema.parse(item));
+  const rows = array(data.rows, Number(selected.limit));
+  if (integer(data.pageRows) !== rows.length || integer(data.totalRows) < rows.length)
+    throw new ReadFailure(502, "invalid_export_response");
+  if (data.nextCursor !== null) string(data.nextCursor);
+  const evidenceIds = new Set<string>();
+  for (const value of array(data.evidence, 2000)) {
+    const entry = object(value),
+      id = identity(entry.evidenceId);
+    if (evidenceIds.has(id) || publicLink(string(entry.sourceUrl)) === null)
+      throw new ReadFailure(502, "invalid_export_response");
+    evidenceIds.add(id);
+    if (entry.repositoryId !== null) identity(entry.repositoryId);
+    if (entry.occurredAt !== null) string(entry.occurredAt);
+    if (entry.sourceRevision !== null) string(entry.sourceRevision);
+    if (entry.sourceRevisionUrl !== null && publicLink(string(entry.sourceRevisionUrl)) === null)
+      throw new ReadFailure(502, "invalid_export_response");
+  }
+  const pageActors = new Set<string>(),
+    referencedEvidence = new Set<string>();
+  for (const value of rows) {
+    const row = object(value),
+      result = metricResultSchema.parse(row.result);
+    const actorId = identity(row.actorId);
+    if (pageActors.has(actorId)) throw new ReadFailure(502, "invalid_export_response");
+    pageActors.add(actorId);
+    if (row.login !== null) string(row.login);
+    if (result.metricId !== metric.id || (row.rank !== null && (integer(row.rank) < 1 || ranking?.rank === false)))
+      throw new ReadFailure(502, "invalid_export_response");
+    for (const id of array(row.evidenceIds)) {
+      const evidenceId = identity(id);
+      if (!evidenceIds.has(evidenceId)) throw new ReadFailure(502, "invalid_export_response");
+      referencedEvidence.add(evidenceId);
+    }
+  }
+  if (referencedEvidence.size !== evidenceIds.size) throw new ReadFailure(502, "invalid_export_response");
+  for (const entry of diagnostics(data.diagnostics))
+    if (entry.metricId !== metric.id || !pageActors.has(entry.actorId))
+      throw new ReadFailure(502, "invalid_export_response");
+  for (const value of array(data.methodology, 98)) {
+    const entry = object(value);
+    if (identity(entry.metricId) !== metric.id) throw new ReadFailure(502, "api_metric_mismatch");
+    identity(entry.policyVersion);
+    string(entry.policySignature);
+    if (entry.policyLink !== null && publicLink(string(entry.policyLink)) === null)
+      throw new ReadFailure(502, "invalid_export_response");
+  }
+}
 export interface Metadata {
   snapshotId: string;
   revision: number;

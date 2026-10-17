@@ -337,6 +337,11 @@ fieldset {
 .catalog-controls {
   margin-bottom: var(--space-4);
 }
+/* Native selects size to their longest option; let their flex labels shrink. */
+.scope-controls > label {
+  min-width: 0;
+  max-width: 100%;
+}
 .custom-range {
   display: flex;
   flex-wrap: wrap;

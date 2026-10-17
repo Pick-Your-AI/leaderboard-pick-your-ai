@@ -441,3 +441,54 @@ test("exports retain current-main diagnostic semantics only for the selected vis
   assert.deepEqual(suppressed.diagnostics, [h.data.selected.diagnostics[1]]);
   assert.equal(suppressed.rows[0].actorId, "bob");
 });
+
+test("browser download validates the minimized JSON export rather than the board actor/head contract", async (t) => {
+  const { exportPage, selection, validateExport } = await import("../../web/src/remote/client.ts");
+  const h = harness(t);
+  const selected = selection(`?${params}&limit=1`);
+  const response = await h.app.inject(`${exportUrl}&limit=1`);
+  assert.equal(response.statusCode, 200);
+  const document = response.json();
+  assert.equal(document.head, undefined);
+  assert.equal(document.rows[0].actor, undefined);
+  assert.doesNotThrow(() => validateExport(document, selected));
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () =>
+      new Response(response.body, {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+  );
+  assert.equal(
+    await (await exportPage("https://synthetic.invalid/api/v1", selected, "json", new AbortController().signal)).text(),
+    response.body,
+  );
+  for (const mutate of [
+    (d) => (d.snapshotId = "wrong-pin"),
+    (d) => (d.scope.repository = "wrong-repository"),
+    (d) => (d.metric.id = "issues_opened"),
+    (d) => (d.exportSchemaVersion = "unknown/v2"),
+    (d) => (d.pageRows = 99),
+    (d) => (d.evidence = []),
+    (d) => (d.evidence[0].sourceUrl = "javascript:alert(1)"),
+    (d) => (d.rows[0].result.metricId = "issues_opened"),
+    (d) => d.evidence.push({ ...d.evidence[0], evidenceId: "unrelated" }),
+    (d) =>
+      d.diagnostics.push({
+        metricId: "issues_opened",
+        actorId: "unrelated",
+        numerator: null,
+        denominator: null,
+        sampleCount: 0,
+        censored: 0,
+        missingReadiness: 0,
+        p75: null,
+      }),
+  ]) {
+    const altered = structuredClone(document);
+    mutate(altered);
+    assert.throws(() => validateExport(altered, selected));
+  }
+});

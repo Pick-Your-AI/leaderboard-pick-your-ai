@@ -44,6 +44,21 @@ async function ready(page: Page, route: string) {
   await page.waitForTimeout(180);
 }
 
+async function expectNoHorizontalOverflow(page: Page, context: string) {
+  const layout = await page.evaluate(() => ({
+    viewport: innerWidth,
+    pageWidth: document.documentElement.scrollWidth,
+    outsideViewport: Array.from(document.querySelectorAll("body *"))
+      .filter((element) => element.getClientRects().length && element.getBoundingClientRect().right > innerWidth + 1)
+      .slice(0, 12)
+      .map((element) => ({
+        element: `${element.tagName.toLowerCase()}.${element.className}`,
+        right: element.getBoundingClientRect().right,
+      })),
+  }));
+  expect(layout.pageWidth, `${context}: ${JSON.stringify(layout)}`).toBeLessThanOrEqual(layout.viewport + 1);
+}
+
 for (const width of [320, 360, 768, 1024, 1280]) {
   for (const colorScheme of ["light", "dark"] as const) {
     test(`${width}px ${colorScheme}: public routes, states, reflow and axe`, async ({ page }, info) => {
@@ -56,7 +71,7 @@ for (const width of [320, 360, 768, 1024, 1280]) {
         await test.step(route, async () => {
           await ready(page, route);
           await expect(page.getByRole("complementary", { name: "Synthetic data notice" })).toBeVisible();
-          expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), route).toBe(true);
+          await expectNoHorizontalOverflow(page, route);
           const results = await new AxeBuilder({ page })
             .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"])
             .analyze();
@@ -77,6 +92,35 @@ for (const width of [320, 360, 768, 1024, 1280]) {
   }
 }
 
+test("320px scope labels contain the longest selected snapshot without clipping the page", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  for (const media of [
+    { colorScheme: "light", forcedColors: "none" },
+    { colorScheme: "dark", forcedColors: "none" },
+    { colorScheme: "light", forcedColors: "active" },
+  ] as const) {
+    await page.emulateMedia(media);
+    await ready(page, "/?snapshot=syn-r44-rebuilding");
+    const snapshot = page.getByRole("combobox", { name: "Snapshot", exact: true });
+    await expect(snapshot).toHaveValue("syn-r44-rebuilding");
+    const bounds = await snapshot.evaluate((element) => {
+      const control = element.getBoundingClientRect();
+      const region = element.closest(".scope-controls")!.getBoundingClientRect();
+      return {
+        left: control.left,
+        right: control.right,
+        height: control.height,
+        regionLeft: region.left,
+        regionRight: region.right,
+      };
+    });
+    expect(bounds.left).toBeGreaterThanOrEqual(bounds.regionLeft);
+    expect(bounds.right).toBeLessThanOrEqual(bounds.regionRight + 1);
+    expect(bounds.height).toBeGreaterThanOrEqual(44);
+    await expectNoHorizontalOverflow(page, JSON.stringify(media));
+  }
+});
+
 test("forced colors, reduced motion, unavailable fonts and wall resolutions", async ({ page }, info) => {
   test.setTimeout(120_000);
   for (const media of [
@@ -94,7 +138,7 @@ test("forced colors, reduced motion, unavailable fonts and wall resolutions", as
       expect(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(
         media.reducedMotion === "reduce",
       );
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+      await expectNoHorizontalOverflow(page, `${route}: ${JSON.stringify(media)}`);
       expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     }
     await info.attach(JSON.stringify(media), {
@@ -110,7 +154,7 @@ test("forced colors, reduced motion, unavailable fonts and wall resolutions", as
   ] as const) {
     await page.setViewportSize({ width, height });
     await ready(page, "/live?mode=cycle&boards=pr_merged,prs_reviewed,labels_applied");
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await expectNoHorizontalOverflow(page, `wall ${width}x${height}`);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     const pause = page.getByRole("button", { name: "Pause", exact: true });
     await pause.click();
