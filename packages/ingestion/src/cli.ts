@@ -1,6 +1,7 @@
 import { Pool } from "pg";
 import { createIngestionServer, runWorker } from "./runtime.js";
 import { InboxStore, postgresDatabase } from "./store.js";
+import { SnapshotStore } from "./snapshots.js";
 
 function scopeFromEnvironment(raw: string | undefined): Map<number, Set<number>> {
   if (!raw) throw new Error("Missing scope");
@@ -21,19 +22,30 @@ function scopeFromEnvironment(raw: string | undefined): Map<number, Set<number>>
 
 async function main(): Promise<void> {
   const mode = process.argv[2];
-  if (mode !== "service" && mode !== "worker" && mode !== "replay") throw new Error("Choose service, worker or replay");
+  if (!mode || !["service", "worker", "replay", "snapshot-publish", "snapshot-latest", "snapshot-read"].includes(mode)) throw new Error("Invalid command");
   const repositoryId = Number(process.argv[3]);
   const subjectId = process.argv[4];
-  if (mode === "replay" && (process.argv.length !== 5 || !/^\d+$/.test(process.argv[3] ?? "") ||
+  if (["replay", "snapshot-latest", "snapshot-publish"].includes(mode) && (process.argv.length !== (mode === "snapshot-publish" ? 7 : 5) || !/^\d+$/.test(process.argv[3] ?? "") ||
       !Number.isSafeInteger(repositoryId) || repositoryId < 1 || !subjectId || !/^[A-Za-z0-9_=-]{1,200}$/.test(subjectId))) {
     throw new Error("Invalid replay scope");
+  }
+  const definitionVersion = process.argv[5] ?? "";
+  const expectedRevision = process.argv[6] ?? "";
+  if (mode === "snapshot-publish" && (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(definitionVersion) ||
+      !/^(0|[1-9]\d{0,18})$/.test(expectedRevision) || BigInt(expectedRevision) > 9_223_372_036_854_775_807n)) {
+    throw new Error("Invalid publication version");
+  }
+  if (mode === "snapshot-read" && (process.argv.length !== 4 || !/^[a-f0-9]{64}$/.test(process.argv[3] ?? ""))) {
+    throw new Error("Invalid snapshot ID");
   }
   const connectionString = process.env.INGESTION_DATABASE_URL;
   if (!connectionString) throw new Error("Missing database configuration");
   const pool = new Pool({ connectionString, max: 4, connectionTimeoutMillis: 5000, query_timeout: 10_000, statement_timeout: 8000 });
   // A disconnected idle client is not an unhandled process-level error.
   pool.on("error", () => { console.error("ingestion: database connection unavailable"); });
-  const store = new InboxStore(postgresDatabase(pool));
+  const database = postgresDatabase(pool);
+  const store = new InboxStore(database);
+  const snapshots = new SnapshotStore(database);
   const abort = new AbortController();
   const stop = () => abort.abort();
   process.once("SIGINT", stop);
@@ -41,7 +53,13 @@ async function main(): Promise<void> {
   try {
     // No automatic migrations or source collection at startup.
     await pool.query("SELECT delivery_id FROM leaderboard_ingestion.inbox LIMIT 0");
-    if (mode === "replay") {
+    if (mode === "snapshot-publish") {
+      console.log(JSON.stringify(await snapshots.publishObjectState(repositoryId, subjectId!, definitionVersion, expectedRevision)));
+    } else if (mode === "snapshot-latest") {
+      console.log(JSON.stringify(await snapshots.latest(repositoryId, subjectId!)));
+    } else if (mode === "snapshot-read") {
+      console.log(JSON.stringify(await snapshots.byId(process.argv[3]!)));
+    } else if (mode === "replay") {
       console.log(JSON.stringify(await store.replayObjectState(repositoryId, subjectId!)));
     } else if (mode === "worker") {
       await runWorker(store, { signal: abort.signal,
