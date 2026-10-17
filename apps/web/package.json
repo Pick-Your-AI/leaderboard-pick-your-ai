@@ -15,7 +15,7 @@
   "dependencies": {
     "@pick-your-ai/contracts": "0.1.0",
     "@pick-your-ai/metrics": "0.1.0",
-    "@vitejs/plugin-react": "5.0.4",
+    "@vitejs/plugin-react": "6.1.2",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "vite": "7.3.7"
