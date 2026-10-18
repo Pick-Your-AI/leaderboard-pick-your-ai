@@ -918,6 +918,8 @@ export interface GithubEvidenceNormalizerOptions {
     normalized: NormalizedGithubResult,
   ) => Promise<readonly VerifiedRecognitionReceipt[]>;
   authorizedReviewerIds?: readonly string[];
+  /** Bound the complete review cohort scan; exhaustion never establishes participation. */
+  maxReviewPages?: number;
 }
 
 /** Read-only collection-to-metric adapter. Lossy snapshots are hydrated rather than guessed. */
@@ -954,6 +956,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       let family: GithubEvidenceEnvelope["family"];
       let endpoint: string;
       let pullResource: unknown;
+      let reviewParticipation: GithubEvidenceEnvelope["reviewParticipation"];
       if (input.family === "reviews" && pull && /^pullrequestreview-\d+$/.test(fragment ?? "")) {
         family = "review";
         endpoint = `/repos/${input.repository.slug}/pulls/${pull[1]}/reviews/${fragment!.slice("pullrequestreview-".length)}`;
@@ -1007,6 +1010,63 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       if (family === "issue" && "pull_request" in payload) return none("pull_request_is_not_an_issue_creation_unit");
       // Hydration proves immutable creation/submission fields. It does not prove
       // any current-state field editor, closer, resolver or body-edit history.
+      if (family === "review" && pull) {
+        const cohort = await options.client.scanRest<unknown>({
+          source: options.source,
+          key: `review-cohort:${input.repository.id}:${input.factKey}:${input.fact.sourceRevision}`,
+          url: `/repos/${input.repository.slug}/pulls/${pull[1]}/reviews?per_page=100`,
+          maxPages: options.maxReviewPages ?? 100,
+          ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
+          select(body) {
+            if (!Array.isArray(body)) throw new Error("Review cohort must be an array");
+            return body;
+          },
+        });
+        const submittedStates = ["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"];
+        const ids = new Set<string>();
+        const complete =
+          cohort.length <= 10000 &&
+          cohort.every((review) => {
+            if (!object(review)) return false;
+            const reviewId = resourceId(review, "review", input.repository.id);
+            if (!reviewId || ids.has(reviewId)) return false;
+            ids.add(reviewId);
+            return (
+              review.state === "PENDING" ||
+              (submittedStates.includes(String(review.state)) && time(review.submitted_at) !== null)
+            );
+          });
+        const currentId = resourceId(payload, "review", input.repository.id);
+        const current = cohort.find(
+          (review) => object(review) && resourceId(review, "review", input.repository.id) === currentId,
+        );
+        const reviewerId = object(payload.user) ? payload.user.id : null;
+        if (
+          complete &&
+          object(current) &&
+          current.state === payload.state &&
+          current.submitted_at === payload.submitted_at &&
+          current.commit_id === payload.commit_id &&
+          object(current.user) &&
+          current.user.id === reviewerId &&
+          Number.isSafeInteger(reviewerId)
+        ) {
+          const submissions = cohort.filter(
+            (review): review is Record<string, unknown> =>
+              object(review) &&
+              submittedStates.includes(String(review.state)) &&
+              object(review.user) &&
+              review.user.id === reviewerId,
+          );
+          const earliest = (reviews: Record<string, unknown>[]) =>
+            reviews.map((review) => time(review.submitted_at)!).sort()[0] ?? null;
+          reviewParticipation = {
+            verified: true,
+            firstSubmittedAt: earliest(submissions),
+            roundFirstSubmittedAt: earliest(submissions.filter((review) => review.commit_id === payload.commit_id)),
+          };
+        }
+      }
       const hydrated = family === "review" ? { review: payload, pull_request: pullResource } : payload;
       normalized = normalizeGithubObservation({
         repository: {
@@ -1027,6 +1087,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         action: "snapshot",
         observedAt: input.observedAt,
         payload: hydrated,
+        ...(reviewParticipation ? { reviewParticipation } : {}),
       });
     }
     if (options.acceptance)

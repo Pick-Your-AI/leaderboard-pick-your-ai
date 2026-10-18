@@ -939,3 +939,62 @@ test("pending, unknown and observed facts retain independent canonical evidence 
     0,
   );
 });
+
+test("review hydration proves first participation only from a complete consistent cohort", async () => {
+  const review = {
+    id: 51,
+    user: fixture.reviewer,
+    state: "APPROVED",
+    commit_id: "a".repeat(40),
+    submitted_at: at,
+    html_url: `${fixture.pull_request.html_url}#pullrequestreview-51`,
+  };
+  const earlier = { ...review, id: 50, state: "COMMENTED", submitted_at: "2026-10-02T10:00:00Z" };
+  const input = {
+    repository: { id: 2, slug: "synthetic-owner/repository" },
+    family: "reviews",
+    factKey: "synthetic-review",
+    observedAt,
+    policyVersion: "synthetic/v1",
+    fact: {
+      subjectId: "51",
+      sourceRevision: at,
+      sourceUrl: review.html_url,
+      evidence: "current_state",
+      actorId: null,
+      occurredAt: null,
+      state: "present",
+    },
+  };
+  let cohort = [review, earlier];
+  const client = {
+    rest: async (_source, path) =>
+      path.endsWith("reviews/51") ? review : path.endsWith("pulls/10") ? pr() : fixture.repository,
+    scanRest: async () => cohort,
+  };
+  const normalize = createGithubEvidenceNormalizer({
+    client,
+    source: "synthetic",
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+  });
+  const out = await normalize(input);
+  assert.equal(metrics(out, "prs_reviewed").length, 1);
+  assert.equal(metrics(out, "prs_reviewed")[0].occurredAt, "2026-10-02T10:00:00.000Z");
+  assert.equal(metrics(out, "review_rounds").length, 1);
+  assert.equal(metrics(out, "first_reviews").length, 0);
+  for (const invalid of [
+    [review, earlier, earlier],
+    [review, { ...earlier, submitted_at: null }],
+    [{ ...review, commit_id: "b".repeat(40) }],
+  ]) {
+    cohort = invalid;
+    const result = await normalize(input);
+    assert.equal(metrics(result, "prs_reviewed").length, 0);
+    assert.equal(metrics(result, "review_rounds").length, 0);
+  }
+  client.scanRest = async () => {
+    throw Error("page budget exceeded");
+  };
+  await assert.rejects(normalize(input), /page budget exceeded/);
+});

@@ -8,7 +8,7 @@ const routes = {
 const at = (value) =>
   typeof value === "string" && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
 
-/** Actual read-only REST source. Rich event/history families need their own reviewed adapters. */
+/** Read-only REST source with complete, bounded review fanout. */
 export function createGithubCollectionSource({
   client,
   sourceId,
@@ -49,7 +49,7 @@ export function createGithubCollectionSource({
     async readPage(request) {
       const repository = approved.get(request.repositoryId),
         route = routes[request.family];
-      if (!repository || !repository.families.includes(request.family) || !route)
+      if (!repository || !repository.families.includes(request.family) || (!route && request.family !== "reviews"))
         throw new Error("source_family_adapter_unavailable");
       assertAuthorized();
       let verification;
@@ -66,28 +66,47 @@ export function createGithubCollectionSource({
       }
       if (request.cursor !== null && !/^(0|[1-9]\d{0,4})$/.test(request.cursor))
         throw new Error("invalid_source_cursor");
-      const values = await client.scanRest({
-        source: sourceId,
-        key: `pipeline:${request.runId}:${request.family}`,
-        url: `/repos/${repository.slug}/${route}`,
-        maxPages,
-        assertAuthorized,
-        select(body) {
-          // scanRest may fetch many HTTP pages inside one collection read.
-          // Reject a response when the current authorization has changed.
-          // Transport/checkpoint work already in flight is not cancelled here.
+      const scan = (key, path, filter = (body) => body) =>
+        client.scanRest({
+          source: sourceId,
+          key: `pipeline:${repository.id}:${request.runId}:${key}`,
+          url: `/repos/${repository.slug}/${path}`,
+          maxPages,
+          assertAuthorized,
+          select(body) {
+            assertAuthorized();
+            if (!Array.isArray(body)) throw new Error("source_array_required");
+            return filter(body);
+          },
+        });
+      let values;
+      if (request.family === "reviews") {
+        const pulls = await scan("review-pulls", routes.pull_requests);
+        if (pulls.length > 10000) throw new Error("source_dataset_budget_exceeded");
+        values = [];
+        const seen = new Set();
+        for (const pull of pulls) {
           assertAuthorized();
-          if (!Array.isArray(body)) throw new Error("source_array_required");
-          return request.family === "issues" ? body.filter((item) => !item.pull_request) : body;
-        },
-      });
+          if (!Number.isSafeInteger(pull.number) || pull.number < 1 || seen.has(pull.number))
+            throw new Error("source_pull_identity_unverified");
+          seen.add(pull.number);
+          const reviews = await scan(`reviews:${pull.number}`, `pulls/${pull.number}/reviews?per_page=100`);
+          values.push(...reviews);
+          if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
+        }
+      } else {
+        values = await scan(request.family, route, (body) =>
+          request.family === "issues" ? body.filter((item) => !item.pull_request) : body,
+        );
+      }
       assertAuthorized();
       if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
       const offset = request.cursor === null ? 0 : Number(request.cursor);
       if (offset > values.length) throw new Error("invalid_source_cursor");
       const facts = values.slice(offset, offset + request.limit).map((value) => {
         const subjectId = value.node_id ?? value.sha ?? (Number.isSafeInteger(value.id) ? String(value.id) : null);
-        const revision = value.sha ?? at(value.updated_at) ?? at(value.published_at) ?? at(value.created_at);
+        const revision =
+          value.sha ?? at(value.updated_at) ?? at(value.submitted_at) ?? at(value.published_at) ?? at(value.created_at);
         if (
           typeof subjectId !== "string" ||
           !revision ||
