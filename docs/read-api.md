@@ -109,6 +109,13 @@ Directory ordering is current username (case-insensitive codepoint order), then
 stable actor ID. Timeline ordering is newest occurrence instant then contribution
 ID, so equal timestamps remain traversable. Same-query cursor replay is idempotent.
 
+Source-time ordering retains all fractional digits accepted by the frozen contract,
+including fractions smaller than a millisecond. Equivalent timezone and fraction
+encodings compare equally, while distinct instants stay distinct. Unknown occurrence
+times sort after dated evidence. Activity occurrence/collection ranges use the same
+comparison; representations of a canonical fact with genuinely different occurrence
+times fail closed instead of being silently combined.
+
 The separate bounded portfolio projection retains attributable observed and
 in-progress work even before ranking eligibility. It reuses frozen correction,
 canonical attribution, role, source, context and independent-acceptance checks,
