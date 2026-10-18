@@ -58,6 +58,30 @@ Run `npm run build` followed by
 metrics workspace test commands discover the new `.test.js` file. The earlier
 101-test aggregation inventory below remains a separate suite.
 
+## Accepted localization in portfolios
+
+The [localization portfolio suite](../packages/metrics/test/localization-portfolio.test.js)
+exercises the actual source normalizer, recognition adapter and metric selector
+with two fictional language contributions. It reproduces a separate display
+defect: an accepted localization replaced its original observed activity only
+when their collection timestamps matched. Recollecting the same source unit
+before its independent acceptance left both activities visible in the portfolio.
+
+The selector now matches the original source fact ID, actor, artifact, repository,
+role, locale/category state and occurrence time without requiring equal
+collection timestamps. It retains the accepted activity once and leaves an
+unaccepted language's observed activity visible. The source facts and acceptance
+receipts remain intact for audit; board values and independent acceptance rules
+are unchanged.
+
+Two of the four focused cases failed before this correction; all four pass
+afterward. The cases exercise both input orders, repeated accepted observations,
+source/actor/artifact/repository/role/locale/time mismatches, invalid or future
+acceptance, reviewed withdrawal, historical cutoffs and input immutability.
+These are synthetic adapter-to-engine assertions, not a real localization review
+or a claim of public recognition authority. Run `npm run build`, then
+`node --test packages/metrics/test/localization-portfolio.test.js`.
+
 ## Reproduction
 
 Run from the repository root after dependency installation:

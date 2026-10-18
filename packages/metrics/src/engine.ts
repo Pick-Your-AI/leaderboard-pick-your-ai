@@ -631,9 +631,10 @@ export function selectPortfolioFacts(
       source.repoId === fact.repoId &&
       source.role === fact.role &&
       source.rawState === fact.rawState &&
-      source.occurredAt === fact.occurredAt &&
-      source.observedAt === fact.observedAt
+      source.occurredAt === fact.occurredAt
     )
+      // Recollection changes no source unit. Its first observation may precede
+      // the later observation from which an independently accepted copy arose.
       acceptedSources.add(source.id);
   }
   // Keep both immutable facts for audit and recomputation, but expose one current
