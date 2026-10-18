@@ -425,19 +425,19 @@ function WallDisplay({
   };
   const content = frame?.content;
   const meta = content?.value;
-  const pageSummary = frame
-    ? `${frame.content.kind === "board" ? frame.content.value.metric.name : "Contributor roll"} · page ${frame.position.page} · snapshot ${frame.content.value.snapshotId}.`
+  const displaySummary = frame
+    ? `${frame.content.kind === "board" ? frame.content.value.metric.name : "Contributor roll"} · page ${frame.position.page} · snapshot ${frame.content.value.snapshotId}. Source health: ${frame.health.status === "stale_or_degraded" ? "stale or degraded" : "recently reconciled"}.`
     : "";
   useEffect(() => {
-    if (!pageSummary || !visible) {
+    if (!displaySummary || !visible) {
       setAnnouncement("");
       return;
     }
-    // Announce only a successfully displayed page, coalescing rapid manual
-    // changes. Same-page privacy checks do not repeat the announcement.
-    const timer = setTimeout(() => setAnnouncement(pageSummary), 1_000);
+    // Coalesce displayed page and source-health changes. An unchanged same-page
+    // privacy check does not repeat the announcement.
+    const timer = setTimeout(() => setAnnouncement(displaySummary), 1_000);
     return () => clearTimeout(timer);
-  }, [pageSummary, visible]);
+  }, [displaySummary, visible]);
   const controlLabel =
     mode === "frozen"
       ? "Frozen snapshot — automatic advance off"

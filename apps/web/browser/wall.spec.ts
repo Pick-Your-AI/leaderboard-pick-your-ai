@@ -186,6 +186,9 @@ async function service(page: Page, readDelayMs = 0) {
     stale() {
       current.selected.snapshot.coverage[0]!.lastSuccessfulSync = "2026-10-17T00:00:00.000Z";
     },
+    recoverHealth() {
+      current.selected.snapshot.coverage[0]!.lastSuccessfulSync = at;
+    },
     fail() {
       failed = true;
     },
@@ -336,6 +339,83 @@ test("the unranked roll exposes its login ordering across pages with differently
   }
 });
 
+for (const mode of ["single", "cycle", "frozen"] as const) {
+  test(`${mode} wall resolves a publication arriving after the final read at its safe boundary`, async ({ page }) => {
+    const api = await service(page);
+    try {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.goto(wall(mode, mode === "frozen" ? "&snapshot=wall-1" : ""));
+      await expect(page.getByRole("link", { name: "Wall contributor 01", exact: true })).toBeVisible();
+      for (let index = 0; index < (mode === "cycle" ? 4 : 1); index++) await next(page);
+      await expect(provenance(page)).toContainText("Snapshot wall-1");
+      const boundary = api.calls.length;
+      // Publish after both final-page responses have completed. There is no
+      // intervening privacy poll from which the old frame can learn this head.
+      api.next();
+      await next(page);
+      await expect(provenance(page)).toContainText(`Snapshot wall-${mode === "frozen" ? "1" : "2"}`);
+      const healthRead = api.calls.slice(boundary).find((url) => url.pathname.endsWith("/health"));
+      expect(healthRead).toBeDefined();
+      expect(healthRead!.searchParams.get("snapshot")).toBe(mode === "frozen" ? "wall-1" : null);
+      await expect(page.locator(".api-wall-page")).toContainText("Page 1");
+      await expect(page.getByRole("row", { name: /Wall contributor 01/ })).toContainText(
+        mode === "frozen" ? "5" : "90",
+      );
+    } finally {
+      await api.close();
+    }
+  });
+}
+
+test("same-page source-health changes receive coalesced announcements without repeated privacy-poll speech", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date(at) });
+  await page.clock.pauseAt(new Date(Date.parse(at) + 1000));
+  const api = await service(page);
+  try {
+    await page.goto(wall("frozen", "&snapshot=wall-1"));
+    await expect(page.getByRole("link", { name: "Wall contributor 01", exact: true })).toBeVisible();
+    const announcement = page.locator(".api-wall-announcement");
+    await page.clock.runFor(1000);
+    await expect(announcement).toContainText("PRs merged · page 1 · snapshot wall-1.");
+    const originalAnnouncement = await announcement.textContent();
+    await page.evaluate(() => {
+      const recorded = window as Window & { wallAnnouncements?: string[] };
+      recorded.wallAnnouncements = [];
+      const region = document.querySelector(".api-wall-announcement")!;
+      new MutationObserver(() => recorded.wallAnnouncements!.push(region.textContent ?? "")).observe(region, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    });
+    api.stale();
+    await page.getByRole("button", { name: "Recheck current publication controls" }).click();
+    await expect(page.locator(".api-wall-health")).toHaveText("STALE OR DEGRADED DATA");
+    await page.clock.runFor(999);
+    await expect(announcement).toHaveText(originalAnnouncement!);
+    await page.clock.runFor(1);
+    await expect(announcement).toContainText("Source health: stale or degraded.");
+    const messages = () =>
+      page.evaluate(() => (window as Window & { wallAnnouncements?: string[] }).wallAnnouncements!);
+    expect(await messages()).toHaveLength(1);
+    await page.getByRole("button", { name: "Recheck current publication controls" }).click();
+    await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeEnabled();
+    await page.clock.runFor(2000);
+    expect(await messages()).toHaveLength(1);
+    api.recoverHealth();
+    await page.getByRole("button", { name: "Recheck current publication controls" }).click();
+    await expect(page.locator(".api-wall-health")).toHaveText("Recently reconciled");
+    await page.clock.runFor(1000);
+    await expect(announcement).toContainText("Source health: recently reconciled.");
+    expect(await messages()).toHaveLength(2);
+    await expect(provenance(page)).toContainText("Snapshot wall-1");
+  } finally {
+    await api.close();
+  }
+});
+
 for (const stage of ["board", "contributors"] as const) {
   test(`wall rejects a publication-head change between health and ${stage} content`, async ({ page }) => {
     const api = await service(page);
@@ -416,7 +496,9 @@ test("automatic page timer survives privacy polls and obeys pause, focus and red
     await elapseWithReads(page, 61_000);
     await expect(page.locator(".api-wall-page")).toContainText("Page 2");
     await expect(actor).toBeFocused();
-    await expect(page.locator(".api-wall-announcement")).toHaveText("PRs merged · page 2 · snapshot wall-1.");
+    await expect(page.locator(".api-wall-announcement")).toHaveText(
+      "PRs merged · page 2 · snapshot wall-1. Source health: recently reconciled.",
+    );
     await page.getByRole("button", { name: "Pause wall", exact: true }).click();
     await elapseWithReads(page, 61_000);
     await expect(page.locator(".api-wall-page")).toContainText("Page 2");

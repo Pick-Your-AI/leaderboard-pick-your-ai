@@ -45,10 +45,11 @@ displayed; loading that page does not consume its visible interval. Manual pause
 keyboard focus or pointer interaction
 with the content, reduced motion and background visibility hold automatic page
 changes. Manual next-page control remains available while paused or under reduced
-motion. One polite status region announces successfully displayed page changes,
-coalescing rapid manual changes for one second; refreshed rows are not themselves
-live regions. A privacy recheck does not repeat the page announcement or restart
-the rotation timer. If a page boundary coincides with an unfinished controls read,
+motion. One polite status region announces successfully displayed page and source
+health changes, coalescing them for one second; refreshed rows are not themselves
+live regions. A privacy recheck with unchanged page and health does not repeat the
+announcement or restart the rotation timer. If a page boundary coincides with an
+unfinished controls read,
 one due rotation waits for that read to succeed and uses the resulting current
 page and cursor. Pausing, entering a reading hold, changing the interval, leaving
 the tab, moving manually or a read failure cancels that pending rotation. Resuming
@@ -58,6 +59,10 @@ Every page uses one snapshot, computation revision, metric-definition version an
 current publication-policy version. Health and content must also agree on the
 current head's snapshot, revision and publication timestamp before content is
 displayed. The wall retains only the current bounded page and its cursor.
+At a complete cycle boundary, live modes clear the old pin so the next health
+read selects the then-current publication, including a head published after the
+previous page finished loading. Intermediate pages keep their existing pin;
+frozen mode keeps its explicit snapshot across every boundary.
 The public client's existing eight-second deadline, decoded response limit,
 credential omission and redirect rejection apply to each request.
 
@@ -111,6 +116,13 @@ all pages with display names deliberately ordered differently from logins; the
 visible login keys preserve the API's complete ordering without sorting pages
 independently. Both board and roll layouts are checked and captured at all four
 target resolutions.
+
+Separate safe-boundary cases publish only after the final page has finished
+loading. One-board and cycling modes select that publication on the next cycle,
+while the frozen control keeps its existing pin. A same-page health regression
+verifies a stale status and subsequent recovery each update the polite region
+after its one-second coalescing delay, with no repeated DOM announcement from an
+unchanged privacy recheck.
 
 These are synthetic implementation and automated accessibility checks. They do
 not establish a completed human assistive-technology journey, an eight-hour

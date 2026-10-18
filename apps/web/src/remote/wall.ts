@@ -165,7 +165,7 @@ export async function readWallFrame(
 }
 
 /** Visit every bounded page, including the unranked roll, before adopting a newer snapshot. */
-export function nextWallPage(frame: WallFrame, mode: WallMode): { position: WallPosition; pin: string } {
+export function nextWallPage(frame: WallFrame, mode: WallMode): { position: WallPosition; pin: string | null } {
   const { position, content } = frame;
   if (content.value.nextCursor)
     return {
@@ -182,6 +182,8 @@ export function nextWallPage(frame: WallFrame, mode: WallMode): { position: Wall
     return { position: { ...firstWallPage(), stage: position.stage + 1 }, pin: content.value.snapshotId };
   return {
     position: firstWallPage(),
-    pin: mode === "frozen" ? content.value.snapshotId : frame.health.head.snapshotId,
+    // The next cycle obtains its current publication from a fresh health read;
+    // the final page's observed head may already have been superseded.
+    pin: mode === "frozen" ? content.value.snapshotId : null,
   };
 }
