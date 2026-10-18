@@ -14,6 +14,51 @@ export interface LiveOptions {
   document?: Pick<Document, "hidden" | "addEventListener" | "removeEventListener">;
   intervalMs?: number;
 }
+
+const MAX_LIVE_RESPONSE_BYTES = 2 * 1024 * 1024;
+
+async function readHealth(response: Response, signal: AbortSignal): Promise<Record<string, unknown>> {
+  const advertised = response.headers.get("Content-Length");
+  if (
+    response.redirected ||
+    response.type === "opaqueredirect" ||
+    (advertised !== null && (!/^\d+$/.test(advertised) || Number(advertised) > MAX_LIVE_RESPONSE_BYTES))
+  ) {
+    void response.body?.cancel().catch(() => {});
+    throw new Error("invalid_health_response");
+  }
+  if (!response.body) throw new Error("missing_health_response");
+  const reader = response.body.getReader();
+  const abort = () => {
+    void reader.cancel().catch(() => {});
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  let bytes = 0,
+    text = "";
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  try {
+    if (signal.aborted) throw new Error("health_read_aborted");
+    while (true) {
+      const { done, value } = await reader.read();
+      if (signal.aborted) throw new Error("health_read_aborted");
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_LIVE_RESPONSE_BYTES) throw new Error("health_response_too_large");
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    const value: unknown = JSON.parse(text);
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid_health");
+    return value as Record<string, unknown>;
+  } catch (error) {
+    void reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", abort);
+    reader.releaseLock();
+  }
+}
+
 export function startLiveUpdates(options: LiveOptions): () => void {
   const base = options.basePath ?? "/api/v1";
   if (!/^\/(?!\/)[A-Za-z0-9_/-]+$/.test(base)) throw new Error("invalid_api_base_path");
@@ -86,7 +131,13 @@ export function startLiveUpdates(options: LiveOptions): () => void {
         if (connection !== stream || stopped || document?.hidden) return;
         try {
           const previous = lastNotice;
-          accept(JSON.parse(String(event.data)));
+          if (
+            typeof event.data !== "string" ||
+            event.data.length > MAX_LIVE_RESPONSE_BYTES ||
+            new TextEncoder().encode(event.data).byteLength > MAX_LIVE_RESPONSE_BYTES
+          )
+            throw new Error("invalid_stream_notice_size");
+          accept(JSON.parse(event.data));
           if (lastNotice !== previous) emit({ freshness: "unknown", checkedAt: null });
         } catch {
           connection.onerror?.(new Event("error"));
@@ -119,16 +170,23 @@ export function startLiveUpdates(options: LiveOptions): () => void {
         headers: requestedEtag ? { "If-None-Match": requestedEtag } : {},
         credentials: "omit",
         cache: "no-cache",
+        redirect: "error",
         signal: activeController.signal,
       });
-      if (stopped || current !== generation || currentNotice !== noticeGeneration) return;
+      if (stopped || current !== generation || currentNotice !== noticeGeneration) {
+        void response.body?.cancel().catch(() => {});
+        return;
+      }
       if (response.status === 304) {
         if (!requestedEtag || requestedEtag !== etag || healthNotice !== lastNotice)
           throw new Error("unexpected_not_modified");
         emit({ transport: stream ? "stream" : "polling", freshness: lastHealth, checkedAt: new Date().toISOString() });
       } else {
-        if (!response.ok) throw new Error("poll_unavailable");
-        const body = (await response.json()) as Record<string, unknown>;
+        if (!response.ok) {
+          void response.body?.cancel().catch(() => {});
+          throw new Error("poll_unavailable");
+        }
+        const body = await readHealth(response, activeController.signal);
         if (stopped || current !== generation || currentNotice !== noticeGeneration) return;
         if (body.status !== "recently_reconciled" && body.status !== "stale_or_degraded")
           throw new Error("invalid_health");

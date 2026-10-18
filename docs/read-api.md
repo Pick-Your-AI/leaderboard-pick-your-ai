@@ -208,8 +208,18 @@ which is safe to deduplicate by snapshot/revision/policy.
 `apps/service/src/live-client.ts` exports a browser helper with EventSource support,
 conditional health polling, bounded exponential backoff (up to 30 seconds), a
 five-second request deadline, duplicate/out-of-order notice rejection, visibility
-pause/resume and explicit stop cleanup. It accepts only same-origin API base paths
-and omits credentials. Polling continues to verify freshness while streaming.
+pause/resume and explicit stop cleanup. It accepts only same-origin API base paths.
+Health fetches omit credentials and reject redirects. The native EventSource uses
+`withCredentials: false`; its browser-defined same-origin cookie behavior must not
+be treated as an authenticated identity by the public endpoint. Polling continues
+to verify freshness while streaming.
+Health JSON is read incrementally with a 2 MiB decoded-byte limit, including when
+Content-Length is absent or describes a smaller compressed body. Oversized advertised
+lengths are rejected before reading, and rejected or aborted readers are cancelled.
+Stream event data is checked against the same UTF-8 byte limit before JSON parsing;
+an invalid notice closes that stream and returns to polling without applying it.
+Native EventSource allocates received event text before delivering its callback, so
+this application parse limit does not claim to bound the browser's network buffers.
 Health and conditional validators are bound to the exact snapshot, revision and
 policy identity. A changed stream notice clears that health cache; polling
 responses overtaken by the notice are discarded even if JSON parsing finishes
