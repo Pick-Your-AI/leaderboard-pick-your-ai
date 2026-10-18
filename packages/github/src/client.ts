@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { classifyGithubFailure, nextRestLink, type EndpointOutcome, type GraphqlPage } from "./index.js";
 import type { CheckpointStore } from "./checkpoints.js";
+import { GithubQuotaObservations, type QuotaDiagnostics } from "./quota.js";
 
 export class GithubClientError extends Error {
   constructor(
@@ -124,6 +125,7 @@ export class GithubReadClient {
   private active = 0;
   private readonly waiters: Array<() => void> = [];
   private readonly scans = new Set<string>();
+  private quota: GithubQuotaObservations;
 
   constructor(options: GithubClientOptions) {
     this.origin = new URL(options.apiOrigin ?? "https://api.github.com");
@@ -162,6 +164,15 @@ export class GithubReadClient {
       throw new RangeError("Invalid concurrency or retry bound");
     }
     this.trustedUrl(this.options.graphqlPath, "configuration");
+    this.quota = new GithubQuotaObservations(this.options.checkpoints, this.origin.origin, this.options.now);
+  }
+
+  /** Protected-host diagnostics only. This reads retained observations without resolving a token or calling GitHub. */
+  async readQuota(source: string, assertAuthorized?: () => void): Promise<QuotaDiagnostics> {
+    checkAuthorization(source, assertAuthorized);
+    const diagnostics = await this.quota.read(source, () => checkAuthorization(source, assertAuthorized));
+    checkAuthorization(source, assertAuthorized);
+    return diagnostics;
   }
 
   private trustedUrl(raw: string, source: string): string {
@@ -326,6 +337,10 @@ export class GithubReadClient {
           await response.body?.cancel();
           throw new GithubClientError({ kind: "unsafe_request" }, source);
         }
+        // Retain only bounded numeric quota observations, including conditional
+        // and error responses. Failed telemetry retention does not retry HTTP.
+        await this.quota.observe(source, response, () => checkAuthorization(source, assertAuthorized));
+        authorize();
         // Conditional 304 responses still carry quota state. Observe it before
         // returning a cached representation, just as for a fresh HTTP 200.
         if ((response.ok || response.status === 304) && response.headers.get("x-ratelimit-remaining") === "0") {

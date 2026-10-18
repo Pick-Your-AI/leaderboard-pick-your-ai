@@ -70,3 +70,50 @@ Authorization regressions also exercise revocation during REST/GraphQL fetch and
 `packages/github/test/response-encoding.test.mjs` supplies the synthetic response-byte regressions for [#84](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/84): isolated continuation bytes, truncated and malformed sequences, overlong encodings, encoded surrogates, out-of-range code points, retained ETags, interrupted-page restart, valid byte-split Unicode, and malformed error-body classification. These are client integrity checks; the installed-source canaries and remaining source-family acceptance criteria are separate work.
 
 The implementation follows GitHub's [REST best practices](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api), [REST rate-limit guidance](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api), and [GraphQL pagination guidance](https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api).
+
+## Retained quota observations
+
+`await client.readQuota(installationAndPermissionScopeId, assertAuthorized)` is a
+protected-host diagnostic read. It resolves no token and makes no GitHub request.
+The supplied synchronous host grant is checked before and after the awaited
+checkpoint reads and before queued observation writes, so a revocation withholds
+the result and prevents new writes from starting. The operator HTTP bridge
+must still derive the installation/account scope from its current repository
+grant; this method does not authenticate a browser or authorize a source ID.
+
+The client records the latest successfully retained response for each of `core`,
+`search`, `code_search` and `graphql`, plus one `unknown` resource slot. The
+resource comes only from the response header; an omitted or unfamiliar resource
+does not inherit an endpoint's expected pool. At most five checkpoint values are
+read. Their binding hashes the configured HTTPS API origin and the exact source
+pool identity, so another installation, account or Enterprise origin cannot reuse
+the observation. A shared client serializes writes for each bound resource; a
+multi-process host still requires the transactional storage/scheduler described
+above.
+
+Each observation contains its actual `observedAt`, HTTP `responseStatus`, numeric
+`limit`, `remaining` and `used`, a UTC `resetAt`, and numeric
+`retryAfterSeconds`. Missing or malformed numeric values remain null; a valid zero
+remains zero. Missing records have state `unknown`, and unreadable, corrupt or
+mismatched records have state `unavailable`. Readback returns detached fixed fields.
+No source label, URL, token, arbitrary header, response body or error text is
+stored in this quota record. A response without quota headers does not refresh an
+old observation. A failed telemetry save preserves the previous retained record
+and does not retry an otherwise successful source request or invent a pause.
+
+Conditional 304 and HTTP error responses are observed after the ordinary trusted
+origin, redirect and current-authorization checks. GraphQL can return errors with
+HTTP 200, so `responseStatus` is a transport observation, not collection success.
+The existing typed request outcome remains authoritative for that operation.
+Previously stored unbound retry-pause deadlines are not exposed as if they were
+origin-bound quota observations.
+
+These values describe a response, not an exact global remaining balance or a
+collector heartbeat. GitHub's [REST rate-limit documentation](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
+and [GraphQL rate-limit documentation](https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api)
+(checked 2026-10-18) define these headers and note that later response counters can
+increase because requests may be processed in different regions. The observer
+preserves the later retained values without summing them, taking a minimum or
+manufacturing global consumption. Unobserved clients, resources and secondary
+quota balances remain unknown. Freshness, queue recovery and confirmed
+publication diagnostics are separate from this observation.
