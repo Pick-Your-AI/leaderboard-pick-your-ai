@@ -118,7 +118,7 @@ function snapshot(id = "wall-1", revision = 1) {
     },
   };
 }
-async function service(page: Page) {
+async function service(page: Page, readDelayMs = 0) {
   // Actual Fastify query/cursor/privacy/registry handlers over explicitly synthetic inputs.
   const module = new URL("../../service/dist/app.js", import.meta.url).href;
   const { createService } = await import(module);
@@ -131,6 +131,7 @@ async function service(page: Page) {
     cursorSecret: "synthetic-wall-cursor-secret-00001",
     source: {
       async read(selected: typeof scope, pin: string | null) {
+        if (readDelayMs) await new Promise((resolve) => setTimeout(resolve, readDelayMs));
         if (failed) throw new Error("SENSITIVE_SYNTHETIC_WALL_FAILURE");
         const chosen = pin ? history.get(pin) : current;
         if (!chosen) return null;
@@ -151,6 +152,9 @@ async function service(page: Page) {
   return {
     calls,
     close: () => app.close(),
+    delayReads(milliseconds: number) {
+      readDelayMs = milliseconds;
+    },
     next() {
       current = snapshot("wall-2", 2);
       current.selected.rows[0]!.result.value = 90;
@@ -340,6 +344,31 @@ test("automatic page timer survives privacy polls and obeys pause, focus and red
     await expect(page.locator(".api-wall-page")).toContainText("Page 2");
     await next(page);
     await expect(page.locator(".api-wall-page")).toContainText("Page 1");
+  } finally {
+    await api.close();
+  }
+});
+
+test("a real 20-second page boundary waits for its coincident privacy read instead of disappearing", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const api = await service(page);
+  try {
+    // No page clock is installed. Start an explicit privacy recheck just before
+    // the real minimum page boundary, then let the periodic poll overlap it.
+    await page.goto(wall("cycle", "&format=landscape").replace("interval=30", "interval=20"));
+    await expect(page.locator(".api-wall-page")).toContainText("Page 1");
+    await page.getByRole("button", { name: "Recheck current publication controls" }).focus();
+    await page.mouse.move(0, 0);
+    await expect(page.locator(".api-wall-state")).toContainText("Automatic page boundaries");
+    await page.waitForTimeout(Math.max(0, 18_000 - (await page.evaluate(() => performance.now()))));
+    api.delayReads(1_500);
+    await page.getByRole("button", { name: "Recheck current publication controls" }).click();
+    await expect(page.locator(".api-wall-state")).toContainText("Rechecking controls");
+    await expect(page.locator(".api-wall-page")).toContainText("Page 2", { timeout: 15_000 });
+    await expect(page.locator(".api-wall-page")).toContainText("Rank 1 continues");
+    await expect(provenance(page)).toContainText("wall-1");
   } finally {
     await api.close();
   }

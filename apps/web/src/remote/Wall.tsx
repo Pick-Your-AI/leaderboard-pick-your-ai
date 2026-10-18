@@ -291,6 +291,7 @@ function WallDisplay({
   const pin = useRef<string | null>(selected.snapshot);
   const active = useRef<AbortController | null>(null);
   const recovery = useRef<"page" | "cycle" | null>(null);
+  const automaticDue = useRef(false);
   const region = useRef<HTMLElement>(null);
   const refresh = useCallback(() => {
     if (document.visibilityState !== "visible") return;
@@ -314,6 +315,7 @@ function WallDisplay({
       const showing = document.visibilityState === "visible";
       setVisible(showing);
       if (!showing) {
+        automaticDue.current = false;
         active.current?.abort();
         setFrame(null);
       } else refresh();
@@ -344,6 +346,7 @@ function WallDisplay({
       .catch((failure) => {
         if (!controller.signal.aborted) {
           controller.abort();
+          automaticDue.current = false;
           const problem = failure instanceof ReadFailure ? failure : new ReadFailure(503, "public_read_unavailable");
           // Expiring cursors do not revoke a frozen snapshot. Wait for the next
           // bounded recheck, then restart this stage under the same publication.
@@ -364,24 +367,46 @@ function WallDisplay({
       });
     return () => controller.abort();
   }, [base, selected, options, mode, position, nonce, visible]);
+  const automatic = mode !== "frozen" && !paused && !reduced && visible && !pointerInside && !focusInside;
   const advance = () => {
     if (!frame || reading || document.visibilityState !== "visible") return;
+    automaticDue.current = false;
     const next = nextWallPage(frame, mode);
     pin.current = next.pin;
     active.current?.abort();
     setPosition(next.position);
   };
-  const advanceRef = useRef(advance);
-  advanceRef.current = advance;
+  const advanceAutomatically = () => {
+    if (
+      !automatic ||
+      !frame ||
+      document.visibilityState !== "visible" ||
+      region.current?.contains(document.activeElement)
+    ) {
+      automaticDue.current = false;
+      return;
+    }
+    // Preserve one due page boundary while a coincident privacy read finishes.
+    // Only its freshly validated frame may supply the next cursor/page.
+    automaticDue.current = true;
+    if (!reading) advance();
+  };
+  const advanceRef = useRef(advanceAutomatically);
+  advanceRef.current = advanceAutomatically;
   // A 20-second privacy recheck must not perpetually reset a slower rotation timer.
   useEffect(() => {
     if (paused || reduced || !visible || pointerInside || focusInside || mode === "frozen") return;
     const timer = setInterval(() => {
-      if (!region.current?.contains(document.activeElement)) advanceRef.current();
+      advanceRef.current();
     }, interval * 1000);
     return () => clearInterval(timer);
   }, [paused, reduced, visible, pointerInside, focusInside, mode, interval, position]);
+  useEffect(() => {
+    if (!automatic) automaticDue.current = false;
+    else if (automaticDue.current && !reading) advanceRef.current();
+  }, [automatic, reading, frame]);
   const reset = () => {
+    automaticDue.current = false;
     active.current?.abort();
     recovery.current = null;
     pin.current = selected.snapshot;
@@ -403,7 +428,6 @@ function WallDisplay({
     const timer = setTimeout(() => setAnnouncement(pageSummary), 1_000);
     return () => clearTimeout(timer);
   }, [pageSummary, visible]);
-  const automatic = mode !== "frozen" && !paused && !reduced && visible && !pointerInside && !focusInside;
   const controlLabel =
     mode === "frozen"
       ? "Frozen snapshot — automatic advance off"
