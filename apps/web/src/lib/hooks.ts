@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useRouter } from "./router.tsx";
+import { prototypeHref } from "./prototype-url.ts";
 import { parseScope, routeParams, serializeScope, type Scope, type ScopeIssue } from "./scope.ts";
 import { scopeContext, SourceError } from "../data/source.ts";
 import { deferredLatestSnapshotId, initialLatestSnapshotId } from "../data/synthetic.ts";
@@ -23,7 +24,7 @@ export function useScope(): {
   );
   const hrefWith = useCallback(
     (path: string, extra: Record<string, string | null> = {}, override: Partial<Scope> = {}) =>
-      `${path}${serializeScope({ ...parsed.scope, ...override }, extra)}`,
+      prototypeHref(`${path}${serializeScope({ ...parsed.scope, ...override }, extra)}`),
     [parsed.scope],
   );
   return { ...parsed, params, setScope, hrefWith };

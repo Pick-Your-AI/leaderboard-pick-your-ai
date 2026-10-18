@@ -1,4 +1,5 @@
 import { parseScope, scopedHref } from "./scope.ts";
+import { prototypeHref } from "./prototype-url.ts";
 import { scopeContext } from "../data/source.ts";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
@@ -31,7 +32,7 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const navigate = useCallback((to: string, options: { replace?: boolean } = {}) => {
-    const url = new URL(to, window.location.href);
+    const url = new URL(prototypeHref(to), window.location.href);
     const next = `${url.pathname}${url.search}${url.hash}`;
     if (next === `${window.location.pathname}${window.location.search}${window.location.hash}`) return;
     if (options.replace) window.history.replaceState(null, "", next);
@@ -53,10 +54,11 @@ type LinkProps = Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & {
 
 export function Link({ to, onClick, ...rest }: LinkProps) {
   const { navigate } = useRouter();
+  const href = prototypeHref(to);
   return (
     <a
       {...rest}
-      href={to}
+      href={href}
       onClick={(event) => {
         onClick?.(event);
         if (
@@ -71,7 +73,7 @@ export function Link({ to, onClick, ...rest }: LinkProps) {
           return;
         }
         event.preventDefault();
-        navigate(to);
+        navigate(href);
       }}
     />
   );
