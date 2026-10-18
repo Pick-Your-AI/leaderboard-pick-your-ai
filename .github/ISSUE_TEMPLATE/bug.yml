@@ -1,0 +1,41 @@
+name: Runtime bug
+description: Report a reproducible public or synthetic runtime defect
+title: 'Bug: '
+body:
+- type: markdown
+  attributes:
+    value: This is a public issue. Do not include tokens, cookies, email addresses, private source payloads, personal
+      evidence or exploit details. Follow SECURITY.md for sensitive reports. Check existing issues first; small
+      steps belong in the existing work-package checklist. Native ownership and relationships are set during triage,
+      not inferred from this form.
+- type: textarea
+  id: behavior
+  attributes:
+    label: Expected and observed behavior
+    description: Describe the mismatch without private data. Distinguish unavailable, unknown and measured zero.
+  validations:
+    required: true
+- type: textarea
+  id: reproduce
+  attributes:
+    label: Safe reproduction
+    description: Give minimal steps using synthetic fixtures or already-public evidence. If reproduction needs private
+      data, say so without attaching it.
+  validations:
+    required: true
+- type: textarea
+  id: versions
+  attributes:
+    label: Version and selected view
+    description: Include relevant commit/build, metric definition, snapshot, date bounds and filters when available.
+      State unknown values explicitly.
+  validations:
+    required: true
+- type: textarea
+  id: verification
+  attributes:
+    label: Verification and impact
+    description: Describe the expected regression test, affected journeys and any safe workaround. Link the existing
+      work package or state that triage is needed.
+  validations:
+    required: true

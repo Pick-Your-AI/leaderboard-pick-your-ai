@@ -1,4 +1,10 @@
 import { classifyDocumentation, validateDocumentationPolicy, type DocumentationPathPolicy } from "./documentation.js";
+import {
+  classifyResearchRecords,
+  validateResearchPolicy,
+  type ResearchPathPolicy,
+  type VerifiedResearchRecord,
+} from "./research.js";
 import { createHash } from "node:crypto";
 import {
   serviceAccountClassificationSchema,
@@ -264,6 +270,8 @@ export interface GithubEvidenceEnvelope {
   /** Protected host input: individually verified public, minimized records for this artifact.
    * Never populate from private correction receipts, payload fields or a guessed revision log. */
   publicHistory?: { approvedPublic: true; history: PublicEvidenceHistory };
+  /** Protected exact-blob identities; never copy these from PR or note text. */
+  researchRecords?: readonly VerifiedResearchRecord[];
 }
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -425,6 +433,7 @@ function creditedAction(fact: NormalizedGithubFact, family: string, envelopeActi
 export function normalizeGithubObservation(
   envelope: GithubEvidenceEnvelope,
   documentationPolicy?: DocumentationPathPolicy,
+  researchPolicy?: ResearchPathPolicy,
 ): NormalizedGithubResult {
   const out = result();
   const { repository, proof } = envelope;
@@ -913,24 +922,29 @@ export function normalizeGithubObservation(
       unlocked: "public_moderation",
     };
     const metric = mapping[sourceAction];
-    const target = object(payload.label)
-      ? payload.label
-      : object(payload.milestone)
-        ? payload.milestone
-        : object(payload.assignee)
-          ? payload.assignee
-          : null;
-    const targetId = target ? resourceId(target, "metadata", repository.id) : text(payload.target_id);
+    // Resolve the action's own target, never another field or the issue's current
+    // metadata snapshot. Removal and type transitions need the same identity
+    // proof as additions before they can participate in raw-state grouping.
+    const targetField =
+      ["labeled", "unlabeled"].includes(sourceAction) || sourceAction.startsWith("label_")
+        ? "label"
+        : ["milestoned", "demilestoned"].includes(sourceAction) || sourceAction.startsWith("milestone_")
+          ? "milestone"
+          : ["assigned", "unassigned"].includes(sourceAction)
+            ? "assignee"
+            : ["issue_typed", "issue_untyped"].includes(sourceAction)
+              ? "issue_type"
+              : null;
+    const target = targetField ? payload[targetField] : null;
+    const targetId = object(target) ? resourceId(target, "metadata", repository.id) : text(payload.target_id);
     if (!metric || !proof.eventId) out.reasons.push("unsupported_or_unproven_triage_action");
     else if (object(payload.change) && JSON.stringify(payload.change.before) === JSON.stringify(payload.change.after))
       out.reasons.push("no_op_metadata_change");
     else {
-      const missingTarget =
-        ["labels_applied", "assignments_coordinated", "milestones_curated"].includes(metric) && !targetId;
+      const missingTarget = targetField !== null && !targetId;
       if (missingTarget) out.reasons.push("unknown_metadata_target_identity");
       const properties: Partial<NormalizedGithubFact> = {
-        rawState: `${sourceAction}:${targetId ?? "unknown"}`,
-        ...(missingTarget ? { state: "unknown" } : {}),
+        ...(missingTarget ? { state: "unknown" } : { rawState: `${sourceAction}:${targetId ?? "unknown"}` }),
       };
       const metadataUnit = stable(transitionUnit, targetId ?? id);
       emit(metric, sender, "triager", at, metadataUnit, properties);
@@ -1077,6 +1091,58 @@ export function normalizeGithubObservation(
         evidence.sourceRevision = integration.after;
         evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
         evidence.contribution.reasonCodes.push(`documentation_path_policy:${documentationPolicy.version}`);
+      }
+    }
+  }
+  if (researchPolicy && envelope.family === "pull_request") {
+    validateResearchPolicy(researchPolicy);
+    const mergedAt = time(resource.merged_at);
+    if (
+      researchPolicy.repositoryId !== repository.id ||
+      !integration?.diff ||
+      resource.merged !== true ||
+      !mergedAt ||
+      Date.parse(mergedAt) > Date.parse(observedAt) ||
+      resource.merge_commit_sha !== integration.after ||
+      !object(resource.base) ||
+      !text(resource.base.ref) ||
+      !text(integration.targetBranch) ||
+      !text(integration.defaultBranch) ||
+      !text(repository.defaultBranch) ||
+      resource.base.ref !== integration.targetBranch ||
+      integration.targetBranch !== integration.defaultBranch ||
+      repository.defaultBranch !== integration.defaultBranch ||
+      integration.diff.before !== integration.before ||
+      integration.diff.after !== integration.after ||
+      !text(integration.canonicalChangeId)
+    ) {
+      out.reasons.push("research_merged_revision_unverified");
+    } else {
+      const classification = classifyResearchRecords(integration.diff, envelope.researchRecords ?? [], researchPolicy);
+      out.reasons.push(...classification.reasons);
+      for (const record of classification.records) {
+        const recordId = stable("research-record", repository.id, record.path, record.blobSha);
+        const fact = emit("decision_records", author, "author", mergedAt, recordId, {
+          artifactId: recordId,
+          state: author ? "pending" : "unknown",
+          rawState: "research_record_version_pending_independent_review",
+        });
+        const evidence = out.evidence.find((entry) => entry.contribution.contributionId === fact.id)!;
+        evidence.artifact = {
+          ...evidence.artifact,
+          kind: "other",
+          stableId: recordId,
+          publicUrl: `https://github.com/${repository.slug}/blob/${record.sourceRevision}/${record.path}`,
+        };
+        evidence.contribution.artifactId = recordId;
+        evidence.contribution.reasonCodes = [
+          "research_record_not_accepted",
+          `research_path_policy:${researchPolicy.version}`,
+        ];
+        evidence.sourceRevision = record.sourceRevision;
+        evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${record.sourceRevision}`;
+        // The PR title and its history describe a different artifact.
+        delete evidence.evidenceMetadata;
       }
     }
   }
@@ -1229,6 +1295,7 @@ export interface GithubEvidenceNormalizerOptions {
   /** Bound the complete review cohort scan; exhaustion never establishes participation. */
   maxReviewPages?: number;
   documentationPolicies?: readonly DocumentationPathPolicy[];
+  researchPolicies?: readonly ResearchPathPolicy[];
 }
 
 /** Read-only collection-to-metric adapter. Lossy snapshots are hydrated rather than guessed. */
@@ -1237,6 +1304,10 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
   for (const policy of documentationPolicies) validateDocumentationPolicy(policy);
   if (new Set(documentationPolicies.map((policy) => policy.repositoryId)).size !== documentationPolicies.length)
     throw new Error("Ambiguous documentation repository policy");
+  const researchPolicies = structuredClone(options.researchPolicies ?? []);
+  for (const policy of researchPolicies) validateResearchPolicy(policy);
+  if (new Set(researchPolicies.map((policy) => policy.repositoryId)).size !== researchPolicies.length)
+    throw new Error("Ambiguous research repository policy");
   return async (input: CollectionNormalizerInput): Promise<NormalizedGithubResult> => {
     const none = (reason: string) => ({ ...result(), isSynthetic: options.isSynthetic === true, reasons: [reason] });
     if (!options.allowedRepositoryIds.includes(input.repository.id))
@@ -1359,6 +1430,9 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         },
         input.family === "pull_requests"
           ? documentationPolicies.find((policy) => policy.repositoryId === input.repository.id)
+          : undefined,
+        input.family === "pull_requests"
+          ? researchPolicies.find((policy) => policy.repositoryId === input.repository.id)
           : undefined,
       );
     } else {

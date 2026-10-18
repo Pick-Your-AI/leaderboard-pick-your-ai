@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { PublicReadError, type PortfolioEvidence, type PublicRead } from "./public-source.js";
+import { compareSourceInstants } from "./source-time.js";
 
 /** Versioned, reversible display policy. These buckets are not metric aggregates. */
 export const activityGroupingVersion = "actor-repository-state-utc-hour-v1";
@@ -7,11 +8,10 @@ export const activityPreviewLimit = 5;
 export const activityPageByteLimit = 1_000_000;
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-const stamp = (value: string | null) => (value === null ? -Infinity : Date.parse(value));
 export const newest = (a: string | null, b: string | null) => {
-  const left = stamp(a),
-    right = stamp(b);
-  return left === right ? 0 : left > right ? -1 : 1;
+  if (a === null) return b === null ? 0 : 1;
+  if (b === null) return -1;
+  return compareSourceInstants(b, a);
 };
 export function publicPortfolio(read: PublicRead, category: string | null): PortfolioEvidence[] {
   // Legacy eligibility never implies acceptance or a retained collection clock.
@@ -81,7 +81,7 @@ export function activityIndex(read: PublicRead, category: string | null): Activi
     if (prior) {
       const previous = prior.representative;
       if (
-        stamp(previous.occurredAt) !== stamp(entry.occurredAt) ||
+        newest(previous.occurredAt, entry.occurredAt) !== 0 ||
         JSON.stringify(previous.artifact) !== JSON.stringify(entry.artifact)
       )
         throw new PublicReadError(503, "activity_fact_conflict");

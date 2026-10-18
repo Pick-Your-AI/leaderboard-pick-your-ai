@@ -1,11 +1,17 @@
 import type { PortfolioEvidence, PublicRead } from "./public-source.js";
+import { compareSourceInstants as compareInstants } from "./source-time.js";
 
 export const ACHIEVEMENT_RULE_VERSION = "accepted-evidence/v1";
 /** Candidate rules are activated only by an explicit reviewed service policy. */
 export function acceptedAchievements(read: PublicRead, actorId: string) {
-  if (!read.selected.actors.some((entry) => entry.actorId === actorId && entry.actor.kind === "user")) return [];
+  if (
+    !read.selected.actors.some(
+      (entry) => entry.actorId === actorId && entry.actor.kind === "user" && entry.actor.executionMode !== "automated",
+    )
+  )
+    return [];
   const { scope, snapshot } = read.selected;
-  const through = Date.parse(scope.end ?? snapshot.generatedAt);
+  const through = scope.end ?? snapshot.generatedAt;
   if (
     !snapshot.coverage.length ||
     snapshot.coverage.some(
@@ -17,11 +23,11 @@ export function acceptedAchievements(read: PublicRead, actorId: string) {
         !coverage.windowStart ||
         !coverage.windowEnd ||
         !coverage.sourceWatermark ||
-        !(Date.parse(coverage.windowEnd) >= through) ||
-        !(Date.parse(coverage.sourceWatermark) >= through) ||
+        !(compareInstants(coverage.windowEnd, through) >= 0) ||
+        !(compareInstants(coverage.sourceWatermark, through) >= 0) ||
         (scope.start
-          ? !(Date.parse(coverage.windowStart) <= Date.parse(scope.start))
-          : !coverage.knownStart || !(Date.parse(coverage.windowStart) <= Date.parse(coverage.knownStart))),
+          ? !(compareInstants(coverage.windowStart, scope.start) <= 0)
+          : !coverage.knownStart || !(compareInstants(coverage.windowStart, coverage.knownStart) <= 0)),
     )
   )
     return [];
@@ -37,7 +43,7 @@ export function acceptedAchievements(read: PublicRead, actorId: string) {
     )
     .sort(
       (a, b) =>
-        Date.parse(a.occurredAt!) - Date.parse(b.occurredAt!) ||
+        compareInstants(a.occurredAt!, b.occurredAt!) ||
         (a.contribution.contributionId < b.contribution.contributionId
           ? -1
           : a.contribution.contributionId > b.contribution.contributionId

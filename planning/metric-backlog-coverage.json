@@ -1170,9 +1170,9 @@
         "COV-09"
       ],
       "definition": {
-        "unit": "distinct actor-item-day triage groups",
+        "unit": "distinct actor-item-raw-state UTC-hour triage groups",
         "aggregation": "count_distinct_eligible_units",
-        "numerator": "distinct actor/item/day qualifying change; group related actions; explicit policy version",
+        "numerator": "one observed group per stable actor/item/exact raw state in each fixed 3,600-second UTC bucket anchored at the Unix epoch; repeated identical states within a bucket count once (triage-raw-state/v1)",
         "denominator": {
           "kind": "not_applicable",
           "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
