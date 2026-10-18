@@ -31,6 +31,13 @@
   flex-basis: 100%;
   overflow-wrap: anywhere;
 }
+.api-wall-scope > .public-scope-provenance,
+.api-wall-scope > .public-scope-details {
+  font-size: max(12px, 0.85em);
+}
+.api-wall-scope .public-scope-details summary {
+  cursor: pointer;
+}
 .api-wall-provenance {
   display: flex;
   flex-wrap: wrap;

@@ -48,12 +48,25 @@ export function PublicScopeControls({ selected }: { selected: PublicScope }) {
   );
 }
 
-export function PublicScopeProvenance({ scope }: { scope: PublicScope }) {
-  return (
-    <p aria-label="Membership and contribution scope">
+export function PublicScopeProvenance({ scope, compact = false }: { scope: PublicScope; compact?: boolean }) {
+  const provenance = (
+    <p className="public-scope-provenance" aria-label="Membership and contribution scope">
       Membership: {scope.context === "current" ? "current at snapshot cutoff" : "at event time"}. GitHub Projects:{" "}
       {scope.projects?.length ? scope.projects.join(", ") : "all in this materialized scope"}. Contribution roles:{" "}
       {scope.roles?.length ? `${scope.roles.map((role) => roleLabels[role]).join(", ")} (any selected)` : "all"}.
     </p>
   );
+  if (compact && (scope.projects?.join(", ").length ?? 0) > 96) {
+    return (
+      <details className="public-scope-details">
+        <summary>
+          Membership: {scope.context === "current" ? "current at snapshot cutoff" : "at event time"}. GitHub Projects:{" "}
+          {scope.projects!.length} selected. Contribution roles:{" "}
+          {scope.roles?.length ? `${scope.roles.length} selected` : "all"}. Show full scope.
+        </summary>
+        {provenance}
+      </details>
+    );
+  }
+  return provenance;
 }

@@ -50,7 +50,7 @@ function Scope({ selected }: { selected: Selection }) {
         <br />
         {selected.start ? `${selected.start} to ${selected.end} (end exclusive)` : "All-time materialized scope"}
       </p>
-      <PublicScopeProvenance scope={selected} />
+      <PublicScopeProvenance scope={selected} compact />
       <WindowBounds start={selected.start} end={selected.end} timeZone={selected.timeZone ?? "UTC"} />
     </div>
   );

@@ -297,3 +297,44 @@ test("percent-encoding expansion is rejected before live polling or EventSource 
   expect(await page.evaluate(() => (window as unknown as { scopeStreamAttempts: number }).scopeStreamAttempts)).toBe(0);
   expect(errors).toEqual([]);
 });
+
+test("long in-budget Project scopes keep overlay controls visible and disclose every selected ID", async ({ page }) => {
+  const api = await service(page);
+  try {
+    const projects = ["PVT_A", ...Array.from({ length: 10 }, (_, i) => `PVT_LONG_${i}_` + "A".repeat(100))];
+    const project = projects.join(",");
+    await page.setViewportSize({ width: 960, height: 540 });
+    await page.goto(
+      `/live?${new URLSearchParams({ ui: "api", ...selected, project, mode: "frozen", format: "overlay", boards: "pr_merged" })}`,
+    );
+    await expect(page.locator(".api-wall-scope summary")).toContainText("GitHub Projects: 11 selected");
+    await expect(page.getByRole("button", { name: "Pause wall", exact: true })).toBeInViewport();
+    expect(
+      await page.evaluate(() => ({
+        width: document.documentElement.scrollWidth,
+        height: document.documentElement.scrollHeight,
+      })),
+    ).toEqual({ width: 960, height: 540 });
+    const summary = page.locator(".api-wall-scope summary");
+    await summary.focus();
+    await summary.press("Enter");
+    await expect(page.locator(".api-wall-scope details")).toHaveAttribute("open", "");
+    await expect(page.locator(".api-wall-scope .public-scope-provenance")).toContainText(
+      `GitHub Projects: ${projects.join(", ")}`,
+    );
+    await expect(page.locator(".api-wall-scope .public-scope-provenance")).toContainText(
+      "Contribution roles: Author, Reviewer (any selected)",
+    );
+    await summary.press("Enter");
+    await expect(page.locator(".api-wall-scope details")).not.toHaveAttribute("open", "");
+    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(540);
+    const reads = api.calls.filter((url) => ["/api/v1/health", "/api/v1/boards"].includes(url.pathname));
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((url) => url.searchParams.get("project") === project)).toBe(true);
+    expect(
+      (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
+    ).toEqual([]);
+  } finally {
+    await api.close();
+  }
+});
