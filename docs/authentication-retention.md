@@ -17,9 +17,9 @@ The public projection, suppression state, evidence, configuration and audit hist
 remain unchanged. The receipt registry is capped at 10,000 operations and fails
 closed when full; archival requires a separately reviewed operator procedure.
 
-Four synthetic tests verify expiry boundaries, no public changes, idempotency,
+Five synthetic tests verify expiry boundaries, no public changes, idempotency,
 authorization denial, future-cutoff rejection, concurrent refresh and transactional
-rollback. The root Node test command includes the retention tests.
+rollback, reserved property names and invalid clocks. The root Node test command includes the retention tests.
 
 This is one retention component. Source facts, raw/derived evidence, frozen policy
 inputs, comparisons, editorial records, private audit logs, backups and external

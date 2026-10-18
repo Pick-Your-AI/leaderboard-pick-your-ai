@@ -75,3 +75,15 @@ test("receipt storage failure rolls back deletions", async (t) => {
   await assert.rejects(expireControlsAuthentication(broken, options), /synthetic-failure/);
   assert.deepEqual(store.read(), before);
 });
+
+test("inherited receipt names remain idempotent own records and invalid clocks fail closed", async (t) => {
+  const store = fixture(t);
+  for (const invalid of [NaN, Infinity, -1, "100", 1.5])
+    await assert.rejects(expireControlsAuthentication(store, { ...options, now: () => invalid }), /invalid_/);
+  assert.equal(store.read().sessions.expired.expires, 99);
+  for (const receiptId of ["__proto__", "constructor", "toString"]) {
+    const receipt = await expireControlsAuthentication(store, { ...options, receiptId });
+    assert.deepEqual(await expireControlsAuthentication(store, { ...options, receiptId }), receipt);
+    assert.equal(Object.hasOwn(store.read().authenticationExpiryReceipts, receiptId), true);
+  }
+});

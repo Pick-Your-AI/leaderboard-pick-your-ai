@@ -2,13 +2,16 @@ import { createHash } from "node:crypto";
 
 /** Protected host job. Existing authentication deadlines are the retention policy. */
 export async function expireControlsAuthentication(store, { receiptId, cutoff, authorize, now = Date.now }) {
+  const currentTime = typeof now === "function" ? now() : NaN;
   if (
+    !Number.isSafeInteger(currentTime) ||
+    currentTime < 0 ||
     !store?.transaction ||
     typeof receiptId !== "string" ||
     !/^[a-zA-Z0-9_-]{1,128}$/.test(receiptId) ||
     !Number.isSafeInteger(cutoff) ||
     cutoff < 0 ||
-    cutoff > now() ||
+    cutoff > currentTime ||
     typeof authorize !== "function"
   )
     throw new Error("invalid_authentication_expiry_request");
@@ -18,7 +21,9 @@ export async function expireControlsAuthentication(store, { receiptId, cutoff, a
   if ((await authorize({ receiptId, cutoff, operation: "expire_authentication" })) !== true)
     throw new Error("authentication_expiry_not_authorized");
   return store.transaction((state) => {
-    const existing = state.authenticationExpiryReceipts?.[receiptId];
+    const existing = Object.hasOwn(state.authenticationExpiryReceipts ?? {}, receiptId)
+      ? state.authenticationExpiryReceipts[receiptId]
+      : undefined;
     if (existing) {
       if (existing.binding !== binding) throw new Error("authentication_expiry_receipt_conflict");
       return structuredClone(existing);
