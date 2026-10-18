@@ -291,6 +291,15 @@ pending or independently accepted state is supplied by the authorized portfolio;
 legacy evidence remains acceptance-unknown. Missing occurrence and collection
 clocks remain null. A date-window selection excludes unknown occurrence dates.
 
+The shared source contract also validates coverage windows at their full fractional
+precision: distinct sub-millisecond bounds form a valid half-open window, while
+equivalent or reversed bounds do not. The service and browser use its shared
+comparator. Browser activity validation rejects reversed occurrence/collection
+bounds and proofs outside a group's exact source-time range, including differences
+smaller than one millisecond. Timestamp representation, null clocks and UTC-hour
+grouping remain unchanged. Direct contract and browser regressions cover these
+boundaries, equivalent offsets and trailing zeros.
+
 Canonical facts use source event, artifact and actor identity. Multiple metric
 representations of that same fact count once within each explicit work state,
 while every original contribution proof ID remains accessible. Acceptance belongs

@@ -152,3 +152,31 @@ test("activity proof details reject cross-actor, artifact, category, state and d
   ])
     assert.throws(() => activityDetail({ ...base, group, proofs: [{ ...proof, ...patch }] }, selected));
 });
+
+test("activity validates fractional bounds and proof inclusion without rounding the source clocks", () => {
+  const early = "2026-10-17T12:00:00.0001Z";
+  const late = "2026-10-17T08:00:00.0009-04:00";
+  const precise = {
+    ...group,
+    earliestOccurredAt: early,
+    latestOccurredAt: late,
+    firstCollectedAt: early,
+    lastCollectedAt: late,
+  };
+  assert.equal(activity({ ...base, groups: [precise], totalGroups: 1 }, selected).groups[0].latestOccurredAt, late);
+  for (const patch of [
+    { earliestOccurredAt: late, latestOccurredAt: early },
+    { firstCollectedAt: late, lastCollectedAt: early },
+  ]) {
+    assert.throws(() => activity({ ...base, groups: [{ ...precise, ...patch }], totalGroups: 1 }, selected));
+  }
+  for (const occurredAt of ["2026-10-17T12:00:00.0000Z", "2026-10-17T12:00:00.00091Z"]) {
+    assert.throws(() => activityDetail({ ...base, group: precise, proofs: [{ ...proof, occurredAt }] }, selected));
+  }
+  for (const occurredAt of [early, late, "2026-10-17T12:00:00.00090Z"]) {
+    assert.equal(
+      activityDetail({ ...base, group: precise, proofs: [{ ...proof, occurredAt }] }, selected).proofs[0].occurredAt,
+      occurredAt,
+    );
+  }
+});

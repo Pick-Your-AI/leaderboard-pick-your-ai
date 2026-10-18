@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { compareSourceInstants } from "./source-time.js";
 
 const nonEmpty = z.string().trim().min(1);
 const id = nonEmpty;
@@ -248,7 +249,7 @@ export const coverageSchema = z
     if (
       coverage.windowStart &&
       coverage.windowEnd &&
-      Date.parse(coverage.windowStart) >= Date.parse(coverage.windowEnd)
+      compareSourceInstants(coverage.windowStart, coverage.windowEnd) >= 0
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

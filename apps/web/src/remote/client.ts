@@ -1,4 +1,5 @@
 import {
+  compareSourceInstants,
   actorFilterSchema,
   actorKindSchema,
   executionModeSchema,
@@ -805,16 +806,16 @@ function activityGroup(value: unknown, selected: Selection): ActivityGroup {
     (result.firstCollectedAt === null) !== (result.lastCollectedAt === null) ||
     (result.latestOccurredAt !== null &&
       result.earliestOccurredAt !== null &&
-      (Date.parse(result.earliestOccurredAt) > Date.parse(result.latestOccurredAt) ||
+      (compareSourceInstants(result.earliestOccurredAt, result.latestOccurredAt) > 0 ||
         Math.floor(Date.parse(result.earliestOccurredAt) / 3600000) !==
           Math.floor(Date.parse(result.latestOccurredAt) / 3600000))) ||
     (result.firstCollectedAt !== null &&
       result.lastCollectedAt !== null &&
-      Date.parse(result.firstCollectedAt) > Date.parse(result.lastCollectedAt)) ||
+      compareSourceInstants(result.firstCollectedAt, result.lastCollectedAt) > 0) ||
     (selected.start !== null &&
-      (result.earliestOccurredAt === null || Date.parse(result.earliestOccurredAt) < Date.parse(selected.start))) ||
+      (result.earliestOccurredAt === null || compareSourceInstants(result.earliestOccurredAt, selected.start) < 0)) ||
     (selected.end !== null &&
-      (result.latestOccurredAt === null || Date.parse(result.latestOccurredAt) >= Date.parse(selected.end)))
+      (result.latestOccurredAt === null || compareSourceInstants(result.latestOccurredAt, selected.end) >= 0))
   )
     throw new ReadFailure(502, "invalid_activity_response");
   return result;
@@ -858,8 +859,8 @@ export function activityDetail(value: unknown, selected: Selection): ActivityDet
       (result.occurredAt !== null &&
         group.latestOccurredAt !== null &&
         group.earliestOccurredAt !== null &&
-        (Date.parse(result.occurredAt) > Date.parse(group.latestOccurredAt) ||
-          Date.parse(result.occurredAt) < Date.parse(group.earliestOccurredAt)))
+        (compareSourceInstants(result.occurredAt, group.latestOccurredAt) > 0 ||
+          compareSourceInstants(result.occurredAt, group.earliestOccurredAt) < 0))
     )
       throw new ReadFailure(502, "invalid_activity_response");
     return {
