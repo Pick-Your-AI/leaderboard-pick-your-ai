@@ -1,6 +1,6 @@
 # GitHub source adapter coverage
 
-Refs #45, #46, #59, #63, #67. This is implementation evidence, not installation,
+Refs #45, #46, #59, #63, #67, #79. This is implementation evidence, not installation,
 source-owner acceptance, real-data reconciliation, or launch approval.
 
 The default collection adapter reads complete paginated issue, PR, comment,
@@ -55,9 +55,9 @@ no contribution metrics. The runtime retains opaque source provenance, not a
 published Project field-value or current-context view. See [Project item fields](https://docs.github.com/en/graphql/reference/projects)
 and [issue Project memberships](https://docs.github.com/en/graphql/reference/issues).
 
-Selected native issue histories now support ProjectV2ItemStatusChangedEvent and
-ParentIssueAdded/RemovedEvent plus BlockedByAdded/RemovedEvent. They traverse the
-bounded filtered GraphQL timelineItems connection and retain exact event IDs,
+Selected native issue and PR histories support ProjectV2ItemStatusChangedEvent.
+Issue histories also support ParentIssueAdded/RemovedEvent and BlockedByAdded/RemovedEvent.
+They traverse the bounded filtered GraphQL timelineItems connection and retain exact event IDs,
 actors and creation clocks. Distinct native events in the same second remain
 distinct; replaying one event does not create another unit. Status details are
 hydrated only after the event's public Project matches repository.allowedProjectIds.
@@ -65,8 +65,37 @@ The native wasAutomated flag is bound into event revision proof; automated or
 unknown automation states receive no human status-update credit.
 Parent/blocker endpoints must both be public in the approved repository; foreign
 or hidden endpoints remain unavailable. Current parent or blocker fields never
-stand in for missing history. This adapter currently covers issue timelines;
-PR-specific Project timelines and other event subtypes remain unsupported.
+stand in for missing history. Other event subtypes remain unsupported.
+
+The Project-status inventory includes open and closed issues and PRs, then selects
+the explicit issue or pullRequest timeline and verifies its exact repository,
+subject URL and event revision again during normalization. Collection binds the
+REST node identity to every GraphQL page; normalization also requires one stable
+subject across fresh and resumed pages. The minimized collected fact retains that
+native issue/PR ID separately from its event ID. Hydration must match the collected
+ID, including when every later page consistently names a different subject at the
+same URL. Ordinary event-revision drift remains uncredited until a fresh collection
+verifies the new revision; it does not establish a subject-scope loss.
+Legacy facts without the collected native ID remain uncredited until recollected.
+A private Project-only normalization version prevents older cached results from
+bypassing this binding, without changing frozen comparison policy signatures or
+relationship behavior. Typed-history checkpoints use a new
+identity-verification namespace so older completed scans cannot bypass these checks.
+It uses a separate
+inventory checkpoint from older issue-only scans; a completed legacy checkpoint
+cannot silently certify PR coverage. Duplicate subjects and incomplete nested
+pages fail closed. The PR author never substitutes for the event actor: an unknown
+editor remains uncredited unknown evidence. Current and pinned PR publications
+use the same persistent Project-privacy denial and reapproval gate as issue evidence.
+A nested subject that becomes private, disappears or changes identity enters that
+durable denial path even when the enclosing REST repository and Project still
+appear public. Missing, invalid or reused inventory identities enter the same
+denial path. Restoring the source alone cannot reopen prior publications:
+recovery requires a separately approved configuration and rebuilt publication.
+The synthetic transport, collector, normalizer and publication regressions are in
+`apps/pipeline/test/project-pr-history.test.mjs` and `project-privacy.test.mjs`.
+See the [PR timeline types](https://docs.github.com/en/graphql/reference/pulls)
+and [native Project status event fields](https://docs.github.com/en/graphql/reference/projects).
 
 Remaining source work includes broader typed historical subtypes, verified
 readiness cohorts, and live installation permission/reconciliation evidence.

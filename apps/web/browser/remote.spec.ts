@@ -270,7 +270,7 @@ test("API polling fallback uses conditional health, holds new rankings and repor
   await page.clock.pauseAt(new Date(Date.parse(at) + 1000));
   const api = await service(page);
   try {
-    await page.goto("/live?ui=api&metric=pr_merged&repository=repo-1&workstream=triage&actors=user&limit=1");
+    await page.goto("/leaderboards/pr_merged?ui=api&repository=repo-1&workstream=triage&actors=user&limit=1");
     const freshness = page.getByRole("region", { name: "Current source freshness" });
     const provenance = page.getByRole("region", { name: "Snapshot provenance" });
     const actor = page.getByRole("link", { name: "Synthetic API A", exact: true });
@@ -593,7 +593,7 @@ test("new heads remain held until applied; unsupported query is rejected before 
 }) => {
   const api = await service(page);
   try {
-    await page.goto("/live?ui=api&metric=pr_merged");
+    await page.goto("/leaderboards/pr_merged?ui=api");
     await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toBeVisible();
     api.next();
     await page.getByRole("button", { name: "Recheck current publication controls" }).click();

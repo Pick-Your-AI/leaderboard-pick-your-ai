@@ -10,6 +10,7 @@ import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { acceptedAchievements, ACHIEVEMENT_RULE_VERSION } from "./achievements.js";
 import { renderContributorCard, renderContributorCardImage } from "./cards.js";
 import { renderPublicExport } from "./exports.js";
+import { publicParticipation } from "./participation.js";
 import {
   activityGroupingVersion,
   activityIndex,
@@ -589,6 +590,7 @@ export function createService(options: ServiceOptions = {}) {
       actorId: actor.actorId,
       category,
       results: rows.map((row) => row.result),
+      activitySummary: publicParticipation(read, actor.actorId, category),
       categories: categories(evidence),
       diagnostics:
         read.selected.diagnostics?.filter(

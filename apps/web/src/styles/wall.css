@@ -1,0 +1,195 @@
+/* API display layouts use the existing reviewed colour tokens. */
+.api-wall {
+  min-height: 100svh;
+  background: var(--color-bg);
+  font-size: clamp(1rem, 1.1vw, 2.6rem);
+  line-height: 1.35;
+}
+.api-wall-frame {
+  min-height: 100svh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: clamp(12px, 1vw, 32px);
+  padding: clamp(20px, 1.7vw, 66px);
+}
+.api-wall-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3em 1.4em;
+  align-items: center;
+  justify-content: space-between;
+}
+.api-wall-header p {
+  margin: 0;
+}
+.api-wall-health {
+  padding: 0.25em 0.7em;
+  border: 2px solid currentColor;
+  font-weight: 700;
+}
+.api-wall-scope {
+  flex-basis: 100%;
+  overflow-wrap: anywhere;
+}
+.api-wall-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2em 1.5em;
+  font-size: 0.8em;
+  overflow-wrap: anywhere;
+}
+.api-wall-content {
+  min-width: 0;
+}
+.api-wall-content h1 {
+  font-size: clamp(2rem, 2.6vw, 6.5rem);
+  margin-bottom: 0.2em;
+}
+.api-wall-summary,
+.api-wall-page {
+  margin: 0 0 0.35em;
+}
+.api-wall-page,
+.api-wall-detail,
+.api-wall-policy {
+  color: var(--color-text-muted);
+}
+.api-wall-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: clamp(1.1rem, 1.5vw, 3.6rem);
+  font-variant-numeric: tabular-nums;
+}
+.api-wall-table th,
+.api-wall-table td {
+  padding: 0.2em 0.4em;
+}
+.api-wall-table th {
+  font-size: 0.65em;
+}
+.api-wall-table th:first-child {
+  width: 14%;
+}
+.api-wall-table th:last-child {
+  width: 36%;
+}
+.api-wall-table td:first-child {
+  overflow-wrap: anywhere;
+}
+.api-wall-table td a,
+.api-wall-roll a {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.api-wall-detail {
+  display: block;
+  font-size: 0.51em;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.api-wall-roll {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65em 2em;
+  padding: 0;
+  list-style: none;
+  font-size: clamp(1.3rem, 2vw, 4.5rem);
+}
+.api-wall-roll li {
+  min-width: 0;
+  border-bottom: 1px solid var(--color-border);
+  padding: 0.5em 0;
+}
+.api-wall-footer {
+  border-top: 1px solid var(--color-border-strong);
+  padding-top: 0.5em;
+}
+.api-wall-footer p {
+  margin-bottom: 0.3em;
+}
+.api-wall-state {
+  font-weight: 700;
+}
+.api-wall-footer .button,
+.api-wall-footer label,
+.api-wall-footer a {
+  font-size: max(14px, 0.7em);
+}
+.api-wall-footer label {
+  display: flex;
+  gap: 0.4em;
+  align-items: center;
+}
+.api-wall-footer select,
+.api-wall-config select {
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.4em;
+  border: 1px solid var(--color-border-strong);
+}
+.api-wall-policy {
+  font-size: max(12px, 0.65em);
+  margin-top: 0.45em;
+}
+.api-wall-config > label {
+  display: grid;
+  gap: 8px;
+}
+.api-wall-portrait .api-wall-table {
+  font-size: clamp(1.1rem, 2.6vw, 3rem);
+}
+.api-wall-portrait .api-wall-content h1 {
+  font-size: clamp(2rem, 4vw, 5rem);
+}
+.api-wall-portrait .api-wall-roll {
+  grid-template-columns: minmax(0, 1fr);
+}
+.api-wall-overlay {
+  font-size: 14px;
+}
+.api-wall-overlay .api-wall-frame {
+  padding: 16px;
+  gap: 8px;
+}
+.api-wall-overlay .api-wall-content h1 {
+  font-size: 26px;
+}
+.api-wall-overlay .api-wall-table {
+  font-size: 20px;
+}
+.api-wall-overlay .api-wall-detail {
+  font-size: 12px;
+}
+.api-wall-overlay .wall-controls {
+  gap: 8px;
+}
+.api-wall-overlay .button {
+  min-height: 36px;
+  padding: 4px 8px;
+}
+@media (max-width: 600px) {
+  .api-wall-frame {
+    padding: 16px;
+  }
+  .api-wall-provenance {
+    font-size: 12px;
+  }
+  .api-wall-table {
+    font-size: 17px;
+  }
+  .api-wall-detail {
+    font-size: 12px;
+  }
+  .api-wall-roll {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .api-wall-footer label {
+    flex-wrap: wrap;
+  }
+}
