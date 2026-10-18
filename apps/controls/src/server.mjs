@@ -4,6 +4,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { actorId, ControlError, exactKeys, locator, record, requireThat, text } from "./store.mjs";
 import { nominateSpotlight, decideSpotlight, projectSpotlights } from "./editorial.mjs";
 import { createConfigurationManager } from "./configuration.mjs";
+import { createPolicyComparisonManager } from "./policy-comparison.mjs";
 
 const random = () => randomBytes(32).toString("base64url");
 const hash = (value) => createHash("sha256").update(value).digest("base64url");
@@ -68,6 +69,7 @@ export function createControlsServer({
   approvedPolicyVersions = [],
   knownMetricIds = [],
   sourceVerifier,
+  policyComparisons,
   now = Date.now,
   sessionSeconds = 900,
   loginSuccessPath = "/controls/session",
@@ -124,6 +126,7 @@ export function createControlsServer({
     now,
     rolesForActor: roleState,
   });
+  const managePolicyComparison = policyComparisons ? createPolicyComparisonManager(policyComparisons) : null;
   async function authenticate(req, parsed) {
     const token = parsed[sessionCookie];
     requireThat(typeof token === "string" && /^[A-Za-z0-9_-]{43}$/.test(token), 401, "Authentication required");
@@ -165,9 +168,11 @@ export function createControlsServer({
     res.setHeader("x-content-type-options", "nosniff");
     res.setHeader("referrer-policy", "no-referrer");
     res.setHeader("content-security-policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
-    function send(status, value) {
+    function send(status, value, beforeSend) {
+      const serialized = JSON.stringify(value);
+      beforeSend?.();
       res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify(value));
+      res.end(serialized);
     }
     try {
       requireThat(typeof req.url === "string" && req.url.startsWith("/") && !req.url.startsWith("//"));
@@ -255,6 +260,20 @@ export function createControlsServer({
         session = await authenticate(req, parsed);
         return input;
       };
+      if (path.startsWith("/controls/policy-comparisons")) {
+        requireThat(session.roles.includes("reviewer"), 403, "Reviewer role required");
+        requireThat(managePolicyComparison, 503, "Private policy comparison is not configured");
+        const input = req.method === "GET" ? undefined : await inputBody(16_384);
+        await managePolicyComparison({
+          path,
+          method: req.method,
+          input,
+          session,
+          refreshSession: () => authenticate(req, parsed),
+          respond: (result, beforeSend) => send(result.status, result.data, beforeSend),
+        });
+        return;
+      }
       if (path.startsWith("/controls/operations/")) {
         requireThat(session.roles.includes("operator"), 403, "Operator role required");
         const input = req.method === "GET" ? undefined : await inputBody();
@@ -657,6 +676,7 @@ export function createControlsServer({
       }
       throw new ControlError(404, "Not found");
     } catch (error) {
+      if (res.headersSent) return;
       send(error instanceof ControlError ? error.status : 500, {
         error: error instanceof ControlError ? error.message : "Request failed",
       });

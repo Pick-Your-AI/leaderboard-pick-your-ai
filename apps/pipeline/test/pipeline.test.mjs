@@ -1,210 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createRequire } from "node:module";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
-import {
-  loadPipelineComponents,
-  createPipeline,
-  migratePipeline,
-  createGithubCollectionSource,
-} from "../src/index.mjs";
-
-const checkout = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
-const roots = process.env.PIPELINE_COMPONENT_ROOTS ? JSON.parse(process.env.PIPELINE_COMPONENT_ROOTS) : {};
-const ingestionRoot = roots.ingestion ?? checkout;
-const require = createRequire(join(ingestionRoot, "packages/ingestion/package.json"));
-const { PGlite } = require("@electric-sql/pglite");
-const components = await loadPipelineComponents(roots);
-const clock = () => new Date().toISOString();
-const ago = (days) => new Date(Date.now() - days * 86400000).toISOString();
-const fixtureId = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
-const publicScope = { organization: "Pick-Your-AI", repository: null, workstream: null, start: null, end: null };
-const boardUrl = "/api/v1/boards?metric=issues_opened";
-
-async function harness(t, extra = {}) {
-  const slug = extra.markerFreeConfig ? "example-org/example-repo" : "synthetic-org/synthetic-repo";
-  const directory = await mkdtemp(join(tmpdir(), "leaderboard-pipeline-"));
-  const engine = new PGlite(join(directory, "postgres"));
-  const db = {
-    query: (sql, params) => engine.query(sql, params),
-    transaction: (work) => engine.transaction((tx) => work({ query: (sql, params) => tx.query(sql, params) })),
-  };
-  for (const name of [
-    "001_ingestion.up.sql",
-    "002_snapshots.up.sql",
-    "003_collection.up.sql",
-    "004_outbox_dispatch.up.sql",
-  ])
-    await engine.exec(await readFile(join(ingestionRoot, "packages/ingestion/sql", name), "utf8"));
-  await migratePipeline(db);
-  const controlsStore = new components.controls.ControlStore(join(directory, "controls.sqlite"));
-  const policy = {
-    metricId: "issues_opened",
-    version: "synthetic-policy-v1",
-    definitionVersion: components.metrics.metricRegistryV1.policy_version,
-    unit: components.metrics.getMetricDefinition("issues_opened").definition.unit,
-    aggregation: "count",
-    dateBasis: "occurredAt",
-    rankedStates: ["observed"],
-    roles: ["reporter"],
-    groupBy: "actor_artifact",
-    sources: ["github_rest"],
-    minimumSamples: 1,
-    rank: true,
-  };
-  const config = {
-    version: "synthetic-configuration-v1",
-    organization: "Pick-Your-AI",
-    approvalReceipt: "synthetic-config-approval",
-    repositories: [
-      { id: 2, installationId: 1, slug, families: ["issues"], approvalReceipt: "synthetic-source-approval" },
-    ],
-    policies: [
-      { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-metric-approval" },
-    ],
-    scopes: [publicScope],
-  };
-  if (extra.markerFreeConfig) {
-    config.version = "configuration-v1";
-    config.approvalReceipt = "config-approval";
-    config.repositories[0].approvalReceipt = "source-approval";
-    policy.version = "policy-v1";
-    config.policies[0].approvalReceipt = "policy-approval";
-    config.policies[0].signature = components.metrics.stableJSON(policy);
-  }
-  let privateRepository = false;
-  let fixturePage = false;
-  let sourceFailure = false;
-  let payloads = [
-    {
-      id: 1001,
-      node_id: "SYNTHETIC_ISSUE_1",
-      number: 1,
-      html_url: `https://github.com/${slug}/issues/1`,
-      created_at: ago(2),
-      updated_at: ago(1),
-      user: { id: 101, node_id: "U_SYNTHETIC_A", login: "synthetic-alice", type: "User" },
-    },
-    {
-      id: 1002,
-      node_id: "SYNTHETIC_ISSUE_2",
-      number: 2,
-      html_url: `https://github.com/${slug}/issues/2`,
-      created_at: ago(45),
-      updated_at: ago(1),
-      user: { id: 102, node_id: "U_SYNTHETIC_B", login: "synthetic-bob", type: "User" },
-    },
-  ];
-  const githubClient = new components.github.GithubReadClient({
-    apiOrigin: "https://api.synthetic.invalid",
-    token: async () => "synthetic-test-token",
-    checkpoints: new components.github.FileCheckpointStore(join(directory, "http-checkpoints")),
-    maxRetries: 0,
-    fetch: async (value) => {
-      const url = new URL(value);
-      if (sourceFailure) throw new Error("synthetic unavailable source");
-      const repository = { id: 2, private: privateRepository, full_name: slug, default_branch: "main" };
-      let body;
-      if (url.pathname === `/repos/${slug}`) body = repository;
-      else if (url.pathname === `/repos/${slug}/issues`) body = payloads;
-      else {
-        const number = Number(url.pathname.match(/\/issues\/(\d+)$/)?.[1]);
-        body = payloads.find((payload) => payload.number === number);
-      }
-      return new Response(JSON.stringify(body ?? { message: "not found" }), {
-        status: body ? 200 : 404,
-        headers: { "content-type": "application/json" },
-      });
-    },
-  });
-  const source = {
-    async readPage(request) {
-      const items = await githubClient.rest("installation:1", `/repos/${slug}/issues`);
-      return {
-        repositoryId: 2,
-        visibility: "public",
-        isSynthetic: fixturePage,
-        nextCursor: null,
-        expectedCount: items.length,
-        facts: items.map((item) => ({
-          subjectId: item.node_id,
-          sourceRevision: item.updated_at,
-          sourceUrl: item.html_url,
-          evidence: "current_state",
-          actorId: null,
-          occurredAt: null,
-          state: "open",
-        })),
-      };
-    },
-  };
-  const options = {
-    components,
-    db,
-    controlsStore,
-    githubClient,
-    sourceId: "installation:1",
-    source,
-    config,
-    dataMode: "synthetic",
-    cursorSecret: "synthetic-cursor-secret-is-at-least-32-characters",
-    verifyConfiguration: async (value) => value.approvalReceipt === config.approvalReceipt,
-    authorizeCorrection: async (value) =>
-      value.operatorId === "201" && value.approvalReceipt === "synthetic-correction-approval",
-    probeRepository: async (repo) => {
-      const value = await githubClient.rest("installation:1", `/repos/${repo.slug}`);
-      return {
-        repositoryId: value.id,
-        installationId: repo.installationId,
-        visibility: value.private ? "private" : "public",
-        checkedAt: clock(),
-      };
-    },
-    ...extra,
-  };
-  const runtime = await createPipeline(options);
-  t.after(async () => {
-    await runtime.stop();
-    controlsStore.close();
-    await engine.close();
-    assert.equal(dirname(resolve(directory)), resolve(tmpdir()));
-    assert.match(basename(directory), /^leaderboard-pipeline-/);
-    await rm(directory, { recursive: true, force: true });
-  });
-  return {
-    runtime,
-    db,
-    controlsStore,
-    options,
-    engine,
-    directory,
-    setPrivate(value) {
-      privateRepository = value;
-    },
-    setSourceFailure(value) {
-      sourceFailure = value;
-    },
-    setFixturePage(value) {
-      fixturePage = value;
-    },
-    duplicate() {
-      payloads = payloads.map((payload) => ({ ...payload, updated_at: clock() }));
-    },
-    add(payload) {
-      payloads.push(payload);
-    },
-    config,
-  };
-}
-
-async function getBoard(runtime, suffix = "") {
-  const response = await runtime.app.inject(boardUrl + suffix);
-  assert.equal(response.statusCode, 200, response.body);
-  return response.json();
-}
+import { createPipeline, createGithubCollectionSource } from "../src/index.mjs";
+import { harness, getBoard, components, clock, ago, fixtureId, publicScope, boardUrl } from "./harness.mjs";
 
 test("unapproved configuration fails closed before collection or public publication", async (t) => {
   const h = await harness(t, { verifyConfiguration: async () => false });
@@ -820,30 +620,6 @@ test("failed controls confirmation hides the SQL snapshot and an authorized exac
   assert.equal((await h.runtime.app.inject(boardUrl)).statusCode, 200);
 });
 
-test("a confirmed historical pin cannot advertise an unconfirmed newer publication head", async (t) => {
-  const h = await harness(t);
-  const first = await h.runtime.runOnce();
-  const pin = first.publications[0].snapshotId;
-  const cutoff = clock();
-  const transaction = h.controlsStore.transaction.bind(h.controlsStore);
-  h.controlsStore.transaction = (change, options) =>
-    transaction((state) => {
-      change(state);
-      throw Error("synthetic_confirmation_failure");
-    }, options);
-  await assert.rejects(h.runtime.runOnce({ cutoff }), /synthetic_confirmation_failure/);
-  h.controlsStore.transaction = transaction;
-  assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 2);
-  assert.equal((await h.runtime.app.inject(`${boardUrl}&snapshot=${pin}`)).statusCode, 410);
-  assert.equal((await h.runtime.app.inject(boardUrl)).statusCode, 503);
-  const retry = await h.runtime.runOnce({ cutoff });
-  assert.equal(retry.publications[0].changed, false);
-  const pinned = await getBoard(h.runtime, `&snapshot=${pin}`);
-  assert.equal(pinned.snapshotId, pin);
-  assert.equal(pinned.head.snapshotId, retry.publications[0].snapshotId);
-  assert.equal(pinned.head.revision, 2);
-});
-
 test("public observed work survives accepted-only rankings without granting assignee, mention or membership credit", async (t) => {
   const h = await harness(t);
   const config = structuredClone(h.config);
@@ -1329,4 +1105,130 @@ test("materialization retains separate pending provenance through replay and rev
   const exported = (await h.runtime.app.inject("/api/v1/exports?metric=pr_merged&format=json")).json();
   assert.equal(exported.pendingEvidence.length, 2);
   assert.equal(exported.rows.find((entry) => entry.actorId === "101").pending.count, 2);
+});
+
+test("confirmed publication captures minimal private snapshot-bound frozen input and engine audit for exact policy replay", async (t) => {
+  const { createPolicyComparisonManager, comparisonHash } = await import("../../controls/src/policy-comparison.mjs");
+  const h = await harness(t);
+  const publication = (await h.runtime.runOnce()).publications[0];
+  assert.equal(publication.comparisonInput.state, "retained");
+  const record = h.runtime.policyComparisons.comparisons.input(publication.comparisonInput.inputId);
+  assert.equal(record.snapshot.snapshotId, publication.snapshotId);
+  assert.equal(record.snapshot.revision, publication.revision);
+  assert.equal(record.baseline[0].metricId, "issues_opened");
+  assert.ok(Array.isArray(record.baseline[0].audit));
+  assert.deepEqual(Object.keys(record.input.actors[0]).sort(), ["executionMode", "id", "kind", "login", "publicState"]);
+  assert.doesNotMatch(JSON.stringify(record), /html_url|node_id|user:|private@example/);
+  const session = {
+    sid: "synthetic-reviewer-session",
+    actorId: "201",
+    roles: ["reviewer"],
+    roleVersion: "1",
+    expires: Date.now() + 600_000,
+  };
+  h.controlsStore.transaction((state) => {
+    state.sessions[session.sid] = session;
+  });
+  const manager = createPolicyComparisonManager(h.runtime.policyComparisons);
+  const request = {
+    path: "/controls/policy-comparisons",
+    method: "POST",
+    session,
+    refreshSession: async () => session,
+    input: {
+      inputId: record.id,
+      candidatePolicy: { ...record.policies[0], version: "synthetic-policy-v2", rank: false },
+    },
+  };
+  const result = await manager(request);
+  assert.equal(result.data.inputHash, comparisonHash(record.input));
+  assert.equal(result.data.before.datasetId, result.data.after.datasetId);
+  assert.equal(result.data.baselineHash, comparisonHash(record.baseline[0]));
+  assert.ok(result.data.changes.every((change) => change.afterRank === null));
+  const restarted = await createPipeline(h.options);
+  t.after(() => restarted.stop());
+  assert.deepEqual(await createPolicyComparisonManager(restarted.policyComparisons)(request), result);
+  for (const path of [boardUrl, "/api/v1/contributors", "/api/v1/exports?metric=issues_opened", "/api/v1/methodology"])
+    assert.doesNotMatch(
+      (await h.runtime.app.inject(path)).body,
+      /candidatePolicy|correctionReceipt|inputHash|baselineHash|excluded_by_policy/,
+    );
+  await h.runtime.collection.suppress(fixtureId(75), "e".repeat(64), 1, [2], "revoked");
+  await assert.rejects(manager(request), /source authorization changed/);
+  await assert.rejects(
+    manager({ ...request, method: "GET", path: "/controls/policy-comparisons/" + result.data.comparisonId }),
+    /source authorization changed/,
+  );
+});
+
+test("normalizer-derived suppression uses an exclusive repository gate without a shared-lock upgrade", async (t) => {
+  const h = await harness(t, {
+    normalizer: async () => ({
+      actors: [],
+      facts: [],
+      evidence: [],
+      isSynthetic: true,
+      suppressArtifactIds: ["SYNTHETIC_ISSUE_1"],
+    }),
+  });
+  const transaction = h.db.transaction;
+  const suppressionTransactions = [];
+  h.db.transaction = (work) =>
+    transaction(async (tx) => {
+      const statements = [];
+      const result = await work({
+        query: async (sql, params) => {
+          statements.push(sql);
+          if (sql.includes("INSERT INTO leaderboard_ingestion.object_suppressions")) {
+            assert.ok(statements.some((statement) => /repository_access.*FOR UPDATE/.test(statement)));
+            assert.equal(
+              statements.some((statement) => /FOR SHARE/.test(statement)),
+              false,
+            );
+            suppressionTransactions.push(statements);
+          }
+          return tx.query(sql, params);
+        },
+      });
+      return result;
+    });
+  assert.equal((await h.runtime.runOnce()).state, "published");
+  assert.ok(suppressionTransactions.length > 0);
+  assert.equal(
+    (await h.db.query("SELECT count(*)::int AS n FROM leaderboard_ingestion.object_suppressions")).rows[0].n,
+    1,
+  );
+});
+
+test("optional preview capacity cannot take an independently approved public publication offline", async (t) => {
+  const { comparisonLimitsV1 } = await import("../../controls/src/policy-comparison.mjs");
+  const h = await harness(t);
+  assert.equal((await h.runtime.runOnce()).state, "published");
+  const comparisons = h.runtime.policyComparisons.comparisons;
+  h.controlsStore.transaction(() => {
+    for (let i = 1; i < comparisonLimitsV1.approvedVersions; i++)
+      assert.equal(
+        comparisons.captureBindings([{ ...h.config.policies[0].policy, version: `synthetic-approved-history-${i}` }]),
+        null,
+      );
+    for (let i = 0; i < comparisonLimitsV1.candidateVersions; i++)
+      comparisons.bindCandidate({ ...h.config.policies[0].policy, version: `synthetic-unapproved-history-${i}` });
+  });
+  const config = structuredClone(h.config);
+  config.policies[0].policy.version = "synthetic-approved-new-policy";
+  config.policies[0].signature = components.metrics.stableJSON(config.policies[0].policy);
+  const next = await createPipeline({ ...h.options, config });
+  t.after(() => next.stop());
+  const publication = await next.runOnce();
+  assert.equal(publication.state, "published");
+  assert.deepEqual(publication.publications[0].comparisonInput, {
+    state: "unavailable",
+    reason: "frozen_approved_version_capacity_reached",
+  });
+  assert.equal((await next.app.inject(boardUrl)).statusCode, 200);
+  assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 2);
+  assert.equal(
+    h.controlsStore.read().pipelinePublications[publication.publications[0].snapshotId].configurationVersion,
+    config.version,
+  );
 });

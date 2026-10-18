@@ -7,6 +7,7 @@ import {
   type Coverage,
 } from "@pick-your-ai/contracts";
 import { getMetricDefinition } from "./v1/index.js";
+import { getMetricGroupingPolicy } from "./ui.js";
 
 export type EvidenceState = "observed" | "qualified" | "reviewed" | "pending" | "excluded" | "unknown";
 export type Role = Contribution["roles"][number];
@@ -58,6 +59,8 @@ export interface MetricPolicy {
   groupBy: "canonical" | "actor_artifact" | "actor_artifact_state_interval";
   /** Required for state-interval grouping. No interval is silently chosen. */
   groupingSeconds?: number;
+  /** Registry policy pin is required for raw triage grouping. */
+  groupingPolicyVersion?: string;
   sources: Coverage["source"][];
   minimumSamples: number;
   rank: boolean;
@@ -106,7 +109,15 @@ export interface AggregateRow {
   censored: number;
   missingReadiness: number;
   evidenceIds: string[];
-  evidence: { id: string; effectiveAt: string | null; observedAt: string }[];
+  evidence: {
+    id: string;
+    effectiveAt: string | null;
+    observedAt: string;
+    /** Internal comparison only; contains no acceptance/correction receipt or source content.
+     * Older persisted aggregates omit this and cannot establish comparable history.
+     */
+    comparisonSignature?: string;
+  }[];
   rank: number | null;
   tied: boolean;
 }
@@ -210,6 +221,18 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
     (!Number.isSafeInteger(policy.groupingSeconds) || policy.groupingSeconds! < 1)
   )
     throw new Error("State grouping requires an explicit positive interval");
+  const grouping = getMetricGroupingPolicy(policy.metricId);
+  if (
+    grouping &&
+    (policy.groupingPolicyVersion !== grouping.version ||
+      policy.groupBy !== grouping.group_by ||
+      policy.groupingSeconds !== grouping.grouping_seconds ||
+      policy.dateBasis !== grouping.date_basis ||
+      policy.rankedStates[0] !== grouping.state ||
+      policy.roles.length !== 1 ||
+      policy.roles[0] !== "triager")
+  )
+    throw new Error("Raw triage requires the exact versioned grouping policy, observed state and triager role");
   if (policy.aggregation === "ratio" && policy.dateBasis !== "acceptedAt")
     throw new Error("PR ratios use decision time, supplied as acceptedAt for merged and closed-unmerged decisions");
   if (
@@ -592,6 +615,17 @@ export function aggregateMetric(
       id: fact.id,
       effectiveAt: policy.aggregation === "duration" ? (fact.readyAt ?? null) : fact[policy.dateBasis],
       observedAt: fact.observedAt,
+      comparisonSignature: stableJSON([
+        fact.actorId,
+        fact.revision,
+        fact.role,
+        fact.state,
+        fact[policy.dateBasis] == null ? null : instant(fact[policy.dateBasis]!),
+        fact.quantity ?? null,
+        fact.outcome ?? null,
+        fact.readyAt == null ? null : instant(fact.readyAt),
+        fact.firstReviewAt == null ? null : instant(fact.firstReviewAt),
+      ]),
     }));
     if (policy.aggregation === "count" || policy.aggregation === "sum") {
       const missing = policy.aggregation === "sum" && eligible.some((fact) => fact.quantity === undefined);
@@ -745,22 +779,32 @@ export function compareRankMovement(
     (item) =>
       !beforeEvidence.has(item.id) && item.effectiveAt !== null && instant(item.effectiveAt) < instant(before.cutoff),
   );
-  const corrected = [...beforeEvidence.values()].some(
-    (item) =>
-      !afterEvidence.has(item.id) &&
-      (after.scope.from === null ||
-        item.effectiveAt === null ||
-        instant(item.effectiveAt) >= instant(after.scope.from)),
+  const missingComparisonHistory = [...beforeEvidence.values(), ...afterEvidence.values()].some(
+    (item) => !item.comparisonSignature,
   );
+  const corrected = [...beforeEvidence.values()].some((item) => {
+    const next = afterEvidence.get(item.id);
+    if (next) return item.comparisonSignature !== next.comparisonSignature;
+    return (
+      after.scope.from === null || item.effectiveAt === null || instant(item.effectiveAt) >= instant(after.scope.from)
+    );
+  });
   return after.rows.map((row) => {
     const previous = before.rows.find((item) => item.actorId === row.actorId);
-    if (reason || lateHistory || corrected || row.rank === null || previous?.rank === null)
+    if (reason || missingComparisonHistory || lateHistory || corrected || row.rank === null || previous?.rank === null)
       return {
         actorId: row.actorId,
         state: "unavailable",
         delta: null,
         reason:
-          reason ?? (lateHistory ? "late_history" : corrected ? "corrected_or_removed_evidence" : "unranked_metric"),
+          reason ??
+          (missingComparisonHistory
+            ? "insufficient_evidence_history"
+            : lateHistory
+              ? "late_history"
+              : corrected
+                ? "corrected_or_removed_evidence"
+                : "unranked_metric"),
       };
     if (!previous) return { actorId: row.actorId, state: "new_entrant", delta: null, reason: null };
     return { actorId: row.actorId, state: "comparable", delta: previous.rank! - row.rank, reason: null };
