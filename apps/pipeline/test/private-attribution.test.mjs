@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { normalizeGithubObservation } from "@pick-your-ai/github";
 import { privateAttribution } from "../src/private-attribution.mjs";
 
 const source = { subject_id: "PR_SYNTHETIC", family: "pull_requests", repository_id: "2" };
@@ -72,4 +73,52 @@ test("unranked commits retain source-bound metadata without inventing integratio
     ["author", "committer"],
   );
   assert.deepEqual(Object.keys(result).sort(), ["assistance", "participation"]);
+});
+
+for (const sha of ["a".repeat(40), "A".repeat(40), "b".repeat(64), "B".repeat(64)]) {
+  test(`actual unranked commit normalization preserves private metadata for ${sha.length}-character ${sha[0]} SHA`, () => {
+    const artifactId = `github:commit:2:${sha}`;
+    const input = normalizeGithubObservation({
+      repository: { id: 2, slug: "synthetic-owner/repository", visibility: "public", defaultBranch: "main" },
+      proof: { verified: true, source: "github_rest", revision: sha, isSynthetic: true },
+      family: "commit",
+      observedAt: "2026-10-08T10:00:00Z",
+      payload: {
+        sha,
+        html_url: `https://github.com/synthetic-owner/repository/commit/${sha}`,
+        author: { id: 101, node_id: "U_SYNTHETIC_AUTHOR", login: "synthetic-author", type: "User" },
+        committer: { id: 202, node_id: "U_SYNTHETIC_COMMITTER", login: "synthetic-committer", type: "User" },
+      },
+      assistance: [{ model: "Synthetic Model", version: null }],
+    });
+    assert.deepEqual(input.facts, []);
+    assert.deepEqual(input.evidence, []);
+    assert.ok(input.reasons.includes("default_branch_integration_unverified"));
+    assert.deepEqual(privateAttribution(input, { subject_id: sha, family: "commits", repository_id: "2" }), {
+      assistance: [{ artifactId, model: "Synthetic Model", version: null }],
+      participation: [
+        { artifactId, actorId: "101", role: "author", conservedUnit: artifactId },
+        { artifactId, actorId: "202", role: "committer", conservedUnit: artifactId },
+      ],
+    });
+  });
+}
+
+test("commit fallback refuses unsupported hashes and mismatched source bindings", () => {
+  const sha = "a".repeat(64);
+  for (const [subject, family, repositoryId, artifactId] of [
+    ...[39, 41, 63, 65].map((length) => ["a".repeat(length), "commits", "2", `github:commit:2:${"a".repeat(length)}`]),
+    ["g".repeat(64), "commits", "2", `github:commit:2:${"g".repeat(64)}`],
+    [sha, "commits", "3", `github:commit:2:${sha}`],
+    [sha, "issues", "2", `github:commit:2:${sha}`],
+    [sha, "commits", "2", `github:commit:2:${"b".repeat(64)}`],
+  ]) {
+    const input = output();
+    input.assistance[0].artifactId = artifactId;
+    input.participation = [];
+    assert.throws(
+      () => privateAttribution(input, { subject_id: subject, family, repository_id: repositoryId }),
+      /invalid_private_attribution/,
+    );
+  }
 });

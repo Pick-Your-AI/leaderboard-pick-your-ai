@@ -6,11 +6,17 @@ Refs [#34](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/34),
 
 The existing `checks` job runs credential scanning before installing application
 dependencies or running the runtime suite. It checks both all fetched Git history
-(`--all --full-history`) and the current working tree. Checkout fetches full
+(`--all --full-history --diff-merges=first-parent`) and the current working tree. Checkout fetches full
 history and does not persist its authentication token. A detected value, failed
 download, incorrect archive hash, scanner error or incomplete report makes this
 existing required job fail. No new branch-rule selection is needed to include the
 scanner in `checks`; the other runtime, planning, browser and recovery gates remain.
+The explicit merge-diff format detects values introduced only by a merge result,
+including values deleted by a later commit. It does not restrict traversal to the
+first-parent branch: `--all` still traverses every fetched ref. Without an explicit
+merge-diff option, [Git omits merge patches even with `-p`](https://git-scm.com/docs/git-log#_diff_formatting),
+and the pinned scanner's [Git source](https://github.com/gitleaks/gitleaks/blob/v8.30.1/sources/git.go)
+does not add one to the supplied log options.
 
 The workflow downloads the official Linux x64 [Gitleaks 8.30.1
 release](https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1), verifies its
@@ -58,12 +64,16 @@ python3 scripts/secret_scan.py --gitleaks /path/to/gitleaks
 
 The first command creates a disposable Git repository containing the accepted
 synthetic fixtures, then inserts two generated, never-issued credential specimens
-in those same paths. It requires both the provider and generic rules to detect
-them despite inline allow comments, requires fully redacted results, deletes the
-specimens in a later commit, and confirms that the historical leak still fails.
+in those same paths. It requires the expected rule, file and exact line for each
+specimen despite inline allow comments, requires fully redacted results, deletes
+the specimens in a later commit, and requires findings from their exact historical
+commit. A second isolated repository introduces the specimens only in a two-parent
+merge whose parents contain neither value, deletes them in a later commit, and
+must still detect both at the merge commit. A clean current tree does not satisfy
+either history probe.
 Adding matching fingerprints in `.gitleaksignore` must separately fail closed.
 Scanner/configuration errors
-cannot pass this probe: its exact finding exit code and named rules are checked.
+cannot pass this probe: its exact finding exit code and per-specimen locations are checked.
 The temporary repository is removed and no fixture credential enters this project.
 
 The second command scans this checkout. A historical finding must be investigated

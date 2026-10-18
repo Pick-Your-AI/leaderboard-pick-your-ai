@@ -37,7 +37,7 @@ def run_scan(scanner, mode, repository, configuration):
             "--no-banner", "--no-color", "--log-level=error", "--timeout=120",
         ]
         if mode == "git":
-            command.append("--log-opts=--all --full-history")
+            command.append("--log-opts=--all --full-history --diff-merges=first-parent")
         result = subprocess.run(command, capture_output=True, text=True, timeout=150)
         if result.returncode not in (0, FINDINGS):
             raise RuntimeError(f"Credential scanner failed (exit {result.returncode}); no pass recorded")
@@ -67,17 +67,17 @@ def require_clean(scanner, mode, repository, configuration):
     print(f"Credential {mode} scan passed")
 
 
-def self_test(scanner, configuration):
-    """Prove exact fixture exceptions, inline/ignore resistance and deleted-history detection."""
+def rejection_probe(scanner, configuration, merge_only=False):
+    """Detect each deleted specimen in an ordinary commit or only in a merge result."""
     with tempfile.TemporaryDirectory(prefix="leaderboard-secret-probe-") as folder:
         repository = Path(folder)
 
         def git(*arguments):
-            subprocess.run([
+            return subprocess.run([
                 "git", "-c", "user.name=Synthetic scanner test",
                 "-c", "user.email=synthetic@example.invalid",
-                "-c", "commit.gpgsign=false", *arguments,
-            ], cwd=repository, check=True, capture_output=True, text=True, timeout=30)
+                "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", *arguments,
+            ], cwd=repository, check=True, capture_output=True, text=True, timeout=30).stdout.strip()
 
         def commit(message):
             git("add", ".")
@@ -101,23 +101,55 @@ def self_test(scanner, configuration):
         require_clean(scanner, "git", repository, configuration)
         require_clean(scanner, "dir", repository, configuration)
 
+        if merge_only:
+            initial = git("rev-parse", "HEAD")
+            git("checkout", "-q", "-b", "probe-side")
+            (repository / "side.txt").write_text("Synthetic side branch\n", encoding="utf-8")
+            commit("Synthetic side branch")
+            git("checkout", "-q", "-b", "probe-main", initial)
+            (repository / "main.txt").write_text("Synthetic main branch\n", encoding="utf-8")
+            commit("Synthetic main branch")
+            # Both parents contain only the accepted fixtures; the specimens will
+            # first appear in the two-parent merge, then disappear in a later commit.
+            for parent in ("HEAD", "probe-side"):
+                for path, clean in ((pipeline, pipeline_clean), (ingestion, ingestion_clean)):
+                    if git("show", f"{parent}:{path.relative_to(repository).as_posix()}") != clean.strip():
+                        raise RuntimeError("Synthetic merge parent preparation failed")
+            git("merge", "--no-commit", "--no-ff", "probe-side")
+
         # Generated, never-issued test strings; never commit either to this repository.
         provider = "ghp_" + hashlib.sha256(b"leaderboard synthetic provider probe").hexdigest()[:36]
         generic = hashlib.sha256(b"leaderboard synthetic generic probe").hexdigest()
         pipeline.write_text(pipeline_clean + f'const githubToken = "{provider}"; // gitleaks:allow\n', encoding="utf-8")
         ingestion.write_text(ingestion_clean + f'const secret = "{generic}"; // gitleaks:allow\n', encoding="utf-8")
+        specimen_commit = None
 
         def require_detection(mode):
             code, rows, output = run_scan(scanner, mode, repository, configuration)
-            rules = {row.get("RuleID") for row in rows}
-            if code != FINDINGS or not {"github-pat", "generic-api-key"} <= rules:
-                raise RuntimeError(f"Synthetic {mode} credential rejection probe failed (exit {code}, rules {sorted(rules)})")
+            expected = (
+                ("github-pat", pipeline, len(pipeline_clean.splitlines()) + 1),
+                ("generic-api-key", ingestion, len(ingestion_clean.splitlines()) + 1),
+            )
+            missing = [
+                f"{rule}:{path.relative_to(repository).as_posix()}:{line}"
+                for rule, path, line in expected
+                if not any(
+                    row.get("RuleID") == rule and row.get("StartLine") == line
+                    and row.get("File") in (str(path), path.relative_to(repository).as_posix())
+                    and (mode != "git" or row.get("Commit") == specimen_commit)
+                    for row in rows)
+            ]
+            if code != FINDINGS or missing:
+                raise RuntimeError(f"Synthetic {mode} credential rejection probe failed (exit {code}, missing {missing})")
             if any(value in json.dumps(rows) + output for value in (provider, generic)):
                 raise RuntimeError("Synthetic credential redaction probe failed")
             return rows
 
         require_detection("dir")
         commit("Synthetic credential rejection specimen")
+        specimen_commit = git("rev-parse", "HEAD")
+        if merge_only and len(git("show", "-s", "--format=%P", "HEAD").split()) != 2:
+            raise RuntimeError("Synthetic merge specimen does not have two parents")
         pipeline.write_text(pipeline_clean, encoding="utf-8")
         ingestion.write_text(ingestion_clean, encoding="utf-8")
         commit("Remove synthetic specimen from working tree")
@@ -131,7 +163,13 @@ def self_test(scanner, configuration):
             pass
         else:
             raise RuntimeError("Repository ignore-file rejection probe failed")
-        print("Credential rejection, exact-exception, redaction and deleted-history probes passed")
+
+
+def self_test(scanner, configuration):
+    """Prove exact exceptions, inline/ignore resistance and both kinds of deleted history."""
+    rejection_probe(scanner, configuration)
+    rejection_probe(scanner, configuration, merge_only=True)
+    print("Credential rejection, exact-exception, redaction, deleted-history and merge-only probes passed")
 
 
 def main():
