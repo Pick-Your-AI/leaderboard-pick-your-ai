@@ -61,8 +61,11 @@ records are removed. Contribution IDs must likewise be unique within the provide
 primary evidence collection before non-public or ineligible proof is removed.
 A contradictory public copy cannot survive by discarding its non-public counterpart;
 duplicate identities reject the read, including historical pins and conditional
-responses. Legitimate matching proof in separate primary and portfolio collections
-is still supported. Unique non-public actors remain suppressed without withholding
+responses. Visibility must also agree across primary, portfolio and pending proof
+for each contribution ID and each known artifact stable ID or contribution artifact
+reference. Null or omitted artifact identities do not create a shared identity.
+Legitimate matching proof across collections and multiple contributions to one
+artifact are still supported. Unique non-public actors remain suppressed without withholding
 unrelated contributors. Removing an artifact removes
 its dependent aggregate row; the service never subtracts evidence counts from
 ratios or weighted values. Public URLs must be HTTPS GitHub repository URLs without

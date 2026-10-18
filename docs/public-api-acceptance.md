@@ -39,8 +39,12 @@ reuse an earlier conditional response or disclose conflicting identity metadata.
 An ordinary unique hidden actor or private proof still removes only the affected
 actor/aggregate and dependent evidence; unrelated contributors remain available.
 Matching proof in separate primary and portfolio collections remains valid, since
-each collection has its own purpose and its own uniqueness boundary. Actor node/database-ID
-canonicalization and account linking retain their separate #36 scope.
+each collection has its own purpose and its own uniqueness boundary. Visibility
+must also agree across all supplied primary, portfolio and pending proof for the
+same contribution or known artifact identity. Actor node/database-ID canonicalization
+and account linking retain their separate #36 scope.
+
+### Initial correction receipts at `503ca9a0`
 
 Nine synthetic regressions in `apps/service/test/public-actor-ambiguity.test.mjs`
 exercise both ordering directions for all non-public actor and identity states,
@@ -57,6 +61,29 @@ conditional proof/board/export denial, unique-private-proof suppression and
 legitimate primary/portfolio overlap. Before the evidence correction, five cases
 failed at the intended visibility assertions and both controls passed. All sixteen
 actor and evidence cases pass together after the two corrections, with no skips.
+
+### Cross-collection and artifact visibility correction
+
+Independent follow-up review reproduced eight contradictory same-contribution
+copies across the portfolio/pending collections and three same-artifact copies
+with different contribution IDs at `503ca9a0`. A pinned proof request still
+returned its previous `304` after a private portfolio copy appeared. The initial
+sixteen regressions above passed at that source and did not cover these cases.
+
+The shared projection now checks visibility consistency for every supplied
+collection before returning a result. Contribution IDs have a separate identity
+map from known artifact IDs. Both an artifact's stable ID and a contribution's
+non-null artifact reference participate; omitted/null artifact identities are
+not grouped together or resolved from names. A conflict produces the same generic
+`503` and `no-store` response before any conditional response can be reused.
+
+`apps/service/test/public-evidence-visibility.test.mjs` covers all four non-public
+dispositions, both encounter directions, cross-collection contribution copies,
+different contributions to one artifact, either surviving artifact identity,
+current/pinned conditional routes, matching public/private copies and distinct
+unidentified private proof. These are synthetic regression inputs. Their actual
+execution and final receiving disposition are recorded in the delivery PR;
+the pre-outage reproduction and initial sixteen-case receipts remain historical.
 
 ## Verification and acceptance boundary
 

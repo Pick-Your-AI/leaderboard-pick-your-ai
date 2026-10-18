@@ -344,6 +344,20 @@ export function projectRead(
         entry.state === "public" && entry.actor.identityState === "resolved" && !suppressedActors.has(entry.actorId),
     );
   const actorIds = new Set(actors.map((actor) => actor.actorId));
+  // Every supplied copy must agree before any public response can be returned.
+  // Contribution IDs and known artifact IDs are separate identity namespaces.
+  const visibilityByContribution = new Map<string, Artifact["visibility"]>();
+  const visibilityByArtifact = new Map<string, Artifact["visibility"]>();
+  const checkVisibility = (
+    seen: Map<string, Artifact["visibility"]>,
+    key: string | null | undefined,
+    visibility: Artifact["visibility"],
+  ) => {
+    if (key === null || key === undefined) return;
+    const previous = seen.get(key);
+    if (previous !== undefined && previous !== visibility) return reject();
+    seen.set(key, visibility);
+  };
   const metadataByContribution = new Map<string, string>();
   const documentationClassificationByContribution = new Map<string, string>();
   const projectEvidence = (entries: PublicEvidence[]) =>
@@ -351,6 +365,9 @@ export function projectRead(
       .map((entry) => {
         const artifact = artifactSchema.parse(entry.artifact);
         const parsed = contributionSchema.parse(entry.contribution);
+        checkVisibility(visibilityByContribution, parsed.contributionId, artifact.visibility);
+        checkVisibility(visibilityByArtifact, artifact.stableId, artifact.visibility);
+        checkVisibility(visibilityByArtifact, parsed.artifactId, artifact.visibility);
         const classification = publicDocumentationReasons(parsed);
         if (parsed.metricIds.includes("documentation") && classification.length > 0) {
           // Legacy copies can lack labels. Every present classification must
