@@ -13,10 +13,16 @@ import {
 } from "../dist/index.js";
 
 const migrations = await Promise.all(
-  ["001_ingestion", "002_snapshots", "003_collection", "004_outbox_dispatch", "005_collection_retirement"].map((name) =>
-    readFile(new URL(`../sql/${name}.up.sql`, import.meta.url), "utf8"),
-  ),
+  [
+    "001_ingestion",
+    "002_snapshots",
+    "003_collection",
+    "004_outbox_dispatch",
+    "005_collection_retirement",
+    "007_operator_replay_results",
+  ].map((name) => readFile(new URL(`../sql/${name}.up.sql`, import.meta.url), "utf8")),
 );
+const retirementUp = await readFile(new URL("../sql/005_collection_retirement.up.sql", import.meta.url), "utf8");
 const retirementDown = await readFile(new URL("../sql/005_collection_retirement.down.sql", import.meta.url), "utf8");
 let engine, db, collection, retirement, administration;
 const external = process.env.INGESTION_TEST_DATABASE_URL;
@@ -503,9 +509,9 @@ test("a rollback preserves permanent retirement history and an empty migration c
     external ? db.transaction((tx) => tx.query(sql)) : engine.transaction((tx) => tx.exec(sql));
   // A single-statement runner must also retain the locks through every DROP.
   await (external ? engine.query(retirementDown) : engine.exec(retirementDown));
-  await migrate(migrations.at(-1));
+  await migrate(retirementUp);
   await migrate(retirementDown);
-  await migrate(migrations.at(-1));
+  await migrate(retirementUp);
   await retirement.retire(request(), approved);
   const schema = await retirementSchema();
   await assert.rejects(migrate(retirementDown), /retirement_history_prevents_rollback/);

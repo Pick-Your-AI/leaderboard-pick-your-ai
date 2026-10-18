@@ -1,6 +1,6 @@
 # Protected diagnostics and audited inbox replay
 
-Refs #73 and #93. This supplies an opt-in backend bridge and an independently mountable `Operations` component. It does not claim source connectivity, successful recovery, a published revision, production deployment or operational acceptance. #94 specialist correction handling and staffed private verification remain separate.
+Refs #73 and #93. This documents the protected operator console, audited inbox replay, retained source health and independently verified publication results. The native recovery checks use synthetic source responses, actual HTTP handlers, persisted PostgreSQL-compatible data and the private publication store. Production deployment, live OAuth, the staffed #93 drill and #94 specialist correction handling retain their separate acceptance gates.
 
 The approved host constructs `new OperatorInbox(database)` from the ingestion package and passes it as `operations` to `createControlsServer`. It must also supply `authorizeRepository({actorId,repositoryId})`, returning `{allowed:true,policyVersion,revision}` only for a currently authorized operator/repository pair under an approved policy. Every missing option defaults to unavailable; the operator role alone grants no repository. The callback must use current authority, not a cached browser declaration. Changing authority must change `revision`; changed policy/revision invalidates previously displayed replay selections. The host remains responsible for database statement timeouts and connection/resource budgets.
 
@@ -8,7 +8,7 @@ The approved host constructs `new OperatorInbox(database)` from the ingestion pa
 
 `POST /controls/operations/:repositoryId/replay` accepts only `{deliveryId,expectedRevision,reason,confirmed:true}` with ordinary session, origin and CSRF protections. Reasons are `source_recovered`, `normalization_corrected` or `operator_reviewed`. The server derives operator identity. A transaction locks the current public repository-access generation and exact quarantined inbox record; the opaque displayed revision binds repository, access generation, authority/policy, delivery digest, attempt count/reason and attempt timestamp. Authority is rechecked before mutation and after the receipt/queue writes, before transaction commit; revocation during those writes rolls both changes back. Foreign, withdrawn, already queued or changed records fail closed.
 
-The transaction writes the durable replay receipt and resets only that retained delivery to pending with a fresh bounded attempt budget. The receipt records operator, reason, policy, repository generation, prior attempts/reason, before revision and queued revision. `resultingPublicationRevision` remains null: a queued replay is not collection success. An uncertain HTTP response must be resolved through receipt readback rather than an automatic retry. No unaudited outbox replay endpoint is exposed.
+The transaction writes the durable replay receipt and resets only that retained delivery to pending with a fresh bounded attempt budget. The receipt records operator, reason, policy, repository generation, prior attempts/reason, before revision and queued revision. `resultingPublicationRevision` remains null in this immutable queued audit. The separate result read below can establish actual processing and verified publication references without rewriting that audit. An uncertain HTTP response must be resolved through receipt readback rather than an automatic retry. No unaudited outbox replay endpoint is exposed.
 
 Both diagnostic and replay responses recheck the current session and repository authority after adapter/database completion, and require the same policy and grant revision as at request admission. A synchronous session check after response serialization prevents an expired or revoked session from receiving the result. If authority changes after a replay has committed, the response is withheld; this does not undo an already committed receipt, and authorized receipt readback remains the recovery path.
 
@@ -83,8 +83,8 @@ policy, source generation, prior attempts/reason and before/queued revisions, pl
 a batch ID, batch size, exact window and selection revision. The batch result
 contains those per-delivery receipt IDs and a queued batch revision. Protected
 receipt readback adds a sanitized `batch` field (null for legacy single-delivery
-receipts). All resulting publication revisions remain null until actual
-publication is independently established; resetting the inbox is not publication.
+receipts). The queued audits keep their original null publication revision;
+the result read independently verifies each delivery's later publication.
 Existing bounded worker retries and observation/outbox identity deduplication
 continue to apply.
 
@@ -112,14 +112,195 @@ minimization, preserved history and resumed workers producing no duplicate
 observations/outbox records. These tests do not certify production concurrency,
 throughput, complete source coverage or a deployed operational drill.
 
-The window HTTP tests exercise the actual controls server and transactional PGlite
+The original #232 window HTTP tests exercise the actual controls server and transactional PGlite
 store: preview without writes, half-open receive boundaries, foreign/current
 installation filtering, overflow and empty selection, stale arrivals, exact
 identity/CSRF/role checks, durable batch readback, duplicate retry refusal and
 authorization loss after the first write rolling back the whole batch. The browser
 journeys use that actual HTTP/database bridge, including keyboard confirmation,
 320px reflow and Axe checks, edited/empty/stale selections, withheld late responses
-and revoked grants. These synthetic checks do not establish production scale,
-live OAuth, collection catch-up, downstream publication or staffed recovery.
+and revoked grants. That original window slice did not establish downstream
+publication. The native result and recovery tests below add the actual publisher
+and restart boundary; production scale, live OAuth and staffed recovery remain separate.
 
-Validation covers the real controls HTTP boundary and transactional PostgreSQL-compatible PGlite store, including denied anonymous/non-operator/foreign-repository access, CSRF, confirmation, server-derived identity, changed authority/source/policy, stale replay revisions, single receipt persistence and no payload leakage. Browser integration forwards synthetic authenticated requests through the real controls HTTP server and transactional database adapter, verifies scoped replay and receipt readback, denial clearing, 320px reflow and axe checks. It is not a live OAuth/deployment exercise. Real worker catch-up/publication and a staffed operational drill remain required acceptance evidence.
+The original single-delivery bridge also exercises anonymous/non-operator/foreign-repository denial, CSRF, confirmation, server-derived identity, changed authority/source/policy, stale replay revisions, single receipt persistence and payload minimization. Its browser fixture uses synthetic established sessions. The following native integration extends that evidence without relabeling the earlier queued-only receipts.
+
+## Native health and replay results
+
+Apply `007_operator_replay_results.up.sql` after ingestion migrations 001–004,
+inside the approved host migration transaction, before starting this version of
+the inbox worker or operator bridge. The optional permanent-retirement migration
+005 remains independently owned and composes with 007. Migration 007 adds exact
+receipt/delivery and attempt/delivery foreign keys, an inbox pointer to the audited
+replay, and an immutable processing-result table. It does not backfill older
+receipts by matching timestamps or a delivery's earlier publication. Roll back 007
+before 004 on disposable databases only; its rollback removes the added result
+records and must not discard retained production audit evidence.
+
+For the native pipeline integration, explicitly supply `operatorDiagnostics` to
+`createPipeline`:
+
+- `freshnessBudgetSeconds`: an approved integer from 1 to 86,400. This is an
+  observation freshness threshold, not a newly approved production SLO.
+- `configurationCurrent(binding)`: a synchronous function that returns exactly
+  `true` only while the host still authorizes this runtime's immutable
+  `configurationHash`, `configurationVersion`, `dataMode`, `repositoryId`,
+  `installationId` and `sourceGeneration`. A missing, false, throwing or
+  promise-returning currentness check cannot authorize a diagnostic.
+
+The runtime exposes `operations` only when this option is supplied. The existing
+`controlsAuthentication` integration uses it when no custom operations adapter is
+provided; a separately mounted controls server can receive `runtime.operations`.
+The existing session, operator role and current `authorizeRepository` grant remain
+required. None of these options chooses an installation, acquires a public-source
+grant or enables the synthetic dispatcher for public data.
+
+| Protected GET route | Meaning |
+| --- | --- |
+| `/controls/operations/:repositoryId/health` | Current-generation collection observations, retained current-installation queues, bounded quota observations and the latest independently verified completed publication |
+| `/controls/operations/:repositoryId/replays/:receiptId` | The exact retained replay receipt's causal processing result and, when verified, every resulting publication scope, immutable snapshot ID and revision |
+
+Both reads reject query parameters and return fixed minimized JSON with
+`repositoryId`, `sourceGeneration`, current `policyVersion` and `authorityRevision`.
+Receipt IDs use the existing opaque `[A-Za-z0-9_-]{1,128}` grammar; delivery IDs
+remain UUIDs. Browser-selected repository or receipt identity cannot replace the
+route and authenticated grant. The new GET routes do not queue or retry work.
+
+### Causal processing and publication
+
+`InboxStore.complete` reads the persisted replay pointer under the current lease
+lock. Its single transaction commits the observation, newly inserted outbox notice,
+processing result, attempt history and inbox completion. The processing result
+binds the receipt to that exact delivery and persisted lease. Its `event_key` is
+set only when this lease actually inserts a new notice. A duplicate observation
+whose notice already exists receives `no_new_publication_notice`; the earlier
+notice and publication are never attributed to a later replay. A stale worker or
+failed transaction cannot manufacture a result. Low-level legacy replay clears
+the operator pointer instead of silently inheriting a previous audited operation.
+
+| Result state | Retained reason | What is established |
+| --- | --- | --- |
+| `unknown` | `legacy_unbound` | No causal binding was recorded for this older audit |
+| `queued` | `awaiting_intake` | The audited replay is pending |
+| `processing` | `intake_in_progress` or `publication_in_progress` | A current worker lease exists; completion remains unconfirmed |
+| `failed` | `intake_failed` or `publication_failed` | The respective stage is quarantined |
+| `superseded` | `later_replay_queued` | A later replay replaced this still-unprocessed queued attempt |
+| `processed` | `no_new_publication_notice` or `awaiting_publication` | Intake completed; this replay has no verified publication yet |
+| `published` | `verified_publication` | The actual publication ledger and current private/source authority verify all returned references |
+| `unavailable` | `source_generation_changed`, `result_binding_unavailable` or `publication_verification_unavailable` | The necessary current binding or verification is unavailable; publication references and publication delay are withheld |
+
+The native verifier checks the persisted outbox operation and actual SQL
+`dispatch_publications` mappings, exact configured scope set, each immutable
+snapshot/document digest, and the private arithmetic explanation and publication
+confirmation. It reconstructs the publisher's content ID with this operation's
+recorded event cutoff and configuration. An authentic snapshot from a different
+window cannot establish this replay. A genuinely content-identical dispatch may
+retain an existing revision after a later observation freeze: the first private
+explanation remains immutable, and the current source/cache and privacy checks
+still apply. A future explanation cannot authorize an earlier observation freeze.
+Outbox completion JSON alone is insufficient.
+
+Current installation/generation, approved configuration, normalized source
+identities, source suppression, private actor suppression, active metric
+configuration and recognition authority remain independent checks. The native
+reader keeps its PostgreSQL source and normalization locks through the last
+asynchronous session/grant check, JSON serialization, synchronous private
+currentness check and HTTP send. A changed session, grant, policy, configuration
+or private publication authority withholds the response. Permanent source
+retirement denies both reads across a database/runtime restart. A retired
+repository checkpoint view also denies its quota health read while preserving an
+active sibling's shared source-pool observation.
+
+Each result can retain its original `queuedAt` and a trustworthy `processedAt`.
+`processingDelaySeconds` measures queued-to-processing completion.
+`publicationCompletedAt`, `publicationDelaySeconds`, `publicationPolicyVersion`
+and the nonempty `publications` set appear only for a verified publication;
+publication delay measures queued-to-publication completion. Current read policy,
+queued replay policy and publication policy are separately named and need not be
+the same version. Invalid, missing, future or backward clocks never become zero
+delay or successful completion. A later correction or loss of current authority
+can make an earlier successful result unavailable without rewriting its audit.
+
+Verification reads at most 100 publication references and enforces a combined
+16 MiB budget for SQL snapshot documents and private proof material. It checks
+the SQL size manifest before loading document payloads, deduplicates private
+authorization sets, and bounds their normalization identities at 10,000. The
+existing source/cache validation budget remains in force. The host must still
+set database statement/transaction timeouts, connection limits and request budgets.
+
+### Health observations
+
+Health carries its explicit `asOf` UTC instant and configured freshness budget.
+Collection summaries consider only configured source families in the current
+repository generation. Each has a fixed state/reason, latest usable attempt,
+last complete success, reconciled-through time and nullable actual/expected counts.
+
+`quiet` requires a recent complete window whose actual and expected item counts
+are both known zero. A missing attempt remains `unknown`. A failed collector
+read has state `disconnected` and a fixed `source_read_failed` reason; it reports
+the failed read, not a diagnosis of the physical network. Other failures are
+`degraded`, incomplete recent work is `collecting`, and old attempts or completed
+reconciliation are `overdue`. Fresh complete nonempty work is `progress`.
+The aggregate cannot hide a disconnected, degraded, overdue, unknown or collecting
+family behind another family's successful read.
+
+Intake counts and lag cover retained envelopes for the selected repository and
+current installation. Pending, leased and quarantined records all contribute to
+the oldest unfinished queue age. Completed payload expiry removes an envelope
+from those counts; it does not turn a retained-payload observation into complete
+history. Intake lag uses that latest retained delivery's source time and independent
+receive time. Missing or future source time remains unknown. Publication queue
+age covers the corresponding retained notices. Its latest completed publication
+must pass the same native proof verifier before exposing revisions or completion
+delay; that health delay measures received-to-publication completion, separately
+from a replay result's queued-to-publication delay.
+
+Quota health uses the accepted scoped observations in [the GitHub client
+contract](github-client.md#retained-quota-observations). It reads exactly the five
+fixed resource buckets for the current API origin/source pool and performs no
+token lookup or GitHub request. A valid remaining count of zero stays zero;
+missing, corrupt or inaccessible observations remain unknown or unavailable.
+The reported reset may be in the future. Counters are separate retained response
+observations and cannot establish an exact global balance or collector heartbeat.
+
+The console offers explicit health and per-receipt result reads. Its independent
+browser validator binds all four authority fields, receipt/delivery identity,
+state/reason combinations, scope-set bounds, response clocks and nullable values.
+Repository edits, visibility/session changes, replay/window edits and newer reads
+clear the old private observations. Late responses cannot restore them. An
+unavailable or denied read clears the private view and requires fresh diagnostics;
+there is no background poll, automatic replay or fallback to public API data.
+
+### Automated recovery evidence
+
+The new executable tests use established synthetic sessions and actual native
+components. `operator-results.test.mjs` covers persisted receipt/lease causation,
+stale workers, new-notice attribution, rollback, legacy audits, timing and result
+minimization. The pipeline's `operator-health`, `operator-http` and
+`operator-retirement` suites cover fresh empty versus failed collection, unknown
+clocks/counts, scoped quota reads, actual multi-scope publication, incorrect-window
+grafts, legitimate existing-revision reuse, final HTTP authorization/serialization
+fences, source and checkpoint retirement, and proof-size bounds.
+
+The native recovery case closes and reopens the on-disk database, constructs a new
+pipeline runtime, rejects the expired worker lease, processes its replacement once
+and dispatches the actual publication. It checks one observation, one notice, one
+processing result and the exact two scoped publications. The browser recovery
+journey queues the audit through real HTTP, observes queued status, performs that
+restart and reads the native publication identities. Additional browser cases
+cover quiet/disconnected health, zero/unknown quotas, revoked grants, current
+suppression, late responses, keyboard confirmation, 320px reflow and Axe checks.
+
+Run the current source with Node 24 and the repository's pinned dependencies:
+
+```sh
+npm run build
+node --test --test-concurrency=1 packages/ingestion/test/operator-results.test.mjs packages/ingestion/test/operator-window.test.mjs packages/ingestion/test/operator.test.mjs apps/pipeline/test/operator-health.test.mjs apps/pipeline/test/operator-http.test.mjs apps/pipeline/test/operator-retirement.test.mjs apps/web/test/operations-observed.test.ts
+npm run test:browser -- operations.spec.ts operations-observed.spec.ts
+```
+
+These automated software checks support the #73 recovery and health distinction.
+Their actual execution receipts, independent source review, protected delivery and
+literal issue acceptance remain separately recorded in the PR/issue discussion.
+They do not replace the staffed #93 drill, installed-source authorization,
+production capacity/SLO qualification or the actual-duration wall soak.
