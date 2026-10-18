@@ -236,7 +236,7 @@ test("hidden tabs discard pending private previews and do not restore them after
     });
     await expect(page.getByRole("button", { name: "Load retained policy inputs" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Candidate preview result" })).toHaveCount(0);
-    await expect(page.getByRole("combobox", { name: "Frozen input", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "Frozen input", exact: true, includeHidden: true })).toHaveCount(0);
   } finally {
     release?.();
     await api.close();
