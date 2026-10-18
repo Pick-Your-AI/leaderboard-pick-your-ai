@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readPublicProjectSnapshot, projectSnapshotRevision, createGithubEvidenceNormalizer } from "../dist/index.js";
-const repository = { id: 2, slug: "synthetic-owner/repository" };
+const repository = { id: 2, slug: "synthetic-owner/repository", allowedProjectIds: ["PVT_synthetic"] };
 const item = () => ({
   id: "PVTI_synthetic",
   updatedAt: "2026-10-07T10:00:00Z",
@@ -13,7 +13,6 @@ const item = () => ({
       {
         __typename: "ProjectV2ItemFieldSingleSelectValue",
         id: "PVTF_synthetic",
-        optionId: "synthetic-option",
         field: { id: "PVTSSF_synthetic" },
       },
     ],
@@ -22,6 +21,7 @@ const item = () => ({
 });
 const options = (client) => ({
   client,
+  allowedProjectIds: ["PVT_synthetic"],
   source: "synthetic",
   repository,
   itemId: "PVTI_synthetic",
@@ -29,13 +29,17 @@ const options = (client) => ({
 });
 
 test("Project fields are current-only snapshots and never fabricated editor credit", async () => {
-  const client = { scanGraphql: async (scan) => scan.select({ node: item() }).nodes };
+  const client = {
+    graphql: async () => ({ node: { project: { id: "PVT_synthetic", public: true } } }),
+    scanGraphql: async (scan) => scan.select({ node: item() }).nodes,
+  };
   const snapshot = await readPublicProjectSnapshot(options(client));
-  assert.equal(snapshot.fields[0].optionId, "synthetic-option");
+  assert.equal(snapshot.fields[0].id, "PVTF_synthetic");
   const normalize = createGithubEvidenceNormalizer({
     client,
     source: "synthetic",
     allowedRepositoryIds: [2],
+    allowedProjectIds: ["PVT_synthetic"],
     isSynthetic: true,
   });
   const output = await normalize({
@@ -66,14 +70,35 @@ test("private, cross-repository and changing nested Project snapshots fail close
     { ...item(), content: { ...item().content, repository: { databaseId: 3, isPrivate: false } } },
     { ...item(), content: { ...item().content, repository: { databaseId: 2, isPrivate: true } } },
   ]) {
-    const client = { scanGraphql: async (scan) => scan.select({ node: value }).nodes };
+    const client = {
+      graphql: async () => ({ node: { project: { id: "PVT_synthetic", public: true } } }),
+      scanGraphql: async (scan) => scan.select({ node: value }).nodes,
+    };
     await assert.rejects(readPublicProjectSnapshot(options(client)), /project_public_subject_unverified/);
   }
   const client = {
+    graphql: async () => ({ node: { project: { id: "PVT_synthetic", public: true } } }),
     scanGraphql: async (scan) => {
       scan.select({ node: item() });
       return scan.select({ node: { ...item(), updatedAt: "2026-10-08T10:00:00Z" } }).nodes;
     },
   };
   await assert.rejects(readPublicProjectSnapshot(options(client)), /changed_during_scan/);
+});
+
+test("unapproved Project scope is rejected before any field request", async () => {
+  let reads = 0;
+  const client = {
+    graphql: async () => ({ node: { project: { id: "PVT_other", public: true } } }),
+    scanGraphql: async () => {
+      reads++;
+      return [];
+    },
+  };
+  await assert.rejects(readPublicProjectSnapshot(options(client)), /project_not_authorized/);
+  assert.equal(reads, 0);
+  await assert.rejects(
+    readPublicProjectSnapshot({ ...options(client), allowedProjectIds: [] }),
+    /approved_project_scope_required/,
+  );
 });

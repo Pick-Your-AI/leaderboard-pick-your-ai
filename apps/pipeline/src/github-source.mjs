@@ -94,6 +94,8 @@ export function createGithubCollectionSource({
         });
       let values;
       if (request.family === "project_current") {
+        const allowedProjectIds = repository.allowedProjectIds ?? [];
+        if (!allowedProjectIds.length) throw new Error("approved_project_scope_required");
         if (!client.scanGraphql) throw new Error("project_source_unavailable");
         const subjects = await scan("project-subjects", routes.issues);
         if (subjects.length > 10000) throw new Error("source_dataset_budget_exceeded");
@@ -105,8 +107,8 @@ export function createGithubCollectionSource({
             key: `pipeline:${repository.id}:${request.runId}:project-items:${subject.node_id}`,
             query: `query($id:ID!, $first:Int!, $after:String) {
               node(id:$id) {
-                ... on Issue { id repository { databaseId isPrivate } projectItems(first:$first,after:$after) { nodes { id project { public } } pageInfo { hasNextPage endCursor } } }
-                ... on PullRequest { id repository { databaseId isPrivate } projectItems(first:$first,after:$after) { nodes { id project { public } } pageInfo { hasNextPage endCursor } } }
+                ... on Issue { id repository { databaseId isPrivate } projectItems(first:$first,after:$after) { nodes { id project { id public } } pageInfo { hasNextPage endCursor } } }
+                ... on PullRequest { id repository { databaseId isPrivate } projectItems(first:$first,after:$after) { nodes { id project { id public } } pageInfo { hasNextPage endCursor } } }
               }
             }`,
             variables: { id: subject.node_id },
@@ -121,9 +123,16 @@ export function createGithubCollectionSource({
                 !Array.isArray(data.node.projectItems?.nodes)
               )
                 throw new Error("project_subject_identity_unverified");
-              if (data.node.projectItems.nodes.some((item) => item?.project?.public !== true))
+              if (
+                data.node.projectItems.nodes.some(
+                  (item) => allowedProjectIds.includes(item?.project?.id) && item?.project?.public !== true,
+                )
+              )
                 throw new Error("project_public_scope_unverified");
-              return data.node.projectItems;
+              return {
+                ...data.node.projectItems,
+                nodes: data.node.projectItems.nodes.filter((item) => allowedProjectIds.includes(item?.project?.id)),
+              };
             },
           });
           if (items.length + values.length > 10000) throw new Error("source_dataset_budget_exceeded");
@@ -133,6 +142,7 @@ export function createGithubCollectionSource({
               source: sourceId,
               repository,
               itemId: item.id,
+              allowedProjectIds,
               scanId: request.runId,
               maxPages,
               assertAuthorized,
@@ -155,8 +165,9 @@ export function createGithubCollectionSource({
               databaseId isPrivate hasDiscussionsEnabled
               discussions(first:$first, after:$after, orderBy:{field:CREATED_AT,direction:ASC}) {
                 nodes { id url updatedAt createdAt answerChosenAt
-                  answerChosenBy { ... on User { databaseId } ... on Bot { databaseId } }
-                  answer { id isAnswer author { ... on User { databaseId } ... on Bot { databaseId } } }
+                  author { id __typename login ... on User { databaseId } ... on Bot { databaseId } }
+                  answerChosenBy { id __typename ... on User { databaseId } ... on Bot { databaseId } }
+                  answer { id isAnswer author { id __typename ... on User { databaseId } ... on Bot { databaseId } } }
                 }
                 pageInfo { hasNextPage endCursor }
               }

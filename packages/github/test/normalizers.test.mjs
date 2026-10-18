@@ -1068,7 +1068,9 @@ test("Discussion hydration validates capability, public identity and exact revis
       state: "present",
     },
   };
-  assert.equal(metrics(await normalize(input), "discussions_started").length, 1);
+  const normalized = await normalize(input);
+  assert.equal(metrics(normalized, "discussions_started").length, 1);
+  assert.equal(normalized.observations[0].source, "github_graphql");
   repo = { ...repo, hasDiscussionsEnabled: false };
   assert.match((await normalize(input)).reasons[0], /unavailable/);
   repo = {

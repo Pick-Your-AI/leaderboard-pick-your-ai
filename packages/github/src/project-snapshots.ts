@@ -7,7 +7,7 @@ export interface PublicProjectSnapshot {
   sourceUrl: string;
   updatedAt: string;
   archived: boolean;
-  /** No text, owners or inferred historic editors are retained. */
+  /** Only field identities/types; no field values or inferred historic editors. */
   fields: Record<string, unknown>[];
 }
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -21,10 +21,25 @@ export async function readPublicProjectSnapshot(options: {
   source: string;
   repository: { id: number; slug: string };
   itemId: string;
+  allowedProjectIds: readonly string[];
   scanId: string;
   maxPages?: number;
   assertAuthorized?: () => void;
 }): Promise<PublicProjectSnapshot> {
+  if (!options.allowedProjectIds.length) throw new Error("approved_project_scope_required");
+  const probe = await options.client.graphql<{ node?: { project?: { id?: string; public?: boolean } } }>(
+    options.source,
+    `query($id:ID!) { node(id:$id) { ... on ProjectV2Item { project { id public } } } }`,
+    { id: options.itemId },
+    options.assertAuthorized,
+  );
+  if (
+    probe.node?.project?.public !== true ||
+    !probe.node.project.id ||
+    !options.allowedProjectIds.includes(probe.node.project.id)
+  )
+    throw new Error("project_not_authorized");
+  const approvedProjectId = probe.node.project.id;
   let snapshot: Omit<PublicProjectSnapshot, "fields"> | undefined;
   const fields = await options.client.scanGraphql<Record<string, unknown>>({
     refresh: true,
@@ -36,9 +51,9 @@ export async function readPublicProjectSnapshot(options: {
         content { ... on Issue { url repository { databaseId isPrivate } } ... on PullRequest { url repository { databaseId isPrivate } } }
         fieldValues(first:$first, after:$after) {
           nodes { __typename
-            ... on ProjectV2ItemFieldSingleSelectValue { id optionId field { ... on ProjectV2SingleSelectField { id } } }
-            ... on ProjectV2ItemFieldNumberValue { id number field { ... on ProjectV2Field { id } } }
-            ... on ProjectV2ItemFieldDateValue { id date field { ... on ProjectV2Field { id } } }
+            ... on ProjectV2ItemFieldSingleSelectValue { id field { ... on ProjectV2SingleSelectField { id } } }
+            ... on ProjectV2ItemFieldNumberValue { id field { ... on ProjectV2Field { id } } }
+            ... on ProjectV2ItemFieldDateValue { id field { ... on ProjectV2Field { id } } }
           }
           pageInfo { hasNextPage endCursor }
         }
@@ -54,6 +69,7 @@ export async function readPublicProjectSnapshot(options: {
         item.id !== options.itemId ||
         !object(item.project) ||
         item.project.public !== true ||
+        item.project.id !== approvedProjectId ||
         typeof item.project.id !== "string" ||
         !object(item.content) ||
         !object(item.content.repository) ||

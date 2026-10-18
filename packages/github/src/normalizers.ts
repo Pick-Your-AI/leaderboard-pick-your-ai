@@ -28,18 +28,20 @@ export function githubReviewRevision(value: Record<string, unknown>): string {
 }
 
 export function githubDiscussionRevision(value: Record<string, unknown>): string {
+  const identity = (value: unknown) =>
+    object(value) ? [value.databaseId ?? value.id ?? null, value.__typename ?? value.type ?? null] : null;
   return createHash("sha256")
     .update(
       JSON.stringify([
         value.id ?? null,
         value.updatedAt ?? null,
+        value.createdAt ?? null,
+        identity(value.author),
         value.answerChosenAt ?? null,
         object(value.answer) ? (value.answer.id ?? null) : null,
         object(value.answer) ? (value.answer.isAnswer ?? null) : null,
-        object(value.answer) && object(value.answer.author)
-          ? (value.answer.author.databaseId ?? value.answer.author.id ?? null)
-          : null,
-        object(value.answerChosenBy) ? (value.answerChosenBy.databaseId ?? value.answerChosenBy.id ?? null) : null,
+        object(value.answer) ? identity(value.answer.author) : null,
+        identity(value.answerChosenBy),
       ]),
     )
     .digest("hex");
@@ -979,7 +981,7 @@ export function applyRecognitionReceipt(
 export interface CollectionNormalizerInput {
   /** Trusted host selects the current subject revision at its frozen cutoff. */
   selectedCurrentState?: boolean;
-  repository: { id: number; slug: string };
+  repository: { id: number; slug: string; allowedProjectIds?: readonly string[] };
   family: string;
   factKey: string;
   observedAt: string;
@@ -1028,6 +1030,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         source: options.source,
         repository: input.repository,
         itemId: input.fact.subjectId,
+        allowedProjectIds: input.repository.allowedProjectIds ?? [],
         scanId: input.factKey,
         ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
       });
@@ -1094,9 +1097,9 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
               databaseId isPrivate hasDiscussionsEnabled
               discussion(number:$number) {
                 id url createdAt updatedAt answerChosenAt
-                author { __typename login ... on User { databaseId } ... on Bot { databaseId } }
-                answerChosenBy { __typename login ... on User { databaseId } ... on Bot { databaseId } }
-                answer { id isAnswer author { __typename login ... on User { databaseId } ... on Bot { databaseId } } }
+                author { id __typename login ... on User { databaseId } ... on Bot { databaseId } }
+                answerChosenBy { id __typename login ... on User { databaseId } ... on Bot { databaseId } }
+                answer { id isAnswer author { id __typename login ... on User { databaseId } ... on Bot { databaseId } } }
               }
             }
           }`,

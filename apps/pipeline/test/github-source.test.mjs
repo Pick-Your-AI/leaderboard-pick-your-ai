@@ -134,8 +134,9 @@ test("Project collector traverses subject memberships and current field snapshot
   const calls = [];
   const source = createGithubCollectionSource({
     sourceId: "synthetic",
-    repositories: [{ ...repository, families: ["project_current"] }],
+    repositories: [{ ...repository, families: ["project_current"], allowedProjectIds: ["PVT_synthetic"] }],
     client: {
+      graphql: async () => ({ node: { project: { id: "PVT_synthetic", public: true } } }),
       rest: async () => ({ id: 2, private: false }),
       scanRest: async () => [{ node_id: "I_synthetic" }],
       scanGraphql: async (scan) => {
@@ -156,7 +157,7 @@ test("Project collector traverses subject memberships and current field snapshot
               id: "I_synthetic",
               repository: { databaseId: 2, isPrivate: false },
               projectItems: {
-                nodes: [{ id: "PVTI_synthetic", project: { public: true } }],
+                nodes: [{ id: "PVTI_synthetic", project: { id: "PVT_synthetic", public: true } }],
                 pageInfo: { hasNextPage: false, endCursor: null },
               },
             };

@@ -45,12 +45,14 @@ uncredited; this endpoint is not a claim of complete GitHub timeline coverage.
 See [issue events](https://docs.github.com/en/rest/issues/events).
 
 The `project_current` adapter traverses each approved repository issue/PR's
-Project memberships and each item's complete field-value connection. Public
+explicitly approved Project memberships (`repository.allowedProjectIds`) and each
+item's complete field-identity connection. Missing approval fails closed. Unapproved
+Projects are filtered before field hydration; a metadata-only probe precedes field reads. Public
 Project and content-repository scope are checked on every nested page. Item
-changes during field pagination fail closed. IDs, single-select option IDs,
-numbers and dates form current-only fingerprints; text fields and historic
-editors are not inferred. A Project snapshot produces a source observation and
-no contribution metrics. See [Project item fields](https://docs.github.com/en/graphql/reference/projects)
+changes during field pagination fail closed. Only field IDs and types form current-only fingerprints; no field values or
+historic editors are collected. Field-value collection needs its own approved scope. A Project snapshot produces a source observation and
+no contribution metrics. The runtime retains opaque source provenance, not a
+published Project field-value or current-context view. See [Project item fields](https://docs.github.com/en/graphql/reference/projects)
 and [issue Project memberships](https://docs.github.com/en/graphql/reference/issues).
 
 Remaining source work includes selectively supported Project history and
