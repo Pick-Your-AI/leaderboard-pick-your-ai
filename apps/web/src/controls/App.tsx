@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { canReview, control, ControlsFailure, verifiedSession, type Receipt, type Session } from "./client.ts";
 
+import { Configuration, type ConfigurationState } from "./Configuration.tsx";
 import { Spotlights, type Nomination } from "./Spotlights.tsx";
 
 type Run = (path: string, input: unknown) => Promise<boolean>;
@@ -516,15 +517,12 @@ export function ControlsApp() {
               </section>
               <Spotlights nominations={nominations} session={session} run={run} admin={admin} />
               {admin && session.roles.includes("operator") && (
-                <section>
-                  <h2>Configuration and operations</h2>
-                  <p>
-                    Current versioned configuration is read-only here. Configuration publication requires source
-                    verification and independent approval through the controls API. Collection diagnostics and replay
-                    controls are not yet available through this UI.
-                  </p>
-                  <pre>{JSON.stringify(configuration, null, 2)}</pre>
-                </section>
+                <Configuration
+                  key={JSON.stringify(configuration)}
+                  state={configuration as ConfigurationState}
+                  session={session}
+                  run={run}
+                />
               )}
             </fieldset>
           )}

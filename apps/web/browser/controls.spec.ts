@@ -188,3 +188,145 @@ test("editorial nomination decisions require explicit public explanation and cur
     },
   });
 });
+
+test("operators preview approve and activate exact configuration bindings then propose a scoped disable", async ({
+  page,
+}) => {
+  await controls(page, ["operator"]);
+  const document = {
+    repositories: [],
+    projects: [],
+    metrics: [
+      {
+        id: "pr_opened",
+        enabled: true,
+        policyVersion: "policy-v1",
+        policyLink: "https://github.com/example/synthetic/blob/main/policy.md",
+        reason: "",
+      },
+    ],
+  };
+  const proposal = {
+    id,
+    owner: "2",
+    version: "config-v1",
+    versionNumber: 1,
+    baseRevision: 0,
+    status: "proposed",
+    digest: "config-digest",
+    document,
+    history: [],
+    preview: {
+      digest: "preview-digest",
+      configurationDigest: "config-digest",
+      baseRevision: 0,
+      source: { validUntil: Date.now() + 600000 },
+      before: { enabledMetricIds: [] },
+      after: { enabledMetricIds: ["pr_opened"] },
+    },
+    approval: { id: "approval-id", actor: "1", configurationDigest: "config-digest", previewDigest: "preview-digest" },
+  };
+  const state = { revision: 0, active: null as typeof proposal | null, proposals: { [id]: proposal }, history: [] };
+  const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
+  await page.route("**/controls/configuration**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "GET") {
+      await route.fulfill({ json: state });
+      return;
+    }
+    const body = request.postDataJSON();
+    writes.push({ path, body });
+    if (path.endsWith("/preview")) {
+      proposal.status = "previewed";
+      proposal.versionNumber++;
+    }
+    if (path.endsWith("/approve")) {
+      proposal.status = "approved";
+      proposal.versionNumber++;
+    }
+    if (path.endsWith("/activate")) {
+      proposal.status = "activated";
+      proposal.versionNumber++;
+      state.active = proposal;
+      state.revision++;
+    }
+    await route.fulfill({ json: proposal });
+  });
+  await page.goto("/admin");
+  await page.getByLabel(/Source-test proposal config-v1/).check();
+  await page.getByRole("button", { name: "Preview configuration", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Approve tested preview" })).toBeVisible();
+  await page.getByLabel(/I have no conflict and approve configuration digest/).check();
+  await page.getByRole("button", { name: "Approve tested preview" }).click();
+  await expect(page.getByRole("button", { name: "Activate approved configuration" })).toBeVisible();
+  await page.getByLabel(/Activate config-v1, digest/).check();
+  await page.getByRole("button", { name: "Activate approved configuration" }).click();
+  await expect(page.getByText("Active revision 1.", { exact: false })).toBeVisible();
+  expect(writes.slice(0, 3)).toEqual([
+    { path: `/controls/configuration/proposals/${id}/preview`, body: { version: 1 } },
+    {
+      path: `/controls/configuration/proposals/${id}/approve`,
+      body: { version: 2, previewDigest: "preview-digest", conflict: false },
+    },
+    { path: `/controls/configuration/proposals/${id}/activate`, body: { version: 3, approvalId: "approval-id" } },
+  ]);
+  await page.getByLabel("Disable explanation").fill("Source quality under review");
+  await page.getByLabel("Disable proposal version").fill("config-v2");
+  await page.getByLabel(/Propose disabling pr_opened/).check();
+  await page.getByRole("button", { name: "Propose metric disable" }).click();
+  await expect(page.getByRole("status")).toContainText("Service confirmed");
+  expect(writes[3]).toMatchObject({
+    path: "/controls/configuration/proposals",
+    body: {
+      baseRevision: 1,
+      version: "config-v2",
+      document: {
+        ...document,
+        metrics: [{ ...document.metrics[0], enabled: false, reason: "Source quality under review" }],
+      },
+    },
+  });
+});
+
+test("configuration self-approval and stale activation are unavailable and invalid JSON never sends", async ({
+  page,
+}) => {
+  const writes = await controls(page, ["operator"]);
+  const proposal = {
+    id,
+    owner: "1",
+    version: "config-v1",
+    versionNumber: 2,
+    baseRevision: 0,
+    status: "previewed",
+    digest: "digest",
+    document: { repositories: [], projects: [], metrics: [] },
+    history: [],
+    preview: {
+      digest: "preview",
+      configurationDigest: "digest",
+      baseRevision: 0,
+      source: { validUntil: Date.now() + 600000 },
+      before: {},
+      after: {},
+    },
+  };
+  await page.route("**/controls/configuration", (r) =>
+    r.fulfill({ json: { revision: 0, active: null, proposals: { [id]: proposal }, history: [] } }),
+  );
+  await page.goto("/admin");
+  await expect(page.getByText("Another operator must independently approve your proposal.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Approve tested preview" })).toHaveCount(0);
+  await page.getByLabel("New configuration version").fill("invalid-v1");
+  await page.getByLabel("Configuration document (JSON)").fill("invalid json");
+  await page.getByLabel(/Create a proposal against active revision/).check();
+  await page.getByRole("button", { name: "Create configuration proposal" }).click();
+  await expect(page.getByRole("alert")).toContainText("Nothing was submitted");
+  expect(writes).toHaveLength(0);
+  proposal.baseRevision = -1;
+  await page.getByRole("button", { name: "Reload receipts" }).click();
+  await expect(page.getByText(/This proposal is stale/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Preview configuration", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Activate approved configuration" })).toHaveCount(0);
+});
