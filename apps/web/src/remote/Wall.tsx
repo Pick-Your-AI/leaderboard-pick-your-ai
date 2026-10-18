@@ -395,6 +395,7 @@ function WallDisplay({
   advanceRef.current = advanceAutomatically;
   // A 20-second privacy recheck must not perpetually reset a slower rotation timer.
   useEffect(() => {
+    automaticDue.current = false;
     if (paused || reduced || !visible || pointerInside || focusInside || mode === "frozen") return;
     const timer = setInterval(() => {
       advanceRef.current();

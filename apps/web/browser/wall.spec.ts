@@ -124,6 +124,7 @@ async function service(page: Page, readDelayMs = 0) {
   const { createService } = await import(module);
   let current = snapshot(),
     failed = false;
+  let healthGate: Promise<void> | null = null;
   const history = new Map([[current.head.snapshotId, current]]);
   const calls: URL[] = [];
   const app = createService({
@@ -146,6 +147,7 @@ async function service(page: Page, readDelayMs = 0) {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     calls.push(url);
+    if (url.pathname.endsWith("/health") && healthGate) await healthGate;
     const response = await app.inject({ method: "GET", url: url.pathname + url.search });
     await route.fulfill({ status: response.statusCode, headers: response.headers, body: response.body });
   });
@@ -172,6 +174,16 @@ async function service(page: Page, readDelayMs = 0) {
     },
     fail() {
       failed = true;
+    },
+    holdHealth() {
+      let release!: () => void;
+      healthGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return () => {
+        healthGate = null;
+        release();
+      };
     },
   };
 }
@@ -373,6 +385,45 @@ test("a real 20-second page boundary waits for its coincident privacy read inste
     await api.close();
   }
 });
+
+for (const actionWhileReading of ["continue", "pause", "interval"] as const) {
+  test(`a due rotation respects ${actionWhileReading} during current publication controls`, async ({ page }) => {
+    const api = await service(page);
+    let release: (() => void) | undefined;
+    try {
+      await page.clock.install();
+      await page.goto(wall("single").replace("interval=30", "interval=20"));
+      await expect(page.getByRole("link", { name: "Wall contributor 01", exact: true })).toBeVisible();
+      await page.clock.runFor(19_000);
+      release = api.holdHealth();
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeDisabled();
+      await page.clock.runFor(1_010);
+      await expect(page.locator(".api-wall-page")).toContainText("Page 1");
+      if (actionWhileReading === "pause") await page.getByRole("button", { name: "Pause wall", exact: true }).click();
+      if (actionWhileReading === "interval")
+        await page.getByRole("combobox", { name: "Page speed", exact: true }).selectOption("60");
+      api.suppress();
+      release();
+      await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeEnabled();
+      await expect(page.getByRole("link", { name: "Wall contributor 01", exact: true })).toHaveCount(0);
+      await expect(page.locator(".api-wall-page")).toContainText(
+        actionWhileReading === "continue" ? "Page 2" : "Page 1",
+      );
+      if (actionWhileReading !== "continue") {
+        if (actionWhileReading === "pause")
+          await page.getByRole("button", { name: "Resume wall", exact: true }).click();
+        await page.clock.runFor(1_000);
+        await expect(page.locator(".api-wall-page")).toContainText("Page 1");
+      } else {
+        await expect(page.getByRole("link", { name: "Wall contributor 08", exact: true })).toBeVisible();
+      }
+    } finally {
+      release?.();
+      await api.close();
+    }
+  });
+}
 
 test("expired cursors recover at the same pin, while revoked snapshots recover only in live mode", async ({ page }) => {
   await page.clock.install();
