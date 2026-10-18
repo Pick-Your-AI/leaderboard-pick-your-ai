@@ -216,6 +216,37 @@ for (const [name, change] of [
     },
   ],
   [
+    "array actor kind on another account",
+    (h) => {
+      h.state.cohort[0].user = {
+        ...h.state.cohort[0].user,
+        id: h.state.review.user.id + 1,
+        node_id: "U_synthetic_other",
+        type: ["User"],
+      };
+    },
+  ],
+  [
+    "array submitted state",
+    (h) => {
+      h.state.cohort[0].state = ["COMMENTED"];
+    },
+  ],
+  [
+    "array head commit identity",
+    (h) => {
+      h.state.cohort[0].commit_id = [h.state.review.commit_id];
+    },
+  ],
+  [
+    "current cohort database ID differs from hydrated review",
+    (h) => {
+      h.state.cohort[1].id = 99;
+      h.state.cohort[1].html_url = `${source}#pullrequestreview-99`;
+      h.state.cohort[1]._links.html.href = h.state.cohort[1].html_url;
+    },
+  ],
+  [
     "current cohort node differs from hydrated review",
     (h) => {
       h.state.cohort[1].node_id = "PRR_synthetic_other";

@@ -219,6 +219,8 @@ export interface GithubLineage {
 }
 export interface NormalizedGithubResult {
   isSynthetic: boolean;
+  /** Private provenance retained when the pipeline combines observation results. */
+  syntheticFactIds?: readonly string[];
   facts: NormalizedGithubFact[];
   actors: NormalizedGithubActor[];
   evidence: NormalizedPublicEvidence[];
@@ -1328,6 +1330,23 @@ export function applyRecognitionReceipt(
   ) {
     throw new Error("Independent verified recognition receipt is required");
   }
+  // A generic receipt cannot turn a PR, closing action or synthetic fixture into
+  // a confirmed report. The issue proof must identify this exact source fact.
+  if (
+    receipt.metricId === "confirmed_bugs" &&
+    (input.isSynthetic === true ||
+      input.syntheticFactIds?.includes(target.id) ||
+      target.metricId !== "issues_opened" ||
+      !target.artifactId ||
+      !targetEvidence ||
+      input.evidence.filter((entry) => entry.contribution.contributionId === target.id).length !== 1 ||
+      targetEvidence.artifact.kind !== "issue" ||
+      targetEvidence.artifact.stableId !== target.artifactId ||
+      targetEvidence.contribution.artifactId !== target.artifactId ||
+      targetEvidence.artifact.repositoryId !== target.repoId ||
+      targetEvidence.contribution.actorId !== target.actorId)
+  )
+    throw new Error("Confirmed bug recognition requires a nonsynthetic issue source");
   // Localization is one PR/language/category unit. A bulk changeset must never
   // collapse different languages or mint another unit for the same source fact.
   const unit = receipt.metricId === "localization" ? target.canonicalKey : (receipt.changesetId ?? target.canonicalKey);
@@ -1819,11 +1838,13 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
             ids.add(reviewId);
             return (
               review.state === "PENDING" ||
-              (submittedStates.includes(String(review.state)) &&
+              (typeof review.state === "string" &&
+                submittedStates.includes(review.state) &&
                 time(review.submitted_at) !== null &&
                 object(review.user) &&
                 positive(review.user.id) &&
-                pinnedSha(String(review.commit_id)))
+                typeof review.commit_id === "string" &&
+                pinnedSha(review.commit_id))
             );
           });
         const currentId = resourceId(payload, "review", input.repository.id);
@@ -1834,6 +1855,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         if (
           complete &&
           object(current) &&
+          current.id === payload.id &&
           current.state === payload.state &&
           current.submitted_at === payload.submitted_at &&
           current.commit_id === payload.commit_id &&
@@ -1845,7 +1867,8 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           const submissions = cohort.filter(
             (review): review is Record<string, unknown> =>
               object(review) &&
-              submittedStates.includes(String(review.state)) &&
+              typeof review.state === "string" &&
+              submittedStates.includes(review.state) &&
               object(review.user) &&
               review.user.id === reviewerId,
           );

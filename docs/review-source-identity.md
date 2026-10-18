@@ -13,8 +13,13 @@ review facts.
 Every history row must identify the same pull and its own review ID. A complete
 cohort cannot reuse a database or node review identity, bind one actor node to
 different accounts, or give one account conflicting node identities or account
-kinds. Unknown submitted-actor kinds withhold the first-submission proof. Pending
-reviews supply no submission milestone. Consistent historical login changes do
+kinds. The current history row must agree with the hydrated review on both its
+database and node identities. Actor kinds, submitted states and head commit
+identities must be valid strings; malformed values cannot become known
+identities or submissions through string conversion. Unknown actor kinds and
+malformed states or heads withhold the
+first-submission proof. Pending reviews supply no submission milestone.
+Consistent historical login changes do
 not change the native actor identity. Invalid history withholds participation
 and round credit while retaining independently scoped target feedback as raw
 evidence, without treating its length or state as quality.
@@ -38,8 +43,17 @@ identity aliases, conflicting actor identities, exact fingerprint drift,
 preserved raw feedback, distinct head rounds, pending reviews, historical login
 changes and exact recovery. The original accepted normalizer at
 `580f43881c8edda904b8eae25799302af6626555` fails 22 of these 25 methods; the corrected
-normalizer passes all 25. All 358 methods in the GitHub adapter package pass,
-with no failures or skips.
+normalizer passes those 25. Independent review added three counterexamples for a
+conflicting current database ID, an array actor kind on another account, and an
+array submitted state. All three fail against the first source checkpoint
+`cef112d0c94cc365e167b4de9d7db00e34076b51` and pass after the stricter checks. A
+fourth counterexample, an array head commit identity, still fails against that
+three-fix build and passes after requiring an actual string head. The corrected
+normalizer passes all 29 focused methods and all 362 methods in the
+GitHub adapter package, with no failures or skips. The complete suite required
+child-process support for the existing local Git and crash-recovery tests; the
+restricted-sandbox attempt's ten `EPERM` failures are retained separately and do
+not count as a passing execution.
 
 These source and fixture checks do not supply installed-source permission,
 complete readiness history, independent review-quality receipts or the broader

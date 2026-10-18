@@ -51,11 +51,16 @@ export function consistentReviewCohortIdentities(
   const actorIds = new Map<number, { nodeId: string | undefined; kind: string }>();
   const actorNodes = new Map<string, number>();
   const bindActor = (value: unknown) => {
-    if (!object(value) || !positive(value.id) || !["User", "Bot", "Organization"].includes(String(value.type)))
+    if (
+      !object(value) ||
+      !positive(value.id) ||
+      typeof value.type !== "string" ||
+      !["User", "Bot", "Organization"].includes(value.type)
+    )
       return false;
     if (value.node_id !== undefined && !node(value.node_id)) return false;
     const nodeId = value.node_id as string | undefined;
-    const kind = value.type as string;
+    const kind = value.type;
     const previous = actorIds.get(value.id);
     if (
       (previous && (previous.kind !== kind || (previous.nodeId && nodeId && previous.nodeId !== nodeId))) ||
