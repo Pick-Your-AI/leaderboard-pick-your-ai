@@ -869,3 +869,44 @@ test("expiry crossed by commit withholds the response even after a valid calcula
   assert.equal(reply.status, 401);
   assert.deepEqual(reply.data, { error: "Reviewer session revoked" });
 });
+
+test("private triage replay preserves the exact registry grouping policy version", async (t) => {
+  const input = capture();
+  const grouping = metrics.getMetricGroupingPolicy("items_triaged");
+  const triage = policy({
+    metricId: "items_triaged",
+    version: "synthetic-triage/v1",
+    unit: metrics.getMetricDefinition("items_triaged").definition.unit,
+    roles: ["triager"],
+    groupBy: grouping.group_by,
+    groupingSeconds: grouping.grouping_seconds,
+    groupingPolicyVersion: grouping.version,
+    dateBasis: grouping.date_basis,
+    rankedStates: [grouping.state],
+  });
+  input.policies = [triage];
+  input.input.facts = [
+    fact("synthetic-triage-a", { metricId: "items_triaged", role: "triager", rawState: "labeled:bug" }),
+    fact("synthetic-triage-b", { metricId: "items_triaged", role: "triager", rawState: "labeled:bug" }),
+  ];
+  const h = await harness(t, { input });
+  const retained = h.comparisons.input(h.retained.inputId);
+  assert.equal(retained.policies[0].groupingPolicyVersion, grouping.version);
+  const candidate = { ...triage, version: "synthetic-triage/v2" };
+  const preview = await h.preview(candidate);
+  assert.equal(preview.status, 200, JSON.stringify(preview));
+  assert.equal(preview.data.before.rows[0].value, 1);
+  assert.equal(preview.data.after.rows[0].value, 1);
+  assert.equal(preview.data.publicEnabled, false);
+  for (const patch of [
+    { groupingPolicyVersion: undefined },
+    { groupingPolicyVersion: "unreviewed-grouping/v2" },
+    { groupingPolicyVersion: { injected: true } },
+    { groupingSeconds: 60 },
+  ])
+    assert.equal((await h.preview({ ...candidate, ...patch })).status, 400);
+  await h.restart();
+  const replay = await h.call(prefix + "/" + preview.data.comparisonId);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.data.resultHash, preview.data.resultHash);
+});

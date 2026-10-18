@@ -31,7 +31,7 @@ class ContractRegistryParityTests(unittest.TestCase):
             len({metric["id"] for metric in candidate["metrics"]}), 98
         )
 
-    def test_unresolved_ui_metadata_is_not_fabricated_or_enabled(self):
+    def test_ui_metadata_maps_every_definition_without_enabling_sources(self):
         candidate = json.loads(
             (
                 ROOT
@@ -43,9 +43,22 @@ class ContractRegistryParityTests(unittest.TestCase):
             ).read_text(encoding="utf-8")
         )
         ui = candidate["ui_metadata"]
-        self.assertEqual(ui["decision_state"], "unresolved")
-        self.assertIn("department", ui["fields"])
-        self.assertIn("lead_view", ui["fields"])
+        self.assertEqual(ui["decision_state"], "candidate")
+        self.assertEqual(ui["version"], "leaderboard-ui/v1")
+        self.assertFalse(ui["public_enabled"])
+        self.assertEqual({entry["metric_id"] for entry in ui["metrics"]},
+                         {entry["id"] for entry in candidate["metrics"]})
+        self.assertEqual(len(ui["metrics"]), 98)
+        definitions = {entry["id"]: entry for entry in candidate["metrics"]}
+        for entry in ui["metrics"]:
+            self.assertEqual(entry["department"], definitions[entry["metric_id"]]["family"])
+            for case in entry["verification_cases"]:
+                self.assertTrue((ROOT / case).is_file(), case)
+            if entry["maturity"] in ("definition_only", "deferred"):
+                self.assertFalse(entry["supported_combinations"])
+                self.assertIsNone(entry["default_combination"])
+                self.assertFalse(entry["lead_view"]["wall"])
+        self.assertFalse(candidate["grouping_policies"][0]["public_enabled"])
         self.assertNotIn("universal_score", candidate)
 
 
