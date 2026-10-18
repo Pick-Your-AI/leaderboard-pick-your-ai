@@ -7,6 +7,8 @@
  * documented default is used in their place.
  */
 
+import { defaultDisplayTimeZone, isDisplayTimeZone } from "./display-time-zone.ts";
+
 export const periodPresets = ["7d", "30d", "90d", "all", "month", "quarter", "year", "custom"] as const;
 export type PeriodPreset = (typeof periodPresets)[number];
 
@@ -28,6 +30,8 @@ export interface Scope {
   /** Immutable snapshot pin. Null follows the latest published snapshot. */
   snapshot: string | null;
   density: Density;
+  /** Presentation only: counting and custom dates always use UTC. */
+  timeZone: string;
 }
 
 export interface ScopeIssue {
@@ -51,10 +55,11 @@ export const defaultScope: Scope = {
   actor: "user",
   snapshot: null,
   density: "comfortable",
+  timeZone: defaultDisplayTimeZone,
 };
 
 /** Parameters owned by the scope; route-specific parameters pass through. */
-export const scopeParams = ["period", "from", "to", "repo", "project", "actor", "snapshot", "density"] as const;
+export const scopeParams = ["period", "from", "to", "repo", "project", "actor", "snapshot", "density", "tz"] as const;
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -179,6 +184,17 @@ export function parseScope(search: string, context: ScopeContext = {}): { scope:
       });
   }
 
+  const timeZones = params.getAll("tz");
+  if (timeZones.length) {
+    if (timeZones.length === 1 && isDisplayTimeZone(timeZones[0])) scope.timeZone = timeZones[0];
+    else
+      issues.push({
+        param: "tz",
+        value: timeZones.join(","),
+        message: "Choose one supported IANA display timezone. Displaying UTC; the selected UTC window is unchanged.",
+      });
+  }
+
   return { scope, issues };
 }
 
@@ -200,6 +216,7 @@ export function serializeScope(scope: Scope, extra: Record<string, string | null
   if (scope.actor !== defaultScope.actor) params.set("actor", scope.actor);
   if (scope.snapshot) params.set("snapshot", scope.snapshot);
   if (scope.density !== defaultScope.density) params.set("density", scope.density);
+  if (scope.timeZone !== defaultDisplayTimeZone) params.set("tz", scope.timeZone);
   for (const key of Object.keys(extra).sort()) {
     const value = extra[key];
     // Empty semantic selections are invalid requests, not absent defaults.

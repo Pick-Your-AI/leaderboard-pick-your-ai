@@ -1,9 +1,4 @@
-import {
-  actorFilterLabels,
-  publicScopeParameters,
-  publicScopeSchemaVersion,
-  type MetricRegistry,
-} from "@pick-your-ai/contracts";
+import { actorFilterLabels, publicScopeParameters, type MetricRegistry } from "@pick-your-ai/contracts";
 import { PublicReadError, safePublicUrl, type PublicRead } from "./public-source.js";
 
 const escape = (value: string) =>
@@ -34,7 +29,7 @@ function measurementContext(
     ["p75", supplied(diagnostic?.p75)],
     ["Pending", `${supplied(row.pending?.count)} (${row.pending?.state ?? "unknown"})`],
     ["Value class", row.pending?.valueClass ?? "unknown"],
-    ...(read.selected.scope.schemaVersion === publicScopeSchemaVersion
+    ...(read.selected.scope.schemaVersion !== undefined
       ? ([
           [
             "Membership basis",
@@ -42,6 +37,9 @@ function measurementContext(
           ],
           ["Projects", read.selected.scope.projects!.join(", ") || "All approved Projects and unboarded work"],
         ] as [string, string][])
+      : []),
+    ...(read.selected.scope.roles?.length
+      ? ([["Contribution roles", read.selected.scope.roles.join(", ")]] as [string, string][])
       : []),
   ];
 }

@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import "../styles/wall.css";
 import { actorFilterLabels, type Actor, type MetricRegistry } from "@pick-your-ai/contracts";
 import { getLeadMetrics } from "@pick-your-ai/metrics";
+import { WindowBounds } from "../components/DisplayTimeZone.tsx";
+import { LastVerifiedSnapshot, type SnapshotReference } from "./LastVerifiedSnapshot.tsx";
 import {
   apiBase,
   catalog,
@@ -39,20 +41,31 @@ const oldestSync = (status: Health) => {
 };
 function Scope({ selected }: { selected: Selection }) {
   return (
-    <p className="api-wall-scope">
-      {selected.organization}
-      {selected.repository && ` · repository ${selected.repository}`}
-      {selected.workstream && ` · workstream ${selected.workstream}`} · {actorFilterLabels[selected.actors ?? "all"]}
-      <br />
-      {selected.start ? `${selected.start} to ${selected.end} (end exclusive)` : "All-time materialized scope"}
-    </p>
+    <div className="api-wall-scope">
+      <p>
+        {selected.organization}
+        {selected.repository && ` · repository ${selected.repository}`}
+        {selected.workstream && ` · workstream ${selected.workstream}`} · {actorFilterLabels[selected.actors ?? "all"]}
+        <br />
+        {selected.start ? `${selected.start} to ${selected.end} (end exclusive)` : "All-time materialized scope"}
+      </p>
+      <WindowBounds start={selected.start} end={selected.end} timeZone={selected.timeZone ?? "UTC"} />
+    </div>
   );
 }
-function Failure({ error }: { error: ReadFailure }) {
+function Failure({ error, previousSnapshot }: { error: ReadFailure; previousSnapshot?: SnapshotReference | null }) {
   return (
     <section className="notice notice-error" role="alert">
-      <h2>{error.status === 410 ? "Selection expired or revoked" : "Public wall unavailable"}</h2>
+      <h2>
+        {error.status === 410
+          ? "Selection expired or revoked"
+          : error.status === 429
+            ? "Requests temporarily limited"
+            : "Public wall unavailable"}
+      </h2>
       <p>{error.code}</p>
+      {error.status === 429 && <p>Wait before retrying this selection.</p>}
+      {previousSnapshot && <LastVerifiedSnapshot value={previousSnapshot} />}
       <p>No saved contributor response or fixture is used after this failure.</p>
     </section>
   );
@@ -289,6 +302,7 @@ function WallDisplay({
   const [announcement, setAnnouncement] = useState("");
   const [fullscreenMessage, setFullscreenMessage] = useState("");
   const pin = useRef<string | null>(selected.snapshot);
+  const lastVerified = useRef<SnapshotReference | null>(null);
   const active = useRef<AbortController | null>(null);
   const recovery = useRef<"page" | "cycle" | null>(null);
   const automaticDue = useRef(false);
@@ -337,6 +351,12 @@ function WallDisplay({
     void readWallFrame(base, selected, options, position, pin.current, controller.signal)
       .then((value) => {
         if (controller.signal.aborted) return;
+        // The complete frame and current controls have passed validation.
+        // Keep only this historical date/reference if a later read fails.
+        lastVerified.current = {
+          snapshotId: value.content.value.snapshotId,
+          generatedAt: value.content.value.generatedAt,
+        };
         pin.current = value.content.value.snapshotId;
         recovery.current = null;
         setFrame(value);
@@ -350,13 +370,7 @@ function WallDisplay({
           const problem = failure instanceof ReadFailure ? failure : new ReadFailure(503, "public_read_unavailable");
           // Expiring cursors do not revoke a frozen snapshot. Wait for the next
           // bounded recheck, then restart this stage under the same publication.
-          if (
-            [
-              "cursor_expired_refetch",
-              "cursor_policy_changed_refetch",
-              "wall_publication_changed_during_read",
-            ].includes(problem.code)
-          )
+          if (["cursor_expired_refetch", "cursor_policy_changed_refetch"].includes(problem.code))
             recovery.current = "page";
           else if (mode !== "frozen" && ["snapshot_expired_refetch", "snapshot_revoked_refetch"].includes(problem.code))
             recovery.current = "cycle";
@@ -501,7 +515,7 @@ function WallDisplay({
           {error && (
             <>
               <h1>Public live wall</h1>
-              <Failure error={error} />
+              <Failure error={error} previousSnapshot={lastVerified.current} />
             </>
           )}
           {content?.kind === "board" && (

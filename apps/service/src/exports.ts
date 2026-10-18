@@ -1,6 +1,6 @@
 import type { PublicRankComparison, RankMovement } from "./rank-comparison.js";
 import type { Actor, MetricRegistry, MetricResult, PendingCount } from "@pick-your-ai/contracts";
-import { publicScopeSchemaVersion } from "@pick-your-ai/contracts";
+import { publicRoleScopeSchemaVersion } from "@pick-your-ai/contracts";
 import { PublicReadError, safePublicUrl, type PublicRead, type PublicDiagnostic } from "./public-source.js";
 
 /** Serialization limits, not policy eligibility or source-publication approval. */
@@ -110,8 +110,9 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
   const evidence = [...ids].sort().map(serializeEvidence);
   const pendingEvidence = [...pendingIds].sort().map(serializeEvidence);
   const snapshot = read.selected.snapshot;
-  const extendedScope = read.selected.scope.schemaVersion === publicScopeSchemaVersion;
-  const exportVersion = extendedScope ? "public-export/v2" : "public-export/v1";
+  const extendedScope = read.selected.scope.schemaVersion !== undefined;
+  const roleScope = read.selected.scope.schemaVersion === publicRoleScopeSchemaVersion;
+  const exportVersion = roleScope ? "public-export/v3" : extendedScope ? "public-export/v2" : "public-export/v1";
   // Deliberately omit raw/provider fields, display names, internal event IDs and control lists.
   const document = {
     ...(board.comparison === undefined ? {} : { comparison: board.comparison }),
@@ -165,6 +166,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     "repository",
     "workstream",
     ...(extendedScope ? ["scope_schema_version", "context", "projects"] : []),
+    ...(roleScope ? ["roles"] : []),
     "start",
     "end",
     "metric",
@@ -210,6 +212,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     s.repository,
     s.workstream,
     ...(extendedScope ? [s.schemaVersion!, s.context!, boundedJson(s.projects!)] : []),
+    ...(roleScope ? [boundedJson(s.roles!)] : []),
     s.start,
     s.end,
     board.metric.id,

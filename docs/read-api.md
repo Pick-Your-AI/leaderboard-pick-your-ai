@@ -110,6 +110,14 @@ back or trigger collection. Extended scopes use `public-scope/v2`, public API
 envelopes use `public-read/v2`, and all scope dimensions remain bound through pins,
 cursors, comparison windows and shared links.
 
+An optional comma-separated `role` selects an exact approved union of contribution
+roles through the separate [public role contract](public-role-scopes.md). Nonempty
+role selections use `public-scope/v3`, `public-read/v3` and `public-export/v3`, with
+explicit context, Projects and roles. Default and membership-only bytes remain
+unchanged. Contribution roles grant no protected service authority. Missing role
+materializations cannot fall back to an unfiltered head, and role identity remains
+bound through pins, cursors, proof projection, comparison receipts and every link.
+
 `limit` is 1–100 (default 50). Signed cursors bind exact scope, metric, limit,
 snapshot, current policy version and offset. Cursors expire within 10–15 minutes;
 deployment restart/key rotation may expire them earlier. Supply the original query

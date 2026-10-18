@@ -1,6 +1,6 @@
 import React, { useEffect, useId, useState } from "react";
 import { useScope } from "../lib/hooks.ts";
-import { formatDateTime } from "../lib/format.ts";
+import { TimeZoneOptions, WindowBounds } from "./DisplayTimeZone.tsx";
 import type { PeriodPreset, Scope, ScopeIssue, TimeWindow } from "../lib/scope.ts";
 import { getMetricUi } from "../data/registry.ts";
 import { projects, repositories, snapshots } from "../data/source.ts";
@@ -207,20 +207,33 @@ export function ScopeBar({
             </select>
           </label>
         )}
+        <label>
+          <span>Display timezone</span>
+          <select value={scope.timeZone} onChange={(event) => update({ timeZone: event.target.value })}>
+            <TimeZoneOptions selected={scope.timeZone} />
+          </select>
+        </label>
       </div>
       {timeWindow && (
-        <p className="scope-window">
-          <span className="muted">Window:</span> {timeWindow.label} ·{" "}
-          {timeWindow.start ? (
-            <time dateTime={timeWindow.start.toISOString()}>{formatDateTime(timeWindow.start.toISOString())}</time>
-          ) : (
-            "start of known history"
-          )}{" "}
-          to <time dateTime={timeWindow.end.toISOString()}>{formatDateTime(timeWindow.end.toISOString())}</time>, end
-          exclusive ·{" "}
-          {scope.actor === "user" ? "user accounts" : scope.actor === "automation" ? "automation only" : "all activity"}
-        </p>
+        <div className="scope-window">
+          <p>
+            <span className="muted">Window:</span> {timeWindow.label} ·{" "}
+            {scope.actor === "user"
+              ? "user accounts"
+              : scope.actor === "automation"
+                ? "automation only"
+                : "all activity"}
+          </p>
+          <WindowBounds
+            start={timeWindow.start?.toISOString() ?? null}
+            end={timeWindow.end.toISOString()}
+            timeZone={scope.timeZone}
+          />
+        </div>
       )}
+      <p className="small">
+        Display timezone changes the clock labels. Date inputs, calendar periods and counting boundaries use UTC.
+      </p>
     </section>
   );
 }
