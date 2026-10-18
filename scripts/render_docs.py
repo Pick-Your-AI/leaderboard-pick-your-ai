@@ -103,7 +103,8 @@ This repository contains the complete delivery baseline: **{len(epics)} epics, {
 - [Product scope](docs/PRODUCT.md) · [Delivery plan and complete task list](docs/DELIVERY_PLAN.md)
 - [Metric catalog](docs/METRICS.md) · [UI concept](docs/UI.md) · [Architecture](docs/ARCHITECTURE.md)
 - [Contribution and ownership](CONTRIBUTING.md) · [Governance](docs/GOVERNANCE.md)
-- [Source audit](docs/SOURCE_AUDIT.md) · [Release and operations plan](docs/OPERATIONS_PLAN.md)
+- [Organization boundaries and current inventory](docs/organization-boundaries.md) · [Historical source audit](docs/SOURCE_AUDIT.md)
+- [Release and operations plan](docs/OPERATIONS_PLAN.md)
 
 The proposed product name is **PickYour.AI Credits**, with the tagline **Contributions, with evidence.** Recognition covers PRs, code and deletions, review, issues, triage, planning, research, documentation, design, accessibility, testing, maintenance and community work. There is no universal contributor score. Every board exposes its unit, period, source coverage and counting policy; observed activity, accepted outcomes and reviewed recognition remain distinct.
 
@@ -125,7 +126,7 @@ These checks cover planning integrity, mappings, dependency cycles, local links 
 
 ## Repository boundaries
 
-The [research repository](https://github.com/Pick-Your-AI/pick-your-ai-research) owns research decisions and its imported v1 contracts. The [website repository](https://github.com/Pick-Your-AI/pickyour.ai) owns the builder. The [organization repository](https://github.com/Pick-Your-AI/.github) owns shared guidance. This repository owns contributor-recognition contracts and the future service. Existing owners, source issues and native relationships remain authoritative.
+The [research repository](https://github.com/Pick-Your-AI/pick-your-ai-research) owns research decisions and its frozen builder v1 contracts. The [website repository](https://github.com/Pick-Your-AI/pickyour.ai) owns the web builder; the [Android](https://github.com/Pick-Your-AI/pick-your-ai-android) and [Apple](https://github.com/Pick-Your-AI/pick-your-ai-apple) repositories own their native applications. The [organization repository](https://github.com/Pick-Your-AI/.github) owns shared guidance. This repository owns contributor-recognition contracts, the local runtime and public-service delivery. The [dated organization inventory](docs/organization-boundaries.md) records stable identifiers and existing work. Live owners, source issues and native relationships remain authoritative.
 
 The structured plan lives in [planning/](planning/README.md). See [local runtime setup](docs/runtime-foundation.md) for Node.js 24 startup, database migrations and explicitly synthetic fixtures, and [ingestion operations](docs/INGESTION.md) for the separate collector primitives. Public hosting and the proposed contributor subdomain require their own approved decisions and operational proof.
 
@@ -459,6 +460,8 @@ A release is complete only with the accepted deployment decision, real public UR
 
 The planning audit was captured from {audit['snapshot']['started_at']} to {audit['snapshot']['finished_at']}. It covered the three visible public repositories and five Projects listed below, with {audit['snapshot']['issue_pr_count']} issue/PR records in the source inventory. This is a historical snapshot, not a live inventory or a claim about undisclosed private repositories.
 
+The [2026-10-18 organization boundary inventory](organization-boundaries.md) separately reconciles all six visible public repositories and six Projects, their stable identifiers, configured fields and existing ownership. The historical counts below remain unchanged.
+
 {table(['Repository', 'Reviewed revision', 'Issues', 'PRs'], [(f"[{r['name']}]({r['url']})", r.get('tree_sha','unknown'), r.get('issues_total','unknown'), r.get('pull_requests_total','unknown')) for r in audit['repositories']])}
 
 {bullet(f"[Project {p['number']}]({p['url']})" for p in audit['projects'])}
@@ -496,6 +499,7 @@ These files are the versioned source for generated documentation. GitHub issues 
 | [decision-register.json](decision-register.json) | Proposed decisions, accountable roles and prerequisites |
 | [release-manifest.json](release-manifest.json) | Mandatory foundations, product journey, conditional modules and live readback |
 | [source-audit.json](source-audit.json) | Historical public organization inventory and explicit limits |
+| [organization-inventory-2026-10-18.json](organization-inventory-2026-10-18.json) | Dated complete public repository/issue/PR inventory, six Project identities, all configured field IDs and existing owner roles |
 | [metric-api-evidence.json](metric-api-evidence.json) | Time-bounded official API references and source capability findings |
 | [plan-review-resolution.json](plan-review-resolution.json) | Review findings and their planned resolutions |
 
