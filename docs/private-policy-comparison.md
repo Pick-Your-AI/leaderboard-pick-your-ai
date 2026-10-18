@@ -1,6 +1,6 @@
 # Private frozen-policy comparison candidate
 
-Refs [#115](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/115), [#122](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/122) and the private audit boundary of [#83](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/83). This bounded executable preview is partial implementation evidence. It does not satisfy designated policy approval, a public policy release, published release notes, a rollout/rollback drill, source capability approval or deployment acceptance.
+Refs [#115](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/115), [#122](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/122) and optional investigation of [#83](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/83). This bounded executable preview is partial implementation evidence. It does not satisfy designated policy approval, a public policy release, published release notes, a rollout/rollback drill, source capability approval or deployment acceptance.
 
 ## Durable input and replay
 
@@ -48,3 +48,5 @@ Expired records are pruned on every capture and preview request; expired data ca
 ## Synthetic verification
 
 `apps/controls/test/policy-comparison.test.mjs` uses the actual metric engine and authenticated HTTP controls to cover exact restart/replay, inclusion/rank/value causes, correction exclusions, immutable policy versions, absence of activation/public leakage, current privacy redaction, future-correction cutoff handling, revocation at both awaited authority boundaries, absent/stale/thenable authority fences, integrity failures, expiry, strict input limits, concurrency and transactional capacity failures. `apps/pipeline/test/pipeline.test.mjs` proves actual pipeline capture, private snapshot-bound audit, restart replay, public projection separation, source-generation revocation, source lock ordering and successful public confirmation when private registry capacity is exhausted. `apps/controls/test/policy-preview-authority.test.mjs` exercises the versioned local cache, exact identity binding, expiry and synchronous revocation. No test fixture is real contribution or approval evidence.
+
+Required publication arithmetic and inclusion/exclusion persistence is separate: see [Required private aggregate explanations](required-aggregate-explanations.md). A preview becoming unavailable or expiring cannot remove that required record.

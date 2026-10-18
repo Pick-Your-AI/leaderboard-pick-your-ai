@@ -18,6 +18,8 @@ Policies can count canonical actions, one actor/artifact participation, or disti
 
 Count/sum rows carry evidence IDs, effective/observation times, unit, definition version, sample count, value state and pending count. Pending never enters the ranked numerator. Count, sum, ratio and duration are separate operations; there is no overall score or weighted combination. Missing sum quantities stay unknown. Numeric inputs and totals must be finite and nonnegative. Internal `audit` entries record inclusion and exclusion reasons and may contain suppressed fact/actor IDs: they require authorized access and must not be serialized as public API responses. Public-facing actor rows exclude suppression everywhere and neutralize deleted account logins.
 
+Required pipeline persistence is documented in [Required private aggregate explanations](required-aggregate-explanations.md). It is independent of optional preview retention/capacity, and blocks publication confirmation when exact arithmetic/audit storage fails. Nonselected evidence classes, future observations and unknown ratio outcomes have explicit audit reasons.
+
 ## Scope and coverage
 
 `resolveMetricWindow` defaults to 30 days and supports 7/30/90-day rolling windows, all-time, calendar month/quarter/year and explicit custom bounds. It emits exact UTC instants and a period label. Boundaries are half-open. Inputs with local offsets, invalid dates, reversed bounds or windows beyond the frozen cutoff fail. DST never changes the number of hours in a rolling UTC day.
@@ -48,7 +50,7 @@ The synthetic tests cover evidence reconciliation, 14 accepted plus 3 pending, d
 
 | Work package | Implemented evidence | Acceptance still required |
 | --- | --- | --- |
-| #83 independent aggregates | Versioned independent count/sum/ratio/distribution candidates and evidence receipts; pending separated | Source-specific normalizers and real atomic snapshot/read API integration; affected-owner acceptance |
+| #83 independent aggregates | Independent count/sum/ratio/distribution calculations, required snapshot-bound private arithmetic/audit persistence, publication/replay integrity gates and separate pending counts; actual pipeline synthetic tests | Reviewed source-specific evidence, production integration/operational acceptance and affected-owner acceptance |
 | #91 filters | Exact UTC presets/custom windows, scope/context/role/actor filters, Project dedupe | Verified repository/Project/workstream history and UI/API presentation of exact bounds |
 | #97 ranks and movement | Dense ties, stable ordering, compatible-period gates and backfill/correction reasons | Runtime snapshot metadata, freshness/coverage integration and UI behavior against live sources |
 | #98 participation | Coverage-aware first qualifying contribution, active weeks/denominator, sample/censoring diagnostics | Approved history origin, sample thresholds, diagnostic policies and source readiness evidence |
