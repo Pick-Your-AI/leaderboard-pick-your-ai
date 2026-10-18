@@ -5,6 +5,7 @@ import { requireThat } from "../../controls/src/store.mjs";
 import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-metadata.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
+import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -111,6 +112,12 @@ export async function createPipeline(options) {
       fail("synthetic_data_forbidden_in_public_runtime");
   };
   const config = copy(options.config ?? { version: "unconfigured", repositories: [], policies: [], scopes: [] });
+  const normalizationPolicySignature = digest([
+    "current-state-selection-v1",
+    dataMode,
+    Array.isArray(config.policies) ? config.policies.map((item) => item?.signature) : [],
+  ]);
+  const normalizationSignature = digest([normalizationDocumentVersion, normalizationPolicySignature]);
   const verifyConfig = options.verifyConfiguration ?? (async () => false);
   const authorizeCorrection = options.authorizeCorrection ?? (async () => false);
   const now = options.now ?? (() => new Date().toISOString());
@@ -175,11 +182,13 @@ export async function createPipeline(options) {
           await tx.query(
             `SELECT n.document,n.document_hash FROM leaderboard_pipeline.normalizations AS n
            JOIN leaderboard_ingestion.source_facts AS f ON f.fact_key=n.fact_key
-           WHERE n.document_hash=ANY($1::text[]) AND n.policy_signature=$2
+           WHERE n.document_hash=ANY($1::text[]) AND n.policy_signature=ANY($2::text[])
              AND f.repository_id=ANY($3::bigint[]) LIMIT 10001 FOR SHARE OF n`,
             [
               binding.normalizationHashes,
-              digest(["current-state-selection-v1", dataMode, config.policies.map((item) => item.signature)]),
+              // Legacy documents still bind historical frozen actor evidence;
+              // only fresh runs require the new private-attribution projection.
+              [normalizationSignature, normalizationPolicySignature],
               authorization.sources.map((source) => source.repositoryId),
             ],
           )
@@ -642,7 +651,7 @@ export async function createPipeline(options) {
       )
     ).rows;
     if (unlabeled.length) fail("cross_mode_or_unproven_source_data");
-    const signature = digest(["current-state-selection-v1", dataMode, config.policies.map((item) => item.signature)]);
+    const signature = normalizationSignature;
     const outputs = [];
     for (const row of sourceRows) {
       const cached = (
@@ -751,6 +760,7 @@ export async function createPipeline(options) {
         facts: output.facts,
         actors: output.actors,
         evidence: output.evidence,
+        ...privateAttribution(output, row),
         reasons: Array.isArray(output.reasons)
           ? output.reasons.map((reason) =>
               typeof reason === "string" && /^[a-z0-9_:-]{1,100}$/.test(reason) ? reason : "normalization_unavailable",
