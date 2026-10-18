@@ -138,6 +138,27 @@ async function harness(t, options = {}) {
   };
 }
 
+test("malformed CSRF token bytes are rejected without mutation and leave the valid session usable", async (t) => {
+  const h = await harness(t);
+  const user = await h.login("1");
+  const before = h.store.read();
+  const wrongAscii = (user.csrf[0] === "A" ? "B" : "A") + user.csrf.slice(1);
+  for (const csrf of ["é".repeat(user.csrf.length), user.csrf.slice(1) + "é", wrongAscii, ""]) {
+    const rejected = await h.call("/controls/requests", {
+      user,
+      method: "POST",
+      input: fixture(),
+      headers: { "x-csrf-token": csrf },
+    });
+    assert.equal(rejected.status, 403);
+    assert.equal(rejected.data.error, "CSRF rejected");
+    assert.deepEqual(h.store.read(), before);
+  }
+  const accepted = await h.call("/controls/requests", { user, method: "POST", input: fixture() });
+  assert.equal(accepted.status, 201);
+  assert.equal(Object.keys(h.store.read().requests).length, 1);
+});
+
 test("anonymous snapshot is available without login and no private state is exposed", async (t) => {
   const h = await harness(t);
   assert.equal((await h.call("/controls/public")).status, 200);
