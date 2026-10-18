@@ -95,6 +95,32 @@ node --test --test-isolation=none packages/metrics/test/participation-scale.test
 
 `comparePolicies` runs both versions on the same frozen input/scope and returns value, rank and included/excluded evidence differences, along with both complete audit trails and policy identifiers. Supplying the prior policy again deterministically reconstructs its prior candidate output; rollback does not overwrite historical identifiers.
 
+The comparison indexes the internally unique rows by actor and each actor's
+old/new evidence IDs by membership. It still sorts the union of actor IDs and
+filters the original evidence arrays, preserving their order. A changed rank
+alone or changed evidence with identical values/ranks remains a change. Zero and
+unknown stay distinct; a missing row versus a pending-only row with no value,
+rank or value evidence still produces no change. Both original aggregates and
+their audits remain intact.
+
+The synthetic [policy comparison scale cases](../packages/metrics/test/policy-comparison-scale.test.mjs)
+check all 10,000 contributor changes and bound actual generated-row identity
+reads: 100,060,000 before indexing, 50,000 after. A separate contributor with
+4,000 evidence records falls from 10,013,000 to 18,000 evidence-array element
+reads. The synchronous test observer counts reads made by both scans and indexes,
+requires the complete expected row count, and restores ordinary row descriptors
+and the array prototype before returning. The inputs and policies are frozen.
+Additional cases cover unknown/zero values, actors present on one side, evidence
+changes without numeric changes, rank-only changes, pending-only omission,
+permuted replay, rollback and policy identity guards. These are operation-count
+regressions, not host timing or production latency claims. Actor sorting and both
+complete aggregate preparations keep their existing costs; the new indexes use
+one entry per actor and evidence sets for the actor currently being compared.
+
+```sh
+node --test --test-isolation=none packages/metrics/test/policy-comparison-scale.test.mjs
+```
+
 `planPolicyRelease` requires a designated approver, receipt and release notes and constructs a version/signature transition manifest. The service must authenticate that actor, supply its protected approver allowlist, persist the manifest and release notes, perform a compare-and-swap policy transition, and retain rollback history. This pure function neither changes an active policy nor publishes release notes nor enables public metrics. The package does not provide a database lock, authorization server or deployment gate.
 
 ## Acceptance status and validation
