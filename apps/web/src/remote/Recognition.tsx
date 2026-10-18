@@ -9,6 +9,7 @@ import {
   milestoneParameters,
   recognitionParameters,
   spotlights,
+  supportsEditorialScope,
 } from "./recognition-client.ts";
 
 type Load<T> = { key: string; value?: T; error?: boolean };
@@ -266,16 +267,7 @@ export function EditorialSpotlights({
   organization: string;
   selected: Selection;
 }) {
-  const supported =
-    (selected.actors ?? "all") === "all" &&
-    selected.organization === organization &&
-    !selected.repository &&
-    !selected.workstream &&
-    !selected.start &&
-    !selected.end &&
-    !selected.snapshot &&
-    !selected.category &&
-    !selected.search;
+  const supported = supportsEditorialScope(selected, organization);
   const key = JSON.stringify([controlsBase, organization, selected]);
   const state = useCurrentRead(key, async (signal) => {
     if (!supported) throw new ReadFailure(400, "editorial_scope_unavailable");
