@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { RankCell } from "../components/BoardTable.tsx";
 import { Layout, PageHeader, SyntheticDataBanner } from "../components/Layout.tsx";
+import { ScopeIssues } from "../components/ScopeBar.tsx";
 import { ErrorState, FreshnessIndicator, SnapshotNotices } from "../components/status.tsx";
 import { getMetric } from "../data/registry.ts";
 import { listContributors, SourceError } from "../data/source.ts";
@@ -46,7 +47,7 @@ export function LivePage({ standalone = false }: { standalone?: boolean }) {
 }
 
 function WallConfigurator() {
-  const { scope } = useScope();
+  const { scope, issues } = useScope();
   const latest = useLatestSnapshotId();
   const [mode, setMode] = useState<WallMode>("cycle");
   const [boards, setBoards] = useState<string[]>(wallMetricIds().slice(0, 3));
@@ -66,6 +67,7 @@ function WallConfigurator() {
           only public data is shown.
         </p>
       </PageHeader>
+      <ScopeIssues issues={issues} />
       <form className="wall-config" onSubmit={(event) => event.preventDefault()}>
         <fieldset>
           <legend>Mode</legend>
@@ -165,7 +167,7 @@ function WallPage({
   interval: number;
   format: WallFormat;
 }) {
-  const { scope, params } = useScope();
+  const { scope, params, issues } = useScope();
   const latest = useLatestSnapshotId();
   const [appliedLatest, setAppliedLatest] = useState(latest);
   const [index, setIndex] = useState(0);
@@ -218,7 +220,13 @@ function WallPage({
           {announcement}
         </div>
         <main className="wall-body">
-          {content.kind === "error" && <ErrorState error={content.error} />}
+          <ScopeIssues issues={issues} />
+          {content.kind === "error" && (
+            <>
+              <h1>Live wall</h1>
+              <ErrorState error={content.error} />
+            </>
+          )}
           {content.kind === "credits" && (
             <>
               <h1>Contributors in this period</h1>

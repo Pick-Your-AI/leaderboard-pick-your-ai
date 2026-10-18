@@ -20,6 +20,8 @@ const routes = [
   "/live",
   "/live?ui=prototype&mode=cycle&boards=not-a-metric",
   "/live?ui=prototype&mode=bogus",
+  "/live?ui=prototype&mode=frozen&boards=pr_merged&snapshot=syn-r99",
+  "/live?ui=prototype&mode=frozen&boards=pr_merged&snapshot=syn-r45-failed",
   "/prototype",
   "/leaderboards/issues_opened?repo=syn-repo-research",
   "/contributors?q=nobody",

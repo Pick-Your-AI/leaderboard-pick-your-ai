@@ -228,7 +228,11 @@ test("a failed wall retains only its dated snapshot reference and retries the fr
   }
 });
 
-for (const query of ["mode=cycle&boards=not-a-metric", "mode=bogus"] as const) {
+for (const query of [
+  "mode=cycle&boards=not-a-metric",
+  "mode=bogus",
+  "mode=frozen&boards=pr_merged&snapshot=syn-r45-failed",
+] as const) {
   test(`invalid prototype wall ${query} keeps its banner, landmarks and narrow-screen accessibility`, async ({
     page,
   }) => {
@@ -243,6 +247,19 @@ for (const query of ["mode=cycle&boards=not-a-metric", "mode=bogus"] as const) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   });
 }
+
+test("an unpublished prototype wall pin shows the canonical fallback warning", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 900 });
+  await page.clock.resume();
+  await page.goto("/live?ui=prototype&mode=frozen&boards=pr_merged&snapshot=syn-r99");
+  await expect(page.getByRole("complementary", { name: "Synthetic data notice" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText(
+    'Snapshot "syn-r99" is not published. Showing the latest published snapshot.',
+  );
+  await expect(page.getByRole("table")).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
 
 test("a response rejected by the registry cannot replace the last verified snapshot date", async ({ page }) => {
   const api = await evidenceService(page);
