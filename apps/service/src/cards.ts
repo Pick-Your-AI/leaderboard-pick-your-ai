@@ -7,6 +7,19 @@ const escape = (value: string) =>
     (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!,
   );
 
+/** A source page may support several distinct contributions, but is still one public link. */
+function publicSourceLinks(read: PublicRead, evidenceIds: string[]): string[] {
+  const selectedIds = new Set(evidenceIds);
+  return [
+    ...new Set(
+      read.selected.evidence
+        .filter((entry) => selectedIds.has(entry.contribution.contributionId))
+        .map((entry) => safePublicUrl(entry.artifact.publicUrl))
+        .filter((url): url is string => url !== null),
+    ),
+  ];
+}
+
 /** Definition text is registry context; diagnostics are supplied observations, never inferred counts. */
 function measurementContext(
   read: PublicRead,
@@ -67,14 +80,7 @@ export function renderContributorCard(
   if (read.actorFilter && read.actorFilter !== "all") params.set("actors", read.actorFilter);
   params.set("ui", "api");
   const href = `/contributors/${encodeURIComponent(actorId)}?${params}`;
-  const evidence = read.selected.evidence.filter((entry) =>
-    row.evidenceIds.includes(entry.contribution.contributionId),
-  );
-  const sources = [
-    ...new Set(
-      evidence.map((entry) => safePublicUrl(entry.artifact.publicUrl)).filter((url): url is string => url !== null),
-    ),
-  ];
+  const sources = publicSourceLinks(read, row.evidenceIds);
   const methodology = read.selected.methodology?.find((entry) => entry.metricId === metric.id);
   const policy = methodology
     ? `${methodology.policyVersion} (${methodology.policySignature})`
@@ -106,10 +112,7 @@ export function renderContributorCardImage(
         .join("; "),
     );
   const method = read.selected.methodology?.find((entry) => entry.metricId === metric.id);
-  const sources = read.selected.evidence
-    .filter((entry) => row.evidenceIds.includes(entry.contribution.contributionId))
-    .map((entry) => safePublicUrl(entry.artifact.publicUrl))
-    .filter((url): url is string => url !== null);
+  const sources = publicSourceLinks(read, row.evidenceIds);
   const lines = [
     `${metric.name}: ${row.result.value ?? row.result.state} (${row.result.state})`,
     actor.actor.login ?? actorId,

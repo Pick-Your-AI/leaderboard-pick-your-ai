@@ -87,15 +87,7 @@ export function parseScope(search: string, context: ScopeContext = {}): { scope:
   const scope: Scope = { ...defaultScope, repos: [], projects: [] };
 
   const period = params.get("period");
-  if (period !== null) {
-    if (oneOf(periodPresets, period)) scope.period = period;
-    else
-      issues.push({
-        param: "period",
-        value: period,
-        message: `Unknown period "${period}". Showing the last 30 days instead.`,
-      });
-  }
+  if (period !== null && oneOf(periodPresets, period)) scope.period = period;
 
   const from = params.get("from");
   const to = params.get("to");
@@ -108,14 +100,14 @@ export function parseScope(search: string, context: ScopeContext = {}): { scope:
         value: `${from ?? ""}..${to ?? ""}`,
         message: "A custom window needs both from and to as YYYY-MM-DD UTC dates. Showing the last 30 days instead.",
       });
-      if (scope.period === "custom") scope.period = "30d";
+      scope.period = "30d";
     } else if (from! >= to!) {
       issues.push({
         param: "from/to",
         value: `${from}..${to}`,
         message: "A custom window is half-open and needs from earlier than to. Showing the last 30 days instead.",
       });
-      if (scope.period === "custom") scope.period = "30d";
+      scope.period = "30d";
     } else {
       scope.period = "custom";
       scope.from = from;
@@ -128,6 +120,17 @@ export function parseScope(search: string, context: ScopeContext = {}): { scope:
       message: "A custom period needs from and to dates. Showing the last 30 days instead.",
     });
     scope.period = "30d";
+  }
+
+  if (period !== null && !oneOf(periodPresets, period)) {
+    issues.unshift({
+      param: "period",
+      value: period,
+      message:
+        scope.period === "custom"
+          ? `Unknown period "${period}". Using the valid custom UTC dates instead.`
+          : `Unknown period "${period}". Showing the last 30 days instead.`,
+    });
   }
 
   const checkIds = (name: "repo" | "project", known: readonly string[] | undefined, label: string): string[] => {
