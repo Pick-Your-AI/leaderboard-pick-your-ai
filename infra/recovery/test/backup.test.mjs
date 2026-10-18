@@ -104,3 +104,35 @@ test("restore authenticates before mutation, reapplies suppression before verifi
   assert.deepEqual(operations, []);
   await assert.rejects(restoreBackup({ ...args, expectedState: {} }), /does not match/);
 });
+
+test("expiry bypass still validates the observation clock", () => {
+  const envelope = encryptBackup(input());
+  for (const invalid of [undefined, null, "invalid", ""]) {
+    assert.throws(() => decryptBackup(envelope, { key, now: invalid, allowExpired: true }), /timestamp/);
+  }
+});
+
+test("restore rejects incomplete safeguards and impossible evidence before mutation", async () => {
+  const operations = [];
+  const args = {
+    envelope: encryptBackup(input()),
+    key,
+    now,
+    expectedState: {},
+    observedSourceCutoff: now,
+    assertEmptyTarget: async () => operations.push("empty"),
+    restoreDatabase: async () => operations.push("restore"),
+    reapplySuppressions: async () => operations.push("suppress"),
+    inspectRestoredState: async () => ({}),
+  };
+  for (const callback of ["assertEmptyTarget", "restoreDatabase", "reapplySuppressions", "inspectRestoredState"]) {
+    await assert.rejects(restoreBackup({ ...args, [callback]: undefined }), /callbacks/);
+  }
+  await assert.rejects(restoreBackup({ ...args, expectedState: undefined }), /Expected restored state/);
+  const circular = {};
+  circular.self = circular;
+  await assert.rejects(restoreBackup({ ...args, expectedState: circular }));
+  await assert.rejects(restoreBackup({ ...args, observedSourceCutoff: "2026-10-17T12:00:01Z" }), /future/);
+  await assert.rejects(restoreBackup({ ...args, observedSourceCutoff: "2026-10-17T11:58:00Z" }), /precedes/);
+  assert.deepEqual(operations, []);
+});
