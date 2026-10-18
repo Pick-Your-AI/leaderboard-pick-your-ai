@@ -1,6 +1,6 @@
 # Snapshot-bound public rank comparison
 
-This is backend integration for [#97](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/97). Ordinary board and export responses are unchanged. An optional comparison request exposes movement only when two retained, currently authorized publications have compatible engine history. It does not recalculate published values, infer a prior rank, or authorize a source or metric.
+This is backend and public-browser integration for [#97](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/97). Ordinary board and export responses are unchanged. An optional comparison request exposes movement only when two retained, currently authorized publications have compatible engine history. It does not recalculate published values, infer a prior rank, or authorize a source or metric.
 
 ## Explicit API selection
 
@@ -9,7 +9,7 @@ This is backend integration for [#97](https://github.com/Pick-Your-AI/pick-your-
 - `compare`: the exact earlier published snapshot ID.
 - `compareStart` and `compareEnd`: optional paired half-open UTC baseline bounds. If omitted, the baseline uses the current request's exact bounds. Dates use the existing `.000Z` API format, and each bounded window is limited to 366 days.
 
-The baseline retains the same organization, repository, workstream, membership context, canonical Project selection and contribution-role union. The provider must have published both requested scopes; a query is not a request to compute a new scope. The persisted engine period, filters, policy and evidence metadata remain authoritative. In particular, matching window lengths never reinterpret `custom` windows as a named rolling period.
+The baseline retains the same complete versioned public scope: organization, repository, workstream, event-time or current membership, selected GitHub Projects and contribution roles. Only an explicitly supplied baseline interval differs. The provider must have published both requested scopes; a query is not a request to compute a new scope. The persisted engine period, filters, policy and evidence metadata remain authoritative. In particular, matching window lengths never reinterpret `custom` windows as a named rolling period.
 
 Comparison selection is bound into signed pagination cursors and snapshot-pinned share links. JSON exports contain the same safe comparison and row movement fields as the board. Requested CSV comparisons add `comparison` and `movement` columns. Requests without `compare` retain the existing output shape and cursor binding.
 
@@ -47,11 +47,25 @@ The cumulative imported-history read admits at most 10,000 retained source facts
 
 This lineage is an invalidation input, not a complete-coverage or completed-import receipt. Existing late-evidence and changed/removed evidence-signature checks still detect historical changes discovered through ordinary reconciliation. Source capability, publication windows, coverage and current privacy authority remain independently required.
 
+## Public-browser selection and display
+
+API-backed metric boards and project boards expose an explicit baseline form. The reader enters the exact published baseline snapshot ID and can supply its paired UTC interval. Leaving both baseline dates blank requests the displayed board's exact interval; it does not guess a preceding period. Submitting a baseline pins the currently displayed snapshot, retains the metric, source scope and actor filter, and clears the old cursor and evidence drawer.
+
+The baseline identity, generation time and requested interval are shown with each comparison. Rows preserve the service's dense ranks across cursor pages and show accessible text for upward movement, downward movement, unchanged rank, a new entrant with no previous rank, or an unavailable comparison with its stated reason. An unavailable result has no numeric fallback. Publication generation time is provenance; the service's retained comparison cutoffs determine period ordering.
+
+Board and project permalinks, cursor navigation, and the background of an evidence drawer retain the explicit baseline selection. Ordinary health, live update, proof, contributor, activity and catalog requests do not receive comparison parameters. Navigating to those other pages drops the comparison selection while retaining the displayed current-snapshot pin. The dedicated Live wall keeps its existing separate scope controls.
+
+The client validates the baseline identity, both exact canonical versioned scopes, public timestamps and every movement-to-actor binding before display. Missing or downgraded scope versions, changed membership/Project/role fields and additional private fields invalidate a comparison. Changing the primary scope clears an unchanged old snapshot pin and cursor while retaining the explicitly requested baseline; an unpublished replacement scope remains unavailable. Comparable and entrant states require a ranked numeric result and an enabled matching ranking policy. Comparable deltas are safe integers with a possible positive prior rank; entrant and unavailable deltas are null. Unknown or contradictory shapes and unexpected private comparison fields invalidate the response. The client does not reconstruct ranks from row order, subtract values, or infer a hidden contributor's previous position.
+
+JSON and CSV downloads retain the currently displayed snapshot, metric, scope, actor filter, baseline and page cursor. Both formats pass the same strict comparison validation before a download is offered. CSV comparisons retain the selected `public-export/v1`, `public-export/v2` or `public-export/v3` scope columns and have exactly two additional comparison columns with identical comparison metadata on the metadata record and every row; the metadata record has no movement. Existing byte, field, evidence, duplicate-key and spreadsheet-formula safeguards remain in force. A requested comparison cannot silently become an ordinary export.
+
+A new selection, a second download, applying a held snapshot, a privacy recheck, navigation, hiding the page, or unmounting cancels a pending download. A late response cannot offer a file after its controller is no longer current. The existing focus and 20-second visible-page publication checks revalidate both sides of a comparison through the atomic service read; failed reads clear the displayed rows and movement.
+
 ## Current implementation limits
 
 The pipeline publishes fixed custom/all-time scopes and opt-in named-period scopes with incomplete historical coverage. This change preserves those facts: it does not certify historical completeness, reinterpret legacy custom scopes or produce artificial progress. Positive movement/new-entrant API tests use actual engine-generated synthetic named-period aggregates with complete synthetic coverage. The actual pipeline tests use persisted fixed-window and named-period snapshots and assert `insufficient_history`.
 
-The opt-in named-period publisher is described below. A connected complete-coverage producer and remote Web presentation retain their separate #75/#91/#97 integration work. The persisted reconciliation lineage corrects the ordinary-ingestion marker boundary but does not certify source completeness. This backend slice alone does not close #97, and no production deployment requirement has been added to its automated-validation gate.
+The opt-in named-period publisher is described below, and the public browser consumes the service's explicit compatibility result. A connected complete-coverage producer retains its separate #75/#91/#97 integration work. The persisted reconciliation lineage corrects the ordinary-ingestion marker boundary but does not certify source completeness. This integration alone does not close #97, and no production deployment requirement has been added to its automated-validation gate.
 
 ## Validation
 
@@ -59,6 +73,10 @@ The opt-in named-period publisher is described below. A connected complete-cover
 - `node --test --test-concurrency=1 apps/pipeline/test/rank-comparison.test.mjs`: actual persistence/restart, immutable legacy replay, shared transaction/no nested connection, authority changes during pairing and confirmed-digest tamper rejection.
 - `node --test --test-concurrency=1 apps/pipeline/test/reconciliation-lineage*.test.mjs`: actual ordinary ingestion, correction capture and retry, partial/failed/resumed imports, current-state refresh, audit, frozen cutoffs and cumulative history overflow, while every published coverage record remains partial.
 - `node --test --test-concurrency=1 apps/pipeline/test/reconciliation-recovery.test.mjs`: a synthetic prior-producer marker passes through the actual SQL publisher before interrupted private confirmation; database restart recovers the exact receipt, while missing, altered or substituted frozen records stay unavailable. The existing webhook-dispatch cases separately retain later-correction denial.
+
+- `node --test apps/web/test/rank-comparison-client.test.mjs`: actual engine/service movement and tied cursor pages; strict board and JSON/CSV intake; malformed, private, mismatched and stale export inputs; exact URL scope isolation.
+- `node --test apps/web/test/rank-comparison-scope.test.mjs`: actual engine/service comparisons for event/current membership and role scopes, complete v2/v3 board and JSON/CSV round trips, and rejection of substituted, downgraded, private and malformed comparison records.
+- `npm run test:browser -- rank-comparison.spec.ts`: real-handler baseline selection, visible movement, complete v2/v3 scope and timezone preservation, filter-change pin invalidation, evidence/history, privacy and response-lifetime journeys. The shared fixture is [rank-comparison.mjs](../tests/fixtures/rank-comparison.mjs); it derives movement from the metric engine with explicitly synthetic actors and evidence.
 
 Build workspace packages first. Fixtures are synthetic; their success establishes these executable invariants, not real-source accuracy or coverage.
 
@@ -77,7 +95,7 @@ Public identity uses the shared canonical scope key: organization/repository/wor
 No coverage certificate, reviewer acceptance or real-source evidence producer has been added. Existing complete-coverage checks require every requested repository and policy source to have complete coverage, a known history start spanning the requested bounds, a source watermark covering the selected event-window end, no missing pages, permissions or source errors, and no qualification uncertainty. The current pipeline still emits `partial`, `knownStart: null` and `historical_capability_not_certified`; a completed scan cannot satisfy those requirements. Named-period publication preserves the accepted persisted reconciliation lineage described above: ordinary fresh ingestion leaves its marker stable, while retained imports and effective corrections can change it. The marker and its immutable recovery fence do not certify source completeness. Actual persisted named-period fixtures therefore return `insufficient_history`, including after restart. No positive real-pipeline movement or new entrant is claimed.
 
 - #91: this slice connects existing rolling/calendar/all-time engine semantics to approved publisher scopes and shareable explicit UTC bounds. It tests half-open boundaries around DST and preserves fixed custom semantics. Initial UI selection, timezone presentation, Project/role/context filter UI and broader acceptance remain separate.
-- #97: immutable named-period receipts now reach the existing atomic comparison path without conflating event and observation clocks. Synthetic complete engine fixtures test fresh activity and late-history suppression. The real pipeline-shaped synthetic fixture retains partial coverage and suppresses deltas. Web presentation and truthful compatible source-history evidence remain open.
+- #97: immutable named-period receipts now reach the existing atomic comparison path without conflating event and observation clocks. Synthetic complete engine fixtures test fresh activity and late-history suppression. The real pipeline-shaped synthetic fixture retains partial coverage and suppresses deltas. The public-browser presentation above consumes these receipts; truthful compatible source-history evidence remains open.
 - #75: no history certification is inferred. Actual complete source/definition coverage, freshness acceptance and affected-owner review remain required separately.
 
 Additional synthetic checks:

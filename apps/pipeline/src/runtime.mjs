@@ -89,7 +89,18 @@ const sourceActorEvidence = (allowRenames = true) => ({
   allowRenames,
   hasRenames: false,
 });
-function retainSourceActor(evidence, actor, source, serialize) {
+function retainSourceActor(evidence, actor, source, serialize, contracts) {
+  // Cached and frozen documents keep the source observation's original cutoff.
+  // Check every retained copy before joining actors; a later engine cutoff or
+  // another valid copy cannot authorize a review that this source did not know.
+  if (actor.kind === "service_account" || actor.serviceAccountClassification !== undefined) {
+    const classification = contracts.serviceAccountClassificationSchema.safeParse(actor.serviceAccountClassification);
+    if (
+      !classification.success ||
+      !(contracts.compareSourceInstants(classification.data.reviewedAt, source.observedAt) <= 0)
+    )
+      return false;
+  }
   // Conflicting aliases within one run or at one observation time are ambiguous,
   // regardless of row order or an intervening observation from a later run.
   const keys = [JSON.stringify([actor.id, "run", source.runId]), JSON.stringify([actor.id, "time", source.observedAt])];
@@ -420,7 +431,7 @@ export async function createPipeline(options) {
           assertDataMode(row.document);
           for (const actor of row.document.actors) {
             requireThat(
-              retainSourceActor(identity, actor, sourceBinding(row), canonical),
+              retainSourceActor(identity, actor, sourceBinding(row), canonical, c.contracts),
               409,
               "Frozen identity evidence conflict",
             );
@@ -1319,7 +1330,7 @@ export async function createPipeline(options) {
       evidence = new Map();
     for (const output of outputs) {
       for (const actor of output.actors) {
-        if (!retainSourceActor(identity, actor, actorSources.get(output), c.metrics.stableJSON))
+        if (!retainSourceActor(identity, actor, actorSources.get(output), c.metrics.stableJSON, c.contracts))
           fail("conflicting_actor_metadata");
       }
       for (const entry of output.evidence) {
