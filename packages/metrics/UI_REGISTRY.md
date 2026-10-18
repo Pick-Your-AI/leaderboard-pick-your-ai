@@ -29,7 +29,7 @@ Every definition has a unique metadata entry. `maturity` is one of:
   synthetic verification case. Seven pairs correspond to the existing web
   fixture adapters; `items_triaged` has engine grouping and synthetic
   normalizer-to-engine verification, with no prototype data adapter.
-  The 20 protected domain adapters also have source-to-engine verification for
+  The 21 protected domain adapters also have source-to-engine verification for
   their canonical qualified units and exact event clocks.
   `localization` additionally has source-to-pipeline and public-evidence
   regressions for qualified PR/language/category units on the source merge
@@ -54,7 +54,7 @@ checks its own data-adapter support; engine-only triage is not silently enabled
 in the prototype, and fixture existence cannot invent a registry capability.
 
 The [domain evidence adapters](../../docs/domain-recognition.md#qualification-and-canonical-units)
-advertise `qualified/acceptedAt` for 16 metrics and `qualified/occurredAt` for
+advertise `qualified/acceptedAt` for 17 metrics and `qualified/occurredAt` for
 documentation, tests, freshness checks and security. Documentation and tests use
 merge time, freshness uses check time, and security uses public disclosure time.
 Their synthetic regressions
@@ -63,7 +63,7 @@ unit in the metric engine, and preserve that count through repeated reviews and
 observation delivery. Each event is included only in its half-open clock window.
 Documentation adds this domain combination while retaining its existing
 `qualified/acceptedAt` prototype default and overview/wall choices. The prototype
-rejects the domain-only pair and all 19 other domain adapters remain not measured
+rejects the domain-only pair and all 20 other domain adapters remain not measured
 there. These additions preserve all 98 definitions, source classes and public
 enablement flags; they supply no installation or policy approval.
 
