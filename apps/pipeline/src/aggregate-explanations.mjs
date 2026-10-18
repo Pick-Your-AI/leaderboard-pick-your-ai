@@ -47,15 +47,36 @@ function identityAuthorization(authorization) {
   const binding = authorization.identityEvidence;
   check(
     binding?.schemaVersion === "pipeline-identity-evidence/v1" &&
-      Object.keys(binding).every((key) => ["schemaVersion", "normalizationHashes"].includes(key)) &&
+      Object.keys(binding).every((key) =>
+        ["schemaVersion", "normalizationHashes", "normalizationSources"].includes(key),
+      ) &&
       Array.isArray(binding.normalizationHashes) &&
       binding.normalizationHashes.length <= 10000 &&
-      new Set(binding.normalizationHashes).size === binding.normalizationHashes.length,
+      new Set(binding.normalizationHashes).size === binding.normalizationHashes.length &&
+      (binding.normalizationSources === undefined ||
+        (Array.isArray(binding.normalizationSources) && binding.normalizationSources.length <= 10000)),
+  );
+  const normalizationHashes = binding.normalizationHashes.map(hash);
+  const normalizationSources = binding.normalizationSources?.map((entry) => {
+    check(
+      entry !== null &&
+        typeof entry === "object" &&
+        Object.keys(entry).every((key) => ["factKey", "documentHash"].includes(key)),
+    );
+    return { factKey: hash(entry.factKey), documentHash: hash(entry.documentHash) };
+  });
+  const hashes = new Set(normalizationHashes);
+  check(
+    normalizationSources === undefined ||
+      (new Set(normalizationSources.map((entry) => entry.factKey)).size === normalizationSources.length &&
+        new Set(normalizationSources.map((entry) => entry.documentHash)).size === hashes.size &&
+        normalizationSources.every((entry) => hashes.has(entry.documentHash))),
   );
   return {
     identityEvidence: {
       schemaVersion: binding.schemaVersion,
-      normalizationHashes: binding.normalizationHashes.map(hash),
+      normalizationHashes,
+      ...(normalizationSources === undefined ? {} : { normalizationSources }),
     },
   };
 }
