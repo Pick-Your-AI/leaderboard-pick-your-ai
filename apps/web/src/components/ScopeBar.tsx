@@ -1,4 +1,4 @@
-import React, { useId, useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 import { useScope } from "../lib/hooks.ts";
 import { formatDateTime } from "../lib/format.ts";
 import type { PeriodPreset, Scope, ScopeIssue, TimeWindow } from "../lib/scope.ts";
@@ -55,6 +55,13 @@ export function ScopeBar({
   const [customFrom, setCustomFrom] = useState(scope.from ?? "");
   const [customTo, setCustomTo] = useState(scope.to ?? "");
   const [pendingCustom, setPendingCustom] = useState(scope.period === "custom");
+
+  // A restored URL replaces the applied interval, including its editable fields.
+  useEffect(() => {
+    setCustomFrom(scope.from ?? "");
+    setCustomTo(scope.to ?? "");
+    setPendingCustom(scope.period === "custom");
+  }, [scope.period, scope.from, scope.to]);
   const ui = metricId ? getMetricUi(metricId) : undefined;
   const requestedView = `${params.state ?? ui?.default_combination?.state ?? ""}:${params.date_basis ?? ui?.default_combination?.date_basis ?? ""}`;
   const knownView = ui?.supported_combinations.some((pair) => `${pair.state}:${pair.date_basis}` === requestedView);
@@ -151,10 +158,13 @@ export function ScopeBar({
         <label>
           <span>Program</span>
           <select
-            value={scope.projects[0] ?? ""}
+            value={scope.projects.length === 1 ? scope.projects[0] : scope.projects.length > 1 ? "__multiple" : ""}
             onChange={(event) => update({ projects: event.target.value ? [event.target.value] : [] })}
           >
             <option value="">All programs</option>
+            {scope.projects.length > 1 && (
+              <option value="__multiple" disabled>{`${scope.projects.length} selected from link`}</option>
+            )}
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}
@@ -212,5 +222,19 @@ export function ScopeBar({
         </p>
       )}
     </section>
+  );
+}
+
+/** Reference pages expose carried scope without implying their content is filtered. */
+export function ReferenceScope({
+  children = "Scope travels with contribution links. Definitions and policy notes below describe the current registry.",
+}: {
+  children?: React.ReactNode;
+}) {
+  return (
+    <>
+      <ScopeBar timeWindow={null} />
+      <p className="muted">{children}</p>
+    </>
   );
 }
