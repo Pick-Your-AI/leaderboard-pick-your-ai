@@ -569,7 +569,18 @@ test("activity holds new publications and preserves focused proof links and scro
     expect(Math.abs((await explore.boundingBox())!.y - readingPosition)).toBeLessThanOrEqual(1);
     await expect(page.getByText("Update held: snapshot api-2 is available.")).toBeVisible();
     await expect(page.getByRole("checkbox", { name: /Follow while/ })).not.toBeChecked();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    const overflow = await page.evaluate(() => ({
+      viewport: innerWidth,
+      width: document.documentElement.scrollWidth,
+      elements: [...document.querySelectorAll("main *")]
+        .filter((element) => element.getBoundingClientRect().right > innerWidth + 1)
+        .slice(0, 8)
+        .map((element) => ({ tag: element.tagName, className: element.className })),
+    }));
+    expect(overflow, "activity filter controls must not widen the mobile viewport").toMatchObject({
+      width: overflow.viewport,
+      elements: [],
+    });
     api.suppress();
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(explore).toHaveCount(0);
