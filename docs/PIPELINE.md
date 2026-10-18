@@ -70,7 +70,23 @@ Canonical facts are deduplicated by stable fact ID only when semantic fields agr
 
 Private normalizations also retain declared assistance as artifact ID, model and nullable version, and existing author/committer/coauthor participation as artifact ID, actor ID, role and conserved unit. Each list is capped at 100 entries; model/version labels are capped at 100 characters and exclude email, angle brackets and control-character content. References must bind to the collected artifact or normalized evidence, and participation must bind to a normalized actor. Extra fields, including trailer emails, are discarded. These records do not create actors, execution classifications, credit or public snapshot fields. The normalization document version invalidates older lossy caches on the next authorized run; exact legacy hashes remain usable only for already-bound frozen identity replay under the same policy/source/mode checks.
 
-Normalization caches also bind the complete documentation path, locale and research policies, separately from metric aggregation signatures. Changing or removing classification rules recomputes the source facts on the next authorized run, including edits within an unchanged policy version; unchanged rules reuse the cache after restart. Active documentation policies also require the documentation/locale projection version, so a retained projection from before the future-merge check and locale emission is recomputed. An older projection remains eligible only for exact frozen identity replay when its signature binds every active classification policy. In particular, a documentation-only historical signature is eligible only without an active research policy, and an unclassified signature cannot authorize classified source replay. Fresh classification uses the current combined key.
+Normalization caches also bind the complete documentation path, locale and research policies, separately from metric aggregation signatures. Changing or removing classification rules recomputes the source facts on the next authorized run, including edits within an unchanged policy version; unchanged rules reuse the cache after restart. Active documentation policies require `documentation-locales/v2`, so retained projections from before the future-merge check, locale emission or substantive rename-origin classification are recomputed. An older projection, including the exact `v1` locale format, remains eligible only for frozen identity replay when its signature binds every active classification policy. In particular, a documentation-only historical signature is eligible only without an active research policy, and an unclassified signature cannot authorize classified source replay. Fresh classification uses the current combined key.
+
+The normalization boundary preserves its 100 ordinary fact/proof limit while
+allowing at most one additional paired slot for each eligible configured
+locale/category unit, bounded by 32. It does not raise the actor or attribution
+budgets. Accepted locale portfolio activity uses the exact original source unit
+once, retaining its observed fact privately for audit and recomputation.
+
+Recognition publication authority binds current evidence requests, suppression,
+the relevant complete private audit entries and exact configured recognition
+bindings. Its `localization-review-target/v1` fingerprint invalidates earlier
+unbound authority on current and pinned reads. Locale recognition requires the
+reviewer's actual acceptance target, exact current request/decision version and
+source revision, and acceptance no earlier than the merge. Missing legacy targets
+cannot become acceptance through a configuration change. A fresh authorized run
+can publish the remaining observed participation; it never fabricates a new
+review to restore an old qualified result.
 
 The metric event-window cutoff is captured before collection. A separate observation cutoff is frozen after collection, so newly observed records are included without substituting ingestion time for occurrence/acceptance time. Each source's generation is captured before normalization and compared under the final publication lock. A remove/reverify race cannot publish facts from a prior access generation.
 

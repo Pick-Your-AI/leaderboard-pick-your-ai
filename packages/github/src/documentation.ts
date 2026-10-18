@@ -101,10 +101,12 @@ export function classifyDocumentation(diff: PinnedPhysicalDiff, policy: Document
   const locales = new Map<string, { locale: string; category: string }>();
   let eligible = false;
   for (const file of physical.files) {
-    const documentation = matches(file.path, policy.documentationPaths);
-    const localization = (policy.localizationPaths ?? []).find((rule) => matches(file.path, rule.paths));
-    if (!documentation && !localization) continue;
     const paths = [file.path, ...(file.previousPath ? [file.previousPath] : [])];
+    const documentation = paths.some((path) => matches(path, policy.documentationPaths));
+    const localizations = (policy.localizationPaths ?? []).filter((rule) =>
+      paths.some((path) => matches(path, rule.paths)),
+    );
+    if (!documentation && localizations.length === 0) continue;
     const previousClass = file.previousPath ? classifyFile({ ...file, path: file.previousPath }) : null;
     const previousExclusion =
       previousClass && !["source", "tests", "docs"].includes(previousClass) ? previousClass : null;
@@ -117,11 +119,12 @@ export function classifyDocumentation(diff: PinnedPhysicalDiff, policy: Document
           : (file.reason ?? previousExclusion);
     if (exclusion) {
       if (documentation) reasons.add(`documentation_excluded_${exclusion}`);
-      if (localization) reasons.add(`localization_excluded_${exclusion}`);
+      if (localizations.length > 0) reasons.add(`localization_excluded_${exclusion}`);
     } else if (file.additions > 0 || file.deletions > 0) {
       if (documentation) eligible = true; // Substantive deletion is participation too; zero-change moves are not new content.
-      if (localization) {
-        const { locale, category } = localization;
+      // A substantive rename affects both configured paths. The same
+      // locale/category remains one unit, including moves within its own paths.
+      for (const { locale, category } of localizations) {
         locales.set(JSON.stringify([locale, category]), { locale, category });
       }
     }

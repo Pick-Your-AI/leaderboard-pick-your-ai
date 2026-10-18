@@ -25,10 +25,10 @@ for an omitted research classification. Unclassified legacy signatures cannot
 authorize replay under active documentation or research policies. Fresh runs use
 the current combined classification key and preserve retained historical bytes.
 When documentation policies are active, the current key also identifies the
-documentation/locale projection. This recomputes earlier caches that lacked the
-future-merge check or bound locale rules before the adapter could emit locale
-facts; their exact frozen history remains replayable without acquiring newly
-classified units retroactively.
+`documentation-locales/v2` projection. This recomputes earlier caches that lacked
+the future-merge check, locale emission or substantive rename origins. The exact
+policy-bound `v1` and pre-locale documents remain eligible for frozen history;
+historical snapshots do not acquire newly classified units retroactively.
 
 ### Explicit locale rules
 
@@ -48,6 +48,9 @@ physical-diff exclusions apply, including the original path of a renamed file.
 Each eligible PR/language/category/actor creates one observed `localization` fact.
 Additional files, strings or lines in that pair do not increase its value. Empty
 renames create no unit; substantive deletions can establish observed participation.
+A substantive move between configured pairs records both its original and current
+locale/category, once each. A move out of configured locale paths can still record
+the eligible original pair. The source and destination exclusions both apply.
 The source merge revision, locale, category and policy version remain in the public
 proof. The observation does not certify translation quality or human authorship.
 Independent recognition must target that exact fact and an authorized reviewer
@@ -60,21 +63,45 @@ The engine rejects policies that would label raw work as accepted or collapse
 different locale/category units. Bulk acceptance changeset IDs cannot replace a
 locale contribution's original canonical identity. Acceptance is required but its
 later review date cannot move a merged contribution into a different period.
+The candidate registry view supports this qualified source-clock projection. It
+does not enable production publication. Current portfolio/activity shows an
+accepted representation in place of that exact locale's observed representation;
+the immutable raw fact remains stored for audit and recomputation. Unaccepted
+languages remain observed, and withdrawing acceptance restores the observed view.
 This configuration enables no
 source or public ranking by itself.
 
 An existing private controls recognition binding for localization must target the
 `localization` source metric and include an exact `localization` selector with
 `locale`, `category`, and the documentation classification `policyVersion`.
-The configured request category/scope identifies that reviewed locale selection;
-the selector is trusted configuration, not a claim-supplied authorization. A
-multilingual PR can therefore receive an independent decision for one language
-without accepting its other languages. The existing owner, reviewer, audit,
-policy, public-source and withdrawal checks still apply. Missing selectors,
+The configured request category/scope identifies the expected review selection.
+An authenticated independent reviewer must also record a private `localization`
+target through the actual acceptance API or reviewer form: the exact observed
+`targetFactId`, immutable merge `sourceRevision`, canonical `locale`, `category`,
+and documentation classification `policyVersion`. This field is rejected on
+submission and on other review actions; the server does not infer it from a
+claim, provider response or current configuration. The acceptance audit records
+the reviewed request owner, locator, category and scope alongside the target.
+
+Materialization requires the current request version and receipt ID, exactly one
+unchanged private audit entry, the exact recorded request fields and target, and
+a reviewer decision no earlier than the source merge. The current protected
+selector must still agree. Changing a selector cannot retarget an earlier review;
+changing a source revision requires a new review of that revision. Legacy generic
+receipts without the recorded target retain observed participation but supply no
+locale acceptance. A multilingual PR can therefore receive an independent decision
+for one language without accepting its other languages. The existing owner,
+reviewer, metric policy, public-source and withdrawal checks still apply. Missing selectors,
 ambiguous candidates and malformed labels fail closed; a selector without a
 matching contribution supplies no credit. Private receipt IDs and internal reason
 strings are removed from primary, portfolio and pending proof; only bounded
 classification labels and fixed public state reasons survive.
+
+The normalization budget retains the existing maximum of 100 ordinary facts and
+proofs per collected source record, with one additional paired slot for each
+eligible configured locale/category unit, up to 32. This allows a previously
+supported diff to emit its locale units without increasing the ordinary record
+budget. Actor and private attribution limits remain unchanged.
 
 The enrichment supplies the existing `GithubEvidenceEnvelope.integration` contract: distinct pinned before/after Git SHAs, default/target branch, canonical change identity and a complete `PinnedPhysicalDiff`. `readPinnedGitDiff` is an existing bounded read-only local source implementation; a deployment must explicitly configure and verify its repository source, not discover arbitrary mounted repositories. This change neither clones repositories nor enables that filesystem access automatically.
 
@@ -116,3 +143,10 @@ use the source merge clock and bounded public labels after migration.
 Another restart regression models the earlier documentation projection, verifies
 that fresh normalization adds the configured observed locale units, and preserves
 the historical document and policy-preview result unchanged.
+A destination-only `v1` rename projection receives the same historical guarantees,
+while the next authorized run emits both eligible source and destination pairs.
+Actual controls HTTP tests exercise validated reviewer input, exact audited target
+binding, request amendment, approval chronology and restart/configuration changes.
+They verify that older unbound publication authority is revoked, that accepted
+activity contains one current unit per locale, and that the ordinary normalization
+budget is preserved when 32 configured locale pairs add their bounded units.

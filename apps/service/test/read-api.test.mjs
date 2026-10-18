@@ -969,6 +969,59 @@ test("malformed locale proof fails closed while historical documentation without
   assert.doesNotMatch(detail.body, /locale:|localization_category:/);
 });
 
+test("documentation proof rejects conflicting present classifications while retaining legacy absent labels", async (t) => {
+  const documentationCopies = () => {
+    const data = fixture();
+    data.selected.ranking = [{ metricId: "documentation", direction: "descending", rank: false }];
+    for (const row of data.selected.rows) row.result.metricId = "documentation";
+    for (const entry of data.selected.evidence) {
+      entry.contribution.metricIds = ["documentation"];
+      entry.contribution.reasonCodes = ["documentation_path_policy:synthetic-docs-v1"];
+    }
+    return withPortfolio(data);
+  };
+  const h = harness(t, documentationCopies());
+  for (const path of ["boards?metric=documentation", "evidence/e-alice", "contributors/alice"])
+    assert.equal(
+      (await h.app.inject(`/api/v1/${path}`)).statusCode,
+      200,
+      "Matching nonempty classifications remain readable",
+    );
+  h.data.selected.portfolioEvidence[0].contribution.reasonCodes = ["documentation_path_policy:synthetic-docs-v2"];
+  for (const path of ["boards?metric=documentation", "evidence/e-alice", "contributors/alice"])
+    assert.equal(
+      (await h.app.inject(`/api/v1/${path}`)).statusCode,
+      503,
+      "One contribution cannot carry contradictory policy proof",
+    );
+  for (const missing of ["evidence", "portfolioEvidence"]) {
+    const legacy = documentationCopies();
+    legacy.selected[missing][0].contribution.reasonCodes = ["public_observed_work"];
+    h.set(legacy);
+    assert.equal(
+      (await h.app.inject("/api/v1/evidence/e-alice")).statusCode,
+      200,
+      "Absent historical labels do not invent a conflicting classification",
+    );
+  }
+  const separated = documentationCopies();
+  separated.selected.portfolioEvidence[0].contribution.reasonCodes = ["public_observed_work"];
+  separated.selected.pendingEvidence = [
+    {
+      ...structuredClone(separated.selected.evidence[0]),
+      activityState: "pending",
+      observedAt: at,
+    },
+  ];
+  separated.selected.pendingEvidence[0].contribution.reasonCodes = ["documentation_path_policy:synthetic-docs-v2"];
+  h.set(separated);
+  assert.equal(
+    (await h.app.inject("/api/v1/boards?metric=documentation")).statusCode,
+    503,
+    "An intervening legacy copy cannot erase the earlier nonempty classification",
+  );
+});
+
 test("directory includes observed-only public contributors without ranking, membership or identity leakage", async (t) => {
   const h = harness(t, withPortfolio());
   h.data.selected.rows = [];

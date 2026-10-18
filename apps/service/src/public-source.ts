@@ -330,12 +330,21 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
   if (new Set(actors.map((actor) => actor.actorId)).size !== actors.length) return reject();
   const actorIds = new Set(actors.map((actor) => actor.actorId));
   const metadataByContribution = new Map<string, string>();
+  const documentationClassificationByContribution = new Map<string, string>();
   const projectEvidence = (entries: PublicEvidence[]) =>
     entries
       .map((entry) => {
         const artifact = artifactSchema.parse(entry.artifact);
         const parsed = contributionSchema.parse(entry.contribution);
         const classification = publicDocumentationReasons(parsed);
+        if (parsed.metricIds.includes("documentation") && classification.length > 0) {
+          // Legacy copies can lack labels. Every present classification must
+          // still agree, even if an unlabeled copy appears between two of them.
+          const current = JSON.stringify(classification);
+          const previous = documentationClassificationByContribution.get(parsed.contributionId);
+          if (previous !== undefined && previous !== current) return reject();
+          documentationClassificationByContribution.set(parsed.contributionId, current);
+        }
         const contribution = {
           ...parsed,
           ...(parsed.metricIds.some((metric) => metric === "documentation" || metric === "localization")

@@ -174,6 +174,28 @@ test("locale units require the exact public default-branch merge and matching co
   }
 });
 
+test("substantive locale renames preserve configured origins and destinations without crediting moves", () => {
+  const classify = (changed) => classifyDocumentation(diff([changed]), policy);
+  const renamed = { previousPath: "docs/fr/one.md", additions: 3, deletions: 2 };
+  assert.deepEqual(classify(file("docs/de-DE/one.md", renamed)).localizations, [
+    { locale: "de-DE", category: "documentation" },
+    { locale: "fr", category: "documentation" },
+  ]);
+  const outside = classify(file("guides/unconfigured/one.md", renamed));
+  assert.equal(outside.eligible, true, "The substantive change still affects its configured documentation origin");
+  assert.deepEqual(outside.localizations, [{ locale: "fr", category: "documentation" }]);
+  assert.deepEqual(
+    classify(file("guides/fr/one.md", renamed)).localizations,
+    [{ locale: "fr", category: "documentation" }],
+    "Moving within one locale/category does not create a second unit",
+  );
+  const unchanged = classify(file("docs/de-DE/one.md", { ...renamed, additions: 0, deletions: 0 }));
+  assert.equal(unchanged.eligible, false);
+  assert.deepEqual(unchanged.localizations, []);
+  for (const path of ["locale-generated/one.md", "locale-imported/one.md", "docs/research/one.md", "vendor/one.md"])
+    assert.deepEqual(classify(file(path, renamed)).localizations, [], "Either excluded side prevents locale credit");
+});
+
 test("documentation and locale units require a merge observed at or after its source instant", () => {
   const input = envelope([file("docs/fr/one.md")]);
   input.observedAt = "2026-10-07T10:00:00.000Z";
@@ -241,6 +263,7 @@ test("independent acceptance retains locale proof and never accepts the other lo
     actorId: "101",
     reviewerId: "303",
     acceptedAt: observedAt,
+    sourceRevision: after,
     decision: "accepted",
     targetFactId: target.id,
     evidenceIds: [target.id],
@@ -260,6 +283,32 @@ test("independent acceptance retains locale proof and never accepts the other lo
   ]);
   assert.equal(proof.sourceRevision, after);
   assert.equal(proof.evidenceMetadata.acceptedAt, observedAt);
+  assert.equal(localizationFacts(raw).filter((fact) => fact.state === "qualified").length, 0);
+});
+
+test("locale acceptance binds the exact reviewed revision and cannot precede its source merge", () => {
+  const raw = normalizeGithubObservation(envelope([file("docs/fr/a.md")]), policy);
+  const target = localizationFacts(raw)[0];
+  const receipt = {
+    id: "synthetic-pinned-locale-review",
+    verified: true,
+    metricId: "localization",
+    actorId: "101",
+    reviewerId: "303",
+    acceptedAt: observedAt,
+    sourceRevision: after,
+    decision: "accepted",
+    targetFactId: target.id,
+    evidenceIds: [target.id],
+  };
+  for (const change of [
+    { sourceRevision: undefined },
+    { sourceRevision: before },
+    { acceptedAt: new Date(Date.parse(mergedAt) - 1).toISOString() },
+  ])
+    assert.throws(() => applyRecognitionReceipt(raw, { ...receipt, ...change }, ["303"]), /localization|source|merge/i);
+  const equal = applyRecognitionReceipt(raw, { ...receipt, acceptedAt: mergedAt }, ["303"]);
+  assert.equal(localizationFacts(equal).find((fact) => fact.state === "qualified").acceptedAt, mergedAt);
   assert.equal(localizationFacts(raw).filter((fact) => fact.state === "qualified").length, 0);
 });
 
@@ -302,6 +351,7 @@ test("a bulk recognition changeset preserves locale units and cannot change the 
     actorId: "101",
     reviewerId: "303",
     acceptedAt: observedAt,
+    sourceRevision: after,
     decision: "accepted",
     targetFactId: target.id,
     evidenceIds: [target.id],
@@ -322,4 +372,38 @@ test("a bulk recognition changeset preserves locale units and cannot change the 
     () => applyRecognitionReceipt(accepted, { ...receipt(targets[0]), targetFactId: qualified[0].id }, ["303"]),
     /original observed source fact/,
   );
+});
+
+test("locale acceptance preserves the supported full Git SHA formats from actual normalized merge proof", () => {
+  for (const sourceRevision of ["c".repeat(40), "C".repeat(40), "d".repeat(64), "D".repeat(64)]) {
+    const input = envelope([file("docs/fr/source.md")]);
+    input.proof.revision = sourceRevision;
+    input.payload.pull_request.merge_commit_sha = sourceRevision;
+    input.integration.before = "b".repeat(sourceRevision.length);
+    input.integration.diff.before = input.integration.before;
+    input.integration.after = sourceRevision;
+    input.integration.diff.after = sourceRevision;
+    input.integration.commitShas = [sourceRevision];
+    const normalized = normalizeGithubObservation(input, policy);
+    const target = localizationFacts(normalized)[0];
+    assert.ok(target);
+    const output = applyRecognitionReceipt(
+      normalized,
+      {
+        id: "synthetic-sha-format-review",
+        verified: true,
+        metricId: "localization",
+        actorId: "101",
+        reviewerId: "202",
+        acceptedAt: observedAt,
+        decision: "accepted",
+        targetFactId: target.id,
+        evidenceIds: [target.id],
+        sourceRevision,
+      },
+      ["202"],
+    );
+    assert.equal(output.facts.at(-1).state, "qualified");
+    assert.equal(output.evidence.at(-1).sourceRevision, sourceRevision);
+  }
 });

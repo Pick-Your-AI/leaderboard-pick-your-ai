@@ -129,6 +129,8 @@ export interface NormalizedGithubFact {
   outcome?: "merged" | "closed_unmerged" | "pending";
   readyAt?: string | null;
   firstReviewAt?: string | null;
+  /** Original observed locale unit superseded only in descriptive current activity. */
+  recognitionSourceFactId?: string;
 }
 export interface NormalizedGithubActor {
   id: string;
@@ -1190,6 +1192,8 @@ export interface VerifiedRecognitionReceipt {
   evidenceIds: readonly string[];
   /** One changeset for e.g. ordering/configuration; not one credit per affected child/item. */
   changesetId?: string;
+  /** Exact immutable merge revision reviewed for a localization target. */
+  sourceRevision?: string;
 }
 const receiptMetrics = new Set([
   "accepted_findings",
@@ -1220,6 +1224,7 @@ export function applyRecognitionReceipt(
 ): NormalizedGithubResult {
   const out = structuredClone(input);
   const target = input.facts.find((fact) => fact.id === receipt.targetFactId);
+  const targetEvidence = input.evidence.find((item) => item.contribution.contributionId === receipt.targetFactId);
   if (
     receipt.verified !== true ||
     !text(receipt.id) ||
@@ -1239,6 +1244,19 @@ export function applyRecognitionReceipt(
   const unit = receipt.metricId === "localization" ? target.canonicalKey : (receipt.changesetId ?? target.canonicalKey);
   if (receipt.metricId === "localization" && target.state !== "observed")
     throw new Error("Localization acceptance must target its original observed source fact");
+  if (
+    receipt.metricId === "localization" &&
+    (!targetEvidence ||
+      !target.canonicalKey ||
+      typeof receipt.sourceRevision !== "string" ||
+      !pinnedSha(receipt.sourceRevision) ||
+      targetEvidence.sourceRevision !== receipt.sourceRevision ||
+      !time(target.occurredAt) ||
+      Date.parse(target.occurredAt!) > Date.parse(receipt.acceptedAt))
+  )
+    throw new Error(
+      "Localization acceptance requires its reviewed merge revision and a decision no earlier than merge",
+    );
   const fact = {
     ...target,
     metricId: receipt.metricId,
@@ -1248,9 +1266,10 @@ export function applyRecognitionReceipt(
     acceptedAt: time(receipt.acceptedAt),
     acceptedBy: receipt.reviewerId,
     acceptanceReceipt: receipt.id,
+    ...(receipt.metricId === "localization" ? { recognitionSourceFactId: target.id } : {}),
   };
   out.facts.push(fact);
-  const evidence = input.evidence.find((item) => item.contribution.contributionId === target.id);
+  const evidence = targetEvidence;
   if (evidence)
     out.evidence.push({
       ...structuredClone(evidence),
@@ -1268,7 +1287,7 @@ export function applyRecognitionReceipt(
       contribution: {
         ...evidence.contribution,
         contributionId: fact.id,
-        canonicalEventId: fact.canonicalKey,
+        canonicalEventId: receipt.metricId === "localization" ? target.canonicalKey! : fact.canonicalKey,
         metricIds: [fact.metricId],
         qualification: receipt.decision === "accepted" ? "eligible" : "ineligible",
         reasonCodes: [
@@ -1292,6 +1311,8 @@ export interface CollectionNormalizerInput {
   policyVersion: string;
   fact: {
     subjectId: string;
+    /** Native issue/PR identity retained by the trusted Project-history collector. */
+    historySubjectId?: string;
     sourceRevision: string;
     sourceUrl: string;
     evidence: "current_state" | "observed_transition";
@@ -1343,14 +1364,19 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       throw new Error("Pipeline policy and observation time are required");
     if (input.family === "relationships" || input.family === "project_history") {
       const match = input.fact.sourceUrl.match(
-        new RegExp(`^https://github\\.com/${input.repository.slug.replaceAll(".", "\\.")}/issues/([1-9]\\d*)$`),
+        new RegExp(`^https://github\\.com/${input.repository.slug.replaceAll(".", "\\.")}/(issues|pull)/([1-9]\\d*)$`),
       );
-      if (!match) return none("typed_history_subject_url_unverified");
+      if (!match || (match[1] === "pull" && input.family !== "project_history"))
+        return none("typed_history_subject_url_unverified");
+      if (input.family === "project_history" && input.fact.historySubjectId === undefined)
+        return none("project_history_subject_identity_not_collected");
       const records = await readTypedIssueHistory({
         client: options.client,
         source: options.source,
         repository: input.repository,
-        number: Number(match[1]),
+        number: Number(match[2]),
+        subjectType: match[1] === "pull" ? "pull_request" : "issue",
+        ...(input.family === "project_history" ? { subjectId: input.fact.historySubjectId } : {}),
         family: input.family,
         scanId: input.factKey,
         ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
