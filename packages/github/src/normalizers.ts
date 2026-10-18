@@ -7,6 +7,7 @@ import {
 } from "./research.js";
 import { createHash } from "node:crypto";
 import {
+  publicDocumentationReasons,
   serviceAccountClassificationSchema,
   type ServiceAccountClassification,
   publicEvidenceActionSchema,
@@ -128,6 +129,8 @@ export interface NormalizedGithubFact {
   outcome?: "merged" | "closed_unmerged" | "pending";
   readyAt?: string | null;
   firstReviewAt?: string | null;
+  /** Original observed locale unit superseded only in descriptive current activity. */
+  recognitionSourceFactId?: string;
 }
 export interface NormalizedGithubActor {
   id: string;
@@ -412,6 +415,8 @@ function creditedAction(fact: NormalizedGithubFact, family: string, envelopeActi
     title_scope_edits: "title_or_body_edited",
     issue_transfers: "issue_transferred",
     reverted_delivery: "revert_observed",
+    documentation: "pull_request_merged",
+    localization: "pull_request_merged",
   };
   if (fact.metricId === "review_wait" && !fact.readyAt) return "unknown";
   if (fact.metricId === "pr_accepted_rate")
@@ -1066,6 +1071,7 @@ export function normalizeGithubObservation(
       !integration?.diff ||
       resource.merged !== true ||
       !mergedAt ||
+      Date.parse(mergedAt) > Date.parse(observedAt) ||
       resource.merge_commit_sha !== integration.after ||
       !object(resource.base) ||
       !text(resource.base.ref) ||
@@ -1091,6 +1097,24 @@ export function normalizeGithubObservation(
         evidence.sourceRevision = integration.after;
         evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
         evidence.contribution.reasonCodes.push(`documentation_path_policy:${documentationPolicy.version}`);
+      }
+      for (const { locale, category } of classification.localizations) {
+        const fact = emit(
+          "localization",
+          author,
+          "author",
+          mergedAt,
+          JSON.stringify([repository.id, id, "localization", locale, category]),
+          { rawState: `merged_locale_participation:${locale}:${category}` },
+        );
+        const evidence = out.evidence.find((entry) => entry.contribution.contributionId === fact.id)!;
+        evidence.sourceRevision = integration.after;
+        evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
+        evidence.contribution.reasonCodes.push(
+          `documentation_path_policy:${documentationPolicy.version}`,
+          `locale:${locale}`,
+          `localization_category:${category}`,
+        );
       }
     }
   }
@@ -1168,6 +1192,8 @@ export interface VerifiedRecognitionReceipt {
   evidenceIds: readonly string[];
   /** One changeset for e.g. ordering/configuration; not one credit per affected child/item. */
   changesetId?: string;
+  /** Exact immutable merge revision reviewed for a localization target. */
+  sourceRevision?: string;
 }
 const receiptMetrics = new Set([
   "accepted_findings",
@@ -1198,6 +1224,7 @@ export function applyRecognitionReceipt(
 ): NormalizedGithubResult {
   const out = structuredClone(input);
   const target = input.facts.find((fact) => fact.id === receipt.targetFactId);
+  const targetEvidence = input.evidence.find((item) => item.contribution.contributionId === receipt.targetFactId);
   if (
     receipt.verified !== true ||
     !text(receipt.id) ||
@@ -1212,27 +1239,41 @@ export function applyRecognitionReceipt(
   ) {
     throw new Error("Independent verified recognition receipt is required");
   }
+  // Localization is one PR/language/category unit. A bulk changeset must never
+  // collapse different languages or mint another unit for the same source fact.
+  const unit = receipt.metricId === "localization" ? target.canonicalKey : (receipt.changesetId ?? target.canonicalKey);
+  if (receipt.metricId === "localization" && target.state !== "observed")
+    throw new Error("Localization acceptance must target its original observed source fact");
+  if (
+    receipt.metricId === "localization" &&
+    (!targetEvidence ||
+      !target.canonicalKey ||
+      typeof receipt.sourceRevision !== "string" ||
+      !pinnedSha(receipt.sourceRevision) ||
+      targetEvidence.sourceRevision !== receipt.sourceRevision ||
+      !time(target.occurredAt) ||
+      Date.parse(target.occurredAt!) > Date.parse(receipt.acceptedAt))
+  )
+    throw new Error(
+      "Localization acceptance requires its reviewed merge revision and a decision no earlier than merge",
+    );
   const fact = {
     ...target,
     metricId: receipt.metricId,
-    id: stable("recognized", receipt.metricId, receipt.changesetId ?? target.canonicalKey, receipt.actorId),
-    canonicalKey: stable(
-      "recognized-unit",
-      receipt.metricId,
-      receipt.changesetId ?? target.canonicalKey,
-      receipt.actorId,
-    ),
+    id: stable("recognized", receipt.metricId, unit, receipt.actorId),
+    canonicalKey: stable("recognized-unit", receipt.metricId, unit, receipt.actorId),
     state: receipt.decision === "accepted" ? ("qualified" as const) : ("excluded" as const),
     acceptedAt: time(receipt.acceptedAt),
     acceptedBy: receipt.reviewerId,
     acceptanceReceipt: receipt.id,
+    ...(receipt.metricId === "localization" ? { recognitionSourceFactId: target.id } : {}),
   };
   out.facts.push(fact);
-  const evidence = input.evidence.find((item) => item.contribution.contributionId === target.id);
+  const evidence = targetEvidence;
   if (evidence)
     out.evidence.push({
       ...structuredClone(evidence),
-      occurredAt: fact.acceptedAt,
+      occurredAt: receipt.metricId === "localization" ? target.occurredAt : fact.acceptedAt,
       ...(evidence.evidenceMetadata
         ? {
             evidenceMetadata: {
@@ -1246,10 +1287,15 @@ export function applyRecognitionReceipt(
       contribution: {
         ...evidence.contribution,
         contributionId: fact.id,
-        canonicalEventId: fact.canonicalKey,
+        canonicalEventId: receipt.metricId === "localization" ? target.canonicalKey! : fact.canonicalKey,
         metricIds: [fact.metricId],
         qualification: receipt.decision === "accepted" ? "eligible" : "ineligible",
-        reasonCodes: ["independent_recognition_receipt"],
+        reasonCodes: [
+          "independent_recognition_receipt",
+          ...(receipt.metricId === target.metricId && ["documentation", "localization"].includes(target.metricId)
+            ? publicDocumentationReasons(evidence.contribution)
+            : []),
+        ],
       },
     });
   return out;

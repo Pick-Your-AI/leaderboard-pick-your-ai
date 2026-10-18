@@ -75,6 +75,44 @@ test("admin denies unprivileged accounts and supports versioned independent revi
   await expect(page.getByRole("status")).toContainText("Service confirmed");
   expect(writes).toHaveLength(0);
 });
+
+test("locale acceptance submits the explicitly reviewed fact, language, policy and merge revision", async ({
+  page,
+}) => {
+  const writes = await controls(page, ["reviewer"]);
+  await page.goto("/admin");
+  await page.getByLabel("Review decision").selectOption("accept");
+  await page.getByLabel("Accept one reviewed language and source revision").check();
+  await page.getByLabel("Contribution ID", { exact: true }).fill("synthetic-locale:fr");
+  await page.getByLabel("Reviewed merge revision").fill("C".repeat(40));
+  await page.getByLabel("Language tag").fill("fr");
+  await page.getByLabel("Content category", { exact: true }).fill("documentation");
+  await page.getByLabel("Documentation classification policy version").fill("synthetic-locales-v1");
+  await page.getByLabel("Approved policy version").fill("synthetic-metric-v1");
+  await page.getByLabel("Decision reason").fill("Reviewed the exact public French merge proof");
+  await page.getByLabel("I reviewed the source and verified it is public").check();
+  await page.getByLabel(/I have no conflict/).check();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  await page.getByRole("button", { name: "Record review decision" }).click();
+  await expect(page.getByRole("status")).toContainText("Service confirmed");
+  expect(writes).toHaveLength(1);
+  expect(writes[0]).toMatchObject({
+    path: `/controls/requests/${id}/review`,
+    body: {
+      version: 3,
+      decision: "accept",
+      policyVersion: "synthetic-metric-v1",
+      sourceReviewedPublic: true,
+      localization: {
+        targetFactId: "synthetic-locale:fr",
+        sourceRevision: "C".repeat(40),
+        locale: "fr",
+        category: "documentation",
+        policyVersion: "synthetic-locales-v1",
+      },
+    },
+  });
+});
 test("expired authority clears private content and never reports mutation success", async ({ page }) => {
   await controls(page, ["reviewer"]);
   await page.goto("/admin");

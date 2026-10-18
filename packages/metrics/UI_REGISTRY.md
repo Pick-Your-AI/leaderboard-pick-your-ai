@@ -29,6 +29,10 @@ Every definition has a unique metadata entry. `maturity` is one of:
   synthetic verification case. Seven pairs correspond to the existing web
   fixture adapters; `items_triaged` has engine grouping and synthetic
   normalizer-to-engine verification, with no prototype data adapter.
+  `localization` additionally has source-to-pipeline and public-evidence
+  regressions for qualified PR/language/category units on the source merge
+  clock, with no prototype data adapter. Its acceptance clock remains separate
+  proof, and raw participation does not qualify for the selectable count.
 - `definition_only`: searchable and documented, with no selectable view in
   this UI metadata version. Generic engine support for counting is not proof
   that the definition's particular attribution/grouping is implemented.
