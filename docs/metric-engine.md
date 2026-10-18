@@ -87,8 +87,11 @@ by actor once, then reads each actor's own facts. This avoids scanning both enti
 collections for every participant. The indexes retain references proportional to
 the supplied facts; existing preparation, chronological sorting and week ordering
 retain their own costs. Organization-wide first evidence remains independent of
-the selected repository lens, and actor order, UTC weeks, stable evidence-ID ties
-and unknown-history behavior remain unchanged.
+selected repository, Project, workstream and role lenses. The configured policy's
+eligible roles still determine qualifying history: a display filter cannot hide an
+earlier eligible role or its unknown qualification. Active weeks keep the selected
+scope; actor order, UTC weeks, stable evidence-ID ties and coverage requirements
+remain unchanged.
 
 The synthetic [participation scale cases](../packages/metrics/test/participation-scale.test.mjs)
 check every result for 10,000 contributors and bound source actor-identity reads

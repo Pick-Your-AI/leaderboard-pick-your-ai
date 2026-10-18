@@ -5,6 +5,7 @@ import {
   type PublicScope,
   publicDocumentationReasons,
   publicDocumentationRecognitionReasons,
+  publicReproductionRecognitionReasons,
   matchesActorFilter,
   type ActorFilter,
   publicEvidenceMetadataSchema,
@@ -390,7 +391,7 @@ export function projectRead(
   >();
   const metadataByContribution = new Map<string, string>();
   const documentationClassificationByContribution = new Map<string, string>();
-  const projectEvidence = (entries: PublicEvidence[]) =>
+  const projectEvidence = (entries: PublicEvidence[], acceptedReproductions = false) =>
     entries
       .map((entry) => {
         const artifact = artifactSchema.parse(entry.artifact);
@@ -399,6 +400,18 @@ export function projectRead(
         checkVisibility(visibilityByArtifact, artifact.stableId, artifact.visibility);
         checkVisibility(visibilityByArtifact, parsed.artifactId, artifact.visibility);
         const classification = publicDocumentationReasons(parsed);
+        const activityState = (entry as Partial<PortfolioEvidence>).activityState;
+        if (
+          parsed.metricIds.includes("reproductions") &&
+          acceptedReproductions &&
+          activityState !== undefined &&
+          activityState !== "accepted"
+        )
+          return reject();
+        const reproduction = publicReproductionRecognitionReasons(
+          parsed,
+          acceptedReproductions || activityState === "accepted",
+        );
         if (parsed.metricIds.includes("documentation") && classification.length > 0) {
           // Legacy copies can lack labels. Every present classification must
           // still agree, even if an unlabeled copy appears between two of them.
@@ -409,7 +422,9 @@ export function projectRead(
         }
         const contribution = {
           ...parsed,
-          ...(parsed.metricIds.some((metric) => metric === "documentation" || metric === "localization")
+          ...(parsed.metricIds.some(
+            (metric) => metric === "documentation" || metric === "localization" || metric === "reproductions",
+          )
             ? {
                 reasonCodes: [
                   ...parsed.reasonCodes.filter((reason) =>
@@ -424,6 +439,7 @@ export function projectRead(
                   ),
                   ...classification,
                   ...publicDocumentationRecognitionReasons(parsed),
+                  ...reproduction,
                 ],
               }
             : {}),
@@ -462,6 +478,7 @@ export function projectRead(
         if (!date(entry.occurredAt) || (entry.sourceRevision !== null && !id(entry.sourceRevision))) return reject();
         const metadata =
           entry.evidenceMetadata === undefined ? undefined : publicEvidenceMetadataSchema.parse(entry.evidenceMetadata);
+        if (reproduction.length > 0 && metadata && metadata.activityState !== "accepted") return reject();
         // Absence is part of the metadata projection too: route preference must
         // not choose a legacy copy over a richer copy of the same contribution.
         // Locale units require identical labels on every copy. Earlier generic
@@ -470,6 +487,7 @@ export function projectRead(
         const serialized = JSON.stringify({
           metadata: metadata ?? null,
           classification: parsed.metricIds.includes("localization") ? classification : null,
+          reproduction: parsed.metricIds.includes("reproductions") ? reproduction : null,
         });
         if (
           metadataByContribution.has(contribution.contributionId) &&
@@ -515,7 +533,7 @@ export function projectRead(
     contributionSchema.shape.contributionId.parse(entry.contribution.contributionId),
   );
   if (new Set(primaryContributionIds).size !== selected.evidence.length) return reject();
-  const evidence = projectEvidence(selected.evidence);
+  const evidence = projectEvidence(selected.evidence, true);
   const portfolioInput = selected.portfolioEvidence ?? [];
   const portfolioMetadata = new Map(
     portfolioInput.map((entry) => {
@@ -540,7 +558,10 @@ export function projectRead(
           `public_${portfolioMetadata.get(entry.contribution.contributionId)!.activityState}_work`,
           ...publicDocumentationReasons(entry.contribution),
           ...(portfolioMetadata.get(entry.contribution.contributionId)!.activityState === "accepted"
-            ? publicDocumentationRecognitionReasons(entry.contribution)
+            ? [
+                ...publicDocumentationRecognitionReasons(entry.contribution),
+                ...publicReproductionRecognitionReasons(entry.contribution, true),
+              ]
             : []),
         ],
       },
