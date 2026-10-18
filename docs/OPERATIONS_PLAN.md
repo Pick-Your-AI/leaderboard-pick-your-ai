@@ -6,6 +6,20 @@ The complete plan covers the whole product. A specific release enables only capa
 
 Creating this repository, issue hierarchy and Project establishes the delivery plan. It does not install a GitHub App, select a host, provision credentials, enable a public metric or deploy a website. Staging validation and production verification remain separate work packages.
 
+The [release-phase decision](release-decision.md) defines the measurement protocol, privacy priority and receiving evidence for `release-gates/v1`. Review and merge adopt the gate policy; actual phase acceptance remains evidence-bound.
+
+## Proposed evaluation targets
+
+| Measure | Proposed target | Receiving boundary |
+| --- | --- | --- |
+| Durable webhook acknowledgement, p95 | Under 2 seconds within the declared load and payload envelope | LB-19.04 and LB-20.01: measure failures/timeouts and durable confirmation; no acknowledgement before persistence |
+| Receive-to-publication latency, p95 | Under 60 seconds for received in-scope events requiring publication | LB-19.04 and LB-20.04: retain unpublished events, oldest-pending age and separate upstream lag |
+| Public read availability | At least 99.5% of minute observation slots over a complete rolling 30-day window | LB-20.01 and LB-20.04: each declared critical anonymous journey returns the correct privacy-safe contract within 10 seconds; missing observations prevent full-window acceptance |
+| Recovery time objective | At most 4 hours from first observed service loss through safe recovery and independent readback | LB-18.04, LB-20.01 and LB-20.03: include detection/decision delay, reconciliation and current privacy restrictions |
+| Recovery point objective for public source observations | At most 24 hours of acknowledged source observations unrecovered after reconciliation | LB-18.04 and LB-20.03: verify actual missing observations; backup age alone is insufficient; privacy/consent/correction state is outside the loss allowance |
+
+These values are proposed evaluation objectives, not measured results or operating commitments. The selected host, budget, declared load, source scope and accepted operational roles must support the receiving profile before public beta. Missing observations, unsafe publication and unreconciled data loss cannot be reported as a pass. See the decision for exact clocks, denominators and privacy-preserving recovery.
+
 ## Release phases
 
 **Phase:** Concept and Project publication
@@ -14,11 +28,25 @@ Creating this repository, issue hierarchy and Project establishes the delivery p
 
 **Not claimed:** Implementation, data accuracy or deployment
 
+### Required evidence
+
+- Reviewed product, metric, contributor-rights and phase decisions with unresolved choices recorded
+- Publication receipt with native hierarchy, preserved source boundaries and actual GitHub readback
+
+**Receiving roles:** Maintainer / product policy and Data / application engineering
+
 **Phase:** Synthetic design prototype
 
 **Exit:** Representative accessible journeys and all failure states reviewed using labeled synthetic data
 
 **Not claimed:** Live contributor counts
+
+### Required evidence
+
+- Exact source/build and labeled synthetic fixture scope, including empty, partial, unavailable, privacy and recovery states
+- Reviewed deterministic results and the required accessible user-journey evidence; no source or participant result inferred from mocks
+
+**Receiving roles:** UI / application engineering and accessibility review
 
 **Phase:** Public-data shadow collection
 
@@ -26,11 +54,28 @@ Creating this repository, issue hierarchy and Project establishes the delivery p
 
 **Not claimed:** Complete historical observability
 
+### Required evidence
+
+- Approved immutable source IDs, event/field permissions, source-use conditions and known history boundaries
+- Actual read-only source probes, durable replay/deduplication, reconciliation and coverage receipts
+- Private shadow-output access verified; public rankings remain disabled
+
+**Receiving roles:** Source/App owner, Data / application engineering and privacy review
+
 **Phase:** Public beta
 
 **Exit:** Working public journeys, attribution/LOC/triage audits, functional correction controls, disclosed limitations and active operator
 
 **Not claimed:** Unsupported qualitative recognition or guaranteed service targets
+
+### Required evidence
+
+- All mandatory public-release packages and first complete product journey accepted for the selected manifest
+- Exact enabled/disabled metric and optional-module records with source, identity, privacy, methodology and receiving evidence
+- Host/cost/operating decision, functioning correction receipt, accepted target profile and declared monitoring interval
+- Independent anonymous journey readback with attribution, freshness, coverage and privacy limits visible
+
+**Receiving roles:** Product, metric/source, privacy, accessibility and accepted operations roles
 
 **Phase:** Production launch
 
@@ -38,11 +83,28 @@ Creating this repository, issue hierarchy and Project establishes the delivery p
 
 **Not claimed:** Completion of every optional expansion
 
+### Required evidence
+
+- Accepted staged artifact, accessibility/privacy/load/recovery evidence and explicit deployment authority
+- Approved DNS/TLS, actual deployed revision, fresh source progress and independent anonymous board/profile/evidence readback
+- Actual correction submission receipt, rollback verification and operator acknowledgement
+- Target measurements report their actual intervals and unresolved results; a short run cannot certify 30-day availability
+
+**Receiving roles:** Release authority and accepted operations, with independent receiving review
+
 **Phase:** Full project acceptance
 
 **Exit:** Every in-scope work package completed or explicitly descoped by owner with reason; enabled-capability manifest reconciled; operations handed off
 
 **Not claimed:** Future scope implicitly implemented
+
+### Required evidence
+
+- Every in-scope work package accepted or explicitly descoped through a reviewed owner decision with reason
+- Enabled-capability manifest reconciled with the complete scope and all conditional-module acceptance
+- Operations handoff accepted; no optional or future expansion silently substituted for unfinished scope
+
+**Receiving roles:** Program scope authority and the actual receiving owners for each package
 
 ## Mandatory public-release packages
 

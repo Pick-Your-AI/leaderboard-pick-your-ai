@@ -88,6 +88,6 @@ Protected mutation endpoints cover corrections, opt-out, profile preferences, ev
 | webhook_ack_p95 | <2 seconds after durable write |
 | received_to_publication_p95 | <60 seconds under agreed test load |
 | reconciliation | 5-15 minute recent-window scans and daily rotating completeness audits, budget-adaptive |
-| availability_rto_rpo | Owner/budget decision before launch; no unmeasured promise |
+| availability_rto_rpo | Evaluate release-gates/v1 targets in planning/release-manifest.json; actual host, budget, operating acceptance and measured results remain required before commitments |
 
 These targets are proposals. A production SLO, retention policy, capacity envelope, incident owner, budget and recovery objective require accepted decisions and operational tests. A documentation build cannot satisfy those gates.
