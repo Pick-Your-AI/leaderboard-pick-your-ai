@@ -62,6 +62,10 @@ Do not commit credentials, private GitHub payloads, commit emails, customer data
 
 Changes to research findings or imported builder contracts belong in the [research repository](https://github.com/Pick-Your-AI/pick-your-ai-research), following its workflow and central contract review. Leaderboard contracts are separate and versioned here. Ingestion must not mutate upstream labels, ownership or Project fields.
 
+## Access, branches and reviews
+
+Early contributors push branches named `contrib/<your-login>/<topic>` to this repository; other contributors work from a fork. Every pull request into `main` needs one approval from someone other than its author, and only maintainers merge. The [organization contributing rules](https://github.com/Pick-Your-AI/.github/blob/main/CONTRIBUTING.md) define roles, credentials and enforcement.
+
 ## Review and completion
 
 Request review from the affected metric, source, UI, security or operations roles. Acceptance requires the package's stated evidence, not only passing automated checks. Mark Done after the reviewed deliverable is merged and its gate is met. Public release additionally requires approved hosting, real deployment, independent anonymous readback, fresh source activity and a functioning correction receipt. Proposed operators and response commitments must be accepted before they are advertised.
