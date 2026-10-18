@@ -96,7 +96,10 @@ export function createGithubCollectionSource({
         });
       let values;
       if (["project_history", "relationships"].includes(request.family)) {
-        if (request.family === "project_history" && !repository.allowedProjectIds?.length)
+        if (
+          request.family === "project_history" &&
+          (!Array.isArray(repository.allowedProjectIds) || !repository.allowedProjectIds.length)
+        )
           throw new Error("approved_project_scope_required");
         const subjects = await scan(`${request.family}:subjects`, routes.issues, (items) =>
           items.filter((item) => !item.pull_request),
@@ -129,7 +132,8 @@ export function createGithubCollectionSource({
         }
       } else if (request.family === "project_current") {
         const allowedProjectIds = repository.allowedProjectIds ?? [];
-        if (!allowedProjectIds.length) throw new Error("approved_project_scope_required");
+        if (!Array.isArray(allowedProjectIds) || !allowedProjectIds.length)
+          throw new Error("approved_project_scope_required");
         if (!client.scanGraphql) throw new Error("project_source_unavailable");
         const subjects = await scan("project-subjects", routes.issues);
         if (subjects.length > 10000) throw new Error("source_dataset_budget_exceeded");

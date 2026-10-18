@@ -20,7 +20,14 @@ export async function readTypedIssueHistory(options: {
   maxPages?: number;
   assertAuthorized?: () => void;
 }): Promise<TypedHistoryRecord[]> {
-  if (options.family === "project_history" && !options.repository.allowedProjectIds?.length)
+  if (
+    options.family === "project_history" &&
+    (!Array.isArray(options.repository.allowedProjectIds) ||
+      !options.repository.allowedProjectIds.length ||
+      !options.repository.allowedProjectIds.every(
+        (id) => typeof id === "string" && /^[A-Za-z0-9_=.-]{1,128}$/.test(id),
+      ))
+  )
     throw new Error("approved_project_scope_required");
   const [owner, name] = options.repository.slug.split("/");
   const actor = "actor { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }";

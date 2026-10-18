@@ -26,7 +26,12 @@ export async function readPublicProjectSnapshot(options: {
   maxPages?: number;
   assertAuthorized?: () => void;
 }): Promise<PublicProjectSnapshot> {
-  if (!options.allowedProjectIds.length) throw new Error("approved_project_scope_required");
+  if (
+    !Array.isArray(options.allowedProjectIds) ||
+    !options.allowedProjectIds.length ||
+    !options.allowedProjectIds.every((id) => typeof id === "string" && /^[A-Za-z0-9_=.-]{1,128}$/.test(id))
+  )
+    throw new Error("approved_project_scope_required");
   const probe = await options.client.graphql<{ node?: { project?: { id?: string; public?: boolean } } }>(
     options.source,
     `query($id:ID!) { node(id:$id) { ... on ProjectV2Item { project { id public } } } }`,

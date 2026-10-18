@@ -102,3 +102,15 @@ test("unapproved Project scope is rejected before any field request", async () =
     /approved_project_scope_required/,
   );
 });
+
+test("Project approvals cannot be a substring-matched string", async () => {
+  const client = {
+    graphql: async () => {
+      throw Error("must not read");
+    },
+  };
+  await assert.rejects(
+    readPublicProjectSnapshot({ ...options(client), allowedProjectIds: "prefix-PVT_synthetic-suffix" }),
+    /approved_project_scope_required/,
+  );
+});
