@@ -1351,7 +1351,7 @@ export async function createPipeline(options) {
       repos: repos.map((repo) => String(repo.id)),
       projects: scope.projects ?? [],
       workstreams: scope.workstream === null ? [] : [scope.workstream],
-      roles: [],
+      roles: scope.roles ?? [],
       actors: "all",
       context: scope.context ?? "event",
     };
