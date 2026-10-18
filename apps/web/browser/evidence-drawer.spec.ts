@@ -3,7 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { evidenceService } from "./evidenceHarness.ts";
 
 test.use({ storageState: { cookies: [], origins: [] } });
-const board = "/leaderboards/pr_opened?ui=api&snapshot=api-1";
+const board = "/leaderboards/pr_merged?ui=api&snapshot=api-1";
 
 test("API drawer and permanent route have identical proof, retain cursor/scope and hold a new head", async ({
   page,
@@ -183,7 +183,7 @@ test("deep linked unavailable source has no fabricated replacement and Close sta
     await dialog.getByRole("button", { name: "Close evidence panel" }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
-    expect(new URL(page.url()).pathname).toBe("/leaderboards/pr_opened");
+    expect(new URL(page.url()).pathname).toBe("/leaderboards/pr_merged");
     expect(new URL(page.url()).searchParams.get("snapshot")).toBe("api-1");
     expect(new URL(page.url()).searchParams.has("proof")).toBe(false);
   } finally {
