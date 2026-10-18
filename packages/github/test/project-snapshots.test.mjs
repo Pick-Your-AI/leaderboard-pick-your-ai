@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { syntheticRepositoryClient } from "./synthetic-client.mjs";
 import { readPublicProjectSnapshot, projectSnapshotRevision, createGithubEvidenceNormalizer } from "../dist/index.js";
 const repository = { id: 2, slug: "synthetic-owner/repository", allowedProjectIds: ["PVT_synthetic"] };
 const item = () => ({
@@ -36,7 +37,7 @@ test("Project fields are current-only snapshots and never fabricated editor cred
   const snapshot = await readPublicProjectSnapshot(options(client));
   assert.equal(snapshot.fields[0].id, "PVTF_synthetic");
   const normalize = createGithubEvidenceNormalizer({
-    client,
+    client: syntheticRepositoryClient(repository.id, client),
     source: "synthetic",
     allowedRepositoryIds: [2],
     allowedProjectIds: ["PVT_synthetic"],

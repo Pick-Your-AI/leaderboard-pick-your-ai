@@ -7,6 +7,11 @@ import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
+import {
+  canonicalProjectWorkstreamMappings,
+  normalizedProjectContext,
+  applyCurrentProjectContexts,
+} from "./project-context.mjs";
 import { readCurrentSourceHealth } from "./source-health.mjs";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
@@ -26,8 +31,6 @@ const canonical = (value) =>
       : JSON.stringify(value);
 const digest = (value) => createHash("sha256").update(canonical(value)).digest("hex");
 const policyDigest = (value) => createHash("sha256").update(value).digest("hex");
-const scopeKey = (scope) =>
-  JSON.stringify([scope.organization, scope.repository, scope.workstream, scope.start, scope.end]);
 const copy = (value) => structuredClone(value);
 // Private preview records retain labels only. Provider bindings stay in the
 // restricted normalization store and are restored transiently before engine use.
@@ -169,12 +172,15 @@ export async function createPipeline(options) {
   if (
     !c?.ingestion?.CollectionStore ||
     !c?.metrics?.aggregateMetric ||
+    !c?.contracts?.canonicalPublicScope ||
+    !c?.contracts?.publicScopeKey ||
     !c?.service?.createService ||
     !controlsStore?.read ||
     !controlsStore?.transaction ||
     !db?.transaction
   )
     fail("pipeline_components_required");
+  const scopeKey = c.contracts.publicScopeKey;
   const dataMode = options.dataMode ?? "public";
   if (!["public", "synthetic"].includes(dataMode)) fail("invalid_pipeline_data_mode");
   const assertDataMode = (value) => {
@@ -184,6 +190,10 @@ export async function createPipeline(options) {
       fail("synthetic_data_forbidden_in_public_runtime");
   };
   const config = copy(options.config ?? { version: "unconfigured", repositories: [], policies: [], scopes: [] });
+  const projectWorkstreamMappings = canonicalProjectWorkstreamMappings(
+    config,
+    c.github?.validateProjectWorkstreamMapping,
+  );
   if (config.researchPolicies?.length) {
     const recordPolicies = config.policies.filter((entry) => entry.policy.metricId === "decision_records");
     if (
@@ -216,9 +226,21 @@ export async function createPipeline(options) {
   const documentationNormalizationSignature = classificationPolicies.documentation.length
     ? digest(["documentation-locales/v2", attributionNormalizationSignature])
     : attributionNormalizationSignature;
-  const normalizationSignature = digest(["verified-default-branch-merge-pins/v1", documentationNormalizationSignature]);
+  const verifiedMergeNormalizationSignature = digest([
+    "verified-default-branch-merge-pins/v1",
+    documentationNormalizationSignature,
+  ]);
+  // Retained Project history still participates after active collection stops.
+  // Keep its new semantics in a distinct cache generation for every configuration,
+  // so reprocessing cannot overwrite an earlier frozen normalization dependency.
+  const normalizationSignature = digest([
+    "project-membership-context/v1",
+    verifiedMergeNormalizationSignature,
+    projectWorkstreamMappings,
+  ]);
   const frozenNormalizationSignatures = [
     normalizationSignature,
+    verifiedMergeNormalizationSignature,
     documentationNormalizationSignature,
     attributionNormalizationSignature,
     normalizationPolicySignature,
@@ -550,6 +572,7 @@ export async function createPipeline(options) {
           assertAuthorized: () => assertRunConfiguration(),
           documentationPolicies: config.documentationPolicies ?? [],
           researchPolicies: config.researchPolicies ?? [],
+          projectWorkstreamMappings,
           ...(options.githubEnrich ? { enrich: options.githubEnrich } : {}),
         })
       : null);
@@ -645,6 +668,7 @@ export async function createPipeline(options) {
         fail("registry_definition_version_mismatch");
     }
     for (const scope of config.scopes) {
+      const canonicalScope = c.contracts.canonicalPublicScope(scope);
       if (
         scope.organization !== config.organization ||
         !["repository", "workstream", "start", "end"].every((key) => key in scope)
@@ -655,7 +679,15 @@ export async function createPipeline(options) {
       if (scope.workstream !== null) required(scope.workstream, "invalid_workstream_scope");
       if ((scope.start === null) !== (scope.end === null)) fail("incomplete_public_window");
       if (scope.start !== null && utc(scope.start) >= utc(scope.end)) fail("invalid_public_window");
+      const approvedProjects = new Set(
+        config.repositories
+          .filter((repo) => scope.repository === null || String(repo.id) === scope.repository)
+          .flatMap((repo) => repo.allowedProjectIds ?? []),
+      );
+      if ((canonicalScope.projects ?? []).some((id) => !approvedProjects.has(id))) fail("unapproved_scope_project");
     }
+    if (new Set(config.scopes.map(scopeKey)).size !== config.scopes.length)
+      fail("duplicate_public_scope_configuration");
     return true;
   }
   const configuredScope = (scope) => config.scopes.some((item) => scopeKey(item) === scopeKey(scope));
@@ -776,19 +808,47 @@ export async function createPipeline(options) {
         ),
     );
   async function normalizeStored(repositoryIds, cutoff, dispatch) {
+    // Current association is selected from one completed whole-repository scan.
+    // A partial later run cannot replace it, and subjects absent from the latest
+    // complete inventory cannot inherit older membership rows.
+    const latestProjectRuns = (
+      await db.query(
+        `SELECT run_id,repository_id FROM (
+          SELECT run_id,repository_id,
+            DENSE_RANK() OVER (PARTITION BY repository_id ORDER BY last_success_at DESC) AS recency
+          FROM leaderboard_ingestion.collection_runs
+          WHERE repository_id=ANY($1::bigint[]) AND family='project_current'
+          AND state='complete' AND last_success_at <= $2
+        ) AS completed WHERE recency=1 ORDER BY repository_id,run_id LIMIT 10001`,
+        [repositoryIds, cutoff],
+      )
+    ).rows;
+    if (latestProjectRuns.length > 10000) fail("frozen_dataset_budget_exceeded");
+    if (new Set(latestProjectRuns.map((run) => String(run.repository_id))).size !== latestProjectRuns.length)
+      fail("ambiguous_current_project_run");
+    const selectedProjectRuns = latestProjectRuns.map((run) => run.run_id);
     const sourceRows = (
       await db.query(
         `SELECT fact.* FROM leaderboard_ingestion.source_facts AS fact
       JOIN leaderboard_ingestion.repository_access AS access USING (repository_id)
       WHERE fact.repository_id = ANY($1::bigint[]) AND fact.observed_at <= $2 AND access.state='public'
-      AND (fact.document->>'evidence' <> 'current_state' OR NOT EXISTS (
+      AND (
+        (fact.family='project_current' AND fact.document ? 'projectSubjectId'
+          AND EXISTS (SELECT 1 FROM leaderboard_ingestion.collection_items AS selected
+            WHERE selected.fact_key=fact.fact_key AND selected.run_id=ANY($3::text[])))
+        OR (NOT (fact.family='project_current' AND fact.document ? 'projectSubjectId')
+        AND (fact.document->>'evidence' <> 'current_state' OR NOT EXISTS (
         SELECT 1 FROM leaderboard_ingestion.source_facts AS newer
         WHERE newer.repository_id=fact.repository_id AND newer.family=fact.family AND newer.subject_id=fact.subject_id
-        AND newer.document->>'evidence'='current_state' AND newer.observed_at <= $2 AND newer.observed_at > fact.observed_at))
+        AND newer.document->>'evidence'='current_state' AND newer.observed_at <= $2 AND newer.observed_at > fact.observed_at
+        AND (NOT (newer.family='project_current' AND newer.document ? 'projectSubjectId')
+          OR EXISTS (SELECT 1 FROM leaderboard_ingestion.collection_items AS selected
+            WHERE selected.fact_key=newer.fact_key AND selected.run_id=ANY($3::text[]))))))
+      )
       AND NOT EXISTS (SELECT 1 FROM leaderboard_ingestion.object_suppressions AS removed
         WHERE removed.repository_id=fact.repository_id AND removed.subject_id=fact.subject_id)
       ORDER BY fact.fact_key LIMIT 10001`,
-        [repositoryIds, cutoff],
+        [repositoryIds, cutoff, selectedProjectRuns],
       )
     ).rows;
     if (sourceRows.length > 10000) fail("frozen_dataset_budget_exceeded");
@@ -814,6 +874,7 @@ export async function createPipeline(options) {
     const signature = normalizationSignature;
     const outputs = [];
     for (const row of sourceRows) {
+      const repository = config.repositories.find((repo) => String(repo.id) === String(row.repository_id));
       const cached = (
         await db.query(
           "SELECT document,document_hash FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=$2",
@@ -828,14 +889,22 @@ export async function createPipeline(options) {
         // Keep the shared policy signature stable for frozen comparisons.
         const currentHistoryNormalizer =
           row.family !== "project_history" ||
-          cached.document.projectHistoryNormalizationVersion === "collected-subject/v1";
-        if (currentHistoryNormalizer && hasDispatchEvidence(cached.document, dispatch, row)) {
+          cached.document.projectHistoryNormalizationVersion === "collected-subject/v2";
+        const currentProjectNormalizer =
+          row.family !== "project_current" ||
+          row.document.projectSubjectId === undefined ||
+          cached.document.projectContextNormalizationVersion === "subject-membership/v1";
+        if (
+          currentHistoryNormalizer &&
+          currentProjectNormalizer &&
+          hasDispatchEvidence(cached.document, dispatch, row)
+        ) {
+          normalizedProjectContext(cached.document, row, repository, projectWorkstreamMappings);
           await retainSourceArtifacts(db, row.fact_key, cached.document);
           outputs.push({ document: cached.document, source: sourceBinding(row) });
           continue;
         }
       }
-      const repository = config.repositories.find((repo) => String(repo.id) === String(row.repository_id));
       const normalizationStarted = performance.now();
       let output;
       try {
@@ -954,13 +1023,17 @@ export async function createPipeline(options) {
       // prove the target creation. Failure must not leave older evidence visible.
       if (!hasDispatchEvidence(output, dispatch, row)) fail("dispatch_enrichment_unavailable");
       const document = {
-        ...(row.family === "project_history" ? { projectHistoryNormalizationVersion: "collected-subject/v1" } : {}),
+        ...(row.family === "project_history" ? { projectHistoryNormalizationVersion: "collected-subject/v2" } : {}),
+        ...(row.family === "project_current" && row.document.projectSubjectId !== undefined
+          ? { projectContextNormalizationVersion: "subject-membership/v1" }
+          : {}),
         suppressArtifactIds: suppressed,
         isSynthetic: dataMode === "synthetic",
         facts: output.facts,
         actors: output.actors,
         evidence: output.evidence,
         ...privateAttribution(output, row),
+        ...normalizedProjectContext(output, row, repository, projectWorkstreamMappings),
         reasons: Array.isArray(output.reasons)
           ? output.reasons.map((reason) =>
               typeof reason === "string" && /^[a-z0-9_:-]{1,100}$/.test(reason) ? reason : "normalization_unavailable",
@@ -1058,6 +1131,7 @@ export async function createPipeline(options) {
   }
   async function publish(scope, cutoff, observationCutoff, dispatch) {
     assertRunConfiguration();
+    scope = c.contracts.canonicalPublicScope(scope);
     if (!configuredScope(scope)) fail("scope_not_approved");
     const repos = repositoriesFor(scope);
     const generations = (
@@ -1205,7 +1279,10 @@ export async function createPipeline(options) {
       if (previous && semantic(previous) !== semantic(fact)) fail("conflicting_normalized_fact");
       if (!previous || fact.observedAt < previous.observedAt) uniqueFacts.set(fact.id, fact);
     }
-    const facts = [...uniqueFacts.values()].sort((a, b) => a.id.localeCompare(b.id));
+    const facts = applyCurrentProjectContexts(
+      [...uniqueFacts.values()].sort((a, b) => a.id.localeCompare(b.id)),
+      outputs,
+    );
     const identity = sourceActorEvidence();
     const actors = identity.actors,
       evidence = new Map();
@@ -1254,11 +1331,11 @@ export async function createPipeline(options) {
     const engineScope = {
       ...window,
       repos: repos.map((repo) => String(repo.id)),
-      projects: [],
+      projects: scope.projects ?? [],
       workstreams: scope.workstream === null ? [] : [scope.workstream],
       roles: [],
       actors: "all",
-      context: "event",
+      context: scope.context ?? "event",
     };
     const state = controlsStore.read();
     assertRunConfiguration();
@@ -1628,7 +1705,7 @@ export async function createPipeline(options) {
   }
   const source = {
     async readComparison(scope, pin, previous, signal) {
-      if (["organization", "repository", "workstream"].some((key) => scope[key] !== previous.scope[key])) return null;
+      if (c.contracts.publicScopeFilterKey(scope) !== c.contracts.publicScopeFilterKey(previous.scope)) return null;
       // Both reads reuse this transaction. Source locks remain held through the
       // final authority query, including expanded retained-source revocations.
       return db.transaction(async (tx) => {

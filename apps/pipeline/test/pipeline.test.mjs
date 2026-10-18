@@ -546,7 +546,7 @@ test("default collection adapter rejects a revoked response before following its
       const url = new URL(value);
       calls.push(url.href);
       if (url.pathname === "/repos/synthetic-org/synthetic-repo")
-        return new Response(JSON.stringify({ id: 2, private: false }));
+        return new Response(JSON.stringify({ id: 2, private: false, full_name: "synthetic-org/synthetic-repo" }));
       authorized = false;
       return new Response(JSON.stringify([{}]), {
         headers: {

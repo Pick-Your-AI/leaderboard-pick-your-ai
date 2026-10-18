@@ -1,4 +1,4 @@
-import { sourceAdapterSchema } from "@pick-your-ai/contracts";
+import { publicScopeFilterKey, sourceAdapterSchema } from "@pick-your-ai/contracts";
 import { compareRankMovement, resolveMetricWindow, stableJSON, type RankComparisonInput } from "@pick-your-ai/metrics";
 import { compareSourceInstants } from "./source-time.js";
 import type { PublicRead, PublicScope } from "./public-source.js";
@@ -49,7 +49,16 @@ function historyMetric(
   )
     return null;
   const scope = read.selected.scope;
-  if (!sameTime(metric.scope.from, scope.start) || (scope.end !== null && !sameTime(metric.scope.to, scope.end)))
+  if (
+    !sameTime(metric.scope.from, scope.start) ||
+    (scope.end !== null && !sameTime(metric.scope.to, scope.end)) ||
+    metric.scope.context !== (scope.context ?? "event") ||
+    !sameSet(metric.scope.projects, scope.projects ?? []) ||
+    !sameSet(metric.scope.workstreams, scope.workstream === null ? [] : [scope.workstream]) ||
+    (scope.repository !== null && !sameSet(metric.scope.repos, [scope.repository])) ||
+    metric.scope.roles.length !== 0 ||
+    metric.scope.actors !== "all"
+  )
     return null;
   if (metric.scope.period && metric.scope.period !== "custom") {
     const expected = resolveMetricWindow(metric.scope.period, metric.scope.to);
@@ -152,6 +161,8 @@ export function comparePublishedRanks(
     return unavailable("mixed_computation_versions");
   if (!currentHistory || !previousHistory) return unavailable("insufficient_evidence_history");
   try {
+    if (publicScopeFilterKey(current.selected.scope) !== publicScopeFilterKey(previous.selected.scope))
+      return unavailable("comparison_scope_changed");
     const before = historyMetric(previous, previousHistory, metricId),
       after = historyMetric(current, currentHistory, metricId);
     if (!before || !after) return unavailable("history_or_visible_cohort_changed");
