@@ -221,7 +221,9 @@ export class FileCheckpointStore implements CheckpointStore {
         if (size > this.maxBytes) throw new CheckpointLimitError(this.maxBytes);
         chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
       }
-      return JSON.parse(Buffer.concat(chunks, size).toString("utf8")) as unknown;
+      // Reject damaged bytes without changing the existing JSON/BOM boundary.
+      const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks, size));
+      return JSON.parse(text) as unknown;
     } catch (error) {
       if (error instanceof CheckpointLimitError) throw error;
       throw new Error("Checkpoint is unreadable or corrupt", { cause: error });

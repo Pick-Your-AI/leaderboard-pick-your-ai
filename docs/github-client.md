@@ -55,6 +55,8 @@ Each filesystem checkpoint has a 64 MiB UTF-8 JSON record limit by default. Conf
 
 Repository-bound records live under `repositories-v1/<repositoryId>`. Their permanent retirement marker is stored separately from payloads and is checked on every scoped load/save and awaited client delivery boundary. `retireRepositoryCheckpoints(id, binding)` first durably installs the operation-bound denial marker, then removes only that repository namespace. Read the [retirement procedure and limitations](repository-checkpoint-retirement.md) before integrating this privileged host operation. Legacy unscoped bytes are explicitly outside its receipt; it does not purge database, controls or backup payloads.
 
+Filesystem loads require well-formed UTF-8 before JSON parsing. Damaged bytes produce the existing fixed corrupt-checkpoint error without rewriting the saved record; they cannot become replacement characters in restored source identities. Valid encoded Unicode, including a literal replacement character, remains readable. Leading UTF-8 BOMs retain the existing JSON-parser rejection behavior. This check cannot recover original bytes from legacy records already rewritten by a lossy decoder.
+
 The scan result is not an atomic database commit with a downstream importer. Consume it through an idempotent canonical-event importer or a separately coordinated transaction. A checkpoint is collection progress, not evidence that downstream recognition was accepted. The client does not mark coverage complete merely because a supplied pagination chain ended.
 
 ## Retry and resource bounds

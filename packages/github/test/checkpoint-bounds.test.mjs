@@ -138,3 +138,33 @@ test("an oversized second scan page preserves the resumable first-page checkpoin
   assert.deepEqual(await create(2048).scanRest(scan), ["synthetic-first", "x".repeat(600)]);
   assert.deepEqual(calls, [scan.url, accepted.next, accepted.next]);
 });
+
+for (const [name, octets] of [
+  ["isolated continuation", [0x80]],
+  ["truncated sequence", [0xe2, 0x82]],
+  ["bad continuation", [0xc3, 0x28]],
+  ["overlong character", [0xc0, 0xaf]],
+  ["encoded surrogate", [0xed, 0xa0, 0x80]],
+  ["outside Unicode range", [0xf4, 0x90, 0x80, 0x80]],
+]) {
+  test(`filesystem checkpoints reject ${name} bytes without rewriting the record`, async (t) => {
+    const directory = await fixture(t);
+    const bytes = Buffer.concat([Buffer.from('{"id":"'), Buffer.from(octets), Buffer.from('"}')]);
+    await writeFile(pathFor(directory), bytes);
+    const store = new FileCheckpointStore(directory, { maxBytes: 64 });
+    await assert.rejects(store.load(key), { message: "Checkpoint is unreadable or corrupt" });
+    assert.deepEqual(await readFile(pathFor(directory)), bytes);
+  });
+}
+
+test("filesystem checkpoints preserve valid Unicode and the existing leading-BOM rejection", async (t) => {
+  const directory = await fixture(t);
+  const value = { id: "synthetic � 日本語" };
+  const store = new FileCheckpointStore(directory, { maxBytes: 64 });
+  await store.save(key, value);
+  assert.deepEqual(await new FileCheckpointStore(directory, { maxBytes: 64 }).load(key), value);
+  const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), await readFile(pathFor(directory))]);
+  await writeFile(pathFor(directory), bytes);
+  await assert.rejects(store.load(key), { message: "Checkpoint is unreadable or corrupt" });
+  assert.deepEqual(await readFile(pathFor(directory)), bytes);
+});
