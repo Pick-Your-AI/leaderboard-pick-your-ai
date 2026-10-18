@@ -29,6 +29,14 @@ retryable dependency block. Ordinary source mutations stay forbidden. This does
 not purge pipeline, controls, checkpoint or backup copies; rollback refuses to
 discard an existing permanent retirement.
 
+[Protected replay results and source health](../../docs/operator-operations.md#native-health-and-replay-results)
+add migration `007_operator_replay_results.up.sql`. Apply it after migrations
+001–004 before starting this version of the inbox worker/operator bridge.
+It binds an audited replay to its persisted processing lease and only a newly
+inserted publication notice; older receipts remain explicitly unbound. The native
+pipeline verifies actual publication references separately from the immutable
+queued audit. Optional collection retirement remains independently applied.
+
 ## Run validation
 
 Use Node 24, from this directory:
@@ -52,10 +60,11 @@ Default tests use PGlite's embedded PostgreSQL engine and explicitly skip multi-
 For explicit source/time-window recovery, the protected `OperatorInbox` provides
 `previewReplayWindow` and `replayWindow` with required UTC receive bounds, a
 1–50 delivery limit, expected policy, reviewed selection revision, operator and
-reason. See the [host integration and audit contract](../../docs/operator-operations.md#bounded-sourcetime-window-host-primitive).
-Overflow and changed selections fail closed; no new HTTP route or automatic
-replay is enabled. Batch receipts preserve per-delivery provenance and keep
-resulting publication unknown.
+reason. See the [host integration and audit contract](../../docs/operator-operations.md#bounded-receive-time-replay).
+Overflow and changed selections fail closed. The opt-in controls adapter exposes
+the reviewed routes; no automatic replay is enabled. Batch receipts preserve
+per-delivery provenance and keep their queued publication field null. A separate
+current-authority result read verifies each later processing/publication result.
 
 All store writes are parameterized. Credentials, raw source bodies, titles, user text, emails and logins are not retained. Error responses contain fixed codes. Delivery IDs identify authenticated delivery receipts, not unique source contributions. Different delivery IDs describing the same GitHub action remain separate observations until the source-event deduplication and lineage layers reconcile them. The outbox remains an internal notice queue. The opt-in [synthetic pipeline dispatcher](../../docs/webhook-dispatch.md) adds a leased, retryable bridge for approved issue-creation fixtures; public dispatch remains disabled.
 
