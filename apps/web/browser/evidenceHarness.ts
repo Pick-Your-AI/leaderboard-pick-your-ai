@@ -235,5 +235,8 @@ export async function evidenceService(page: Page) {
     fail() {
       unavailable = true;
     },
+    recover() {
+      unavailable = false;
+    },
   };
 }

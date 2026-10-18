@@ -18,6 +18,8 @@ const routes = [
   "/coverage",
   "/corrections",
   "/live",
+  "/live?ui=prototype&mode=cycle&boards=not-a-metric",
+  "/live?ui=prototype&mode=bogus",
   "/prototype",
   "/leaderboards/issues_opened?repo=syn-repo-research",
   "/contributors?q=nobody",
