@@ -30,14 +30,23 @@ export function materializeRecognition(input, state, bindings, policies, applyRe
   const domainReasons = new Map();
   const decisionTime = (request) => {
     const at = request.history?.findLast((event) => event.action === "accepted")?.at;
-    return typeof at === "number" ? at : Date.parse(at);
+    const time = typeof at === "number" ? at : typeof at === "string" ? Date.parse(at) : NaN;
+    return Number.isFinite(time) ? time : Infinity;
   };
-  const requests = Object.values(state.requests ?? {}).sort(
-    (a, b) => decisionTime(a) - decisionTime(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-  );
+  // Only eligible request kinds participate in canonical receipt ordering.
+  // Invalid accepted clocks sort last and still fail validation below; they
+  // cannot make the comparator non-transitive or silently disappear.
+  const requests = Object.values(state.requests ?? {})
+    .filter(
+      (request) =>
+        request.kind === "evidence" && request.status === "accepted" && !state.profiles?.[request.owner]?.suppressed,
+    )
+    .sort((a, b) => {
+      const at = decisionTime(a),
+        bt = decisionTime(b);
+      return at < bt ? -1 : at > bt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
   for (const request of requests) {
-    if (request.kind !== "evidence" || request.status !== "accepted" || state.profiles?.[request.owner]?.suppressed)
-      continue;
     const matches = bindings.filter(
       (b) => b.category === request.category && b.scope === request.scope && b.policyVersion === request.policyVersion,
     );
@@ -75,10 +84,12 @@ export function materializeRecognition(input, state, bindings, policies, applyRe
     )
       throw new Error("recognition_decision_unverified");
     // Controls records epoch milliseconds; normalizers require canonical UTC strings.
-    const acceptedAt =
-      typeof decision.at === "number" && Number.isSafeInteger(decision.at) && decision.at >= 0
-        ? new Date(decision.at).toISOString()
-        : decision.at;
+    if (
+      typeof decision.at === "number" &&
+      (!Number.isSafeInteger(decision.at) || decision.at < 0 || !Number.isFinite(new Date(decision.at).getTime()))
+    )
+      throw new Error("recognition_decision_time_invalid");
+    const acceptedAt = typeof decision.at === "number" ? new Date(decision.at).toISOString() : decision.at;
     if (
       typeof acceptedAt !== "string" ||
       !Number.isFinite(Date.parse(acceptedAt)) ||

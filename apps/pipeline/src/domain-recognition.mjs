@@ -220,7 +220,7 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
         "sourceIds",
         "factualReview",
       ]);
-      require(/^[A-Z]{3}$/.test(detail.currency));
+      require(typeof detail.currency === "string" && /^[A-Z]{3}$/.test(detail.currency));
       instant(detail.asOf);
       require(instant(detail.asOf) <= instant(acceptedAt) && detail.factualReview === true);
       digest(detail.conditionsHash);

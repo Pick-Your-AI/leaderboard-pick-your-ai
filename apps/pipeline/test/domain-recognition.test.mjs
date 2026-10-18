@@ -403,6 +403,56 @@ test("a reviewer, matching URL or forged manifest cannot replace current exact s
   }
 });
 
+test("pricebook currency requires an actual uppercase three-letter string", () => {
+  for (const currency of [
+    ["USD"],
+    ["EUR"],
+    ["USD", "EUR"],
+    [],
+    {},
+    { currency: "USD" },
+    null,
+    true,
+    840,
+    "usd",
+    "US",
+    "USDD",
+  ]) {
+    const s = scenario("pricebook_proposals");
+    s.record.details.currency = currency;
+    assert.throws(() => run(s), /domain_recognition_evidence_unverified/, JSON.stringify(currency));
+  }
+});
+
+test("malformed accepted decision clocks remain closed before canonical deduplication", () => {
+  for (const at of [
+    undefined,
+    null,
+    [],
+    {},
+    NaN,
+    Infinity,
+    Number.MAX_SAFE_INTEGER,
+    -1,
+    Date.parse(acceptedAt) + 0.5,
+    "invalid",
+  ]) {
+    const s = scenario();
+    const invalid = structuredClone(s.request);
+    invalid.id = "z-invalid-clock";
+    invalid.history[0].id = "invalid-clock-decision";
+    invalid.history[0].at = at;
+    s.state.requests[invalid.id] = invalid;
+    s.state.audit.push(invalid.history[0]);
+    s.binding.domainEvidence.records.push({
+      ...structuredClone(s.record),
+      requestId: invalid.id,
+      decisionId: invalid.history[0].id,
+    });
+    assert.throws(() => run(s), /recognition_decision_time_invalid/);
+  }
+});
+
 test("mutable, intermediate or incomplete PR observations never acquire immutable recognition pins", () => {
   const changes = [
     (e) => {
@@ -560,6 +610,59 @@ test("canonical units deduplicate aliases independently of request insertion ord
     initial,
     "a separately reviewed canonical record version is a separate unit",
   );
+});
+
+test("unrelated requests cannot change the earliest audited canonical receipt in any insertion order", () => {
+  const s = scenario();
+  const bindings = [],
+    requests = [];
+  const earlierAt = "2026-10-08T10:00:00.000Z";
+  for (const [id, at] of [
+    ["a-later", acceptedAt],
+    ["z-earlier", earlierAt],
+  ]) {
+    const request = structuredClone(s.request),
+      binding = structuredClone(s.binding);
+    request.id = id;
+    request.scope += `:${id}`;
+    request.history[0].id = `decision:${id}`;
+    request.history[0].at = Date.parse(at);
+    binding.scope = request.scope;
+    binding.domainEvidence.records[0].requestId = id;
+    binding.domainEvidence.records[0].decisionId = request.history[0].id;
+    requests.push(request);
+    bindings.push(binding);
+  }
+  const state = {
+    profiles: { 303: { suppressed: true } },
+    audit: requests.map((request) => request.history[0]),
+    requests: Object.fromEntries(requests.map((request) => [request.id, request])),
+  };
+  const materialize = () =>
+    materializeRecognition(s.input, state, bindings, s.policies, applyRecognitionReceipt, cutoff);
+  const expected = materialize();
+  const facts = expected.facts.filter((fact) => fact.metricId === "catalog_proposals" && fact.state === "qualified");
+  assert.equal(facts.length, 1);
+  assert.equal(facts[0].acceptedAt, earlierAt);
+  const permutations = [
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+  ];
+  for (const unrelated of [
+    { id: "m-pending", kind: "evidence", status: "pending", owner: "101", history: [] },
+    { id: "m-consent", kind: "consent", status: "accepted", owner: "101", history: [] },
+    { id: "m-suppressed", kind: "evidence", status: "accepted", owner: "303", history: [] },
+  ]) {
+    const entries = [requests[0], unrelated, requests[1]];
+    for (const order of permutations) {
+      state.requests = Object.fromEntries(order.map((index) => [entries[index].id, entries[index]]));
+      assert.deepEqual(materialize(), expected, `${unrelated.id}: ${order.join(",")}`);
+    }
+  }
 });
 
 test("new proof for an existing canonical unit cannot create extra credit", () => {
