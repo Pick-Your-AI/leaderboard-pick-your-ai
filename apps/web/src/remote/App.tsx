@@ -10,6 +10,7 @@ import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
 import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
+import { RankComparisonControls, RankMovementValue } from "./RankComparison.tsx";
 import {
   discoverMetrics,
   isCatalogPath,
@@ -33,6 +34,7 @@ import {
   parameters,
   profile,
   publicLink,
+  rankComparisonPath,
   ReadFailure,
   request,
   selection,
@@ -253,6 +255,9 @@ function Filters({
             "search",
             "category",
             "actors",
+            "compare",
+            "compareStart",
+            "compareEnd",
           ]) {
             const value = String(input.get(key) ?? "").trim();
             if (value) params.set(key, value);
@@ -300,6 +305,10 @@ function Filters({
             {path === "/contributors" && <input type="hidden" name="search" value={selected.search ?? ""} />}
           </>
         )}
+        {rankComparisonPath(path) && selected.compare &&
+          (["compare", "compareStart", "compareEnd"] as const).map((key) => (
+            <input key={key} type="hidden" name={key} value={selected[key] ?? ""} />
+          ))}
         <button className="button" type="submit">
           Read exact scope
         </button>
@@ -418,7 +427,7 @@ export function RemoteApp() {
   useEffect(() => applyThemePreference(theme), [theme]);
   const parsed = useMemo(() => {
     try {
-      const selected = selection(url.search);
+      const selected = selection(url.search, { comparison: rankComparisonPath(url.pathname) });
       validateCatalogRoute(url.pathname, url.search);
       if (
         selected.proof &&
@@ -461,6 +470,7 @@ export function RemoteApp() {
   const { selected } = parsed;
   const refresh = useCallback(() => {
     active.current?.abort();
+    activeExport.current?.abort();
     setChecking(true);
     setNonce((value) => value + 1);
   }, []);
@@ -598,6 +608,7 @@ export function RemoteApp() {
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
+          activeExport.current?.abort();
           setChecking(false);
           setState({
             status: "error",
@@ -619,6 +630,7 @@ export function RemoteApp() {
   const apply = useCallback(() => {
     if (pending) {
       active.current?.abort();
+      activeExport.current?.abort();
       setState({ status: "loading" });
       setHeldPin(pending);
       setAnnouncement(`Applying snapshot ${pending}.`);
@@ -667,6 +679,7 @@ export function RemoteApp() {
         controller.signal,
         registryMetric(state.registry, pinned.metric),
       );
+      if (controller.signal.aborted || activeExport.current !== controller) return;
       const href = URL.createObjectURL(blob),
         anchor = document.createElement("a");
       anchor.href = href;
@@ -903,6 +916,15 @@ export function RemoteApp() {
                   Download current CSV page
                 </button>
               </p>
+              {rankComparisonPath(url.pathname) && (
+                <RankComparisonControls
+                  key={`${url.pathname}${url.search}`}
+                  value={data.value.comparison}
+                  selected={pinned}
+                  path={url.pathname}
+                  navigate={navigate}
+                />
+              )}
               {url.pathname.startsWith("/methodology/") ? (
                 <Methods metric={data.value.metric} registry={state.registry} meta={data.value} />
               ) : (
@@ -925,6 +947,11 @@ export function RemoteApp() {
                           <th scope="col" role="columnheader">
                             Rank
                           </th>
+                          {data.value.comparison && (
+                            <th scope="col" role="columnheader">
+                              Rank movement
+                            </th>
+                          )}
                           <th scope="col" role="columnheader">
                             Contributor
                           </th>
@@ -942,6 +969,11 @@ export function RemoteApp() {
                             <td role="cell" data-label="Rank">
                               {row.rank === null ? "Unranked" : row.rank}
                             </td>
+                            {data.value.comparison && (
+                              <td role="cell" data-label="Rank movement">
+                                <RankMovementValue value={row.movement} />
+                              </td>
+                            )}
                             <th role="rowheader" scope="row">
                               <a data-api-nav href={uiHref(`/contributors/${encodeURIComponent(row.actorId)}`, pinned)}>
                                 {name(row.actor, row.actorId)}

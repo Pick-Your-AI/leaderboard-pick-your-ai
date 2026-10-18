@@ -80,7 +80,7 @@ function records(raw: string, rowLimit: number): string[][] {
       if (!closed || formula(cell) || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(cell)) invalid();
       if (new TextEncoder().encode(cell).byteLength > 256 * 1024) invalid();
       row.push(cell);
-      if (row.length > columns.length) invalid();
+      if (row.length > columns.length + 2) invalid();
       if (raw[index] === ",") {
         index++;
         continue;
@@ -89,12 +89,20 @@ function records(raw: string, rowLimit: number): string[][] {
       index += 2;
       break;
     }
-    if (row.length !== columns.length) invalid();
+    if (row.length !== columns.length && row.length !== columns.length + 2) invalid();
     result.push(row);
     if (result.length > rowLimit + 2) invalid();
   }
   const header = result[0];
-  if (result.length < 2 || !header || columns.some((column, index) => header[index] !== column)) invalid();
+  if (
+    result.length < 2 ||
+    !header ||
+    columns.some((column, index) => header[index] !== column) ||
+    (header.length === columns.length + 2 &&
+      (header[columns.length] !== "comparison" || header[columns.length + 1] !== "movement")) ||
+    result.some((row) => row.length !== header.length)
+  )
+    invalid();
   return result.slice(1);
 }
 
@@ -127,7 +135,14 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
     if (value === undefined) invalid();
     return value;
   };
-  if (metadata[0] !== "metadata" || metadata.slice(metadataEnd).some((cell) => cell !== "")) invalid();
+  const withComparison = metadata.length === columns.length + 2;
+  if (
+    metadata[0] !== "metadata" ||
+    metadata.slice(metadataEnd, columns.length).some((cell) => cell !== "") ||
+    (withComparison && metadata[columns.length + 1] !== "")
+  )
+    invalid();
+  const comparison = withComparison ? parseExportJSON(metadata[columns.length]!) : undefined;
   if (
     !expectedMetric ||
     at(metadata, "metric") !== protectedText(expectedMetric.id) ||
@@ -150,6 +165,8 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
   const diagnostics: unknown[] = [];
   const rows = data.map((row) => {
     if (row[0] !== "row" || row.slice(1, metadataEnd).some((cell, index) => cell !== metadata[index + 1])) invalid();
+    if (withComparison && row[columns.length] !== metadata[columns.length]) invalid();
+    const movement = withComparison ? parseExportJSON(row[columns.length + 1]!) : undefined;
     const actorId = originalText(at(row, "actor_id"));
     const diagnosticColumns = [
       "numerator",
@@ -194,9 +211,11 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
       },
       evidenceIds,
       ...(pending === undefined ? {} : { pending }),
+      ...(withComparison ? { movement } : {}),
     };
   });
   return {
+    ...(withComparison ? { comparison } : {}),
     exportSchemaVersion: at(metadata, "export_schema_version"),
     schemaVersion: "leaderboard/v1",
     snapshotId: originalText(at(metadata, "snapshot")),

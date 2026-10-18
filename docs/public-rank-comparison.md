@@ -1,6 +1,6 @@
 # Snapshot-bound public rank comparison
 
-This is backend integration for [#97](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/97). Ordinary board and export responses are unchanged. An optional comparison request exposes movement only when two retained, currently authorized publications have compatible engine history. It does not recalculate published values, infer a prior rank, or authorize a source or metric.
+This is backend and public-browser integration for [#97](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/97). Ordinary board and export responses are unchanged. An optional comparison request exposes movement only when two retained, currently authorized publications have compatible engine history. It does not recalculate published values, infer a prior rank, or authorize a source or metric.
 
 ## Explicit API selection
 
@@ -47,11 +47,25 @@ The cumulative imported-history read admits at most 10,000 retained source facts
 
 This lineage is an invalidation input, not a complete-coverage or completed-import receipt. Existing late-evidence and changed/removed evidence-signature checks still detect historical changes discovered through ordinary reconciliation. Source capability, publication windows, coverage and current privacy authority remain independently required.
 
+## Public-browser selection and display
+
+API-backed metric boards and project boards expose an explicit baseline form. The reader enters the exact published baseline snapshot ID and can supply its paired UTC interval. Leaving both baseline dates blank requests the displayed board's exact interval; it does not guess a preceding period. Submitting a baseline pins the currently displayed snapshot, retains the metric, source scope and actor filter, and clears the old cursor and evidence drawer.
+
+The baseline identity, generation time and requested interval are shown with each comparison. Rows preserve the service's dense ranks across cursor pages and show accessible text for upward movement, downward movement, unchanged rank, a new entrant with no previous rank, or an unavailable comparison with its stated reason. An unavailable result has no numeric fallback. Publication generation time is provenance; the service's retained comparison cutoffs determine period ordering.
+
+Board and project permalinks, cursor navigation, and the background of an evidence drawer retain the explicit baseline selection. Ordinary health, live update, proof, contributor, activity and catalog requests do not receive comparison parameters. Navigating to those other pages drops the comparison selection while retaining the displayed current-snapshot pin. The dedicated Live wall keeps its existing separate scope controls.
+
+The client validates the baseline identity, both exact scopes, public timestamps and every movement-to-actor binding before display. Comparable and entrant states require a ranked numeric result and an enabled matching ranking policy. Comparable deltas are safe integers with a possible positive prior rank; entrant and unavailable deltas are null. Unknown or contradictory shapes and unexpected private comparison fields invalidate the response. The client does not reconstruct ranks from row order, subtract values, or infer a hidden contributor's previous position.
+
+JSON and CSV downloads retain the currently displayed snapshot, metric, scope, actor filter, baseline and page cursor. Both formats pass the same strict comparison validation before a download is offered. CSV comparisons have exactly two extra columns with identical comparison metadata on the metadata record and every row; the metadata record has no movement. Existing byte, field, evidence, duplicate-key and spreadsheet-formula safeguards remain in force. A requested comparison cannot silently become an ordinary export.
+
+A new selection, a second download, applying a held snapshot, a privacy recheck, navigation, hiding the page, or unmounting cancels a pending download. A late response cannot offer a file after its controller is no longer current. The existing focus and 20-second visible-page publication checks revalidate both sides of a comparison through the atomic service read; failed reads clear the displayed rows and movement.
+
 ## Current implementation limits
 
 The pipeline currently publishes fixed custom scopes or all-time scopes with incomplete historical coverage. This change preserves those facts: it does not certify historical completeness, change publication-window semantics or produce artificial progress. Positive movement/new-entrant API tests use actual engine-generated synthetic named-period aggregates with complete synthetic coverage. The actual pipeline tests use two persisted fixed-window snapshots and assert `insufficient_history`.
 
-Named-period publication integration, a connected complete-coverage producer and remote Web presentation remain separate unfinished integration work under #75/#91/#97. The persisted reconciliation lineage corrects the ordinary-ingestion marker boundary but supplies none of those missing capabilities. This backend slice alone does not close #97, and no production deployment requirement has been added to its automated-validation gate.
+Named-period publication integration and a connected complete-coverage producer remain separate unfinished integration work under #75/#91/#97. The persisted reconciliation lineage corrects the ordinary-ingestion marker boundary; the browser consumes the service's explicit compatibility result. Neither supplies those missing publication capabilities. This integration alone does not close #97, and no production deployment requirement has been added to its automated-validation gate.
 
 ## Validation
 
@@ -59,5 +73,8 @@ Named-period publication integration, a connected complete-coverage producer and
 - `node --test --test-concurrency=1 apps/pipeline/test/rank-comparison.test.mjs`: actual persistence/restart, immutable legacy replay, shared transaction/no nested connection, authority changes during pairing and confirmed-digest tamper rejection.
 - `node --test --test-concurrency=1 apps/pipeline/test/reconciliation-lineage*.test.mjs`: actual ordinary ingestion, correction capture and retry, partial/failed/resumed imports, current-state refresh, audit, frozen cutoffs and cumulative history overflow, while every published coverage record remains partial.
 - `node --test --test-concurrency=1 apps/pipeline/test/reconciliation-recovery.test.mjs`: a synthetic prior-producer marker passes through the actual SQL publisher before interrupted private confirmation; database restart recovers the exact receipt, while missing, altered or substituted frozen records stay unavailable. The existing webhook-dispatch cases separately retain later-correction denial.
+
+- `node --test apps/web/test/rank-comparison-client.test.mjs`: actual engine/service movement and tied cursor pages; strict board and JSON/CSV intake; malformed, private, mismatched and stale export inputs; exact URL scope isolation.
+- `npm run test:browser -- --grep "rank comparison"`: real-handler baseline selection, visible movement, evidence/history, privacy and response-lifetime journeys. The shared fixture is [rank-comparison.mjs](../tests/fixtures/rank-comparison.mjs); it derives movement from the metric engine with explicitly synthetic actors and evidence.
 
 Build workspace packages first. Fixtures are synthetic; their success establishes these executable invariants, not real-source accuracy or coverage.

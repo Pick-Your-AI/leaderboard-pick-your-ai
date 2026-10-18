@@ -43,7 +43,9 @@ export class ReadFailure extends Error {
 }
 const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
 const scopeKeys = ["organization", "repository", "workstream", "start", "end"] as const;
+const comparisonKeys = ["compare", "compareStart", "compareEnd"] as const;
 const supported = new Set([
+  ...comparisonKeys,
   "actors",
   ...scopeKeys,
   "snapshot",
@@ -71,12 +73,17 @@ export interface Selection {
   search: string | null;
   category: string | null;
   proof?: string | null;
+  compare?: string | null;
+  compareStart?: string | null;
+  compareEnd?: string | null;
   /** Local catalog discovery only; never sent as a source-data filter. */
   catalogQuery?: string | null;
   department?: string | null;
 }
-export function selection(query: string): Selection {
+export function selection(query: string, options: { comparison?: boolean } = {}): Selection {
   const params = new URLSearchParams(query);
+  if (!options.comparison && comparisonKeys.some((key) => params.has(key)))
+    throw new ReadFailure(400, "comparison_requires_board");
   for (const key of params.keys())
     if (!supported.has(key) || params.getAll(key).length !== 1)
       throw new ReadFailure(400, "unsupported_or_duplicate_filter");
@@ -105,6 +112,17 @@ export function selection(query: string): Selection {
     (start !== null && end !== null && (start >= end || Date.parse(end) - Date.parse(start) > 366 * 86400000))
   )
     throw new ReadFailure(400, "invalid_utc_window");
+  const compare = id("compare"),
+    compareStart = date("compareStart"),
+    compareEnd = date("compareEnd");
+  if (
+    (compareStart === null) !== (compareEnd === null) ||
+    (compareStart !== null &&
+      compareEnd !== null &&
+      (compareStart >= compareEnd || Date.parse(compareEnd) - Date.parse(compareStart) > 366 * 86400000)) ||
+    (compare === null && (compareStart !== null || compareEnd !== null))
+  )
+    throw new ReadFailure(400, "invalid_comparison_window");
   const limit = params.get("limit") ?? "50";
   if (!/^[1-9]\d{0,2}$/.test(limit) || Number(limit) > 100) throw new ReadFailure(400, "invalid_page_limit");
   const cursor = params.get("cursor");
@@ -122,6 +140,7 @@ export function selection(query: string): Selection {
     search: search?.toLowerCase() ?? null,
     category: id("category"),
     proof: id("proof"),
+    ...(compare === null ? {} : { compare, compareStart, compareEnd }),
     organization: id("organization") ?? "Pick-Your-AI",
     repository: id("repository"),
     workstream: id("workstream"),
@@ -133,6 +152,13 @@ export function selection(query: string): Selection {
     cursor,
   };
 }
+/** Historical movement is a board-page capability; the wall has separate scope controls. */
+export function rankComparisonPath(path: string): boolean {
+  return /^\/leaderboards\/[^/]+$/.test(path) || /^\/projects\/[^/]+$/.test(path);
+}
+function comparisonParameters(params: URLSearchParams, value: Selection): void {
+  for (const key of comparisonKeys) if (value[key]) params.set(key, value[key]);
+}
 export function parameters(
   value: Selection,
   extra: { metric?: string; snapshot?: string | null; cursor?: string | null; board?: boolean } = {},
@@ -143,6 +169,7 @@ export function parameters(
   const pin = extra.snapshot === undefined ? value.snapshot : extra.snapshot;
   if (pin) params.set("snapshot", pin);
   if (extra.board) {
+    comparisonParameters(params, value);
     params.set("metric", extra.metric ?? value.metric);
     params.set("limit", value.limit);
   }
@@ -158,6 +185,7 @@ export function uiHref(
   params.set("metric", extra.metric ?? value.metric);
   params.set("limit", value.limit);
   params.set("ui", "api");
+  if (rankComparisonPath(path)) comparisonParameters(params, value);
   if ((path.startsWith("/contributors") || path === "/activity" || path.startsWith("/activity/")) && value.category)
     params.set("category", value.category);
   if (path === "/contributors" && value.search) params.set("search", value.search);
@@ -399,6 +427,90 @@ function descriptiveMetric(metric: MetricDefinition): boolean {
     ["ratio", "median_and_p75_of_elapsed_hours"].includes(metric.definition.aggregation)
   );
 }
+export interface RankComparison {
+  snapshotId: string | null;
+  scope: Pick<Selection, "organization" | "repository" | "workstream" | "start" | "end"> | null;
+  generatedAt: string | null;
+}
+export type RankMovement =
+  | { actorId: string; state: "comparable"; delta: number; reason: null }
+  | { actorId: string; state: "new_entrant"; delta: null; reason: null }
+  | { actorId: string; state: "unavailable"; delta: null; reason: string };
+function invalidComparison(): never {
+  throw new ReadFailure(502, "invalid_rank_comparison");
+}
+function comparisonTime(value: unknown): string {
+  const parsed = sourceEventSchema.shape.occurredAt.safeParse(value);
+  if (!parsed.success || parsed.data === null) invalidComparison();
+  return parsed.data;
+}
+function comparisonObject(value: unknown, keys: readonly string[]): Record<string, unknown> {
+  const data = object(value);
+  if (Object.keys(data).some((key) => !keys.includes(key))) invalidComparison();
+  return data;
+}
+function rankComparison(value: unknown, selected: Selection, generatedAt: unknown): RankComparison | undefined {
+  if (!selected.compare) {
+    if (value !== undefined) invalidComparison();
+    return undefined;
+  }
+  comparisonTime(generatedAt);
+  const data = comparisonObject(value, ["snapshotId", "scope", "generatedAt"]);
+  if (data.snapshotId === null && data.scope === null && data.generatedAt === null)
+    return { snapshotId: null, scope: null, generatedAt: null };
+  if (data.snapshotId !== selected.compare || data.scope === null || data.generatedAt === null) invalidComparison();
+  const scope = comparisonObject(data.scope, scopeKeys);
+  const expected = {
+    organization: selected.organization,
+    repository: selected.repository,
+    workstream: selected.workstream,
+    start: selected.compareStart ?? selected.start,
+    end: selected.compareEnd ?? selected.end,
+  };
+  for (const key of scopeKeys) if (scope[key] !== expected[key]) invalidComparison();
+  return { snapshotId: selected.compare, scope: expected, generatedAt: comparisonTime(data.generatedAt) };
+}
+function rankMovement(
+  value: unknown,
+  actorId: string,
+  rank: number | null,
+  rankedValue: boolean,
+  comparison: RankComparison | undefined,
+  selected: Selection,
+): RankMovement | undefined {
+  if (comparison === undefined) {
+    if (value !== undefined) invalidComparison();
+    return undefined;
+  }
+  const data = comparisonObject(value, ["actorId", "state", "delta", "reason"]);
+  if (data.actorId !== actorId) invalidComparison();
+  if (data.state === "unavailable") {
+    if (data.delta !== null || typeof data.reason !== "string" || !/^[a-z][a-z0-9_]{0,119}$/.test(data.reason))
+      invalidComparison();
+    return { actorId, state: "unavailable", delta: null, reason: data.reason };
+  }
+  if (
+    comparison.snapshotId === null ||
+    comparison.generatedAt === null ||
+    (selected.actors ?? "all") !== "all" ||
+    rank === null ||
+    !rankedValue ||
+    data.reason !== null
+  )
+    invalidComparison();
+  if (data.state === "new_entrant" && data.delta === null)
+    return { actorId, state: "new_entrant", delta: null, reason: null };
+  if (
+    data.state !== "comparable" ||
+    typeof data.delta !== "number" ||
+    !Number.isSafeInteger(data.delta) ||
+    !Number.isSafeInteger(rank + data.delta) ||
+    rank + data.delta < 1
+  )
+    invalidComparison();
+  return { actorId, state: "comparable", delta: data.delta, reason: null };
+}
+
 /** Validate the minimized export contract, which intentionally has no actor profile or live head. */
 export function validateExport(value: unknown, selected: Selection, expectedMetric: MetricDefinition): void {
   const data = object(value),
@@ -425,6 +537,7 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
     "rows",
     "evidence",
     "pendingEvidence",
+    "comparison",
   ]);
   onlyExportKeys(scope, scopeKeys);
   if (data.exportSchemaVersion !== "public-export/v1" || data.schemaVersion !== "leaderboard/v1")
@@ -465,6 +578,7 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
     if (previous !== undefined && previous !== binding) throw new ReadFailure(502, "invalid_export_response");
     evidenceBindings.set(id, binding);
   };
+  const comparison = rankComparison(data.comparison, selected, data.generatedAt);
   const evidenceIds = new Set<string>();
   for (const value of array(data.evidence, 2000)) {
     const entry = object(value),
@@ -516,7 +630,17 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
   for (const value of rows) {
     const row = object(value),
       result = metricResultSchema.parse(row.result);
-    onlyExportKeys(row, ["actorId", "login", "actorKind", "executionMode", "rank", "result", "evidenceIds", "pending"]);
+    onlyExportKeys(row, [
+      "actorId",
+      "login",
+      "actorKind",
+      "executionMode",
+      "rank",
+      "result",
+      "evidenceIds",
+      "pending",
+      "movement",
+    ]);
     const actorId = identity(row.actorId);
     if (pageActors.has(actorId)) throw new ReadFailure(502, "invalid_export_response");
     pageActors.add(actorId);
@@ -535,6 +659,14 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
       (row.rank !== null && (integer(row.rank) < 1 || ranking?.rank === false || descriptiveMetric(metric)))
     )
       throw new ReadFailure(502, "invalid_export_response");
+    rankMovement(
+      row.movement,
+      actorId,
+      row.rank === null ? null : integer(row.rank),
+      ranking?.rank === true && result.value !== undefined,
+      comparison,
+      selected,
+    );
     const pending = row.pending === undefined ? undefined : pendingCountSchema.parse(row.pending);
     rowPending.set(actorId, pending);
     if (pending !== undefined)
@@ -666,6 +798,7 @@ function diagnostics(value: unknown): Diagnostic[] {
   });
 }
 export interface Board extends Metadata {
+  comparison?: RankComparison;
   metric: MetricDefinition;
   ranking: { direction: string; rank: boolean } | null;
   rows: {
@@ -675,6 +808,7 @@ export interface Board extends Metadata {
     result: MetricResult;
     evidenceIds: string[];
     pending?: PendingCount;
+    movement?: RankMovement;
   }[];
   diagnostics: Diagnostic[];
   totalRows: number;
@@ -692,11 +826,15 @@ export function board(value: unknown, selected: Selection): Board {
         (descriptiveMetric(metric) && method.rank !== false)))
   )
     throw new ReadFailure(502, "api_metric_mismatch");
+  const meta = metadata(value, selected);
+  const comparison = rankComparison(data.comparison, selected, meta.generatedAt);
+  const seen = new Set<string>();
   return {
-    ...metadata(value, selected),
+    ...meta,
+    ...(comparison === undefined ? {} : { comparison }),
     metric,
     ranking: method ? { direction: String(method.direction), rank: method.rank as boolean } : null,
-    rows: array(data.rows, 100).map((value) => {
+    rows: array(data.rows, selected.compare ? Number(selected.limit) : 100).map((value) => {
       const row = object(value),
         result = metricResultSchema.parse(row.result);
       if (
@@ -704,9 +842,22 @@ export function board(value: unknown, selected: Selection): Board {
         (row.rank !== null && (integer(row.rank) < 1 || method?.rank === false || descriptiveMetric(metric)))
       )
         throw new ReadFailure(502, "invalid_api_response");
+      const actorId = identity(row.actorId);
+      const rank = row.rank === null ? null : integer(row.rank);
+      if (comparison && seen.has(actorId)) invalidComparison();
+      seen.add(actorId);
+      const movement = rankMovement(
+        row.movement,
+        actorId,
+        rank,
+        method?.rank === true && result.value !== undefined,
+        comparison,
+        selected,
+      );
       return {
-        rank: row.rank === null ? null : integer(row.rank),
-        actorId: identity(row.actorId),
+        rank,
+        actorId,
+        ...(movement === undefined ? {} : { movement }),
         actor: selectedActor(row.actor, selected),
         result,
         evidenceIds: array(row.evidenceIds).map(identity),
