@@ -91,6 +91,7 @@ function historyMetric(
 function completePublicCoverage(read: PublicRead, metric: RankSnapshotHistory["metrics"][number]): boolean {
   if (
     metric.scope.from === null ||
+    compareSourceInstants(read.selected.snapshot.generatedAt, metric.scope.to) < 0 ||
     !metric.scope.repos.length ||
     !Array.isArray(metric.sources) ||
     !metric.sources.length ||
@@ -107,6 +108,8 @@ function completePublicCoverage(read: PublicRead, metric: RankSnapshotHistory["m
     compareSourceInstants(item.windowStart, metric.scope.from!) <= 0 &&
     item.windowEnd !== null &&
     compareSourceInstants(item.windowEnd, metric.scope.to) >= 0 &&
+    item.sourceWatermark !== null &&
+    compareSourceInstants(item.sourceWatermark, metric.scope.to) >= 0 &&
     item.missingPages === 0 &&
     item.permissionsMissing.length === 0 &&
     item.sourceErrors.length === 0;
