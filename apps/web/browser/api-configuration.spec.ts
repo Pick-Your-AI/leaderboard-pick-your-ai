@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build, preview, type PreviewServer } from "vite";
 
-test("a built cross-origin API configuration fails before public fetch or live connections", async ({ page }) => {
+test("malformed compiled API configuration fails before public fetch or live connections", async ({ page }) => {
   test.setTimeout(90_000);
   const root = fileURLToPath(new URL("../", import.meta.url));
   const outDir = await mkdtemp(join(tmpdir(), "leaderboard-api-configuration-"));
   let server: PreviewServer | undefined;
   try {
-    // Compile the actual entry with a representative nondefault public setting.
-    // This build and server belong to this test; the shared preview is untouched.
+    // Deliberately override the compiled literal to exercise the runtime error UI,
+    // separately from production build validation. This build and server are owned.
     const config = {
       root,
       configFile: join(root, "vite.config.ts"),
@@ -21,7 +21,7 @@ test("a built cross-origin API configuration fails before public fetch or live c
     };
     await build({
       ...config,
-      define: { "import.meta.env.VITE_PUBLIC_API_BASE": JSON.stringify("https://api.example.invalid/api/v1") },
+      define: { "import.meta.env.VITE_PUBLIC_API_BASE": JSON.stringify("https://[invalid/api/v1") },
     });
     server = await preview({ ...config, preview: { host: "127.0.0.1", port: 0, strictPort: false } });
     const base = server.resolvedUrls?.local[0];
@@ -45,7 +45,11 @@ test("a built cross-origin API configuration fails before public fetch or live c
     // A regression cannot contact the synthetic external host during this test.
     await page.route("https://api.example.invalid/**", (route) => route.abort());
     const response = await page.goto(new URL("/leaderboards/pr_opened?ui=api", base!).href);
-    expect(response?.headers()["content-security-policy"]).toContain("connect-src 'self'");
+    expect(response?.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+    await expect(page.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute(
+      "content",
+      /connect-src 'self'/,
+    );
     await expect(page.getByRole("alert")).toContainText("invalid_public_api_configuration");
     await expect(page.getByRole("region", { name: "Current source freshness" })).toHaveCount(0);
     await expect(page.getByText("SYNTHETIC DATA", { exact: false })).toHaveCount(0);
@@ -54,7 +58,10 @@ test("a built cross-origin API configuration fails before public fetch or live c
     await expect(page.getByText("Rechecking…", { exact: true })).toHaveCount(0);
     expect(await page.evaluate(() => Reflect.get(window, "syntheticApiAttempts"))).toEqual([]);
   } finally {
-    await server?.close();
-    await rm(outDir, { recursive: true, force: true });
+    try {
+      await server?.close();
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+    }
   }
 });

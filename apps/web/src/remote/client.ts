@@ -181,8 +181,6 @@ function configuredServiceBase(raw: string): URL {
 }
 export function apiBase(raw = "/api/v1"): string {
   const url = configuredServiceBase(raw);
-  // Production fetch and EventSource connections share the document's self-only CSP.
-  if (url.origin !== window.location.origin) throw new ReadFailure(500, "invalid_public_api_configuration");
   return url.href.replace(/\/$/, "");
 }
 /** An explicitly configured top-level account link, never a public request base. */

@@ -25,15 +25,11 @@ test("public API paths and absolute URLs retain the document's exact origin", (t
   assert.equal(apiBase("/public/api"), "https://leaderboard.example.invalid/public/api");
 });
 
-test("public API configuration rejects foreign origins including HTTPS and port changes", (t) => {
+test("configured HTTPS public APIs retain their explicit origin and port", (t) => {
   location(t, "https://leaderboard.example.invalid");
-  for (const raw of [
-    "https://api.example.invalid/api/v1",
-    "//api.example.invalid/api/v1",
-    "https://leaderboard.example.invalid:8443/api/v1",
-    "http://leaderboard.example.invalid/api/v1",
-  ])
-    assert.throws(() => apiBase(raw), configurationFailure, raw);
+  for (const raw of ["https://api.example.invalid/api/v1", "https://leaderboard.example.invalid:8443/api/v1"])
+    assert.equal(apiBase(raw), raw);
+  assert.throws(() => apiBase("http://leaderboard.example.invalid/api/v1"), configurationFailure);
 });
 
 test("local HTTP public reads remain on the browser origin rather than the upstream proxy port", (t) => {
@@ -43,11 +39,11 @@ test("local HTTP public reads remain on the browser origin rather than the upstr
   assert.throws(() => apiBase("http://127.0.0.1:3001/api/v1"), configurationFailure);
 });
 
-test("explicit secure account navigation retains its separate origin without making it a read base", (t) => {
+test("explicit secure account navigation retains its separately configured origin", (t) => {
   location(t, "https://leaderboard.example.invalid");
   const configured = "https://accounts.example.invalid/controls/";
   assert.equal(controlsNavigationBase(configured), "https://accounts.example.invalid/controls");
-  assert.throws(() => apiBase(configured), configurationFailure);
+  assert.equal(apiBase("https://api.example.invalid/api/v1"), "https://api.example.invalid/api/v1");
   assert.equal(controlsNavigationBase("/controls"), "https://leaderboard.example.invalid/controls");
   assert.throws(() => controlsNavigationBase("http://accounts.example.invalid/controls"), configurationFailure);
 });
