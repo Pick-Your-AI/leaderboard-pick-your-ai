@@ -30,6 +30,17 @@ export function cardHref(base: string, selected: Selection, snapshotId: string, 
   params.set("metric", identity(metricId));
   return `${base}/cards/${encodeURIComponent(identity(actorId))}?${params}`;
 }
+export function cardImageHref(
+  base: string,
+  selected: Selection,
+  snapshotId: string,
+  actorId: string,
+  metricId: string,
+) {
+  const href = cardHref(base, selected, snapshotId, actorId, metricId);
+  const index = href.indexOf("?");
+  return href.slice(0, index) + "/image" + href.slice(index);
+}
 export function achievements(value: unknown, selected: Selection, actorId: string) {
   const data = record(value);
   const meta = metadata(data, selected);

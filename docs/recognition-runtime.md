@@ -24,6 +24,8 @@ Remaining acceptance: approved rule policy; cross-workstream mapping/conditions 
 
 `GET /api/v1/cards/:actorId?metric=<id>` returns semantic HTML for one published metric, with period, exact scope, coverage, metric policy, source links, snapshot date and a pinned visible portfolio link. Add `snapshot=<id>` for an explicitly archived card. An unpinned card says to refresh to check for changes; neither mode claims live data. Missing/suppressed contributors or dependent aggregates yield no card. All text and links are escaped, output has no scripts or external assets, caching is disabled, and external framing is denied (`frame-ancestors 'self'` and `SAMEORIGIN`). Current privacy checks happen before conditional responses.
 
+`GET /api/v1/cards/:actorId/image` supplies a bounded deterministic passive SVG for README images. It preserves dated scope, policy and source labels, contains no scripts/external assets/links, and uses the same current suppression check plus no-store/nosniff. The public profile provides copyable Markdown linking the pinned image to its dated HTML card. Third-party caches/downloads remain outside server withdrawal control.
+
 Remaining acceptance: approved external embedding origins/cache policy if external embeds are desired, accessible browser/assistive-technology review, and actual production readback. Downloaded or copied content cannot be remotely withdrawn; served reads enforce current controls.
 
 ## Account backend (#128)

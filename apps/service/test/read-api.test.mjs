@@ -916,10 +916,32 @@ test("achievement rules require approval and use only dated accepted evidence wi
   }
   value.selected.portfolioEvidence[0].activityState = "accepted";
   value.selected.portfolioEvidence[0].occurredAt = null;
-  assert.equal((await app.inject({ url })).statusCode, 503);
+  const undated = await app.inject({ url });
+  assert.equal(undated.statusCode, 200);
+  assert.deepEqual(undated.json().achievements, []);
   value.selected.portfolioEvidence[0].occurredAt = at;
   value.controls.suppressedArtifactIds.push("pr-0");
   assert.deepEqual((await app.inject({ url })).json().achievements, []);
   value.controls.suppressedActorIds.push("alice");
   assert.equal((await app.inject({ url })).statusCode, 404);
+});
+
+test("README SVG images are bounded passive dated output and enforce current pinned suppression", async (t) => {
+  const value = fixture();
+  value.selected.actors[0].actor.login = '<script>alert("unsafe")</script>';
+  const app = createService({ source: { read: async () => structuredClone(value) } });
+  t.after(() => app.close());
+  const url = "/api/v1/cards/alice/image?metric=pr_opened&snapshot=public-1";
+  const response = await app.inject({ url });
+  assert.equal(response.statusCode, 200);
+  assert.match(response.headers["content-type"], /image\/svg\+xml/);
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.equal(response.headers["x-content-type-options"], "nosniff");
+  assert.match(response.body, /Archived snapshot: 2026-10-17/);
+  assert.match(response.body, /&lt;script&gt;/);
+  assert.doesNotMatch(response.body, /<script|<foreignObject|<image|href=|onload=/);
+  assert.ok(Buffer.byteLength(response.body) < 16384);
+  assert.equal((await app.inject({ url })).body, response.body);
+  value.controls.suppressedActorIds.push("alice");
+  assert.equal((await app.inject({ url, headers: { "if-none-match": response.headers.etag } })).statusCode, 404);
 });

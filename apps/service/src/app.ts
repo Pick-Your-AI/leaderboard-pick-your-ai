@@ -3,7 +3,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import { metricRegistrySchema, type MetricRegistry } from "@pick-your-ai/contracts";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { acceptedAchievements, ACHIEVEMENT_RULE_VERSION } from "./achievements.js";
-import { renderContributorCard } from "./cards.js";
+import { renderContributorCard, renderContributorCardImage } from "./cards.js";
 import { renderPublicExport } from "./exports.js";
 import {
   activityGroupingVersion,
@@ -419,6 +419,7 @@ export function createService(options: ServiceOptions = {}) {
         "contributors",
         "contributors/:actorId",
         "cards/:actorId",
+        "cards/:actorId/image",
         "contributors/:actorId/achievements",
         "activity",
         "activity/:groupId",
@@ -592,6 +593,19 @@ export function createService(options: ServiceOptions = {}) {
       "application/json; charset=utf-8",
       "no-store",
     );
+  });
+  app.get<{ Params: { actorId: string } }>("/api/v1/cards/:actorId/image", async (request, reply) => {
+    const q = query(request);
+    if (!q.metric || q.category || q.cursor || q.search || q.format !== "json")
+      fail(400, "card_requires_single_metric");
+    const metric = registry.metrics.find((entry) => entry.id === q.metric);
+    if (!metric) fail(404, "metric_unavailable");
+    const read = await load(q.scope, q.snapshot);
+    const svg = renderContributorCardImage(read, request.params.actorId, metric, q.snapshot !== null);
+    reply
+      .header("Content-Security-Policy", "default-src 'none'; sandbox; frame-ancestors 'none'")
+      .header("Referrer-Policy", "no-referrer");
+    return send(request, reply, svg, "image/svg+xml; charset=utf-8", "no-store");
   });
   app.get<{ Params: { actorId: string } }>("/api/v1/cards/:actorId", async (request, reply) => {
     const q = query(request);

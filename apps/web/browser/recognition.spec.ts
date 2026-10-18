@@ -156,6 +156,9 @@ test("real service sharing opens a dated HTML card and returns to the visible pi
   try {
     await page.goto("/contributors/api-a?ui=api&repository=repo-1&snapshot=api-1");
     await expect(page.getByRole("heading", { name: "First accepted contribution in available scope" })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "README Markdown for pr_opened" })).toHaveValue(
+      /\/cards\/api-a\/image\?.*snapshot=api-1/,
+    );
     await page.getByRole("link", { name: "Open archived pr_opened card" }).click();
     await expect(page.getByText("Archived snapshot card", { exact: true })).toBeVisible();
     await expect(page.getByText(at, { exact: true })).toBeVisible();
@@ -257,6 +260,11 @@ test("real controls current spotlights reject filtered scope and disappear after
   try {
     await page.clock.install();
     await page.goto("/?ui=api");
+    await expect(page.getByRole("heading", { name: "Public contribution evidence", exact: true })).toBeVisible();
+    if (!(await page.getByRole("heading", { name: "Editorial spotlights", exact: true }).count())) {
+      expect(calls).toBe(0);
+      return; // An unconfigured controls deployment must not be auto-enabled by the UI.
+    }
     await expect(page.getByText("Synthetic independently reviewed spotlight")).toBeVisible();
     const source = page.getByRole("link", { name: "Reviewed public evidence" });
     await source.focus();

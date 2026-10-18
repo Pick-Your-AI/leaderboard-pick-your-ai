@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { request, ReadFailure, type Selection } from "./client.ts";
-import { achievements, cardHref, recognitionParameters, spotlights } from "./recognition-client.ts";
+import { achievements, cardHref, cardImageHref, recognitionParameters, spotlights } from "./recognition-client.ts";
 
 type Load<T> = { key: string; value?: T; error?: boolean };
 /** A new request clears old evidence; errors never retain a prior successful result. */
@@ -67,11 +67,24 @@ export function ContributorRecognition({
   return (
     <section aria-labelledby="recognition-title">
       <h2 id="recognition-title">Sharing and accepted achievements</h2>
-      <p>Cards describe this dated snapshot and recheck current visibility when opened.</p>
+      <p>
+        Cards describe this dated snapshot and recheck current visibility when opened. Copied images and third-party
+        caches cannot be remotely withdrawn.
+      </p>
       <ul>
         {[...new Set(metricIds)].map((metric) => (
           <li key={metric}>
             <a href={cardHref(base, selected, snapshotId, actorId, metric)}>Open archived {metric} card</a>
+            {" · "}
+            <a href={cardImageHref(base, selected, snapshotId, actorId, metric)}>Open {metric} SVG image</a>
+            <label>
+              README Markdown for {metric}
+              <textarea
+                readOnly
+                rows={3}
+                value={`[![Dated ${metric} contribution snapshot](${new URL(cardImageHref(base, selected, snapshotId, actorId, metric), window.location.origin).href})](${new URL(cardHref(base, selected, snapshotId, actorId, metric), window.location.origin).href})`}
+              />
+            </label>
           </li>
         ))}
       </ul>
