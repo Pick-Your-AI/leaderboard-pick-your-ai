@@ -1098,6 +1098,38 @@ test("achievement rules require approval and use only dated accepted evidence wi
   assert.equal((await app.inject({ url })).statusCode, 404);
 });
 
+test("achievement exclusions preserve positively evidenced automated execution on user accounts", async (t) => {
+  const value = fixture();
+  value.selected.actors[0].actor.executionMode = "automated";
+  value.selected.portfolioEvidence = value.selected.evidence.map((entry) => ({
+    ...entry,
+    activityState: "accepted",
+    observedAt: at,
+  }));
+  value.selected.portfolioEvidence[0].contribution.roles = ["reviewer", "coauthor"];
+  value.selected.snapshot.coverage[0].knownStart = value.selected.snapshot.coverage[0].windowStart;
+  const app = createService({
+    source: { read: async () => structuredClone(value) },
+    approvedAchievementRuleVersion: "accepted-evidence/v1",
+  });
+  t.after(() => app.close());
+  for (const filter of ["all", "user", "automation"]) {
+    const query = `snapshot=public-1&actors=${filter}`;
+    const response = await app.inject(`/api/v1/contributors/alice/achievements?${query}`);
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json().achievements, [], `${filter} cannot award automated execution`);
+    const board = (await app.inject(`/api/v1/boards?metric=pr_opened&${query}`)).json();
+    const row = board.rows.find((row) => row.actorId === "alice");
+    assert.equal(row.actor.kind, "user", "execution evidence does not reclassify the account");
+    assert.equal(row.actor.executionMode, "automated");
+    assert.equal(row.result.value, 2, "withholding an award does not erase measured activity");
+  }
+  value.selected.actors[0].actor.executionMode = "unknown";
+  const unknown = await app.inject("/api/v1/contributors/alice/achievements?snapshot=public-1&actors=user");
+  assert.equal(unknown.statusCode, 200);
+  assert.equal(unknown.json().achievements.length, 2, "unknown execution stays eligible without claiming manual work");
+});
+
 test("README SVG images are bounded passive dated output and enforce current pinned suppression", async (t) => {
   const value = fixture();
   value.selected.actors[0].actor.login = '<script>alert("unsafe")</script>';
