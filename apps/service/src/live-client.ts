@@ -36,6 +36,8 @@ export function startLiveUpdates(options: LiveOptions): () => void {
     lastNotice = "",
     retryStreamAt = 0;
   let highestRevision = -1;
+  let noticeGeneration = 0;
+  let healthNotice = "";
   let lastHealth: LiveState["freshness"] = "unknown";
   let state: LiveState = { transport: "polling", freshness: "unknown", checkedAt: null };
   function emit(patch: Partial<LiveState>) {
@@ -59,12 +61,18 @@ export function startLiveUpdates(options: LiveOptions): () => void {
     const key = JSON.stringify([notice.snapshotId, notice.revision, notice.policyVersion]);
     if (key !== lastNotice) {
       lastNotice = key;
+      noticeGeneration++;
+      // Health and conditional validators apply only to this exact public identity.
+      etag = null;
+      lastHealth = "unknown";
+      healthNotice = "";
       options.onSnapshot({
         snapshotId: notice.snapshotId,
         revision: notice.revision,
         policyVersion: notice.policyVersion,
       });
     }
+    return key;
   }
   function openStream() {
     if (!streamFactory || stream || Date.now() < retryStreamAt || stopped || document?.hidden) return;
@@ -101,28 +109,33 @@ export function startLiveUpdates(options: LiveOptions): () => void {
   async function poll() {
     if (stopped || document?.hidden) return;
     const current = generation;
+    const currentNotice = noticeGeneration;
+    const requestedEtag = etag;
     controller = new AbortController();
     const activeController = controller;
     const deadline = setTimeout(() => activeController.abort(), 5000);
     try {
       const response = await fetcher(url("health"), {
-        headers: etag ? { "If-None-Match": etag } : {},
+        headers: requestedEtag ? { "If-None-Match": requestedEtag } : {},
         credentials: "omit",
         cache: "no-cache",
         signal: activeController.signal,
       });
-      if (stopped || current !== generation) return;
+      if (stopped || current !== generation || currentNotice !== noticeGeneration) return;
       if (response.status === 304) {
-        if (!etag) throw new Error("unexpected_not_modified");
+        if (!requestedEtag || requestedEtag !== etag || healthNotice !== lastNotice)
+          throw new Error("unexpected_not_modified");
         emit({ transport: stream ? "stream" : "polling", freshness: lastHealth, checkedAt: new Date().toISOString() });
       } else {
         if (!response.ok) throw new Error("poll_unavailable");
         const body = (await response.json()) as Record<string, unknown>;
-        if (stopped || current !== generation) return;
+        if (stopped || current !== generation || currentNotice !== noticeGeneration) return;
         if (body.status !== "recently_reconciled" && body.status !== "stale_or_degraded")
           throw new Error("invalid_health");
         if (typeof body.revision === "number" && body.revision < highestRevision) return;
-        accept(body);
+        const accepted = accept(body);
+        if (accepted !== lastNotice) return;
+        healthNotice = lastNotice;
         etag = response.headers.get("ETag");
         lastHealth = body.status;
         emit({ transport: stream ? "stream" : "polling", freshness: body.status, checkedAt: new Date().toISOString() });
@@ -130,7 +143,7 @@ export function startLiveUpdates(options: LiveOptions): () => void {
       failures = 0;
       openStream();
     } catch {
-      if (!stopped && current === generation) {
+      if (!stopped && current === generation && currentNotice === noticeGeneration) {
         failures++;
         emit({ transport: stream ? "stream" : "unavailable", freshness: "unknown" });
       }

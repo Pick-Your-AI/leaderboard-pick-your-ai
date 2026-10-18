@@ -400,6 +400,48 @@ test("portfolio selection applies canonical correction, frozen observation, half
 });
 
 
+test("same-ID historical corrections cannot masquerade as fresh rank progress", () => {
+  const metricId = "pr_lines_changed", p = { metricId, aggregation: "sum" };
+  const early = "2026-10-15T00:00:00Z";
+  const a = fact("a", { metricId, quantity: 1 });
+  const b = fact("b", { metricId, actorId: "b", quantity: 2 });
+  const before = board([a, b], p, { to: early }, { cutoff: early });
+  for (const patch of [
+    { quantity: 3 },
+    { actorId: "c", subjectActorId: "c" },
+    { acceptedAt: "2026-10-06T10:00:00Z" },
+    {}, // Even a no-op reviewed revision is historical correction, not new work.
+  ]) {
+    const correction = { ...a, ...patch, revision: 1, correctionReceipt: "synthetic-private-correction", observedAt: "2026-10-20T00:00:00Z" };
+    const after = board([a, b, correction], p, { to: early });
+    const movement = compareRankMovement(before, after);
+    assert.ok(movement.length > 0);
+    assert.ok(movement.every(row => row.state === "unavailable" && row.delta === null && row.reason === "corrected_or_removed_evidence"), JSON.stringify(patch));
+    assert.ok(after.rows.every(row => row.evidence.every(item => !item.comparisonSignature.includes("synthetic-private-correction"))));
+    assert.deepEqual(board([correction, b, a], p, { to: early }), after);
+  }
+});
+
+test("movement signatures detect changed measurement even without a collector revision bump", () => {
+  const metricId = "pr_lines_changed", p = { metricId, aggregation: "sum" };
+  const a = fact("a", { metricId, quantity: 1 }), b = fact("b", { metricId, actorId: "b", quantity: 2 });
+  const before = board([a, b], p);
+  const after = board([{ ...a, quantity: 3 }, b], p);
+  assert.equal(compareRankMovement(before, after)[0].reason, "corrected_or_removed_evidence");
+});
+
+test("fresh accepted activity remains comparable and timestamp spelling does not invent corrections", () => {
+  const oldFacts = [fact("a"), fact("b", { actorId: "b" })];
+  const nextCutoff = "2026-11-02T00:00:00Z";
+  const before = board(oldFacts, {}, resolveMetricWindow("30d", to));
+  const fresh = fact("fresh", { actorId: "b", acceptedAt: "2026-11-01T12:00:00Z", observedAt: "2026-11-01T12:01:00Z" });
+  const after = board([...oldFacts.map(f => ({ ...f, acceptedAt: "2026-10-05T10:00:00.000Z" })), fresh], {}, resolveMetricWindow("30d", nextCutoff), { cutoff: nextCutoff, coverage: [coverage({ windowEnd: nextCutoff })] });
+  assert.deepEqual(compareRankMovement(before, after).map(row => [row.actorId, row.state, row.delta]), [["b", "comparable", 0], ["a", "comparable", -1]]);
+  const legacy = structuredClone(before);
+  for (const row of legacy.rows) for (const evidence of row.evidence) delete evidence.comparisonSignature;
+  assert.ok(compareRankMovement(legacy, after).every(row => row.reason === "insufficient_evidence_history" && row.delta === null));
+});
+
 test("pending provenance follows canonical deduplication, policy units, corrections and suppression", () => {
   const pending = fact("pending", { state: "pending", acceptedAt: null });
   const duplicate = { ...pending, id: "duplicate", observedAt: "2026-10-07T10:00:00Z" };
