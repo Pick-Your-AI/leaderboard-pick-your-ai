@@ -8,6 +8,15 @@ authorize publishing, replacing content, changing ownership, or changing a Proje
 
 ## Current real verification
 
+The latest [issue-specific acceptance record](publication-acceptance-20261018.md)
+and [native readback](publication-readback-20261018T035627.json) were completed at
+03:56:27 UTC on 2026-10-18. Exhaustive all-state issue reads (100, 78, and 0 source
+rows) and 133 separate native-parent reads confirm 133 unique planned issues and
+all 132 intended edges. Two planner executions returned the same zero-action
+result. Eleven issues were already closed; their progress was preserved.
+
+### Earlier independent readback
+
 The [sanitized read-only receipt](publication-readback-20261018.json) records an
 actual connected-GitHub read on 2026-10-18, completed at 00:36:45 UTC:
 

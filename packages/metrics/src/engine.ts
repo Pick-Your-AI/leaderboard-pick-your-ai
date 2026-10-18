@@ -283,10 +283,14 @@ export function resolveMetricWindow(
   let start: number | null;
   if (["7d", "30d", "90d"].includes(preset)) start = end - Number.parseInt(preset, 10) * 86400000;
   else if (preset === "all") start = null;
-  else if (preset === "month") start = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
-  else if (preset === "quarter") start = Date.UTC(date.getUTCFullYear(), Math.floor(date.getUTCMonth() / 3) * 3, 1);
-  else if (preset === "year") start = Date.UTC(date.getUTCFullYear(), 0, 1);
-  else if (preset === "custom" && custom) {
+  else if (preset === "month" || preset === "quarter" || preset === "year") {
+    const month =
+      preset === "year" ? 0 : preset === "quarter" ? Math.floor(date.getUTCMonth() / 3) * 3 : date.getUTCMonth();
+    // Preserve the validated year: Date.UTC remaps years 0–99 to 1900–1999.
+    date.setUTCMonth(month, 1);
+    date.setUTCHours(0, 0, 0, 0);
+    start = date.getTime();
+  } else if (preset === "custom" && custom) {
     start = instant(custom.from);
     const to = instant(custom.to);
     if (start >= to || to > end) throw new Error("Custom window must precede cutoff and have from < to");
