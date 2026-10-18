@@ -1,4 +1,4 @@
-import type { Actor, MetricRegistry, MetricResult } from "@pick-your-ai/contracts";
+import type { Actor, MetricRegistry, MetricResult, PendingCount } from "@pick-your-ai/contracts";
 import { PublicReadError, safePublicUrl, type PublicRead, type PublicDiagnostic } from "./public-source.js";
 
 /** Serialization limits, not policy eligibility or source-publication approval. */
@@ -20,6 +20,7 @@ interface ExportBoard {
     actor?: Actor | undefined;
     result: MetricResult;
     evidenceIds: string[];
+    pending?: PendingCount;
   }[];
   totalRows: number;
   nextCursor: string | null;
@@ -81,9 +82,15 @@ function csvCell(value: string | number | boolean | null): string {
 /** Use only a current-authorized, projected page; never read a provider or raw records here. */
 export function renderPublicExport(read: PublicRead, board: ExportBoard, format: "json" | "csv") {
   const ids = new Set(board.rows.flatMap((row) => row.evidenceIds));
-  if (ids.size > PUBLIC_EXPORT_LIMITS.evidenceRecords) tooLarge();
-  const available = new Map(read.selected.evidence.map((entry) => [entry.contribution.contributionId, entry]));
-  const evidence = [...ids].sort().map((evidenceId) => {
+  const pendingIds = new Set(board.rows.flatMap((row) => row.pending?.evidenceIds ?? []));
+  if (ids.size + pendingIds.size > PUBLIC_EXPORT_LIMITS.evidenceRecords) tooLarge();
+  const available = new Map(
+    [...read.selected.evidence, ...(read.selected.pendingEvidence ?? [])].map((entry) => [
+      entry.contribution.contributionId,
+      entry,
+    ]),
+  );
+  const serializeEvidence = (evidenceId: string) => {
     const entry = available.get(evidenceId);
     if (!entry) unsafe();
     const sourceUrl = safePublicUrl(entry.artifact.publicUrl);
@@ -96,7 +103,9 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
       sourceRevision: entry.sourceRevision,
       sourceRevisionUrl: entry.sourceRevisionUrl,
     };
-  });
+  };
+  const evidence = [...ids].sort().map(serializeEvidence);
+  const pendingEvidence = [...pendingIds].sort().map(serializeEvidence);
   const snapshot = read.selected.snapshot;
   // Deliberately omit raw/provider fields, display names, internal event IDs and control lists.
   const document = {
@@ -123,8 +132,10 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
       rank: row.rank,
       result: row.result,
       evidenceIds: [...row.evidenceIds],
+      ...(row.pending === undefined ? {} : { pending: row.pending }),
     })),
     evidence,
+    pendingEvidence,
   };
   const json = boundedJson(document);
   if (format === "json") return { body: json, contentType: "application/json; charset=utf-8" };
@@ -168,6 +179,8 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     "censored",
     "missing_readiness",
     "p75",
+    "pending",
+    "pending_evidence",
   ];
   const s = document.scope;
   const metadata = [
@@ -203,7 +216,25 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     lines.push(serialized);
   }
   line(columns);
-  line(["metadata", ...metadata, null, null, null, null, null, null, null, null, null, null, null, null, null]);
+  line([
+    "metadata",
+    ...metadata,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+  ]);
   const byId = new Map(evidence.map((entry) => [entry.evidenceId, entry]));
   for (const row of document.rows) {
     const diagnostic = document.diagnostics.find(
@@ -225,6 +256,8 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
       diagnostic?.censored ?? null,
       diagnostic?.missingReadiness ?? null,
       diagnostic?.p75 ?? null,
+      row.pending === undefined ? null : boundedJson(row.pending),
+      boundedJson((row.pending?.evidenceIds ?? []).map(serializeEvidence)),
     ]);
   }
   return { body: lines.join(""), contentType: "text/csv; charset=utf-8" };
