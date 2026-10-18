@@ -5566,273 +5566,8 @@
         "synonyms": [
           "catalog proposals"
         ],
-        "maturity": "definition_only",
-        "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
-        "lead_view": {
-          "overview": false,
-          "wall": false,
-          "order": null
-        },
-        "verification_cases": [],
-        "limitations": [
-          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
-          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
-        ]
-      },
-      {
-        "metric_id": "pricebook_proposals",
-        "department": "research",
-        "synonyms": [
-          "pricebook proposals"
-        ],
-        "maturity": "definition_only",
-        "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
-        "lead_view": {
-          "overview": false,
-          "wall": false,
-          "order": null
-        },
-        "verification_cases": [],
-        "limitations": [
-          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
-          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
-        ]
-      },
-      {
-        "metric_id": "compatibility_proposals",
-        "department": "research",
-        "synonyms": [
-          "compatibility proposals"
-        ],
-        "maturity": "definition_only",
-        "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
-        "lead_view": {
-          "overview": false,
-          "wall": false,
-          "order": null
-        },
-        "verification_cases": [],
-        "limitations": [
-          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
-          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
-        ]
-      },
-      {
-        "metric_id": "primary_sources",
-        "department": "research",
-        "synonyms": [
-          "primary sources"
-        ],
-        "maturity": "definition_only",
-        "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
-        "lead_view": {
-          "overview": false,
-          "wall": false,
-          "order": null
-        },
-        "verification_cases": [],
-        "limitations": [
-          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
-          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
-        ]
-      },
-      {
-        "metric_id": "freshness_checks",
-        "department": "research",
-        "synonyms": [
-          "freshness checks"
-        ],
-        "maturity": "definition_only",
-        "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
-        "lead_view": {
-          "overview": false,
-          "wall": false,
-          "order": null
-        },
-        "verification_cases": [],
-        "limitations": [
-          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
-          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
-        ]
-      },
-      {
-        "metric_id": "reproduced_measurements",
-        "department": "research",
-        "synonyms": [
-          "reproduced measurements"
-        ],
-        "maturity": "definition_only",
-        "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
-        "lead_view": {
-          "overview": false,
-          "wall": false,
-          "order": null
-        },
-        "verification_cases": [],
-        "limitations": [
-          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
-          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
-        ]
-      },
-      {
-        "metric_id": "negative_findings",
-        "department": "research",
-        "synonyms": [
-          "negative findings"
-        ],
-        "maturity": "definition_only",
-        "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
-        "lead_view": {
-          "overview": false,
-          "wall": false,
-          "order": null
-        },
-        "verification_cases": [],
-        "limitations": [
-          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
-          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
-        ]
-      },
-      {
-        "metric_id": "rights_reviews",
-        "department": "research",
-        "synonyms": [
-          "rights reviews"
-        ],
-        "maturity": "definition_only",
-        "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
-        "lead_view": {
-          "overview": false,
-          "wall": false,
-          "order": null
-        },
-        "verification_cases": [],
-        "limitations": [
-          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
-          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
-        ]
-      },
-      {
-        "metric_id": "assumptions_resolved",
-        "department": "research",
-        "synonyms": [
-          "assumptions resolved"
-        ],
-        "maturity": "definition_only",
-        "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
-        "lead_view": {
-          "overview": false,
-          "wall": false,
-          "order": null
-        },
-        "verification_cases": [],
-        "limitations": [
-          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
-          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
-        ]
-      },
-      {
-        "metric_id": "market_research",
-        "department": "research",
-        "synonyms": [
-          "market research"
-        ],
-        "maturity": "definition_only",
-        "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
-        "lead_view": {
-          "overview": false,
-          "wall": false,
-          "order": null
-        },
-        "verification_cases": [],
-        "limitations": [
-          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
-          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
-        ]
-      },
-      {
-        "metric_id": "evidence_manifests",
-        "department": "research",
-        "synonyms": [
-          "evidence manifests"
-        ],
-        "maturity": "definition_only",
-        "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
-        "lead_view": {
-          "overview": false,
-          "wall": false,
-          "order": null
-        },
-        "verification_cases": [],
-        "limitations": [
-          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
-          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
-        ]
-      },
-      {
-        "metric_id": "documentation",
-        "department": "craft",
-        "synonyms": [
-          "documentation changes",
-          "docs"
-        ],
         "maturity": "synthetic_verified",
-        "source_class": "reconstructible",
+        "source_class": "evidence_reviewed",
         "supported_states": [
           "qualified"
         ],
@@ -5850,18 +5585,466 @@
           "date_basis": "acceptedAt"
         },
         "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
+        ]
+      },
+      {
+        "metric_id": "pricebook_proposals",
+        "department": "research",
+        "synonyms": [
+          "pricebook proposals"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "evidence_reviewed",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
+        ]
+      },
+      {
+        "metric_id": "compatibility_proposals",
+        "department": "research",
+        "synonyms": [
+          "compatibility proposals"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "evidence_reviewed",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
+        ]
+      },
+      {
+        "metric_id": "primary_sources",
+        "department": "research",
+        "synonyms": [
+          "primary sources"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "evidence_reviewed",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
+        ]
+      },
+      {
+        "metric_id": "freshness_checks",
+        "department": "research",
+        "synonyms": [
+          "freshness checks"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "evidence_reviewed",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "occurredAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "occurredAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "occurredAt"
+        },
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only qualified/occurredAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
+        ]
+      },
+      {
+        "metric_id": "reproduced_measurements",
+        "department": "research",
+        "synonyms": [
+          "reproduced measurements"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "evidence_reviewed",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
+        ]
+      },
+      {
+        "metric_id": "negative_findings",
+        "department": "research",
+        "synonyms": [
+          "negative findings"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "evidence_reviewed",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
+        ]
+      },
+      {
+        "metric_id": "rights_reviews",
+        "department": "research",
+        "synonyms": [
+          "rights reviews"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "evidence_reviewed",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
+        ]
+      },
+      {
+        "metric_id": "assumptions_resolved",
+        "department": "research",
+        "synonyms": [
+          "assumptions resolved"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "evidence_reviewed",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
+        ]
+      },
+      {
+        "metric_id": "market_research",
+        "department": "research",
+        "synonyms": [
+          "market research"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "evidence_reviewed",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
+        ]
+      },
+      {
+        "metric_id": "evidence_manifests",
+        "department": "research",
+        "synonyms": [
+          "evidence manifests"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "evidence_reviewed",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
+        ]
+      },
+      {
+        "metric_id": "documentation",
+        "department": "craft",
+        "synonyms": [
+          "documentation changes",
+          "docs"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "reconstructible",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt",
+          "occurredAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          },
+          {
+            "state": "qualified",
+            "date_basis": "occurredAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
           "overview": true,
           "wall": true,
           "order": 5
         },
         "verification_cases": [
           "apps/web/test/fixtures.test.ts",
-          "apps/web/test/registry-ui.test.ts"
+          "apps/web/test/registry-ui.test.ts",
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js"
         ],
         "limitations": [
           "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
           "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "Only the listed state/date pair is supported; other requests fail closed."
+          "The protected domain adapter supports qualified/occurredAt with canonical PR/category grouping. The prototype retains qualified/acceptedAt only; each adapter rejects unsupported pairs."
         ]
       },
       {
@@ -5870,22 +6053,38 @@
         "synonyms": [
           "tests"
         ],
-        "maturity": "definition_only",
+        "maturity": "synthetic_verified",
         "source_class": "reconstructible",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "occurredAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "occurredAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "occurredAt"
+        },
         "lead_view": {
           "overview": false,
           "wall": false,
           "order": null
         },
-        "verification_cases": [],
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
         "limitations": [
           "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
           "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+          "Only qualified/occurredAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
         ]
       },
       {
@@ -5894,22 +6093,38 @@
         "synonyms": [
           "regressions prevented"
         ],
-        "maturity": "definition_only",
+        "maturity": "synthetic_verified",
         "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
         "lead_view": {
           "overview": false,
           "wall": false,
           "order": null
         },
-        "verification_cases": [],
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
         "limitations": [
           "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
           "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
         ]
       },
       {
@@ -5918,22 +6133,38 @@
         "synonyms": [
           "accessibility"
         ],
-        "maturity": "definition_only",
+        "maturity": "synthetic_verified",
         "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
         "lead_view": {
           "overview": false,
           "wall": false,
           "order": null
         },
-        "verification_cases": [],
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
         "limitations": [
           "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
           "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
         ]
       },
       {
@@ -5942,22 +6173,38 @@
         "synonyms": [
           "design"
         ],
-        "maturity": "definition_only",
+        "maturity": "synthetic_verified",
         "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
         "lead_view": {
           "overview": false,
           "wall": false,
           "order": null
         },
-        "verification_cases": [],
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
         "limitations": [
           "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
           "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
         ]
       },
       {
@@ -5966,22 +6213,38 @@
         "synonyms": [
           "usability"
         ],
-        "maturity": "definition_only",
+        "maturity": "synthetic_verified",
         "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
         "lead_view": {
           "overview": false,
           "wall": false,
           "order": null
         },
-        "verification_cases": [],
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
         "limitations": [
           "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
           "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
         ]
       },
       {
@@ -5990,22 +6253,39 @@
         "synonyms": [
           "localization"
         ],
-        "maturity": "definition_only",
+        "maturity": "synthetic_verified",
         "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "occurredAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "occurredAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "occurredAt"
+        },
         "lead_view": {
           "overview": false,
           "wall": false,
           "order": null
         },
-        "verification_cases": [],
+        "verification_cases": [
+          "packages/metrics/test/registry-ui.test.js",
+          "packages/github/test/localization.test.mjs",
+          "apps/pipeline/test/localization.test.mjs",
+          "apps/service/test/read-api.test.mjs"
+        ],
         "limitations": [
           "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
           "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+          "Only independently accepted PR/language/category units on the source merge clock are selectable. Raw locale participation remains descriptive; configured source and reviewer authority are still required."
         ]
       },
       {
@@ -6014,22 +6294,38 @@
         "synonyms": [
           "performance"
         ],
-        "maturity": "definition_only",
+        "maturity": "synthetic_verified",
         "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
         "lead_view": {
           "overview": false,
           "wall": false,
           "order": null
         },
-        "verification_cases": [],
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
         "limitations": [
           "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
           "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+          "Only qualified/acceptedAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
         ]
       },
       {
@@ -6038,22 +6334,38 @@
         "synonyms": [
           "security"
         ],
-        "maturity": "definition_only",
+        "maturity": "synthetic_verified",
         "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "occurredAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "occurredAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "occurredAt"
+        },
         "lead_view": {
           "overview": false,
           "wall": false,
           "order": null
         },
-        "verification_cases": [],
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
         "limitations": [
           "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
           "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+          "Only qualified/occurredAt with canonical grouping is verified by the protected domain adapter; no prototype data adapter is provided."
         ]
       },
       {

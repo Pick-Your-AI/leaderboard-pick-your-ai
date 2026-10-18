@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createPipeline } from "../src/index.mjs";
 import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
+import { normalizationDocumentVersion } from "../src/private-attribution.mjs";
+import { record as recordControlsDecision } from "../../controls/src/store.mjs";
 import { harness, components, ago, publicScope } from "./harness.mjs";
 
 const before = "a".repeat(40),
@@ -60,8 +62,8 @@ async function researchHarness(t) {
       ];
       config.recognitionBindings = [
         {
-          category: "research",
-          scope: "repository:2",
+          category: "other",
+          scope: "repository:2:decision_records",
           policyVersion,
           metricId: "decision_records",
           sourceMetricId: "decision_records",
@@ -112,29 +114,30 @@ async function researchHarness(t) {
 }
 
 function accept(h, locator = sourceUrl) {
-  const decision = {
-    id: "synthetic-review-receipt",
-    action: "accepted",
-    actor: "202",
-    at: Date.parse(ago(1)),
-    policyVersion,
-    reason: "Private reviewer deliberation must remain private",
-  };
+  let decision;
   h.controlsStore.transaction((state) => {
-    state.requests["synthetic-record-request"] = {
+    const previous = state.requests["synthetic-record-request"];
+    const request = {
       id: "synthetic-record-request",
+      version: previous?.version ?? 0,
       kind: "evidence",
       status: "accepted",
       owner: "101",
-      category: "research",
-      scope: "repository:2",
+      category: "other",
+      scope: "repository:2:decision_records",
       policyVersion,
       locator,
       collaborators: {},
-      history: [decision],
+      history: [...(previous?.history ?? [])],
     };
-    state.audit.push(decision);
+    recordControlsDecision(state, request, "202", "accepted", Date.parse(ago(1)), {
+      policyVersion,
+      reason: "Private reviewer deliberation must remain private",
+    });
+    state.requests[request.id] = request;
+    decision = request.history.at(-1);
   });
+  return decision;
 }
 
 test("research records publish pending proof, require exact revision review, conserve accepted credit through replay and withdrawal", async (t) => {
@@ -160,7 +163,7 @@ test("research records publish pending proof, require exact revision review, con
   await h.runtime.runOnce();
   response = await h.runtime.app.inject(boardUrl);
   assert.equal(response.json().rows[0].result.state, "unknown");
-  accept(h);
+  const review = accept(h);
   const accepted = await h.runtime.runOnce();
   response = await h.runtime.app.inject(boardUrl);
   assert.equal(response.statusCode, 200, response.body);
@@ -176,7 +179,7 @@ test("research records publish pending proof, require exact revision review, con
   assert.equal(proof.json().occurredAt, mergedAt); // The registry's merge clock is preserved.
   assert.equal(proof.json().activityState, "accepted");
   assert.equal(proof.body.includes("Private reviewer deliberation"), false);
-  assert.equal(proof.body.includes("synthetic-review-receipt"), false);
+  assert.equal(proof.body.includes(review.id), false);
   assert.equal(first.publications[0].snapshotId === accepted.publications[0].snapshotId, false);
 
   const cutoff = ago(0);
@@ -239,65 +242,81 @@ test("a reviewed classification change invalidates cached research normalization
   assert.equal(cached.rows[0].n, 2);
 });
 
-test("legacy classified research evidence survives private-attribution migration and remains bound to its source policy", async (t) => {
-  const h = await researchHarness(t);
-  accept(h);
-  h.options.authorizePolicyPreview = async () => true;
-  const cutoff = ago(0);
-  const publication = (await h.runtime.runOnce({ cutoff })).publications[0];
-  const saved = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows[0];
-  const legacy = structuredClone(saved.document);
-  delete legacy.assistance;
-  delete legacy.participation;
-  // This is the exact persisted signature from the record adapter before the
-  // private-attribution document version, including its approved path policies.
-  const legacySignature = comparisonHash([
-    "current-state-selection-v2",
-    "synthetic",
-    h.config.policies.map((entry) => entry.signature),
-    { documentation: [], research: h.config.researchPolicies },
-  ]);
-  const legacyHash = comparisonHash(legacy);
-  await h.db.query(
-    "UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1,document=$2::jsonb,document_hash=$3 WHERE fact_key=$4",
-    [legacySignature, JSON.stringify(legacy), legacyHash, saved.fact_key],
-  );
-  const frozen = (await h.db.query("SELECT document FROM leaderboard_pipeline.frozen_inputs")).rows[0].document;
-  frozen.identityAuthorization.identityEvidence.normalizationHashes = [legacyHash];
-  await h.db.query("UPDATE leaderboard_pipeline.frozen_inputs SET document=$1::jsonb,document_hash=$2", [
-    JSON.stringify(frozen),
-    comparisonHash(frozen),
-  ]);
-  await h.reopenDatabase();
-  const restarted = await createPipeline(h.options);
-  t.after(() => restarted.stop());
-  const previewInput = {
-    snapshotId: publication.snapshotId,
-    policy: { ...h.config.policies[0].policy, version: "synthetic-legacy-research-preview", rank: false },
-    operatorId: "201",
-  };
-  const preview = () => restarted.previewPolicy(previewInput);
-  assert.equal((await preview()).comparison.before.rows.find((row) => row.actorId === "101").value, 1);
-  await restarted.runOnce({ cutoff });
-  const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
-  assert.equal(rows.length, 2);
-  assert.deepEqual(rows.find((row) => row.policy_signature === legacySignature).document, legacy);
-  assert.deepEqual(rows.find((row) => row.policy_signature !== legacySignature).document.assistance, []);
-  assert.equal((await preview()).comparison.before.rows.find((row) => row.actorId === "101").value, 1);
+for (const priorFormat of ["before attribution", "before merge pins"])
+  test(`classified research evidence from ${priorFormat} survives cache migration and remains bound to its source policy`, async (t) => {
+    const h = await researchHarness(t);
+    accept(h);
+    h.options.authorizePolicyPreview = async () => true;
+    const cutoff = ago(0);
+    const publication = (await h.runtime.runOnce({ cutoff })).publications[0];
+    const saved = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows[0];
+    const legacy = structuredClone(saved.document);
+    if (priorFormat === "before attribution") {
+      delete legacy.assistance;
+      delete legacy.participation;
+    }
+    for (const entry of legacy.evidence.filter((value) => value.contribution.metricIds.includes("pr_merged"))) {
+      entry.sourceRevision = null;
+      entry.sourceRevisionUrl = null;
+    }
+    // Recreate each exact earlier persisted signature, including the approved
+    // source classification, while keeping that format's original document.
+    const policySignature = comparisonHash([
+      "current-state-selection-v2",
+      "synthetic",
+      h.config.policies.map((entry) => entry.signature),
+      { documentation: [], research: h.config.researchPolicies },
+    ]);
+    const legacySignature =
+      priorFormat === "before attribution"
+        ? policySignature
+        : comparisonHash([normalizationDocumentVersion, policySignature]);
+    const legacyHash = comparisonHash(legacy);
+    await h.db.query(
+      "UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1,document=$2::jsonb,document_hash=$3 WHERE fact_key=$4",
+      [legacySignature, JSON.stringify(legacy), legacyHash, saved.fact_key],
+    );
+    const frozen = (await h.db.query("SELECT document FROM leaderboard_pipeline.frozen_inputs")).rows[0].document;
+    frozen.identityAuthorization.identityEvidence.normalizationHashes = [legacyHash];
+    await h.db.query("UPDATE leaderboard_pipeline.frozen_inputs SET document=$1::jsonb,document_hash=$2", [
+      JSON.stringify(frozen),
+      comparisonHash(frozen),
+    ]);
+    await h.reopenDatabase();
+    const restarted = await createPipeline(h.options);
+    t.after(() => restarted.stop());
+    const previewInput = {
+      snapshotId: publication.snapshotId,
+      policy: { ...h.config.policies[0].policy, version: "synthetic-legacy-research-preview", rank: false },
+      operatorId: "201",
+    };
+    const preview = () => restarted.previewPolicy(previewInput);
+    assert.equal((await preview()).comparison.before.rows.find((row) => row.actorId === "101").value, 1);
+    await restarted.runOnce({ cutoff });
+    const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows.find((row) => row.policy_signature === legacySignature).document, legacy);
+    assert.deepEqual(rows.find((row) => row.policy_signature !== legacySignature).document.assistance, []);
+    const fresh = rows.find((row) => row.policy_signature !== legacySignature).document;
+    assert.equal(
+      fresh.evidence.find((entry) => entry.contribution.metricIds.includes("pr_merged")).sourceRevision,
+      after,
+    );
+    assert.equal((await preview()).comparison.before.rows.find((row) => row.actorId === "101").value, 1);
 
-  // A legacy document with identical content and metric arithmetic still cannot
-  // authorize the frozen source identity if its classification binding is gone.
-  const unclassifiedSignature = comparisonHash([
-    "current-state-selection-v1",
-    "synthetic",
-    h.config.policies.map((entry) => entry.signature),
-  ]);
-  await h.db.query("UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1 WHERE policy_signature=$2", [
-    unclassifiedSignature,
-    legacySignature,
-  ]);
-  await assert.rejects(preview(), /identity evidence unavailable/);
-});
+    // A legacy document with identical content and metric arithmetic still cannot
+    // authorize the frozen source identity if its classification binding is gone.
+    const unclassifiedSignature = comparisonHash([
+      "current-state-selection-v1",
+      "synthetic",
+      h.config.policies.map((entry) => entry.signature),
+    ]);
+    await h.db.query("UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1 WHERE policy_signature=$2", [
+      unclassifiedSignature,
+      legacySignature,
+    ]);
+    await assert.rejects(preview(), /identity evidence unavailable/);
+  });
 
 for (const state of ["pending", "accepted"])
   test(`source PR suppression removes ${state} record versions from current and pinned public/private reads after restart`, async (t) => {

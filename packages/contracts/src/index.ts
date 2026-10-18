@@ -66,3 +66,4 @@ export {
   publicEvidenceMetadataSchema,
 } from "./v1/evidence-metadata.js";
 export type { PublicEvidenceAction, PublicEvidenceHistory, PublicEvidenceMetadata } from "./v1/evidence-metadata.js";
+export { publicDocumentationReasons, publicDocumentationRecognitionReasons } from "./documentation-reasons.js";

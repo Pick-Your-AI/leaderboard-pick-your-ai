@@ -1,4 +1,6 @@
 import {
+  publicDocumentationReasons,
+  publicDocumentationRecognitionReasons,
   matchesActorFilter,
   type ActorFilter,
   publicEvidenceMetadataSchema,
@@ -328,14 +330,42 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
     );
   if (new Set(actors.map((actor) => actor.actorId)).size !== actors.length) return reject();
   const actorIds = new Set(actors.map((actor) => actor.actorId));
-  const metadataByContribution = new Map<string, string | null>();
+  const metadataByContribution = new Map<string, string>();
+  const documentationClassificationByContribution = new Map<string, string>();
   const projectEvidence = (entries: PublicEvidence[]) =>
     entries
       .map((entry) => {
         const artifact = artifactSchema.parse(entry.artifact);
         const parsed = contributionSchema.parse(entry.contribution);
+        const classification = publicDocumentationReasons(parsed);
+        if (parsed.metricIds.includes("documentation") && classification.length > 0) {
+          // Legacy copies can lack labels. Every present classification must
+          // still agree, even if an unlabeled copy appears between two of them.
+          const current = JSON.stringify(classification);
+          const previous = documentationClassificationByContribution.get(parsed.contributionId);
+          if (previous !== undefined && previous !== current) return reject();
+          documentationClassificationByContribution.set(parsed.contributionId, current);
+        }
         const contribution = {
           ...parsed,
+          ...(parsed.metricIds.some((metric) => metric === "documentation" || metric === "localization")
+            ? {
+                reasonCodes: [
+                  ...parsed.reasonCodes.filter((reason) =>
+                    [
+                      "raw_observed_only",
+                      "independent_recognition_receipt",
+                      "public_observed_work",
+                      "public_pending_work",
+                      "public_accepted_work",
+                      "public_unknown_work",
+                    ].includes(reason),
+                  ),
+                  ...classification,
+                  ...publicDocumentationRecognitionReasons(parsed),
+                ],
+              }
+            : {}),
           metricIds: parsed.metricIds.filter(
             (metricId) => !disabled.has(metricId) && ranking.some((policy) => policy.metricId === metricId),
           ),
@@ -343,9 +373,15 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
         if (!date(entry.occurredAt) || (entry.sourceRevision !== null && !id(entry.sourceRevision))) return reject();
         const metadata =
           entry.evidenceMetadata === undefined ? undefined : publicEvidenceMetadataSchema.parse(entry.evidenceMetadata);
-        // Absence is part of the projection too: route preference must not choose
-        // a legacy copy over a richer copy of the same contribution (or vice versa).
-        const serialized = metadata === undefined ? null : JSON.stringify(metadata);
+        // Absence is part of the metadata projection too: route preference must
+        // not choose a legacy copy over a richer copy of the same contribution.
+        // Locale units require identical labels on every copy. Earlier generic
+        // documentation snapshots omitted path-policy reasons in portfolio proof,
+        // so retain their readability without inventing missing classifications.
+        const serialized = JSON.stringify({
+          metadata: metadata ?? null,
+          classification: parsed.metricIds.includes("localization") ? classification : null,
+        });
         if (
           metadataByContribution.has(contribution.contributionId) &&
           metadataByContribution.get(contribution.contributionId) !== serialized
@@ -404,7 +440,13 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
       ...portfolioMetadata.get(entry.contribution.contributionId)!,
       contribution: {
         ...entry.contribution,
-        reasonCodes: [`public_${portfolioMetadata.get(entry.contribution.contributionId)!.activityState}_work`],
+        reasonCodes: [
+          `public_${portfolioMetadata.get(entry.contribution.contributionId)!.activityState}_work`,
+          ...publicDocumentationReasons(entry.contribution),
+          ...(portfolioMetadata.get(entry.contribution.contributionId)!.activityState === "accepted"
+            ? publicDocumentationRecognitionReasons(entry.contribution)
+            : []),
+        ],
       },
     }))
     .filter((entry) => entry.contribution.metricIds.length > 0);
@@ -425,7 +467,10 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
     ...entry,
     activityState: "pending" as const,
     observedAt: pendingMetadata.get(entry.contribution.contributionId)!,
-    contribution: { ...entry.contribution, reasonCodes: ["public_pending_work"] },
+    contribution: {
+      ...entry.contribution,
+      reasonCodes: ["public_pending_work", ...publicDocumentationReasons(entry.contribution)],
+    },
   }));
   const pendingEvidenceMap = new Map(pendingEvidence.map((entry) => [entry.contribution.contributionId, entry]));
   function pendingProjection(entry: PublicRow, result: MetricResult): PendingCount | undefined {
