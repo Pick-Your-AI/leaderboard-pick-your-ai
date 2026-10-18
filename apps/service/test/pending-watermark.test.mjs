@@ -79,10 +79,20 @@ const watermarks = [
   ["equivalent offset endpoint", "2026-10-17T19:00:00.000000000-05:00", true],
   ["past the endpoint", "2026-10-17T23:00:00.000-02:00", true],
 ];
-for (const [name, watermark, complete] of watermarks)
+const snapshots = [
+  ["one nanosecond short", "2026-10-17T23:59:59.999999999Z", false],
+  ["exact endpoint", end, true],
+  ["equivalent offset endpoint", "2026-10-17T19:00:00.000000000-05:00", true],
+  ["past the endpoint", "2026-10-17T23:00:00.000-02:00", true],
+];
+for (const [name, watermark, generatedAt, complete] of [
+  ...watermarks.map(([name, watermark, complete]) => [`${name} watermark`, watermark, publishedAt, complete]),
+  ...snapshots.map(([name, generatedAt, complete]) => [`${name} selected snapshot`, end, generatedAt, complete]),
+])
   for (const count of [0, 3])
-    test(`${name} watermark projects pending ${count} consistently through current, pinned and export reads`, async (t) => {
+    test(`${name} projects pending ${count} consistently through current, pinned and export reads`, async (t) => {
       const input = fixture(count, watermark);
+      input.selected.snapshot.generatedAt = generatedAt;
       const original = structuredClone(input);
       const app = harness(t, input);
       const expected = expectedPending(input, complete);
@@ -204,14 +214,22 @@ test("versioned current and Project scopes retain corrected pending counts in bo
     { context: "current", projects: ["PVT_B=", "PVT_A"] },
     { context: "event", projects: ["PVT_A"] },
   ])
-    for (const watermark of [null, "2026-10-17T23:59:59.999999999Z", end])
+    for (const [watermark, generatedAt, complete] of [
+      [null, publishedAt, false],
+      ["2026-10-17T23:59:59.999999999Z", publishedAt, false],
+      [end, publishedAt, true],
+      [end, "2026-10-17T23:59:59.999999999Z", false],
+      [end, end, true],
+      [end, "2026-10-17T19:00:00.000000000-05:00", true],
+    ])
       for (const count of [0, 3]) {
         const input = fixture(count, watermark);
+        input.selected.snapshot.generatedAt = generatedAt;
         const scope = canonicalPublicScope({ ...input.selected.scope, ...membership });
         input.selected.scope = scope;
         const original = structuredClone(input);
         const app = harness(t, input);
-        const expected = expectedPending(input, watermark === end);
+        const expected = expectedPending(input, complete);
         for (const pin of [null, input.head.snapshotId]) {
           const params = new URLSearchParams({ ...publicScopeParameters(scope), metric: "pr_merged" });
           if (pin !== null) params.set("snapshot", pin);

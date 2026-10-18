@@ -2,6 +2,7 @@ export type Visibility = "public" | "private" | "unknown" | "unavailable";
 
 export * from "./client.js";
 export * from "./checkpoints.js";
+export type { QuotaResource, QuotaObservation, QuotaDiagnostics } from "./quota.js";
 export * from "./normalizers.js";
 export * from "./project-snapshots.js";
 export * from "./project-context.js";

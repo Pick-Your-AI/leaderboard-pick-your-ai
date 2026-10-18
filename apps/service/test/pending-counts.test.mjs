@@ -5,10 +5,12 @@ import { pendingCountSchema } from "@pick-your-ai/contracts";
 import { board, selection, validateExport } from "../../web/src/remote/client.ts";
 import { readFixture, at } from "../../../tests/fixtures/pending-metric.mjs";
 const url = "/api/v1/boards?metric=pr_merged";
-function harness(t) {
+function harness(t, publishedAt = at) {
   const input = readFixture();
+  input.head.publishedAt = publishedAt;
+  input.selected.snapshot.generatedAt = publishedAt;
   const app = createService({
-    now: () => Date.parse(at),
+    now: () => Date.parse(publishedAt),
     source: {
       async read() {
         return structuredClone(input);
@@ -147,9 +149,9 @@ test("legacy, absent coverage and malformed pending counts cannot become measure
 });
 
 test("zero is measured only with complete bounded coverage, and pending dates obey exact scope", async (t) => {
-  const { input, app } = harness(t);
   const start = "2026-10-16T00:00:00.000Z",
     end = "2026-10-18T00:00:00.000Z";
+  const { input, app } = harness(t, end);
   input.selected.scope.start = start;
   input.selected.scope.end = end;
   const row = input.selected.rows.find((row) => row.actorId === "101");
@@ -181,9 +183,9 @@ test("zero is measured only with complete bounded coverage, and pending dates ob
 
 test("a sub-millisecond coverage start gap cannot certify measured pending zero", async (t) => {
   for (const field of ["knownStart", "windowStart"]) {
-    const { input, app } = harness(t);
     const start = "2026-10-16T00:00:00.000Z",
       end = "2026-10-18T00:00:00.000Z";
+    const { input, app } = harness(t, end);
     input.selected.scope.start = start;
     input.selected.scope.end = end;
     const row = input.selected.rows.find((row) => row.actorId === "101");
