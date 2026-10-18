@@ -23,3 +23,5 @@ export type {
 } from "./outbox.js";
 export { OperatorInbox } from "./operator.js";
 export type { OperatorAuthorize, ReplayWindow, ReplayWindowRequest } from "./operator.js";
+export { RepositoryRetirementStore } from "./retirement.js";
+export type { RepositoryRetirement, RetirementAuthorize } from "./retirement.js";
