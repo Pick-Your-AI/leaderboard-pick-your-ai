@@ -1,3 +1,4 @@
+import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createGithubCollectionSource } from "./github-source.mjs";
 import { createHash } from "node:crypto";
@@ -50,6 +51,8 @@ const statements = [
     operation_key text NOT NULL, scope_key text NOT NULL,
     snapshot_id text NOT NULL REFERENCES leaderboard_pipeline.snapshots(snapshot_id),
     PRIMARY KEY(operation_key,scope_key))`,
+  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.frozen_inputs (snapshot_id text PRIMARY KEY REFERENCES leaderboard_pipeline.snapshots(snapshot_id), document jsonb NOT NULL, document_hash text NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.policy_comparisons (comparison_id text PRIMARY KEY, document jsonb NOT NULL, document_hash text NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.heads (
     scope_key text PRIMARY KEY, snapshot_id text NOT NULL REFERENCES leaderboard_pipeline.snapshots(snapshot_id), revision bigint NOT NULL)`,
 ];
@@ -129,9 +132,14 @@ export async function createPipeline(options) {
   };
   // Runs are serialized. A reactivation must start a fresh run rather than
   // accepting a response begun under an earlier controls configuration.
+  const recognitionBindings = copy(config.recognitionBindings ?? []);
+  let runRecognitionFingerprint = null;
   let runConfigurationRevision = null;
   const assertRunConfiguration = () => {
-    const overlay = restrictConfiguration(controlsStore.read());
+    const state = controlsStore.read();
+    const overlay = restrictConfiguration(state);
+    if (recognitionBindings.length && recognitionFingerprint(state) !== runRecognitionFingerprint)
+      fail("recognition_changed_during_run");
     if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
   };
   const inbox = new c.ingestion.InboxStore(db);
@@ -349,6 +357,10 @@ export async function createPipeline(options) {
         `SELECT fact.* FROM leaderboard_ingestion.source_facts AS fact
       JOIN leaderboard_ingestion.repository_access AS access USING (repository_id)
       WHERE fact.repository_id = ANY($1::bigint[]) AND fact.observed_at <= $2 AND access.state='public'
+      AND (fact.document->>'evidence' <> 'current_state' OR NOT EXISTS (
+        SELECT 1 FROM leaderboard_ingestion.source_facts AS newer
+        WHERE newer.repository_id=fact.repository_id AND newer.family=fact.family AND newer.subject_id=fact.subject_id
+        AND newer.document->>'evidence'='current_state' AND newer.observed_at <= $2 AND newer.observed_at > fact.observed_at))
       AND NOT EXISTS (SELECT 1 FROM leaderboard_ingestion.object_suppressions AS removed
         WHERE removed.repository_id=fact.repository_id AND removed.subject_id=fact.subject_id)
       ORDER BY fact.fact_key LIMIT 10001`,
@@ -356,6 +368,12 @@ export async function createPipeline(options) {
       )
     ).rows;
     if (sourceRows.length > 10000) fail("frozen_dataset_budget_exceeded");
+    const currentSubjects = new Set();
+    for (const row of sourceRows.filter((row) => row.document.evidence === "current_state")) {
+      const key = JSON.stringify([String(row.repository_id), row.family, row.subject_id]);
+      if (currentSubjects.has(key)) fail("ambiguous_current_source_revision");
+      currentSubjects.add(key);
+    }
     if (
       dispatch &&
       repositoryIds.includes(dispatch.lease.observation.repositoryId) &&
@@ -369,7 +387,7 @@ export async function createPipeline(options) {
       )
     ).rows;
     if (unlabeled.length) fail("cross_mode_or_unproven_source_data");
-    const signature = digest([dataMode, config.policies.map((item) => item.signature)]);
+    const signature = digest(["current-state-selection-v1", dataMode, config.policies.map((item) => item.signature)]);
     const outputs = [];
     for (const row of sourceRows) {
       const cached = (
@@ -396,6 +414,7 @@ export async function createPipeline(options) {
           repository: copy(repository),
           family: row.family,
           factKey: row.fact_key,
+          selectedCurrentState: row.document.evidence === "current_state",
           fact: copy(row.document),
           observedAt: new Date(row.observed_at).toISOString(),
           policyVersion: config.version,
@@ -511,8 +530,11 @@ export async function createPipeline(options) {
     controlsStore.transaction((state) => {
       const overlay = restrictConfiguration(state);
       if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
+      if (recognitionBindings.length && recognitionFingerprint(state) !== runRecognitionFingerprint)
+        fail("recognition_changed_during_run");
       state.pipelinePublications ||= {};
       state.pipelinePublications[publication.snapshotId] = {
+        recognitionFingerprint: recognitionBindings.length ? runRecognitionFingerprint : null,
         configurationVersion: config.version,
         controlsConfigurationRevision: runConfigurationRevision,
       };
@@ -560,12 +582,41 @@ export async function createPipeline(options) {
         return publication;
       }
     }
-    const outputs = await normalizeStored(
+    let outputs = await normalizeStored(
       repos.map((repo) => repo.id),
       observationCutoff,
       dispatch,
     );
     const suppressedArtifactIds = new Set(outputs.flatMap((output) => output.suppressArtifactIds ?? []));
+    if (recognitionBindings.length) {
+      const combined = {
+        facts: outputs.flatMap((o) => o.facts),
+        actors: outputs.flatMap((o) => o.actors),
+        evidence: outputs.flatMap((o) => o.evidence),
+        reasons: [],
+      };
+      combined.facts = [
+        ...new Map(
+          combined.facts.filter((f) => !suppressedArtifactIds.has(f.artifactId)).map((f) => [f.id, f]),
+        ).values(),
+      ];
+      const recognized = materializeRecognition(
+        combined,
+        controlsStore.read(),
+        recognitionBindings,
+        config.policies,
+        c.github.applyRecognitionReceipt,
+        observationCutoff,
+      );
+      outputs = [
+        ...outputs,
+        {
+          facts: recognized.facts.slice(combined.facts.length),
+          actors: [],
+          evidence: recognized.evidence.slice(combined.evidence.length),
+        },
+      ];
+    }
     const uniqueFacts = new Map();
     for (const fact of outputs.flatMap((output) => output.facts)) {
       if (suppressedArtifactIds.has(fact.artifactId)) continue;
@@ -842,6 +893,11 @@ export async function createPipeline(options) {
         ON CONFLICT (scope_key) DO UPDATE SET snapshot_id=EXCLUDED.snapshot_id,revision=EXCLUDED.revision`,
           [scopeKey(scope), snapshotId, revision],
         );
+        const frozenDocument = { frozen, engineScope, policies: config.policies };
+        await tx.query(
+          "INSERT INTO leaderboard_pipeline.frozen_inputs(snapshot_id,document,document_hash) VALUES($1,$2::jsonb,$3)",
+          [snapshotId, JSON.stringify(frozenDocument), digest(frozenDocument)],
+        );
         const receiptId = await receipt(tx, `publish:${scopeKey(scope)}:${snapshotId}`, "snapshot_published", {
           snapshotId,
           revision,
@@ -913,6 +969,13 @@ export async function createPipeline(options) {
           )
         )
           return null;
+        if (
+          recognitionBindings.length &&
+          [selected.selected_id, selected.head_id].some(
+            (id) => controls.pipelinePublications?.[id]?.recognitionFingerprint !== recognitionFingerprint(controls),
+          )
+        )
+          return null;
         const document = copy(selected.document);
         document.disabledMetrics = overlay.disabledMetrics.map((entry) => ({
           ...entry,
@@ -957,6 +1020,7 @@ export async function createPipeline(options) {
     if (stopped) fail("pipeline_stopped");
     if (!(await approved())) return { state: "blocked", reason: "approved_configuration_required" };
     runConfigurationRevision = restrictConfiguration(controlsStore.read()).revision;
+    runRecognitionFingerprint = recognitionFingerprint(controlsStore.read());
     if (dispatch && runConfigurationRevision !== dispatch.lease.operation.configurationRevision)
       fail("dispatch_configuration_changed");
     if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 10000) fail("invalid_pipeline_page_budget");
@@ -1098,6 +1162,58 @@ export async function createPipeline(options) {
   });
   function dispatchOnce() {
     return serialize(() => (stopped || !options.webhookDispatch ? "blocked" : dispatch()));
+  }
+  async function previewPolicy({ snapshotId, policy, operatorId }) {
+    return serialize(async () => {
+      if (
+        stopped ||
+        !(await approved()) ||
+        !(await options.authorizePolicyPreview?.({ snapshotId, policy: copy(policy), operatorId }))
+      )
+        fail("policy_preview_not_authorized");
+      const saved = (
+        await db.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
+          snapshotId,
+        ])
+      ).rows[0];
+      if (!saved || digest(saved.document) !== saved.document_hash) fail("frozen_input_unavailable");
+      const previous = saved.document.policies.find((p) => p.policy.metricId === policy.metricId)?.policy;
+      if (!previous) fail("policy_metric_not_in_snapshot");
+      const comparison = c.metrics.comparePolicies(saved.document.frozen, previous, policy, saved.document.engineScope);
+      const document = { snapshotId, comparison, previousPolicy: previous, targetPolicy: copy(policy) };
+      const comparisonId = digest(document);
+      await db.query(
+        "INSERT INTO leaderboard_pipeline.policy_comparisons(comparison_id,document,document_hash) VALUES($1,$2::jsonb,$3) ON CONFLICT DO NOTHING",
+        [comparisonId, JSON.stringify(document), digest(document)],
+      );
+      return { comparisonId, ...copy(document) };
+    });
+  }
+  async function approvePolicyComparison({ comparisonId, operatorId, approvalReceipt, releaseNotes }) {
+    return serialize(async () => {
+      const authorization = { comparisonId, operatorId, approvalReceipt, releaseNotes };
+      if (stopped || !(await approved()) || !(await options.authorizePolicyRelease?.(copy(authorization))))
+        fail("policy_release_not_authorized");
+      const saved = (
+        await db.query(
+          "SELECT document,document_hash FROM leaderboard_pipeline.policy_comparisons WHERE comparison_id=$1",
+          [comparisonId],
+        )
+      ).rows[0];
+      if (!saved || digest(saved.document) !== saved.document_hash) fail("policy_comparison_unavailable");
+      const manifest = c.metrics.planPolicyRelease(saved.document.comparison, {
+        approverId: operatorId,
+        designatedApproverIds: options.policyApproverIds ?? [],
+        approvalReceipt,
+        releaseNotes,
+      });
+      // A reviewed manifest remains non-public until a separately source-tested configuration activates it.
+      const document = { comparisonId, manifest };
+      const receiptId = await db.transaction((tx) =>
+        receipt(tx, `policy-release:${digest(document)}`, "policy_release_reviewed", document),
+      );
+      return { receiptId, ...document };
+    });
   }
   async function applyCorrection({ requestId, expectedVersion, factId, operatorId, approvalReceipt }) {
     return serialize(async () => {
@@ -1303,6 +1419,8 @@ export async function createPipeline(options) {
     dispatchOnce,
     runOnce,
     applyCorrection,
+    previewPolicy,
+    approvePolicyComparison,
     start,
     stop,
     run,

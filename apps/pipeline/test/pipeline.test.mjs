@@ -888,3 +888,106 @@ test("public observed work survives accepted-only rankings without granting assi
   );
   assert.equal((await runtime.app.inject(`/api/v1/contributors/103?snapshot=${directory.snapshotId}`)).statusCode, 404);
 });
+
+test("policy previews persist exact frozen inputs and require independent host release authorization", async (t) => {
+  const h = await harness(t, {
+    authorizePolicyPreview: async ({ operatorId }) => operatorId === "201",
+    authorizePolicyRelease: async ({ operatorId, approvalReceipt }) =>
+      operatorId === "202" && approvalReceipt === "synthetic-policy-review",
+    policyApproverIds: ["202"],
+  });
+  const publication = (await h.runtime.runOnce()).publications[0];
+  const policy = {
+    ...h.options.config.policies[0].policy,
+    version: "synthetic-policy-v2",
+    rankedStates: ["qualified"],
+  };
+  await assert.rejects(
+    h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "999" }),
+    /not_authorized/,
+  );
+  const preview = await h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "201" });
+  assert.equal(preview.comparison.before.datasetId, preview.comparison.after.datasetId);
+  assert.equal(preview.comparison.changes.length > 0, true);
+  assert.deepEqual(
+    await h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "201" }),
+    preview,
+  );
+  await assert.rejects(
+    h.runtime.approvePolicyComparison({ comparisonId: preview.comparisonId, operatorId: "201" }),
+    /not_authorized/,
+  );
+  const release = await h.runtime.approvePolicyComparison({
+    comparisonId: preview.comparisonId,
+    operatorId: "202",
+    approvalReceipt: "synthetic-policy-review",
+    releaseNotes: "Require accepted outcomes",
+  });
+  assert.equal(release.manifest.publicEnabled, false);
+  assert.equal(release.manifest.targetVersion, policy.version);
+  const head = (await h.db.query("SELECT snapshot_id FROM leaderboard_pipeline.heads")).rows[0];
+  assert.equal(head.snapshot_id, publication.snapshotId);
+});
+
+test("accepted controls receipt materializes a separate lens and withdrawal fences pinned snapshots", async (t) => {
+  const h = await harness(t);
+  const config = structuredClone(h.options.config);
+  const policy = {
+    ...config.policies[0].policy,
+    version: "synthetic-accepted-v1",
+    dateBasis: "acceptedAt",
+    rankedStates: ["qualified"],
+  };
+  config.policies = [
+    { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-approval" },
+  ];
+  config.recognitionBindings = [
+    {
+      category: "finding",
+      scope: "repository:2",
+      policyVersion: policy.version,
+      metricId: "issues_opened",
+      sourceMetricId: "issues_opened",
+      repositoryId: "2",
+      reviewerIds: ["202"],
+    },
+  ];
+  const event = {
+    id: "synthetic-receipt",
+    actor: "202",
+    action: "accepted",
+    at: ago(1),
+    policyVersion: policy.version,
+  };
+  h.controlsStore.transaction((s) => {
+    s.requests.claim = {
+      id: "claim",
+      kind: "evidence",
+      status: "accepted",
+      owner: "101",
+      category: "finding",
+      scope: "repository:2",
+      policyVersion: policy.version,
+      locator: "https://github.com/synthetic-org/synthetic-repo/issues/1",
+      collaborators: {},
+      history: [event],
+    };
+    s.audit.push(event);
+  });
+  const runtime = await createPipeline({ ...h.options, config });
+  t.after(() => runtime.stop());
+  const publication = (await runtime.runOnce()).publications[0];
+  const signal = new AbortController().signal;
+  const visible = await runtime.source.read(publicScope, publication.snapshotId, signal);
+  assert.equal(visible.selected.rows.find((r) => r.actorId === "101").result.value, 1);
+  h.controlsStore.transaction((s) => {
+    s.requests.claim.status = "withdrawn";
+  });
+  assert.equal(await runtime.source.read(publicScope, publication.snapshotId, signal), null);
+  const next = (await runtime.runOnce()).publications[0];
+  const after = await runtime.source.read(publicScope, next.snapshotId, signal);
+  assert.equal(
+    after.selected.rows.some((r) => r.result.value > 0),
+    false,
+  );
+});
