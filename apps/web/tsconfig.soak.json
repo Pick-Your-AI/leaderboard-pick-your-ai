@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.browser.json",
+  "include": ["soak/**/*.ts", "playwright.soak.config.ts", "browser/wallFixture.ts"]
+}
