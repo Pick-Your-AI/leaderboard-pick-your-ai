@@ -1,4 +1,9 @@
-import { actorFilterLabels, type MetricRegistry } from "@pick-your-ai/contracts";
+import {
+  actorFilterLabels,
+  publicScopeParameters,
+  publicScopeSchemaVersion,
+  type MetricRegistry,
+} from "@pick-your-ai/contracts";
 import { PublicReadError, safePublicUrl, type PublicRead } from "./public-source.js";
 
 const escape = (value: string) =>
@@ -29,6 +34,15 @@ function measurementContext(
     ["p75", supplied(diagnostic?.p75)],
     ["Pending", `${supplied(row.pending?.count)} (${row.pending?.state ?? "unknown"})`],
     ["Value class", row.pending?.valueClass ?? "unknown"],
+    ...(read.selected.scope.schemaVersion === publicScopeSchemaVersion
+      ? ([
+          [
+            "Membership basis",
+            read.selected.scope.context === "current" ? "Current at the frozen snapshot" : "Event context",
+          ],
+          ["Projects", read.selected.scope.projects!.join(", ") || "All approved Projects and unboarded work"],
+        ] as [string, string][])
+      : []),
   ];
 }
 
@@ -50,8 +64,8 @@ export function renderContributorCard(
     snapshot: snapshot.snapshotId,
     metric: metric.id,
   });
-  for (const key of ["repository", "workstream", "start", "end"] as const)
-    if (scope[key] !== null) params.set(key, scope[key]);
+  for (const [key, value] of Object.entries(publicScopeParameters(scope)))
+    if (key !== "organization") params.set(key, value);
   if (read.actorFilter && read.actorFilter !== "all") params.set("actors", read.actorFilter);
   params.set("ui", "api");
   const href = `/contributors/${encodeURIComponent(actorId)}?${params}`;
