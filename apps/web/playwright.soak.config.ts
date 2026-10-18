@@ -1,26 +1,14 @@
 import { defineConfig } from "@playwright/test";
 import browserConfig from "./playwright.config.ts";
+import { selectSoakTimezone } from "./soak/midnight.ts";
 
 const minutes = Number(process.env.WALL_SOAK_MINUTES ?? "480");
 if (!Number.isFinite(minutes) || minutes < 2 || minutes > 1_440)
   throw new Error("WALL_SOAK_MINUTES must be between 2 and 1440 real minutes");
 const baseURL = "http://127.0.0.1:4277";
-const dateIn = (zone: string, time: number) => new Intl.DateTimeFormat("en-CA", { timeZone: zone }).format(time);
-const now = Date.now();
-// Choose a real timezone whose next midnight falls within six hours. No clock
-// is changed: the long run must actually observe the date transition.
-const timezoneId =
-  process.env.WALL_SOAK_TIMEZONE ??
-  [
-    "Etc/UTC",
-    "America/Los_Angeles",
-    "America/New_York",
-    "Pacific/Honolulu",
-    "Asia/Tokyo",
-    "Asia/Kolkata",
-    "Europe/Paris",
-  ].find((zone) => dateIn(zone, now) !== dateIn(zone, now + 6 * 3_600_000)) ??
-  "Etc/UTC";
+// Leave startup time before midnight and a full hour before the scheduled
+// six-hour timezone change. A late start is checked again inside the real test.
+const timezoneId = selectSoakTimezone(Date.now(), minutes >= 480, process.env.WALL_SOAK_TIMEZONE);
 
 export default defineConfig({
   ...browserConfig,
