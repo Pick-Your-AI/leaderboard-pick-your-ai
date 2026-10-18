@@ -106,12 +106,14 @@ async function validateShape(tx, upgraded) {
     if (!column || column.data_type !== type || column.is_nullable !== "NO") invalid();
   }
   if (!upgraded && columns.some((row) => ["scope_hash", "operation_hash"].includes(row.column_name))) invalid();
+  // Catalog names must cross the driver boundary as text[], preserving their
+  // exact order; pg otherwise returns the unregistered name[] type as a string.
   const constraints = (
     await tx.query(
       `SELECT relation.relname AS table_name,constraint_row.conname AS name,
          constraint_row.contype AS type,constraint_row.convalidated AS validated,
          constraint_row.condeferrable AS deferrable,
-         ARRAY(SELECT attribute.attname FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key(attnum,position)
+          ARRAY(SELECT attribute.attname::text FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key(attnum,position)
            JOIN pg_catalog.pg_attribute AS attribute ON attribute.attrelid=relation.oid AND attribute.attnum=key.attnum
            ORDER BY key.position) AS columns,
          pg_catalog.pg_get_constraintdef(constraint_row.oid) AS definition
