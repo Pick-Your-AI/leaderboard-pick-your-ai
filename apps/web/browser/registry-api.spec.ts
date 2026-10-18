@@ -1,8 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import type { MetricRegistry } from "@pick-your-ai/contracts";
 
 test.use({ storageState: { cookies: [], origins: [] } });
-async function catalogService(page: Page, malformed = false) {
+async function catalogService(page: Page, malformed = false, customize?: (registry: MetricRegistry) => void) {
   const registry = JSON.parse(
     await readFile(new URL("../../../packages/metrics/src/v1/registry.json", import.meta.url), "utf8"),
   );
@@ -11,6 +12,7 @@ async function catalogService(page: Page, malformed = false) {
   ];
   registry.ui_metadata.departments.find((entry: { id: string }) => entry.id === "delivery").label =
     "Served delivery label";
+  customize?.(registry);
   const module = new URL("../../service/dist/app.js", import.meta.url).href;
   const { createService } = await import(module);
   let reads = 0;
@@ -85,6 +87,40 @@ test("deferred and unknown definitions stay honest without a live board read", a
     await page.goto("/methodology/not_a_metric?ui=api");
     await expect(page.getByRole("alert")).toContainText("unknown_metric_definition");
     expect(service.reads).toBe(0);
+  } finally {
+    await service.close();
+  }
+});
+
+test("method sheets expose served denominator limits and source qualification without a snapshot", async ({ page }) => {
+  const service = await catalogService(page, false, (registry) => {
+    registry.metrics.find((metric) => metric.id === "pr_accepted_rate")!.definition.denominator.zero_behavior =
+      "Served denominator guard: no decided PRs means unavailable, never 0%.";
+  });
+  try {
+    await page.goto("/methodology/pr_accepted_rate?ui=api&snapshot=unavailable-pin");
+    await expect(page.getByText("Served denominator guard: no decided PRs means unavailable, never 0%.")).toBeVisible();
+    await expect(page.getByText("Apply identical source/time/eligibility scope to all ratio terms.")).toBeVisible();
+    await expect(page.getByText("No subjective quality inference from measured activity")).toBeVisible();
+    await expect(page.getByText("No published policy signature supplied for this selection.")).toBeVisible();
+    await page.goto("/methodology/review_wait?ui=api");
+    await expect(page.getByText("n=0 => unavailable; never 0 hours.")).toBeVisible();
+    await expect(page.getByText("n eligible PRs with both timestamps;", { exact: false })).toContainText(
+      "unresolved right-censored PR count and missing-readiness-evidence count separately",
+    );
+    await page.goto("/methodology/label_taxonomy?ui=api");
+    await expect(page.getByText("Definition facets", { exact: true })).toBeVisible();
+    await expect(page.getByText("name/description/color edit", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Use only proven approved read scopes and public evidence.", { exact: false }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("An event plus its confirming receipt is one underlying unit.", { exact: false }),
+    ).toBeVisible();
+    await expect(page.getByText("A label rename retains the same label identity", { exact: false })).toBeVisible();
+    expect(service.calls.every((url) => url.pathname === "/api/v1/metrics")).toBe(true);
+    expect(service.reads).toBe(0);
+    await expect(page.getByText("synthetic-aster", { exact: false })).toHaveCount(0);
   } finally {
     await service.close();
   }
