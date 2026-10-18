@@ -6,7 +6,7 @@ import { aggregateExplanationHash } from "../src/aggregate-explanations.mjs";
 import { retainedRankHistory } from "../src/rank-history.mjs";
 import { harness, components, clock, ago, boardUrl } from "./harness.mjs";
 
-async function twoSnapshots(t, extra = {}) {
+async function twoSnapshots(t, extra = {}, beforePublish) {
   const scope = {
     organization: "Pick-Your-AI",
     repository: null,
@@ -21,6 +21,7 @@ async function twoSnapshots(t, extra = {}) {
       config.scopes = [scope];
     },
   });
+  await beforePublish?.(h);
   const first = (await h.runtime.runOnce({ cutoff: ago(0.01) })).publications[0].snapshotId;
   const cutoff = clock();
   const second = (await h.runtime.runOnce({ cutoff })).publications[0].snapshotId;
@@ -28,6 +29,58 @@ async function twoSnapshots(t, extra = {}) {
   const url = `${boardUrl}&${new URLSearchParams({ start: scope.start, end: scope.end })}`;
   return { ...h, first, second, cutoff, url, comparisonUrl: `${url}&snapshot=${second}&compare=${first}` };
 }
+const recognitionPair = (t) =>
+  twoSnapshots(
+    t,
+    {
+      configure(config) {
+        const policy = {
+          ...config.policies[0].policy,
+          version: "synthetic-paired-recognition-v1",
+          dateBasis: "acceptedAt",
+          rankedStates: ["qualified"],
+        };
+        config.policies = [
+          { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-paired-policy" },
+        ];
+        config.recognitionBindings = [
+          {
+            category: "finding",
+            scope: "repository:2",
+            policyVersion: policy.version,
+            metricId: "issues_opened",
+            sourceMetricId: "issues_opened",
+            repositoryId: "2",
+            reviewerIds: ["202"],
+          },
+        ];
+      },
+    },
+    (h) => {
+      const event = {
+        id: "synthetic-paired-recognition-receipt",
+        actor: "202",
+        action: "accepted",
+        at: Date.parse(ago(1.5)),
+        policyVersion: h.config.policies[0].policy.version,
+      };
+      h.controlsStore.transaction((state) => {
+        state.requests.claim = {
+          id: "claim",
+          kind: "evidence",
+          status: "accepted",
+          owner: "101",
+          category: "finding",
+          scope: "repository:2",
+          policyVersion: event.policyVersion,
+          locator: "https://github.com/synthetic-org/synthetic-repo/issues/1",
+          collaborators: {},
+          history: [event],
+        };
+        state.audit.push(event);
+      });
+    },
+  );
 const stored = (h, id) =>
   h.controlsStore.db.prepare("SELECT * FROM pipeline_aggregate_explanations WHERE snapshot_id=?").get(id);
 const safe = (response) =>
@@ -75,6 +128,72 @@ test("actual persisted bounded partial history is unavailable and immutable acro
     await next.close();
   }
 });
+
+test("configured recognition preserves paired public values and retained history across restart", async (t) => {
+  const h = await recognitionPair(t);
+  const before = [stored(h, h.first), stored(h, h.second)];
+  const current = await h.runtime.app.inject(`${h.url}&snapshot=${h.second}`);
+  assert.equal(current.statusCode, 200, current.body);
+  assert.equal(current.json().rows.find((row) => row.actorId === "101").result.value, 1);
+  const response = await h.runtime.app.inject(h.comparisonUrl);
+  unavailable(response, "insufficient_history");
+  assert.equal(response.json().comparison.snapshotId, h.first);
+  assert.deepEqual(
+    response.json().rows.map((row) => [row.actorId, row.result.value, row.rank]),
+    current.json().rows.map((row) => [row.actorId, row.result.value, row.rank]),
+  );
+  assert.doesNotMatch(response.body, /synthetic-paired-recognition-receipt|recognitionFingerprint|recognitionBindings/);
+  const next = await restarted(h);
+  try {
+    const again = await next.runtime.app.inject(h.comparisonUrl);
+    unavailable(again, "insufficient_history");
+    assert.deepEqual(again.json(), response.json());
+    assert.deepEqual([stored(h, h.first), stored(h, h.second)], before);
+  } finally {
+    await next.close();
+  }
+});
+
+for (const changed of ["withdrawal", "audit"])
+  test(`final paired fence rejects recognition ${changed} after both snapshot reads`, async (t) => {
+    const h = await recognitionPair(t);
+    unavailable(await h.runtime.app.inject(h.comparisonUrl), "insufficient_history");
+    const transaction = h.db.transaction.bind(h.db);
+    let reads = 0,
+      finalChecks = 0,
+      finalFence = false;
+    h.db.transaction = (work) =>
+      transaction((tx) =>
+        work({
+          query: async (sql, params) => {
+            const result = await tx.query(sql, params);
+            if (sql.includes("SELECT selected.document")) reads++;
+            if (sql.startsWith("SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access"))
+              finalFence = true;
+            if (
+              finalFence &&
+              sql.includes("UNION SELECT artifact_id AS subject_id FROM leaderboard_pipeline.corrections")
+            ) {
+              finalChecks++;
+              assert.equal(reads, 2, "recognition edit must follow both individually authorized snapshot reads");
+              h.controlsStore.transaction((state) => {
+                if (changed === "withdrawal") state.requests.claim.status = "withdrawn";
+                else state.audit.find((event) => event.id === "synthetic-paired-recognition-receipt").actor = "303";
+              });
+            }
+            return result;
+          },
+        }),
+      );
+    const revision = h.controlsStore.read().revision;
+    const response = await h.runtime.app.inject(h.comparisonUrl);
+    assert.equal(response.statusCode, 410, response.body);
+    assert.equal(response.json().rows, undefined);
+    safe(response);
+    assert.equal(reads, 2);
+    assert.equal(finalChecks, 1);
+    assert.equal(h.controlsStore.read().revision, revision, "recognition edits must be fenced without a revision bump");
+  });
 
 test("pre-extension confirmed receipt remains readable and replayable without adding missing history", async (t) => {
   const h = await twoSnapshots(t),

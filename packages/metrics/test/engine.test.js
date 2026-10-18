@@ -18,6 +18,29 @@ const coverage = (patch = {}) => ({ schemaVersion: "leaderboard/v1", state: "com
 const input = (facts = [], patch = {}) => ({ datasetId: "synthetic-frozen-dataset", cutoff: to, backfillRevision: "synthetic-backfill-1", repositoryIds: ["synthetic-repo"], actors: [actor("a"), actor("b"), actor("c")], facts, coverage: [coverage()], ...patch });
 const board = (facts, policyPatch = {}, scopePatch = {}, inputPatch = {}) => aggregateMetric(input(facts, inputPatch), policy(policyPatch), scope(scopePatch));
 
+test("localization accepted units reject raw counts and preserve distinct accepted locale categories", () => {
+  const configured = policy({ metricId: "localization", groupBy: "canonical", dateBasis: "occurredAt", rank: false });
+  assert.throws(() => validateMetricPolicy({ ...configured, rankedStates: ["observed"] }), /independent acceptance/);
+  assert.throws(() => validateMetricPolicy({ ...configured, groupBy: "actor_artifact" }), /canonical language/);
+  assert.throws(() => validateMetricPolicy({ ...configured, dateBasis: "acceptedAt" }), /source merge clock/);
+  const common = { metricId: "localization", artifactId: "synthetic-same-pr" };
+  const raw = fact("raw-fr", { ...common, canonicalKey: "synthetic-fr", state: "observed", acceptedAt: null, acceptedBy: null, acceptanceReceipt: null });
+  const other = fact("raw-de", { ...raw, id: "raw-de", canonicalKey: "synthetic-de" });
+  const rawOnly = input([raw, other]);
+  assert.ok(aggregateMetric(rawOnly, configured, scope()).rows.every((row) => row.value === null || row.value === 0));
+  assert.equal(selectPortfolioFacts(rawOnly, configured, scope()).length, 2);
+  const accepted = [fact("accepted-fr", { ...common, canonicalKey: "synthetic-accepted-fr" }), fact("accepted-de", { ...common, canonicalKey: "synthetic-accepted-de" })];
+  const result = aggregateMetric(input([...rawOnly.facts, ...accepted]), configured, scope());
+  assert.equal(result.rows[0].value, 2);
+  assert.deepEqual(result.rows[0].evidenceIds, ["accepted-de", "accepted-fr"]);
+  const mergedWindow = scope({ from: "2026-10-04T00:00:00Z", to: "2026-10-05T00:00:00Z" });
+  const reviewedWindow = scope({ from: "2026-10-05T00:00:00Z", to: "2026-10-06T00:00:00Z" });
+  assert.equal(aggregateMetric(input(accepted), configured, mergedWindow).rows[0].value, 2);
+  assert.deepEqual(aggregateMetric(input(accepted), configured, reviewedWindow).rows, []);
+  const selfReviewed = accepted.map((entry) => ({ ...entry, acceptedBy: entry.actorId }));
+  assert.equal(aggregateMetric(input(selfReviewed), configured, scope()).rows.length, 0);
+});
+
 test("accepted counts reconcile to evidence while pending stays outside dense ranks", () => {
   const facts = Array.from({ length: 14 }, (_, n) => fact(`accepted-${n}`));
   facts.push(...Array.from({ length: 3 }, (_, n) => fact(`pending-${n}`, { state: "pending", acceptedAt: null })));

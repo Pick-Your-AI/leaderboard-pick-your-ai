@@ -1,5 +1,10 @@
 export { actorFilterSchema, actorFilterLabels, matchesActorFilter, type ActorFilter } from "./actor-filter.js";
 export { compareSourceInstants } from "./v1/source-time.js";
+export {
+  publicParticipationSchema,
+  participationWeekDenominator,
+  type PublicParticipation,
+} from "./v1/participation.js";
 
 export {
   actorIdentityStateSchema,
@@ -61,3 +66,4 @@ export {
   publicEvidenceMetadataSchema,
 } from "./v1/evidence-metadata.js";
 export type { PublicEvidenceAction, PublicEvidenceHistory, PublicEvidenceMetadata } from "./v1/evidence-metadata.js";
+export { publicDocumentationReasons } from "./documentation-reasons.js";

@@ -5990,22 +5990,39 @@
         "synonyms": [
           "localization"
         ],
-        "maturity": "definition_only",
+        "maturity": "synthetic_verified",
         "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "occurredAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "occurredAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "occurredAt"
+        },
         "lead_view": {
           "overview": false,
           "wall": false,
           "order": null
         },
-        "verification_cases": [],
+        "verification_cases": [
+          "packages/metrics/test/registry-ui.test.js",
+          "packages/github/test/localization.test.mjs",
+          "apps/pipeline/test/localization.test.mjs",
+          "apps/service/test/read-api.test.mjs"
+        ],
         "limitations": [
           "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
           "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+          "Only independently accepted PR/language/category units on the source merge clock are selectable. Raw locale participation remains descriptive; configured source and reviewer authority are still required."
         ]
       },
       {

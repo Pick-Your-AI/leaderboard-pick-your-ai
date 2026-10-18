@@ -5,6 +5,7 @@ import { actorId, ControlError, exactKeys, locator, record, requireThat, text } 
 import { nominateSpotlight, decideSpotlight, projectSpotlights } from "./editorial.mjs";
 import { createConfigurationManager } from "./configuration.mjs";
 import { createPolicyComparisonManager } from "./policy-comparison.mjs";
+import { localizationReviewRequest, parseLocalizationReviewTarget } from "./localization-review.mjs";
 
 const random = () => randomBytes(32).toString("base64url");
 const hash = (value) => createHash("sha256").update(value).digest("base64url");
@@ -554,13 +555,27 @@ export function createControlsServer({
                 "Not found",
               );
               requireThat(typeof input.consent === "boolean" && !["withdrawn", "merged"].includes(request.status));
-              request.collaborators[session.actorId] = input.consent ? "accepted" : "declined";
+              const nextConsent = input.consent ? "accepted" : "declined";
+              const localeReviewRequired =
+                request.status === "accepted" &&
+                request.history.findLast((entry) => entry.action === "accepted")?.localization !== undefined;
+              // Exact locale acceptance binds the reviewed request version. A
+              // changed attribution must become reviewable, not remain accepted
+              // with a stale decision that blocks every subsequent publication.
+              if (localeReviewRequired && request.collaborators[session.actorId] === nextConsent)
+                return { id: request.id, status: request.status, version: request.version };
+              request.collaborators[session.actorId] = nextConsent;
+              if (localeReviewRequired) {
+                request.status = "pending";
+                delete request.policyVersion;
+              }
               record(
                 s,
                 request,
                 session.actorId,
                 input.consent ? "attribution-accepted" : "attribution-declined",
                 timestamp,
+                ...(localeReviewRequired ? [{ reviewRequired: true, previousStatus: "accepted" }] : []),
               );
             } else if (action === "withdraw") {
               exactKeys(input, ["version"]);
@@ -583,6 +598,7 @@ export function createControlsServer({
                 "policyVersion",
                 "sourceReviewedPublic",
                 "duplicateOf",
+                "localization",
               ]);
               requireThat(session.roles.includes(roleNeeded(request)), 403, "Reviewer role required");
               requireThat(
@@ -592,6 +608,7 @@ export function createControlsServer({
               );
               requireThat(input.conflict === false, 403, "Declare conflicts and route to an independent reviewer");
               requireThat(["accept", "reject", "rollback", "merge"].includes(input.decision));
+              requireThat(input.decision === "accept" || input.localization === undefined);
               requireThat(!["withdrawn", "merged", "applied"].includes(request.status), 409, "Request is terminal");
               if (request.status === "appealed" || input.decision === "rollback") {
                 requireThat(
@@ -629,11 +646,20 @@ export function createControlsServer({
                 );
                 const policyVersion = text(input.policyVersion, 100);
                 requireThat(policyVersions.has(policyVersion), 409, "Policy has not been approved for this service");
+                let localization;
+                if (input.localization !== undefined) {
+                  try {
+                    localization = parseLocalizationReviewTarget(input.localization);
+                  } catch {
+                    throw new ControlError(400, "Invalid localization review target");
+                  }
+                }
                 request.policyVersion = policyVersion;
                 request.status = "accepted";
                 record(s, request, session.actorId, "accepted", timestamp, {
                   reason,
                   policyVersion: request.policyVersion,
+                  ...(localization ? { localization, evidenceRequest: localizationReviewRequest(request) } : {}),
                 });
               } else if (input.decision === "reject") {
                 requireThat(["pending", "appealed"].includes(request.status), 409, "Already reviewed");

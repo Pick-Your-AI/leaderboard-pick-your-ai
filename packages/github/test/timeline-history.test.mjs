@@ -116,6 +116,7 @@ test("Project status values are hydrated only after explicit public Project appr
     policyVersion: "synthetic/v1",
     fact: {
       subjectId: record.event.id,
+      historySubjectId: record.subject.id,
       sourceRevision: typedHistoryRevision(record),
       sourceUrl: subject.url,
       evidence: "observed_transition",
@@ -137,6 +138,7 @@ test("Project status values are hydrated only after explicit public Project appr
     policyVersion: "synthetic/v1",
     fact: {
       subjectId: automated.event.id,
+      historySubjectId: automated.subject.id,
       sourceRevision: typedHistoryRevision(automated),
       sourceUrl: subject.url,
       evidence: "observed_transition",

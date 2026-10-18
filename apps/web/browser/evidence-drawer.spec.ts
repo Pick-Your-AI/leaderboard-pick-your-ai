@@ -143,7 +143,7 @@ for (const withdrawal of ["suppress", "suppressArtifact", "revoke", "fail"] as c
   });
 }
 
-test("API proof keeps hostile text literal and unknown times, titles, revisions and acceptance honest", async ({
+test("API proof omits private reasons and keeps unknown times, titles, revisions and acceptance honest", async ({
   page,
 }) => {
   const api = await evidenceService(page);
@@ -152,7 +152,8 @@ test("API proof keeps hostile text literal and unknown times, titles, revisions 
     await page.goto(board);
     await page.getByRole("link", { name: "e-api-a", exact: true }).click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText('<img src=x onerror="window.proofInjected=true">', { exact: false })).toBeVisible();
+    await expect(dialog.locator("[data-evidence-body]")).toBeVisible();
+    await expect(dialog.getByText('<img src=x onerror="window.proofInjected=true">', { exact: false })).toHaveCount(0);
     await expect(dialog.locator("img, script")).toHaveCount(0);
     expect(await page.evaluate(() => Reflect.get(window, "proofInjected"))).toBeUndefined();
     await expect(dialog.getByText("Unknown; no event time is inferred", { exact: true })).toBeVisible();

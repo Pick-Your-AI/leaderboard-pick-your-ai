@@ -210,7 +210,30 @@ export async function createPipeline(options) {
       ? ["current-state-selection-v2", dataMode, policySignatures, classificationPolicies]
       : ["current-state-selection-v1", dataMode, policySignatures],
   );
-  const normalizationSignature = digest([normalizationDocumentVersion, normalizationPolicySignature]);
+  const attributionNormalizationSignature = digest([normalizationDocumentVersion, normalizationPolicySignature]);
+  // Earlier documentation projections lacked locale units, merge-clock bounds,
+  // or substantive rename origins. Recompute every configured docs source.
+  const normalizationSignature = classificationPolicies.documentation.length
+    ? digest(["documentation-locales/v2", attributionNormalizationSignature])
+    : attributionNormalizationSignature;
+  const frozenNormalizationSignatures = [
+    normalizationSignature,
+    attributionNormalizationSignature,
+    normalizationPolicySignature,
+  ];
+  if (classificationPolicies.documentation.length)
+    frozenNormalizationSignatures.push(digest(["documentation-locales/v1", attributionNormalizationSignature]));
+  // The standalone locale adapter already bound every documentation rule. Its
+  // cache can authorize historical identities only when no research policy is
+  // omitted from that format; unclassified legacy keys cannot supply the gap.
+  if (!classificationPolicies.research.length)
+    frozenNormalizationSignatures.push(
+      digest([
+        normalizationDocumentVersion,
+        digest(["current-state-selection-v1", dataMode, policySignatures]),
+        classificationPolicies.documentation,
+      ]),
+    );
   const verifyConfig = options.verifyConfiguration ?? (async () => false);
   const authorizeCorrection = options.authorizeCorrection ?? (async () => false);
   const now = options.now ?? (() => new Date().toISOString());
@@ -303,8 +326,8 @@ export async function createPipeline(options) {
             [
               binding.normalizationHashes,
               // Legacy documents still bind historical frozen actor evidence;
-              // only fresh runs require the new private-attribution projection.
-              [normalizationSignature, normalizationPolicySignature],
+              // only signatures covering every current source classification are eligible.
+              frozenNormalizationSignatures,
               authorization.sources.map((source) => source.repositoryId),
               normalizationSources === undefined
                 ? null
@@ -496,7 +519,7 @@ export async function createPipeline(options) {
   const assertRunConfiguration = () => {
     const state = controlsStore.read();
     const overlay = restrictConfiguration(state);
-    if (recognitionBindings.length && recognitionFingerprint(state) !== runRecognitionFingerprint)
+    if (recognitionBindings.length && recognitionFingerprint(state, recognitionBindings) !== runRecognitionFingerprint)
       fail("recognition_changed_during_run");
     if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
   };
@@ -790,7 +813,12 @@ export async function createPipeline(options) {
         if (digest(cached.document) !== cached.document_hash) fail("normalization_integrity_error");
         if (cached.document.isSynthetic !== (dataMode === "synthetic")) fail("normalization_data_mode_mismatch");
         assertDataMode(cached.document);
-        if (hasDispatchEvidence(cached.document, dispatch, row)) {
+        // Reprocess Project caches created before collected-subject binding.
+        // Keep the shared policy signature stable for frozen comparisons.
+        const currentHistoryNormalizer =
+          row.family !== "project_history" ||
+          cached.document.projectHistoryNormalizationVersion === "collected-subject/v1";
+        if (currentHistoryNormalizer && hasDispatchEvidence(cached.document, dispatch, row)) {
           await retainSourceArtifacts(db, row.fact_key, cached.document);
           outputs.push({ document: cached.document, source: sourceBinding(row) });
           continue;
@@ -832,10 +860,43 @@ export async function createPipeline(options) {
         !Array.isArray(output.facts) ||
         !Array.isArray(output.actors) ||
         !Array.isArray(output.evidence) ||
-        output.facts.length > 100 ||
+        output.facts.length > 132 ||
         output.actors.length > 100 ||
-        output.evidence.length > 100
+        output.evidence.length > 132
       )
+        fail("invalid_normalized_evidence");
+      // Keep the existing 100-record base budget. The locale classifier adds at
+      // most one paired fact/proof for each explicitly configured language/category,
+      // so those bounded additions must not evict previously supported PR evidence.
+      const documentationPolicy = (config.documentationPolicies ?? []).find(
+        (item) => item.repositoryId === repository.id,
+      );
+      const localePairs = new Set(
+        (documentationPolicy?.localizationPaths ?? [])
+          .slice(0, 32)
+          .map((item) => JSON.stringify([item.locale, item.category])),
+      );
+      const localeUnits = new Set();
+      for (const entry of output.evidence) {
+        const contribution = entry?.contribution;
+        if (
+          !Array.isArray(contribution?.metricIds) ||
+          contribution.metricIds.length !== 1 ||
+          contribution.metricIds[0] !== "localization" ||
+          !Array.isArray(contribution.reasonCodes) ||
+          !output.facts.some((fact) => fact.id === contribution.contributionId && fact.metricId === "localization")
+        )
+          continue;
+        const reasons = c.contracts.publicDocumentationReasons(contribution);
+        if (reasons.length !== 3 || reasons[0] !== `documentation_path_policy:${documentationPolicy?.version}`)
+          continue;
+        const pair = JSON.stringify([
+          reasons[1].slice("locale:".length),
+          reasons[2].slice("localization_category:".length),
+        ]);
+        if (localePairs.has(pair)) localeUnits.add(pair);
+      }
+      if (output.facts.length > 100 + localeUnits.size || output.evidence.length > 100 + localeUnits.size)
         fail("invalid_normalized_evidence");
       // Validate the public boundary now; the public API validates it again on every read.
       for (const evidence of output.evidence) {
@@ -882,6 +943,7 @@ export async function createPipeline(options) {
       // prove the target creation. Failure must not leave older evidence visible.
       if (!hasDispatchEvidence(output, dispatch, row)) fail("dispatch_enrichment_unavailable");
       const document = {
+        ...(row.family === "project_history" ? { projectHistoryNormalizationVersion: "collected-subject/v1" } : {}),
         suppressArtifactIds: suppressed,
         isSynthetic: dataMode === "synthetic",
         facts: output.facts,
@@ -945,7 +1007,10 @@ export async function createPipeline(options) {
     controlsStore.transaction((state) => {
       const overlay = restrictConfiguration(state);
       if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
-      if (recognitionBindings.length && recognitionFingerprint(state) !== runRecognitionFingerprint)
+      if (
+        recognitionBindings.length &&
+        recognitionFingerprint(state, recognitionBindings) !== runRecognitionFingerprint
+      )
         fail("recognition_changed_during_run");
       // Required arithmetic explanation and visibility authority share this one
       // durable commit. Optional preview limits can never bypass this write.
@@ -1089,6 +1154,7 @@ export async function createPipeline(options) {
         config.policies,
         c.github.applyRecognitionReceipt,
         observationCutoff,
+        c.contracts.publicDocumentationReasons,
       );
       outputs = [
         ...outputs,
@@ -1240,7 +1306,7 @@ export async function createPipeline(options) {
                 roles: [fact.role],
                 qualification: "eligible",
                 metricIds: [fact.metricId],
-                reasonCodes: ["public_pending_work"],
+                reasonCodes: ["public_pending_work", ...c.contracts.publicDocumentationReasons(original.contribution)],
               },
               occurredAt: fact.occurredAt,
               observedAt: fact.observedAt,
@@ -1271,7 +1337,10 @@ export async function createPipeline(options) {
             roles: [fact.role],
             qualification: "eligible",
             metricIds: [fact.metricId],
-            reasonCodes: [`public_${activityState}_work`],
+            reasonCodes: [
+              `public_${activityState}_work`,
+              ...c.contracts.publicDocumentationReasons(original.contribution),
+            ],
           },
           occurredAt: fact.occurredAt,
           observedAt: fact.observedAt,
@@ -1549,7 +1618,8 @@ export async function createPipeline(options) {
             (recognitionBindings.length &&
               [read.head.snapshotId, read.selected.snapshot.snapshotId].some(
                 (id) =>
-                  controls.pipelinePublications?.[id]?.recognitionFingerprint !== recognitionFingerprint(controls),
+                  controls.pipelinePublications?.[id]?.recognitionFingerprint !==
+                  recognitionFingerprint(controls, recognitionBindings),
               ))
           )
             return null;
@@ -1678,7 +1748,9 @@ export async function createPipeline(options) {
           if (
             recognitionBindings.length &&
             [selected.selected_id, selected.head_id].some(
-              (id) => controls.pipelinePublications?.[id]?.recognitionFingerprint !== recognitionFingerprint(controls),
+              (id) =>
+                controls.pipelinePublications?.[id]?.recognitionFingerprint !==
+                recognitionFingerprint(controls, recognitionBindings),
             )
           )
             return null;
@@ -1740,7 +1812,7 @@ export async function createPipeline(options) {
     if (stopped) fail("pipeline_stopped");
     if (!(await approved())) return { state: "blocked", reason: "approved_configuration_required" };
     runConfigurationRevision = restrictConfiguration(controlsStore.read()).revision;
-    runRecognitionFingerprint = recognitionFingerprint(controlsStore.read());
+    runRecognitionFingerprint = recognitionFingerprint(controlsStore.read(), recognitionBindings);
     if (dispatch && runConfigurationRevision !== dispatch.lease.operation.configurationRevision)
       fail("dispatch_configuration_changed");
     if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 10000) fail("invalid_pipeline_page_budget");
@@ -1907,7 +1979,7 @@ export async function createPipeline(options) {
       fail("policy_input_revoked");
     return digest([
       read.controls.version,
-      recognitionFingerprint(controlsStore.read()),
+      recognitionFingerprint(controlsStore.read(), recognitionBindings),
       configurationOverlay(controlsStore.read()),
     ]);
   }
@@ -2224,7 +2296,8 @@ export async function createPipeline(options) {
           const confirmation = state.pipelinePublications?.[snapshotId];
           if (
             !confirmation?.aggregateExplanationHash ||
-            (recognitionBindings.length && confirmation.recognitionFingerprint !== recognitionFingerprint(state)) ||
+            (recognitionBindings.length &&
+              confirmation.recognitionFingerprint !== recognitionFingerprint(state, recognitionBindings)) ||
             overlay.revision !== initial.document.authorization.controlsConfigurationRevision
           )
             fail("aggregate_explanation_authorization_changed");

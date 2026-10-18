@@ -40,6 +40,8 @@ export interface MetricFact {
   outcome?: "merged" | "closed_unmerged" | "pending";
   readyAt?: string | null;
   firstReviewAt?: string | null;
+  /** Exact observed locale fact whose accepted representation replaces current portfolio display. */
+  recognitionSourceFactId?: string;
 }
 export interface EngineActor {
   id: string;
@@ -217,6 +219,13 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
   )
     throw new Error("Exactly one evidence class is required; observed, qualified and reviewed values stay separate");
   if (
+    policy.metricId === "localization" &&
+    (policy.rankedStates[0] === "observed" || policy.groupBy !== "canonical" || policy.dateBasis !== "occurredAt")
+  )
+    throw new Error(
+      "Localization accepted units require independent acceptance, canonical language/category grouping and the source merge clock",
+    );
+  if (
     !policy.roles.length ||
     policy.roles.some((role) => !knownRoles.includes(role) || role === "unknown") ||
     !policy.sources.length ||
@@ -274,10 +283,14 @@ export function resolveMetricWindow(
   let start: number | null;
   if (["7d", "30d", "90d"].includes(preset)) start = end - Number.parseInt(preset, 10) * 86400000;
   else if (preset === "all") start = null;
-  else if (preset === "month") start = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
-  else if (preset === "quarter") start = Date.UTC(date.getUTCFullYear(), Math.floor(date.getUTCMonth() / 3) * 3, 1);
-  else if (preset === "year") start = Date.UTC(date.getUTCFullYear(), 0, 1);
-  else if (preset === "custom" && custom) {
+  else if (preset === "month" || preset === "quarter" || preset === "year") {
+    const month =
+      preset === "year" ? 0 : preset === "quarter" ? Math.floor(date.getUTCMonth() / 3) * 3 : date.getUTCMonth();
+    // Preserve the validated year: Date.UTC remaps years 0–99 to 1900–1999.
+    date.setUTCMonth(month, 1);
+    date.setUTCHours(0, 0, 0, 0);
+    start = date.getTime();
+  } else if (preset === "custom" && custom) {
     start = instant(custom.from);
     const to = instant(custom.to);
     if (start >= to || to > end) throw new Error("Custom window must precede cutoff and have from < to");
@@ -581,7 +594,7 @@ export function selectPortfolioFacts(
 ): MetricFact[] {
   validateMetricPolicy(policy);
   const scope = canonicalScope(requestedScope);
-  return prepare(
+  const selected = prepare(
     input,
     {
       ...policy,
@@ -593,6 +606,31 @@ export function selectPortfolioFacts(
     },
     scope,
   ).facts.filter((fact) => fact.role !== "unknown" && fact.occurredAt !== null);
+  const observed = new Map(selected.filter((fact) => fact.state === "observed").map((fact) => [fact.id, fact]));
+  const acceptedSources = new Set<string>();
+  for (const fact of selected) {
+    if (
+      fact.metricId !== "localization" ||
+      !["qualified", "reviewed"].includes(fact.state) ||
+      !fact.recognitionSourceFactId
+    )
+      continue;
+    const source = observed.get(fact.recognitionSourceFactId);
+    if (
+      source?.metricId === "localization" &&
+      source.actorId === fact.actorId &&
+      source.artifactId === fact.artifactId &&
+      source.repoId === fact.repoId &&
+      source.role === fact.role &&
+      source.rawState === fact.rawState &&
+      source.occurredAt === fact.occurredAt &&
+      source.observedAt === fact.observedAt
+    )
+      acceptedSources.add(source.id);
+  }
+  // Keep both immutable facts for audit and recomputation, but expose one current
+  // locale activity unit. An unaccepted or unrelated language remains observed.
+  return selected.filter((fact) => !acceptedSources.has(fact.id));
 }
 
 export function aggregateMetric(
