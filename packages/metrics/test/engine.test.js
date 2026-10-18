@@ -464,3 +464,20 @@ test("ratio pending provenance stays outside decided numerator and denominator e
   assert.deepEqual(result.rows[0].evidenceIds, ["merged"]);
   assert.deepEqual(result.rows[0].pendingEvidence.map((fact) => fact.id), ["open"]);
 });
+
+test("every valid nonselected evidence class has a durable exclusion reason", () => {
+  const facts = [fact("accepted"), fact("raw", { state: "observed" }), fact("editorial", { state: "reviewed" }), fact("pending", { state: "pending", acceptedAt: null })];
+  const result = board(facts);
+  assert.equal(result.rows[0].value, 1);
+  assert.equal(result.rows[0].pending, 1);
+  assert.deepEqual(result.audit.filter((entry) => entry.reason === "evidence_class_not_ranked").flatMap((entry) => entry.factIds).sort(), ["editorial", "raw"]);
+  assert.deepEqual([...new Set(result.audit.flatMap((entry) => entry.factIds))].sort(), facts.map((fact) => fact.id).sort());
+});
+
+test("future observations and unknown ratio outcomes remain explicitly accounted for", () => {
+  const facts = [fact("future", { observedAt: "2026-12-01T00:00:00Z" }), fact("current")];
+  assert.ok(board(facts).audit.some((entry) => entry.reason === "observation_after_cutoff" && entry.factIds.includes("future")));
+  const ratio = board([fact("unknown", { metricId: "pr_accepted_rate" }), fact("merged", { metricId: "pr_accepted_rate", outcome: "merged" })], { metricId: "pr_accepted_rate", aggregation: "ratio", rank: false });
+  assert.deepEqual([ratio.rows[0].numerator, ratio.rows[0].denominator], [1, 1]);
+  assert.ok(ratio.audit.some((entry) => entry.reason === "unknown_ratio_outcome" && entry.factIds.includes("unknown")));
+});
