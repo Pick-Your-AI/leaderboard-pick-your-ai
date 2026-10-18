@@ -81,7 +81,8 @@ editor remains uncredited unknown evidence. Current and pinned PR publications
 use the same persistent Project-privacy denial and reapproval gate as issue evidence.
 A nested subject that becomes private, disappears or changes identity enters that
 durable denial path even when the enclosing REST repository and Project still
-appear public. Restoring the source alone cannot reopen prior publications:
+appear public. Missing, invalid or reused inventory identities enter the same
+denial path. Restoring the source alone cannot reopen prior publications:
 recovery requires a separately approved configuration and rebuilt publication.
 The synthetic transport, collector, normalizer and publication regressions are in
 `apps/pipeline/test/project-pr-history.test.mjs` and `project-privacy.test.mjs`.

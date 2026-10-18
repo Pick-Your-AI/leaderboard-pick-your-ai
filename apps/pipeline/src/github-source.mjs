@@ -145,6 +145,9 @@ export function createGithubCollectionSource({
         const seenIds = new Set();
         for (const subject of subjects) {
           if (
+            subject === null ||
+            typeof subject !== "object" ||
+            Array.isArray(subject) ||
             !Number.isSafeInteger(subject.number) ||
             subject.number < 1 ||
             seen.has(subject.number) ||
@@ -152,7 +155,11 @@ export function createGithubCollectionSource({
             !subject.node_id.trim() ||
             seenIds.has(subject.node_id)
           )
-            throw new Error("history_subject_unverified");
+            throw new Error(
+              request.family === "project_history"
+                ? "project_subject_identity_unverified"
+                : "history_subject_unverified",
+            );
           seen.add(subject.number);
           seenIds.add(subject.node_id);
           const records = await readTypedIssueHistory({
