@@ -2,6 +2,9 @@ export { createWebhookHandler, verifySignature } from "./webhook.js";
 export type { Envelope, Delivery, IntakeStore, WebhookOptions } from "./webhook.js";
 export { InboxStore, postgresDatabase } from "./store.js";
 export type { Lease, FailureCode, ReplayAudit, SqlSession, SqlDatabase } from "./store.js";
+export type { RetainedObjectReplay, ExpiredObjectReplay, ObjectReplay } from "./store.js";
+export { DeliveryPayloadExpiryStore } from "./delivery-expiry.js";
+export type { DeliveryExpiryRequest, DeliveryExpiryReceipt, DeliveryExpiryAuthorize } from "./delivery-expiry.js";
 export { createIngestionServer, runWorker } from "./runtime.js";
 export type { ServerOptions, WorkerStore, WorkerStatus, WorkerOptions } from "./runtime.js";
 export { transitionFromDelivery, replayTransitions } from "./replay.js";
@@ -12,7 +15,7 @@ export { CollectionStore, sourceFamilies } from "./collection.js";
 export type { ScanRequest, SourceFact, SourcePage, SourceFamily, ReadOnlySource } from "./collection.js";
 export { EnrichmentStore } from "./enrichment.js";
 export type { SourceMetadata, EnrichmentSource } from "./enrichment.js";
-export { OutboxStore, runOutboxWorker } from "./outbox.js";
+export { OutboxStore, runOutboxWorker, dispatchPublicationScopeKeyLimit } from "./outbox.js";
 export type {
   DispatchBinding,
   DispatchOperation,

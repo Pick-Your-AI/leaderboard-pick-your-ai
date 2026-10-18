@@ -553,7 +553,10 @@ test("invalid and costly queries are rejected before source I/O", async (t) => {
   ]) {
     assert.equal((await app.inject(url)).statusCode, 400, url);
   }
-  assert.equal((await app.inject(`${boardUrl}&repository=${"a".repeat(5000)}`)).statusCode, 414);
+  const malformed = await app.inject(`${boardUrl}&repository=${"a".repeat(5000)}`);
+  assert.equal(malformed.statusCode, 400);
+  assert.equal(malformed.json().error, "invalid_query");
+  assert.equal((await app.inject(`${boardUrl}&repository=${"a".repeat(49_152)}`)).statusCode, 414);
   assert.equal(calls.length, 0);
 });
 
