@@ -1,0 +1,1802 @@
+{
+  "isSynthetic": true,
+  "provenance": {
+    "cutoff": "2026-10-17T02:24:58Z",
+    "sourceRepository": "Pick-Your-AI/pick-your-ai-research",
+    "recordedDefaultBranchHead": "f8237774098f3f376d7b48b8e665a99fdff43e3c",
+    "allowlistedReadbackSha256": "b10d05f49800c110e4445f50aa963c57aa16b6471e712e6fb570a86ecfc015bf",
+    "limitations": "Fixture-only aliases preserve equality and typed actor roles. Ancestry membership is not an integration timestamp, accepted contribution, or proof that absent SHAs were never delivered."
+  },
+  "pullRequests": [
+    {
+      "number": 43,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/43",
+      "mergedAt": "2026-10-16T10:00:22Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "dcc5797d8b55f397fdc2c3fbc35356e8906bab2f",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 44,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/44",
+      "mergedAt": "2026-10-16T11:41:48Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "4b9f70f3c8ebb3501c465484ac61616c8c5b26e3",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "d6e779353b7890336e96271b308e3f26b1aa7fc1",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 45,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/45",
+      "mergedAt": "2026-10-16T11:43:02Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "32f4ad9a8359a800d9507b338bfe3e82931f241c",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "43e3f6cabafd70da603ec36178db6f4c44d9f5a7",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "a2bd9749d9f59f8bcfd82eda3dd92c46fd4a8261",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "06e8da4e467fc03dd799c03ee9e1d53c8d26422a",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        }
+      ]
+    },
+    {
+      "number": 67,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/67",
+      "mergedAt": "2026-10-16T23:39:05Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "1b6c13bb5733c495b493215a56707e43d982f716",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "627a9295f7bc6c82f57655f923b777bd5cf671ba",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "e9d84671a39dccce45f44d81be84f66861d832fb",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "a479e3a6aa32d32bd40f1d75e47e88452924e5a7",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "60695a54fb46ae658ca78e64bf84360a2d6ead6f",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "dead061fd88a316359c4b3835b113189a923d40a",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "c1ec03547b570962b9362a9c677a3a15a23c4503",
+          "author": {
+            "databaseId": 10003,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "fbf8910bed66d47d92861016eef27e157cebdcf3",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "71c595a9ef93f346c0b0ea662dec1ab88545d095",
+          "author": {
+            "databaseId": 10004,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10004,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "c39131f22fc5ba7caf5add19ab95c8dc706f14cb",
+          "author": {
+            "databaseId": 10005,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10005,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "09da858910ea5487ca69e8bd2baffde3bb63c0b9",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "af2754bd45f5bd799ed06fd7505466ec4abd0773",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "d0008e95ea780bb33606a8241a06e2d68db63603",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "ea816ce2f91390711be3e33c93c652670c9b98f1",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "c2108d7ac0ffae693f6d007738725d2fab0bc2a7",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "642bc59de50fc574ef9803f00574f3630e8b0f95",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "c0e437a92308f4faea60f7cc8197a8a8b873fee9",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "b436edd98ac476924e3ddace81a216ab0ef16463",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "84df93263a07ddf98327eefacc0acfd34a3a8df5",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "3c9bc39a1cb9945c1461092055e4e6f9ef1a364b",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "0bbf9678338e7c695daa158b41fee94e9973222a",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "920ca69ed1a71937f900b3775b62a462589fd724",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "fefd5e42d91edeb616c6255cd6b932015d7f521d",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "180ab507df782a71a66c0e865c4fa881da517f3a",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "c419ceaee2a560066a5cd7655f03bb5583f7af85",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "c7bbab4627f805e4bdf1fcbba513ecbcfd37cdab",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "bc85110f6c9887dc4a10ed569add65066601ef6c",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": null
+        },
+        {
+          "sha": "800d13009b69db3dc32fbfd66b95e4b5af81ad81",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 68,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/68",
+      "mergedAt": "2026-10-16T23:51:55Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10006,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "4b9f70f3c8ebb3501c465484ac61616c8c5b26e3",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "d6e779353b7890336e96271b308e3f26b1aa7fc1",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "52c3df688b0d4e05052d5ff64b045d99b407e9f9",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "4a1795e974ade9a6b328e69ad8b911794d029279",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "7b7d541651c75ecb46ff9db7286f47100bc3a5ef",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "df01bec4bd5b71cf8c4c580b2dda9b20e5544463",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "ea7da7602af0c412851299aa250a9b9c859cf0ed",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "24b48f9cd004835e3a2753731c6f0749aade5086",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "80d4d72bfa764382b79aca1d56c347f537f4107c",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 75,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/75",
+      "mergedAt": "2026-10-16T16:11:04Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10002,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10002,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "2691e1de98cda40245a852e9147fb98762b52227",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "da95db58cf072e73eb79cc4c13b4bfe062b8c6d1",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "7e989e7c53415e12bdd3f3ebaab2092c028a88ad",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "8235e2f2290e70545b0824490fa4e2ad39f5a8f3",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "2c3b7ca8a8fd5df2768eddc21c2df8ecfecf25b3",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "873578ba740cdc49e96eaebfc574018bcca31667",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "41e89bcb96c905c26fe9641537a737741f3dfdcd",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 76,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/76",
+      "mergedAt": "2026-10-16T23:53:17Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10006,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "3d046283e27752daaaa74fcaee36b9e321f95d60",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "3f03366a2583c81ffca28f6586002ffa186c4653",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "8331e432e61c1fbe1a1eedfb866f28eb1fffa145",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "3ae5d0a383c848207f2cccab00b882b6fb701fb3",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "839e6d682b37097f6cd7633816ba64647bed5926",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 77,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/77",
+      "mergedAt": "2026-10-16T23:55:19Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10006,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "2008df05486e65ce64dfb7853a8b98aa52a86209",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "96650ddb4ea0fdce82b35689ada1edabb2216dc5",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "6cbcfb9a3fd7b5c03f9bcc71edcbdbd090087b5e",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "59824f1085491d95ed5afddbb28febb352750401",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "20419dfe27e96bbed6afdfaa243d08315bcb27a6",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "4b706b3faaf18fb9c075771fb45a0aee46390e01",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 78,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/78",
+      "mergedAt": "2026-10-16T23:35:16Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "7bed36c3f9a66f5eda031d4e43c29bb8977e0299",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 79,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/79",
+      "mergedAt": "2026-10-16T14:19:18Z",
+      "baseRefName": "research/market-intelligence",
+      "author": {
+        "databaseId": 10002,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10003,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "a479e3a6aa32d32bd40f1d75e47e88452924e5a7",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "60695a54fb46ae658ca78e64bf84360a2d6ead6f",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "dead061fd88a316359c4b3835b113189a923d40a",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 80,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/80",
+      "mergedAt": "2026-10-16T23:36:57Z",
+      "baseRefName": "research/market-intelligence",
+      "author": {
+        "databaseId": 10002,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "fbf8910bed66d47d92861016eef27e157cebdcf3",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 82,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/82",
+      "mergedAt": "2026-10-16T23:37:03Z",
+      "baseRefName": "research/market-intelligence",
+      "author": {
+        "databaseId": 10004,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "71c595a9ef93f346c0b0ea662dec1ab88545d095",
+          "author": {
+            "databaseId": 10004,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10004,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 84,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/84",
+      "mergedAt": "2026-10-16T23:56:28Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10006,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "12c05ece50d715ee40e63536a34a0cbbf6ba8b37",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "da21f71428e53f3335cb03756f08bc3747d6b718",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "0650753828db2c1b6e50b709fc8de41179122d3c",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "bdb1c84ba33e75482b83abb4ba8e10adfe0a044e",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 85,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/85",
+      "mergedAt": "2026-10-17T00:01:38Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10006,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "6e327d40770d6fb780215d81a9f3ad05723b7ccd",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "f6e254fc9d589459960fc67fc988b1d3c006fb86",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "ac8ad393a8eabca26b2bfd5f9c62a91d124dc371",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "83da2ae48793f35e2eda423361c5bcbfd28a1463",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "a12168f5119913e8ba45218a6c619cef26103ce1",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "8ead5346548b8358b46b97e22ff8599060afa082",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "2b4dce529e01807f34ca75e190ec04218b132753",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "7bc78cb783442727b7910e42750aa8b074b99b77",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "b0da53b4ce632450865a72929cc7bf04e39134c7",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 86,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/86",
+      "mergedAt": "2026-10-16T18:42:08Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "8bc2da48e60d7c5636b43b8e375fb944dd3bd5a7",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 87,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/87",
+      "mergedAt": "2026-10-16T23:37:07Z",
+      "baseRefName": "research/market-intelligence",
+      "author": {
+        "databaseId": 10005,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "c39131f22fc5ba7caf5add19ab95c8dc706f14cb",
+          "author": {
+            "databaseId": 10005,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10005,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 88,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/88",
+      "mergedAt": "2026-10-16T23:37:43Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10005,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "5918aa45444c6f0e3e042caa04146951488287b6",
+          "author": {
+            "databaseId": 10005,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10005,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "57ae5cc54213b5781f4141fc93a66dd87e8679dd",
+          "author": {
+            "databaseId": 10005,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10005,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "bd3beaa7b0c210ae9c36de6fd59052c6a0fdb9c2",
+          "author": {
+            "databaseId": 10005,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10005,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 89,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/89",
+      "mergedAt": "2026-10-16T23:53:23Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10006,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "1a0f28f536d0b4512aa6469b6ef92daf92de97d3",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "520e141063185925a29ad8c3c94b11e4cba895f0",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "cba502a75e887785429ac449609b4de8a21e92ad",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 90,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/90",
+      "mergedAt": "2026-10-16T23:37:12Z",
+      "baseRefName": "research/market-intelligence",
+      "author": {
+        "databaseId": 10006,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "09da858910ea5487ca69e8bd2baffde3bb63c0b9",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 91,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/91",
+      "mergedAt": "2026-10-16T23:37:16Z",
+      "baseRefName": "research/market-intelligence",
+      "author": {
+        "databaseId": 10006,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "af2754bd45f5bd799ed06fd7505466ec4abd0773",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 92,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/92",
+      "mergedAt": "2026-10-16T23:37:21Z",
+      "baseRefName": "research/market-intelligence",
+      "author": {
+        "databaseId": 10006,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "d0008e95ea780bb33606a8241a06e2d68db63603",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 93,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/93",
+      "mergedAt": "2026-10-16T23:35:34Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "8c056b1c0ccec5cd47fcf89caa230f7f19656dfb",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 94,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/94",
+      "mergedAt": "2026-10-16T23:37:25Z",
+      "baseRefName": "research/market-intelligence",
+      "author": {
+        "databaseId": 10006,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "ea816ce2f91390711be3e33c93c652670c9b98f1",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 95,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/95",
+      "mergedAt": "2026-10-16T23:37:30Z",
+      "baseRefName": "research/market-intelligence",
+      "author": {
+        "databaseId": 10006,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "c2108d7ac0ffae693f6d007738725d2fab0bc2a7",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 96,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/96",
+      "mergedAt": "2026-10-16T23:37:34Z",
+      "baseRefName": "research/market-intelligence",
+      "author": {
+        "databaseId": 10006,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "642bc59de50fc574ef9803f00574f3630e8b0f95",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 97,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/97",
+      "mergedAt": "2026-10-16T23:37:38Z",
+      "baseRefName": "research/market-intelligence",
+      "author": {
+        "databaseId": 10006,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "c0e437a92308f4faea60f7cc8197a8a8b873fee9",
+          "author": {
+            "databaseId": 10006,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10006,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 98,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/98",
+      "mergedAt": "2026-10-17T01:58:12Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "994434fdb1b5ab5aa8e74c97bd74e32c023a15e2",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "d386141c57ba14d79688ca19c64bcd9a5aade063",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 99,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/99",
+      "mergedAt": "2026-10-17T01:56:29Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "18b417d0599e99190ec920a1bf444548bc7c5c6c",
+          "author": {
+            "databaseId": 10001,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10001,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 100,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/100",
+      "mergedAt": "2026-10-17T01:56:33Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10002,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "7c86caa0a14b5719def98202152decb0c04c5fe2",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        },
+        {
+          "sha": "d2d2a3e9902a04854c7dafc1dfc22bb05b5bcda0",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 101,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/101",
+      "mergedAt": "2026-10-17T01:56:38Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10002,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "3be7a2cbd71840a22f3c6aed1a4e0f5ec06e3af9",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 102,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/102",
+      "mergedAt": "2026-10-17T01:56:42Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10002,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "ba7bf64a9a3815dd7bb9205ac6f16e0e2404b4dd",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 103,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/103",
+      "mergedAt": "2026-10-17T01:56:46Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10002,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "c3e63e28f17c4deec0ec01edbf088270cb75abfb",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 104,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/104",
+      "mergedAt": "2026-10-17T01:56:52Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10002,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "ffb605d76223d4dfaf145f67910f184b20fce36b",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        }
+      ]
+    },
+    {
+      "number": 105,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/105",
+      "mergedAt": "2026-10-17T01:56:58Z",
+      "baseRefName": "main",
+      "author": {
+        "databaseId": 10002,
+        "__typename": "User"
+      },
+      "mergedBy": {
+        "databaseId": 10001,
+        "__typename": "User"
+      },
+      "commits": [
+        {
+          "sha": "fdfa6e0815946ccc6d74877e992877f2f6033ed3",
+          "author": {
+            "databaseId": 10002,
+            "__typename": "User"
+          },
+          "committer": {
+            "databaseId": 10002,
+            "__typename": "User"
+          }
+        }
+      ]
+    }
+  ],
+  "historicalMainCommitAliases": [
+    "24b48f9cd004835e3a2753731c6f0749aade5086",
+    "3be7a2cbd71840a22f3c6aed1a4e0f5ec06e3af9",
+    "994434fdb1b5ab5aa8e74c97bd74e32c023a15e2",
+    "4a1795e974ade9a6b328e69ad8b911794d029279",
+    "f196f927fa46a5deb1c48678e0b8fcc5c73723ef",
+    "e9d84671a39dccce45f44d81be84f66861d832fb",
+    "9fb454f2bcea64ca548974b99f7f981fee89d6cd",
+    "0650753828db2c1b6e50b709fc8de41179122d3c",
+    "7bc78cb783442727b7910e42750aa8b074b99b77",
+    "da95db58cf072e73eb79cc4c13b4bfe062b8c6d1",
+    "8235e2f2290e70545b0824490fa4e2ad39f5a8f3",
+    "80d4d72bfa764382b79aca1d56c347f537f4107c",
+    "642bc59de50fc574ef9803f00574f3630e8b0f95",
+    "4b706b3faaf18fb9c075771fb45a0aee46390e01",
+    "fefd5e42d91edeb616c6255cd6b932015d7f521d",
+    "0bbf9678338e7c695daa158b41fee94e9973222a",
+    "a12168f5119913e8ba45218a6c619cef26103ce1",
+    "f640d88651676c6837341db3420ecb8c8f1d6888",
+    "12c05ece50d715ee40e63536a34a0cbbf6ba8b37",
+    "873578ba740cdc49e96eaebfc574018bcca31667",
+    "59dc7dcceaa4c08d5b22f2743feb3ad8ef8fb6db",
+    "c0e437a92308f4faea60f7cc8197a8a8b873fee9",
+    "20419dfe27e96bbed6afdfaa243d08315bcb27a6",
+    "a479e3a6aa32d32bd40f1d75e47e88452924e5a7",
+    "dead061fd88a316359c4b3835b113189a923d40a",
+    "520e141063185925a29ad8c3c94b11e4cba895f0",
+    "180ab507df782a71a66c0e865c4fa881da517f3a",
+    "da21f71428e53f3335cb03756f08bc3747d6b718",
+    "961845a0a61654d95c0537c486f6de603ac67eee",
+    "ea7da7602af0c412851299aa250a9b9c859cf0ed",
+    "be19ae0f2f134c08ca3f5d808ee871dfc7d78abb",
+    "7f57dd021ca8d8ee87d8cda4adb50c5c62dd021a",
+    "59824f1085491d95ed5afddbb28febb352750401",
+    "83da2ae48793f35e2eda423361c5bcbfd28a1463",
+    "afe69574758d79222cfeb7a263af3fa715a2ba1d",
+    "7c86caa0a14b5719def98202152decb0c04c5fe2",
+    "bc85110f6c9887dc4a10ed569add65066601ef6c",
+    "50590ac777ab884d26cfca502494cdac11f2fbbf",
+    "839e6d682b37097f6cd7633816ba64647bed5926",
+    "b0da53b4ce632450865a72929cc7bf04e39134c7",
+    "fdfa6e0815946ccc6d74877e992877f2f6033ed3",
+    "96650ddb4ea0fdce82b35689ada1edabb2216dc5",
+    "7b7d541651c75ecb46ff9db7286f47100bc3a5ef",
+    "6f28b840d1befedba05fe008a43dbb1ae6bd7a63",
+    "aee5e787069eb8ded73ed55f76b7a512f37fb733",
+    "6cbcfb9a3fd7b5c03f9bcc71edcbdbd090087b5e",
+    "c1ec03547b570962b9362a9c677a3a15a23c4503",
+    "df01bec4bd5b71cf8c4c580b2dda9b20e5544463",
+    "ba7bf64a9a3815dd7bb9205ac6f16e0e2404b4dd",
+    "af2754bd45f5bd799ed06fd7505466ec4abd0773",
+    "3ae5d0a383c848207f2cccab00b882b6fb701fb3",
+    "52c3df688b0d4e05052d5ff64b045d99b407e9f9",
+    "71c595a9ef93f346c0b0ea662dec1ab88545d095",
+    "1568d4ff0c745f088232642a381169ddf59cd878",
+    "c3e63e28f17c4deec0ec01edbf088270cb75abfb",
+    "b436edd98ac476924e3ddace81a216ab0ef16463",
+    "7bed36c3f9a66f5eda031d4e43c29bb8977e0299",
+    "7e989e7c53415e12bdd3f3ebaab2092c028a88ad",
+    "712c9aea56fcdc82a3fbf6845167399dcfa68c36",
+    "2691e1de98cda40245a852e9147fb98762b52227",
+    "9e0908d7b052c869cf92e052ec0ef2cdf9ea3dc9",
+    "c39131f22fc5ba7caf5add19ab95c8dc706f14cb",
+    "c7bbab4627f805e4bdf1fcbba513ecbcfd37cdab",
+    "3f03366a2583c81ffca28f6586002ffa186c4653",
+    "2008df05486e65ce64dfb7853a8b98aa52a86209",
+    "3d046283e27752daaaa74fcaee36b9e321f95d60",
+    "1df833d7cc2bc3f820df65703506f636f63b89e2",
+    "60695a54fb46ae658ca78e64bf84360a2d6ead6f",
+    "b3e31c4f90c6a2e152042d16f073a9a8d9dae817",
+    "57ae5cc54213b5781f4141fc93a66dd87e8679dd",
+    "41e89bcb96c905c26fe9641537a737741f3dfdcd",
+    "d6e779353b7890336e96271b308e3f26b1aa7fc1",
+    "8076493bfa7e9db53497dae8f080363f58190319",
+    "bdb1c84ba33e75482b83abb4ba8e10adfe0a044e",
+    "800d13009b69db3dc32fbfd66b95e4b5af81ad81",
+    "2b4dce529e01807f34ca75e190ec04218b132753",
+    "42019bf0ffd6d76e3e7780ea1bf2618c7ff89269",
+    "2c3b7ca8a8fd5df2768eddc21c2df8ecfecf25b3",
+    "1b6c13bb5733c495b493215a56707e43d982f716",
+    "d2d2a3e9902a04854c7dafc1dfc22bb05b5bcda0",
+    "8ead5346548b8358b46b97e22ff8599060afa082",
+    "cba502a75e887785429ac449609b4de8a21e92ad",
+    "b57113efe7e980168da02bf5b5f6684e981ff5fc",
+    "ffb605d76223d4dfaf145f67910f184b20fce36b",
+    "5918aa45444c6f0e3e042caa04146951488287b6",
+    "511dfc723ee37c4b5c3eb524a3dd3422000605cd",
+    "09da858910ea5487ca69e8bd2baffde3bb63c0b9",
+    "8331e432e61c1fbe1a1eedfb866f28eb1fffa145",
+    "65c75447a17e71266f301f9c89a6a693e397b5c2",
+    "bd3beaa7b0c210ae9c36de6fd59052c6a0fdb9c2",
+    "ac8ad393a8eabca26b2bfd5f9c62a91d124dc371",
+    "8c056b1c0ccec5cd47fcf89caa230f7f19656dfb",
+    "1a0f28f536d0b4512aa6469b6ef92daf92de97d3",
+    "3c9bc39a1cb9945c1461092055e4e6f9ef1a364b",
+    "627a9295f7bc6c82f57655f923b777bd5cf671ba",
+    "d0008e95ea780bb33606a8241a06e2d68db63603",
+    "f6e254fc9d589459960fc67fc988b1d3c006fb86",
+    "18b417d0599e99190ec920a1bf444548bc7c5c6c",
+    "ea816ce2f91390711be3e33c93c652670c9b98f1",
+    "40eea9bdf4d4631377f7835bf7f75e9fc85d3d58",
+    "3f909eef06b88055910d9ea6b9c3ba375a42a189",
+    "920ca69ed1a71937f900b3775b62a462589fd724",
+    "c419ceaee2a560066a5cd7655f03bb5583f7af85",
+    "fbf8910bed66d47d92861016eef27e157cebdcf3",
+    "4b9f70f3c8ebb3501c465484ac61616c8c5b26e3",
+    "adf332ab5c94124dd70bf93d374363a7bc5dfc5d",
+    "de5b23394e083f582fb875eab2562b537cadba61",
+    "6e327d40770d6fb780215d81a9f3ad05723b7ccd",
+    "fc150c4e58dc05a742110b1a4f53e50996b956b3",
+    "d386141c57ba14d79688ca19c64bcd9a5aade063",
+    "c2108d7ac0ffae693f6d007738725d2fab0bc2a7",
+    "84df93263a07ddf98327eefacc0acfd34a3a8df5"
+  ]
+}
