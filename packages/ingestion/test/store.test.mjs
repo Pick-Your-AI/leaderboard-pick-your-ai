@@ -28,8 +28,12 @@ const up =
   "\n" +
   collectionUp +
   "\n" +
-  (await readFile(new URL("../sql/004_outbox_dispatch.up.sql", import.meta.url), "utf8"));
+  (await readFile(new URL("../sql/004_outbox_dispatch.up.sql", import.meta.url), "utf8")) +
+  "\n" +
+  (await readFile(new URL("../sql/007_operator_replay_results.up.sql", import.meta.url), "utf8"));
 const down =
+  (await readFile(new URL("../sql/007_operator_replay_results.down.sql", import.meta.url), "utf8")) +
+  "\n" +
   (await readFile(new URL("../sql/004_outbox_dispatch.down.sql", import.meta.url), "utf8")) +
   "\n" +
   collectionDown +

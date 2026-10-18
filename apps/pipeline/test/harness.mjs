@@ -40,6 +40,7 @@ export async function harness(t, extra = {}) {
     "002_snapshots.up.sql",
     "003_collection.up.sql",
     "004_outbox_dispatch.up.sql",
+    "007_operator_replay_results.up.sql",
   ])
     await engine.exec(await readFile(join(ingestionRoot, "packages/ingestion/sql", name), "utf8"));
   await migratePipeline(db);
@@ -82,6 +83,7 @@ export async function harness(t, extra = {}) {
   let privateRepository = false;
   let fixturePage = false;
   let sourceFailure = false;
+  let collectionFailure = false;
   let payloads = extra.payloads ?? [
     {
       id: 1001,
@@ -104,14 +106,20 @@ export async function harness(t, extra = {}) {
     },
   ];
   if (extra.transformPayloads) payloads = extra.transformPayloads(payloads);
+  const githubReads = { fetches: 0, tokens: 0 };
   const githubClient = new components.github.GithubReadClient({
     apiOrigin: "https://api.synthetic.invalid",
-    token: async () => "synthetic-test-token",
+    token: async () => {
+      githubReads.tokens++;
+      return "synthetic-test-token";
+    },
     checkpoints: new components.github.FileCheckpointStore(join(directory, "http-checkpoints")),
     maxRetries: 0,
     fetch: async (value) => {
+      githubReads.fetches++;
       const url = new URL(value);
       if (sourceFailure) throw new Error("synthetic unavailable source");
+      if (collectionFailure && url.pathname !== `/repos/${slug}`) throw new Error("synthetic unavailable collection");
       const repository = { id: 2, private: privateRepository, full_name: slug, default_branch: "main" };
       let body;
       if (url.pathname === `/repos/${slug}`) body = repository;
@@ -122,7 +130,7 @@ export async function harness(t, extra = {}) {
       }
       return new Response(JSON.stringify(body ?? { message: "not found" }), {
         status: body ? 200 : 404,
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...extra.quotaHeaders },
       });
     },
   });
@@ -201,6 +209,7 @@ export async function harness(t, extra = {}) {
     await rm(directory, { recursive: true, force: true });
   });
   return {
+    githubReads,
     runtime,
     async reopenDatabase() {
       await engine.close();
@@ -219,6 +228,9 @@ export async function harness(t, extra = {}) {
     },
     setSourceFailure(value) {
       sourceFailure = value;
+    },
+    setCollectionFailure(value) {
+      collectionFailure = value;
     },
     setFixturePage(value) {
       fixturePage = value;
