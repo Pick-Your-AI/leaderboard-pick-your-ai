@@ -76,7 +76,7 @@ contributor review, approved recognition/achievement/grouping policies and autho
 reviewer/operator rosters remain required. OAuth registration and private storage,
 cache/backup/retention architecture, accepted operating commitments, hosting/cost
 approval, DNS/TLS, real-device/screen-reader journeys and staged recovery/public
-readback are not supplied by these engineering changes. The selected domain remains
+readback are not supplied by these engineering changes. The configured target domain remains
 `leaderboard.pickyour.ai`; that choice does not approve hosting or launch.
 
 Use the final PR's exact-head build/typecheck/test/browser and independent-review
