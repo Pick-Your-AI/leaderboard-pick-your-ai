@@ -20,6 +20,9 @@ export function PolicyComparison({ session, onAuthorityLost }: { session: Sessio
   const [error, setError] = useState("");
   const [page, setPage] = useState(0);
   const generation = useRef(0);
+  const mounted = useRef(false);
+  const latestSession = useRef(session);
+  latestSession.current = session;
   const input = inputs?.find((entry) => entry.inputId === selected);
   const permitted = () => !document.hidden && session.roles.includes("reviewer") && session.expires > Date.now();
   function clearResult() {
@@ -37,6 +40,7 @@ export function PolicyComparison({ session, onAuthorityLost }: { session: Sessio
     setSavedId("");
   }
   useEffect(() => {
+    mounted.current = true;
     clear();
     const hide = () => {
       if (document.hidden) clear();
@@ -44,6 +48,7 @@ export function PolicyComparison({ session, onAuthorityLost }: { session: Sessio
     document.addEventListener("visibilitychange", hide);
     const timer = setTimeout(clear, Math.max(0, session.expires - Date.now()));
     return () => {
+      mounted.current = false;
       ++generation.current;
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", hide);
@@ -70,12 +75,13 @@ export function PolicyComparison({ session, onAuthorityLost }: { session: Sessio
     try {
       await work();
     } catch (e) {
-      if (current !== generation.current || !permitted()) return;
+      if (!mounted.current || latestSession.current !== session || !permitted()) return;
       if (e instanceof ControlsFailure && [401, 403].includes(e.status)) {
         clear();
         onAuthorityLost();
         return;
       }
+      if (current !== generation.current) return;
       setError(e instanceof Error ? e.message : "Private preview unavailable. No policy change has been confirmed.");
     } finally {
       if (current === generation.current) setBusy(false);
@@ -103,6 +109,7 @@ export function PolicyComparison({ session, onAuthorityLost }: { session: Sessio
       if (current !== generation.current || !permitted() || Date.parse(input.expiresAt) <= Date.now()) return;
       setResult(value);
       setSavedId(value.comparisonId);
+      if (saved) setCandidate(JSON.stringify(value.candidatePolicy));
     });
   }
   if (!session.roles.includes("reviewer")) return null;

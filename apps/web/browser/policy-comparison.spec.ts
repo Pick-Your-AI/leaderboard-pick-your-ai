@@ -2,6 +2,55 @@ import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 test.use({ storageState: { cookies: [], origins: [] } });
 
+for (const replacement of ["edit", "session reload"] as const) {
+  test(`a delayed authority denial after ${replacement} applies only to its current session`, async ({ page }) => {
+    const api = await service(page);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let started!: () => void;
+    const requested = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    try {
+      await selectInput(page, api);
+      await page.route("**/controls/policy-comparisons", async (route) => {
+        started();
+        await pending;
+        await route.fulfill({ status: 403, json: { error: "denied" } });
+      });
+      await page.getByRole("button", { name: "Compare candidate policy", exact: true }).click();
+      await requested;
+      if (replacement === "edit") {
+        await page
+          .getByLabel("Complete candidate policy JSON")
+          .fill(JSON.stringify({ ...api.candidate, version: "synthetic-preview/v3" }));
+      } else {
+        await page.getByRole("button", { name: "Reload receipts" }).click();
+        await expect(page.getByRole("button", { name: "Load retained policy inputs" })).toBeVisible();
+      }
+      const response = page.waitForResponse((r) => new URL(r.url()).pathname === "/controls/policy-comparisons");
+      release();
+      await response;
+      if (replacement === "edit") {
+        await expect(page.getByRole("heading", { name: "Private policy comparison" })).toHaveCount(0);
+        await expect(
+          page.getByText("Your reviewer authority or session changed. Reload your account before continuing."),
+        ).toBeVisible();
+      } else {
+        await expect(page.getByRole("heading", { name: "Private policy comparison" })).toBeVisible();
+        await expect(
+          page.getByText("Your reviewer authority or session changed. Reload your account before continuing."),
+        ).toHaveCount(0);
+      }
+    } finally {
+      release?.();
+      await api.close();
+    }
+  });
+}
+
 async function service(page: Page, roles = ["reviewer"]) {
   const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");

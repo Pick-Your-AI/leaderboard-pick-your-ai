@@ -81,6 +81,7 @@ test("private preview client validates actual persisted engine results and curre
     ])
       assert.throws(() => checkedPolicyPreview({ ...e.result, ...patch }, e.input, e.candidate));
     assert.throws(() => checkedPolicyPreview({ ...e.result, redactionsApplied: true }, e.input));
+    assert.throws(() => checkedPolicyPreview(e.result, { ...e.input, expiresAt: "2020-01-01T00:00:00Z" }));
     assert.throws(() => readCandidatePolicy(JSON.stringify({ metricId: "unknown", version: "v1" }), e.input));
     assert.throws(() => readCandidatePolicy(" ".repeat(8193), e.input));
   } finally {

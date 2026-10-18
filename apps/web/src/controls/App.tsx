@@ -527,6 +527,7 @@ export function ControlsApp() {
                   session={session}
                   onAuthorityLost={() => {
                     ++generation.current;
+                    setBusy(false);
                     clear();
                     setError("Your reviewer authority or session changed. Reload your account before continuing.");
                   }}

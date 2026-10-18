@@ -121,6 +121,7 @@ function causes(value: unknown): boolean {
 }
 export function checkedPolicyPreview(value: unknown, input: FrozenPolicyInput, candidate?: ObjectValue): PolicyPreview {
   if (
+    Date.parse(input.expiresAt) <= Date.now() ||
     !object(value) ||
     value.schemaVersion !== "private-policy-preview/v1" ||
     value.status !== "candidate_preview" ||
