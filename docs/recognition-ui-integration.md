@@ -18,6 +18,14 @@ Both components abort replaced requests, preserve existing same-selection DOM wh
 
 A nonempty achievement response must include complete coverage for every declared source partition through the selected period end or exact snapshot cutoff. All-history awards additionally require coverage from each partition's known history start. The browser compares contract-valid source instants with their full fractional precision and rejects unverifiable supplied awards as `invalid_recognition_response`; this clears any previously displayed award and shows the existing unavailable state. Empty award lists remain valid with incomplete history. This enforces the existing candidate service rule and does not approve or activate it.
 
+## Category milestones and shared-artifact proof
+
+The [accepted-evidence/v2 decision](accepted-achievement-milestones.md) defines the additional rule and display conditions. The component accepts v1 or v2 explicitly. Achievement requests preserve the exact category and use their own 20-item cursor. A v1 service withholds the unsupported category request; there is no unfiltered fallback. Cards continue to use their existing independent scope helper.
+
+Version 2 adds source-linked category milestone headings and a separate “Accepted work on shared artifacts” region. Every pair displays its verified source roles, the selected contributor's original proof, the peer's original proof, a current pinned peer profile and the shared artifact. The visible count means links in this projected evidence, not a complete social graph or count of delivered work. Partial historical coverage can expose recorded qualifying pairs while withholding first-event awards. Category means a registered measure; neither workstream help nor newcomer status is inferred.
+
+Previous, next and restart controls are independent of portfolio timeline paging. A page gesture moves keyboard focus to the resulting heading or error message. Successful same-page refresh preserves focused proof links; scope/actor changes reset pagination and discard obsolete responses. A changed current projection invalidates an old cursor even when its controls version was not updated, clears the old pairs and offers restart. The closed v2 schema and exact scope/actor/category/source-time checks run before any of this evidence is rendered.
+
 ## Card measurement context
 
 Both actual card routes include the snapshot-compatible registry's exact unit,

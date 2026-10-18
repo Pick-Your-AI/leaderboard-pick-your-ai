@@ -23,6 +23,18 @@ export {
 } from "./public-scope.js";
 export { compareSourceInstants } from "./v1/source-time.js";
 export {
+  achievementMilestoneVersion,
+  achievementScopeMeaning,
+  coContributionMeaning,
+  achievementProofSchema,
+  achievementMilestoneSchema,
+  coContributionSchema,
+  achievementMilestonesPageSchema,
+  type AchievementProof,
+  type AchievementMilestone,
+  type CoContribution,
+} from "./v1/achievements.js";
+export {
   publicParticipationSchema,
   participationWeekDenominator,
   type PublicParticipation,
