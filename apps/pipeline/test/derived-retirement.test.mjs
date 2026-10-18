@@ -513,6 +513,138 @@ async function multipleRepositories(t, includeForeignScope = true) {
   });
 }
 
+async function privatePreview(h, snapshotId) {
+  const comparisons = h.runtime.policyComparisons.comparisons;
+  const inputId = h.controlsStore.db
+    .prepare("SELECT id FROM policy_preview_inputs WHERE json_extract(document,'$.snapshot.snapshotId')=?")
+    .get(snapshotId).id;
+  const record = comparisons.input(inputId);
+  const candidate = { ...h.config.policies[0].policy, version: "synthetic-retirement-candidate-v2", rank: false };
+  return h.runtime.policyComparisons.withAuthorizedInputs([record.authorization], async (_removed, authority) =>
+    h.controlsStore.transaction(() => comparisons.compare(record, candidate, authority.restoreInput)),
+  );
+}
+
+for (const direction of ["foreign input", "foreign result"]) {
+  test(`private preview retirement rejects a contradictory ${direction} snapshot reference before removing payloads`, async (t) => {
+    const h = await multipleRepositories(t);
+    await h.runtime.runOnce();
+    const snapshots = await pgRows(h, "snapshots");
+    const target = snapshots.find((row) => row.repository_ids.includes(2));
+    const foreign = snapshots.find((row) => !row.repository_ids.includes(2));
+    const original = direction === "foreign input" ? foreign : target;
+    const claimed = direction === "foreign input" ? target : foreign;
+    const preview = await privatePreview(h, original.snapshot_id);
+    const doc = { ...preview.document, snapshot: claimed.document.snapshot };
+    h.controlsStore.db
+      .prepare("UPDATE policy_previews SET document=?,digest=? WHERE id=?")
+      .run(stable(doc), hash(doc), doc.comparisonId);
+    const before = Object.fromEntries(
+      ["policy_previews", "policy_preview_inputs", "pipeline_aggregate_explanations"].map((table) => [
+        table,
+        h.controlsStore.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(),
+      ]),
+    );
+    const input = await retire(h);
+    assert.equal((await h.eraser.eraseBatch(input, "synthetic-register", 1, approved)).stage, "register_snapshot");
+    await assert.rejects(
+      h.eraser.eraseBatch(input, "synthetic-contradictory-preview", 1, approved),
+      /derived_(?:source_binding_invalid|retirement_integrity_error)/,
+    );
+    for (const [table, rows] of Object.entries(before))
+      assert.deepEqual(h.controlsStore.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(), rows, table);
+    assert.deepEqual(await pgRows(h, "snapshots"), snapshots);
+    assert.equal(
+      (await pgRows(h, "derived_retirement_receipts")).some((row) => row.document.removed > 0),
+      false,
+    );
+  });
+}
+
+for (const timing of ["before selection", "after selection"]) {
+  test(`private preview retirement preserves a result when its linked input disappears ${timing}`, async (t) => {
+    const h = await setup(t);
+    await h.runtime.runOnce();
+    const snapshot = (await pgRows(h, "snapshots"))[0];
+    const preview = await privatePreview(h, snapshot.snapshot_id);
+    const before = h.controlsStore.db.prepare("SELECT * FROM policy_previews").all();
+    const input = await retire(h);
+    await h.eraser.eraseBatch(input, "synthetic-register", 1, approved);
+    const removeInput = () =>
+      h.controlsStore.db.prepare("DELETE FROM policy_preview_inputs WHERE id=?").run(preview.document.inputId);
+    const original = h.db.transaction;
+    let removed = false;
+    if (timing === "before selection") {
+      removeInput();
+      removed = true;
+    } else {
+      h.db.transaction = async (work) => {
+        let selected = false;
+        const result = await original((tx) =>
+          work({
+            query: (sql, params) => {
+              if (
+                sql.includes("INSERT INTO leaderboard_pipeline.derived_retirement_manifests") &&
+                JSON.parse(params[3]).stage === "previews"
+              )
+                selected = true;
+              return tx.query(sql, params);
+            },
+          }),
+        );
+        if (selected && !removed) {
+          removeInput();
+          removed = true;
+        }
+        return result;
+      };
+    }
+    try {
+      await assert.rejects(
+        h.eraser.eraseBatch(input, "synthetic-missing-preview-input", 1, approved),
+        /derived_preview_input_missing/,
+      );
+    } finally {
+      h.db.transaction = original;
+    }
+    assert.equal(removed, true);
+    assert.deepEqual(h.controlsStore.db.prepare("SELECT * FROM policy_previews").all(), before);
+    assert.equal(
+      h.controlsStore.db
+        .prepare("SELECT 1 FROM pipeline_derived_retirement_batches WHERE batch_id=?")
+        .get("synthetic-missing-preview-input"),
+      undefined,
+    );
+    assert.equal(
+      (await pgRows(h, "derived_retirement_receipts")).some(
+        (row) => row.batch_id === "synthetic-missing-preview-input",
+      ),
+      false,
+    );
+  });
+}
+
+test("private preview retirement removes only the bound result and preserves the unrelated repository's result", async (t) => {
+  const h = await multipleRepositories(t);
+  await h.runtime.runOnce();
+  const snapshots = await pgRows(h, "snapshots");
+  const target = snapshots.find((row) => row.repository_ids.includes(2));
+  const foreign = snapshots.find((row) => !row.repository_ids.includes(2));
+  await privatePreview(h, target.snapshot_id);
+  const other = await privatePreview(h, foreign.snapshot_id);
+  const preserved = h.controlsStore.db
+    .prepare("SELECT * FROM policy_previews WHERE id=?")
+    .get(other.document.comparisonId);
+  const input = await retire(h);
+  const receipts = await drain(h.eraser, input);
+  assert.equal(receipts.at(-1).status, "owned_scope_erased");
+  assert.equal(
+    receipts.filter((row) => row.stage === "previews").reduce((n, row) => n + row.removed, 0),
+    1,
+  );
+  assert.deepEqual(h.controlsStore.db.prepare("SELECT * FROM policy_previews").all(), [preserved]);
+});
+
 test("a mixed-source snapshot retires as one object while the unrelated repository's complete projection remains exact", async (t) => {
   const h = await multipleRepositories(t);
   assert.equal((await h.runtime.runOnce()).state, "published");

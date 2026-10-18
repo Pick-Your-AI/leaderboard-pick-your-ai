@@ -246,11 +246,24 @@ function pgRecord(stage, row) {
   const { created_at: _created, ...content } = row;
   return { keys: spec.keys.map((key) => String(row[key])), hash: hash(content) };
 }
-function sqliteRecord(stage, row, binding) {
+function sqliteRecord(stage, row, binding, db) {
   const doc = document(row.document, row.digest);
   boundSnapshot(doc, binding);
   if (stage !== "previews") boundAuthorization(doc, binding);
-  if (stage === "previews") check(doc.inputId === row.input_id);
+  if (stage === "previews") {
+    check(doc.inputId === row.input_id && doc.comparisonId === row.id);
+    const inputRow = db.prepare("SELECT * FROM policy_preview_inputs WHERE id=?").get(row.input_id);
+    check(inputRow, "derived_preview_input_missing");
+    const input = document(inputRow.document, inputRow.digest);
+    boundSnapshot(input, binding);
+    boundAuthorization(input, binding);
+    check(
+      inputRow.id === inputRow.digest &&
+        doc.inputHash === binding.input_hash &&
+        doc.scopeHash === binding.engine_scope_hash,
+      "derived_source_binding_invalid",
+    );
+  }
   if (stage === "preview_inputs") check(row.id === row.digest);
   if (stage === "explanations") check(row.snapshot_id === binding.snapshot_id);
   return { keys: [row[sqliteStages[stage].key]], hash: hash(row) };
@@ -720,7 +733,10 @@ export class PipelineDerivedRetirementStore {
     for (const [stage, sql] of [
       [
         "previews",
-        "SELECT * FROM policy_previews WHERE json_extract(document,'$.snapshot.snapshotId')=? ORDER BY id LIMIT ?",
+        `SELECT preview.* FROM policy_previews AS preview
+        LEFT JOIN policy_preview_inputs AS input ON input.id=preview.input_id
+        WHERE ? IN (json_extract(preview.document,'$.snapshot.snapshotId'),
+          json_extract(input.document,'$.snapshot.snapshotId')) ORDER BY preview.id LIMIT ?`,
       ],
       [
         "preview_inputs",
@@ -729,7 +745,7 @@ export class PipelineDerivedRetirementStore {
       ["explanations", "SELECT * FROM pipeline_aggregate_explanations WHERE snapshot_id=? LIMIT ?"],
     ]) {
       const rows = db.prepare(sql).all(binding.snapshot_id, 1);
-      if (rows.length) return { stage, records: rows.map((row) => sqliteRecord(stage, row, binding)) };
+      if (rows.length) return { stage, records: rows.map((row) => sqliteRecord(stage, row, binding, db)) };
     }
     const state = this.#controlsStore.read();
     const records = [];
@@ -880,7 +896,7 @@ export class PipelineDerivedRetirementStore {
             alreadyAbsent++;
             continue;
           }
-          check(same(sqliteRecord(manifest.stage, current, binding), record), "derived_row_changed");
+          check(same(sqliteRecord(manifest.stage, current, binding, db), record), "derived_row_changed");
           const deleted = db
             .prepare(`DELETE FROM ${spec.table} WHERE ${spec.key}=? AND digest=?`)
             .run(record.keys[0], current.digest);
