@@ -27,7 +27,7 @@ export class ReadFailure extends Error {
 }
 const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
 const scopeKeys = ["organization", "repository", "workstream", "start", "end"] as const;
-const supported = new Set([...scopeKeys, "snapshot", "limit", "cursor", "metric", "ui", "search", "category"]);
+const supported = new Set([...scopeKeys, "snapshot", "limit", "cursor", "metric", "ui", "search", "category", "proof"]);
 export interface Selection {
   organization: string;
   repository: string | null;
@@ -40,6 +40,7 @@ export interface Selection {
   metric: string;
   search: string | null;
   category: string | null;
+  proof?: string | null;
 }
 export function selection(query: string): Selection {
   const params = new URLSearchParams(query);
@@ -79,6 +80,7 @@ export function selection(query: string): Selection {
   return {
     search: search?.toLowerCase() ?? null,
     category: id("category"),
+    proof: id("proof"),
     organization: id("organization") ?? "Pick-Your-AI",
     repository: id("repository"),
     workstream: id("workstream"),
