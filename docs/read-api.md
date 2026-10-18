@@ -196,12 +196,55 @@ expiry uses five-minute issuance buckets. Exports, errors and SSE use `no-store`
 CDN must preserve revalidation and must never add stale-if-error/stale-while-revalidate.
 
 Public health includes service version and last successful publish revision.
-`recently_reconciled` means every supplied coverage record is complete, has a known
-watermark and a nonfuture successful sync within five minutes. Otherwise it reports
-`stale_or_degraded`. This is not proof that webhooks are live. Webhook lag remains
-null because the current frozen coverage contract has no measured webhook lag field.
-Missing data/source outages return 503 with a generic code. Tokens, backend hosts,
-stack traces and raw source errors are never response fields.
+The top-level `coverage` and each source's `state`, `lastSuccessfulSync`,
+`reconciledThrough`, `collectionState` and `degradedCapabilities` remain the selected
+snapshot's frozen, sanitized coverage. Current diagnostics never rewrite a historic
+snapshot or certify its missing historical coverage.
+
+An optional `PublicSnapshotSource.readHealth(scope, snapshotId, signal)` uses the
+same publication and current-authorization boundary as `read`, with an additional
+`currentSourceHealth` projection (at most 100 repository records). The pipeline
+implements this method; ordinary boards, exports and evidence reads do not scan
+operational receipt stores. Legacy providers fall back to `read`, leaving current
+collection and webhook lag unknown. The public projector rejects duplicate,
+out-of-scope, malformed and unbounded diagnostics and copies only allowlisted fields.
+
+For a GitHub source, `sources[].currentCollection` is explicitly repository-scoped:
+the configured collection families in that selected repository, rather than a
+claim that a particular transport is live. It reports the latest retained attempt
+state, most recent attempt time, conservative successful sync/watermark from the
+most recently completed scan of each configured family, and supported webhook
+receipt state. A missing family or new
+access generation is unknown; an unfinished run is collecting; a failed run is
+degraded. `no_activity_in_window` means every latest configured scan completed with
+an exact empty result. It does not establish complete historical coverage or prove
+no new activity has occurred since that scan. A previous successful watermark is
+retained after a newer failed run, alongside its current degraded state.
+
+`webhookLagSeconds` measures the age of the oldest unfinished retained receipt,
+including quarantined receipts, for this repository's current installation and
+configured supported event families (`issues` and `pull_requests`). The explicit
+`webhookLagBasis` is `oldest_unfinished_retained_receipt`; this is neither GitHub
+delivery latency nor collection-to-publication latency. No retained matching
+receipts, unsupported event families or a future receipt clock produce null,
+never fabricated zero. Zero means matching retained receipts exist but none is
+unfinished. Retained receipts from the same installation may predate a renewed
+access generation; the inbox has no generation receipt and cannot prove a new
+subscription is working. Foreign repositories, installations and unsupported
+families do not affect the result. No raw envelope, actor, object, delivery ID,
+installation ID, exception or internal topology becomes public.
+
+`recently_reconciled` requires every frozen coverage record to be complete, have a
+known watermark and a nonfuture successful sync within five minutes. Supplied
+current collection additionally must be reconciled/empty with recent nonfuture
+sync and watermark, no quarantined receipts and no measured backlog older than
+five minutes. Otherwise health is `stale_or_degraded`. Unknown webhook activity
+does not contradict bounded recent reconciliation and never becomes a live claim.
+Current failures alter health and its ETag even when a historical snapshot is
+pinned; successful current scans cannot upgrade partial frozen coverage. A source
+visibility/authorization denial or unreadable source fails closed with a generic
+503 (410 for unavailable historical pins). Tokens, backend hosts, stack traces and
+raw source errors are never response fields.
 
 SSE uses finite, bounded windows with a three-second reconnect hint. A fresh
 connection receives `snapshot`; the same Last-Event-ID receives a heartbeat;

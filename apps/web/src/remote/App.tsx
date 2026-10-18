@@ -21,6 +21,7 @@ import {
   type ActivityDetail,
   apiBase,
   board,
+  controlsNavigationBase,
   directory,
   portfolioParameters,
   catalog,
@@ -150,8 +151,8 @@ function ControlsEntry() {
   try {
     return (
       <p>
-        <a href={`${apiBase(configured)}/auth/login`}>Open configured account authentication</a>. This public UI does
-        not implement private request forms or name a staffed privacy destination.
+        <a href={`${controlsNavigationBase(configured)}/auth/login`}>Open configured account authentication</a>. This
+        public UI does not implement private request forms or name a staffed privacy destination.
       </p>
     );
   } catch {
@@ -521,6 +522,7 @@ export function RemoteApp() {
     const controller = new AbortController();
     active.current = controller;
     if (parsed.error) {
+      setChecking(false);
       setState({ status: "error", error: parsed.error });
       return () => controller.abort();
     }
