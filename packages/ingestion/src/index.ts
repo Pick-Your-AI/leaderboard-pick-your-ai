@@ -21,3 +21,5 @@ export type {
   DispatchFailure,
   DispatchStatus,
 } from "./outbox.js";
+export { OperatorInbox } from "./operator.js";
+export type { OperatorAuthorize } from "./operator.js";
