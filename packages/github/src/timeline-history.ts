@@ -18,6 +18,8 @@ export async function readTypedIssueHistory(options: {
   number: number;
   /** Project status history supports both subjects; native relationships remain issue-only. */
   subjectType?: "issue" | "pull_request";
+  /** Bind collection to the stable node identity obtained from the repository inventory. */
+  subjectId?: string;
   family: "relationships" | "project_history";
   scanId: string;
   maxPages?: number;
@@ -32,6 +34,16 @@ export async function readTypedIssueHistory(options: {
   const subjectField = subjectType === "pull_request" ? "pullRequest" : "issue";
   const subjectPath = subjectType === "pull_request" ? "pull" : "issues";
   const subjectKey = subjectType === "pull_request" ? `pull_request:${options.number}` : options.number;
+  const subjectError =
+    options.family === "project_history" ? "project_subject_identity_unverified" : "typed_history_subject_unverified";
+  if (
+    !Number.isSafeInteger(options.number) ||
+    options.number < 1 ||
+    (options.subjectId !== undefined && (typeof options.subjectId !== "string" || !options.subjectId.trim()))
+  )
+    throw new Error(subjectError);
+  const subjectUrl = `https://github.com/${options.repository.slug}/${subjectPath}/${options.number}`;
+  let verifiedSubjectId = options.subjectId;
   if (
     options.family === "project_history" &&
     (!Array.isArray(options.repository.allowedProjectIds) ||
@@ -66,7 +78,8 @@ export async function readTypedIssueHistory(options: {
       : "PROJECT_V2_ITEM_STATUS_CHANGED_EVENT";
   const records = await options.client.scanGraphql<TypedHistoryRecord>({
     source: options.source,
-    key: `typed-history:${options.repository.id}:${options.family}:${subjectKey}:${options.scanId}`,
+    // Legacy completed scans did not bind stable subject identity. Revalidate them with a new checkpoint key.
+    key: `typed-history:subject-v2:${options.repository.id}:${options.family}:${subjectKey}:${options.scanId}`,
     query: `query($owner:String!, $name:String!, $number:Int!, $first:Int!, $after:String) {
       repository(owner:$owner,name:$name) { databaseId isPrivate ${subjectField}(number:$number) {
         id url timelineItems(first:$first,after:$after,itemTypes:[${types}]) {
@@ -86,12 +99,15 @@ export async function readTypedIssueHistory(options: {
         repo.isPrivate !== false ||
         !object(item) ||
         typeof item.id !== "string" ||
-        item.url !== `https://github.com/${options.repository.slug}/${subjectPath}/${options.number}` ||
+        !item.id.trim() ||
+        (verifiedSubjectId !== undefined && item.id !== verifiedSubjectId) ||
+        item.url !== subjectUrl ||
         !object(item.timelineItems) ||
         !Array.isArray(item.timelineItems.nodes) ||
         !object(item.timelineItems.pageInfo)
       )
-        throw new Error("typed_history_subject_unverified");
+        throw new Error(subjectError);
+      verifiedSubjectId = item.id;
       const subject = { id: item.id, url: item.url as string };
       return {
         nodes: item.timelineItems.nodes.map((event): TypedHistoryRecord => {
@@ -107,6 +123,16 @@ export async function readTypedIssueHistory(options: {
   const result: TypedHistoryRecord[] = [];
   const seen = new Set();
   for (const record of records) {
+    // A resumed or completed checkpoint can return earlier pages without invoking select again.
+    if (
+      !object(record.subject) ||
+      typeof record.subject.id !== "string" ||
+      !record.subject.id.trim() ||
+      record.subject.url !== subjectUrl ||
+      (verifiedSubjectId !== undefined && record.subject.id !== verifiedSubjectId)
+    )
+      throw new Error(subjectError);
+    verifiedSubjectId = record.subject.id;
     if (seen.has(record.event.id)) throw new Error("typed_history_duplicate_event");
     seen.add(record.event.id);
     if (options.family === "relationships") {

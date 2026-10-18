@@ -211,6 +211,8 @@ for (const [loss, subjectType] of [
   ["hidden", "issue"],
   ["controls_failure", "issue"],
   ["private", "pull_request"],
+  ["subject_private", "pull_request"],
+  ["subject_identity", "pull_request"],
 ])
   test(`confirmed ${loss} Project revokes current and pinned ${subjectType} publications until a new approved configuration`, async (t) => {
     const h = await harness(t);
@@ -228,6 +230,8 @@ for (const [loss, subjectType] of [
       { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-policy" },
     ];
     let publicProject = true;
+    let privateSubject = false;
+    let changedSubject = false;
     const event = () => ({
       id: "E_synthetic",
       __typename: "ProjectV2ItemStatusChangedEvent",
@@ -253,9 +257,13 @@ for (const [loss, subjectType] of [
         o.select({
           repository: {
             databaseId: 2,
-            isPrivate: false,
+            isPrivate: privateSubject,
             [subjectType === "pull_request" ? "pullRequest" : "issue"]: {
-              id: subjectType === "pull_request" ? "PR_synthetic" : "I_synthetic",
+              id: changedSubject
+                ? "PR_synthetic_changed"
+                : subjectType === "pull_request"
+                  ? "PR_synthetic"
+                  : "I_synthetic",
               url: `https://github.com/synthetic-org/synthetic-repo/${subjectType === "pull_request" ? "pull" : "issues"}/1`,
               timelineItems: { nodes: [current()], pageInfo: { hasNextPage: false, endCursor: null } },
             },
@@ -282,7 +290,9 @@ for (const [loss, subjectType] of [
           change(state);
           if (state.pipelineSourceDenials) throw Error("synthetic_controls_write_failure");
         }, options);
-    publicProject = loss === "hidden" ? null : false;
+    if (loss === "subject_private") privateSubject = true;
+    else if (loss === "subject_identity") changedSubject = true;
+    else publicProject = loss === "hidden" ? null : false;
     await runtime
       .runOnce()
       .catch((error) =>
@@ -309,6 +319,8 @@ for (const [loss, subjectType] of [
     );
     // A repository that remains public cannot reopen a known-private Project publication.
     publicProject = true;
+    privateSubject = false;
+    changedSubject = false;
     await assert.rejects(runtime.runOnce(), /project_source_scope_requires_reapproval/);
     assert.notEqual((await runtime.app.inject(url)).statusCode, 200);
     const restarted = await createPipeline({ ...h.options, config, githubClient: client, source: undefined });
