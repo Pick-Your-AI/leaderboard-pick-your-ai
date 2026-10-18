@@ -20,6 +20,7 @@ const migrations = [
   "003_collection",
   "004_outbox_dispatch",
   "006_delivery_payload_expiry",
+  "007_operator_replay_results",
 ];
 before(async () => {
   directory = await mkdtemp(join(tmpdir(), "leaderboard-delivery-expiry-"));
