@@ -1,4 +1,4 @@
-import type { MetricRegistry } from "@pick-your-ai/contracts";
+import { actorFilterLabels, type MetricRegistry } from "@pick-your-ai/contracts";
 import { PublicReadError, safePublicUrl, type PublicRead } from "./public-source.js";
 
 const escape = (value: string) =>
@@ -26,6 +26,7 @@ export function renderContributorCard(
   });
   for (const key of ["repository", "workstream", "start", "end"] as const)
     if (scope[key] !== null) params.set(key, scope[key]);
+  if (read.actorFilter && read.actorFilter !== "all") params.set("actors", read.actorFilter);
   params.set("ui", "api");
   const href = `/contributors/${encodeURIComponent(actorId)}?${params}`;
   const evidence = read.selected.evidence.filter((entry) =>
@@ -43,7 +44,7 @@ export function renderContributorCard(
   const period = `${scope.start ?? "available history"} to ${scope.end ?? "snapshot date"}`;
   const mode = archived ? "Archived snapshot card" : "Current snapshot card — refresh to check for changes";
   const value = row.result.value === undefined ? row.result.state : `${row.result.value} (${row.result.state})`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(metric.name)} contribution card</title></head><body><main><article aria-labelledby="card-title"><h1 id="card-title">${escape(metric.name)}</h1><p>${escape(actor.actor.login ?? actorId)}</p><p>${escape(value)}</p><dl><dt>Mode</dt><dd>${escape(mode)}</dd><dt>Snapshot date</dt><dd><time datetime="${escape(snapshot.generatedAt)}">${escape(snapshot.generatedAt)}</time></dd><dt>Period</dt><dd>${escape(period)}</dd><dt>Scope</dt><dd>${escape([scope.organization, scope.repository, scope.workstream].filter(Boolean).join(" / "))}</dd><dt>Metric registry</dt><dd>${escape(snapshot.metricDefinitionVersion)}</dd><dt>Metric policy</dt><dd>${escape(policy)}</dd><dt>Coverage</dt><dd>${escape(row.result.coverage.state)}</dd></dl><p>This card describes the dated snapshot; it does not claim live activity or personal productivity.</p><a href="${escape(href)}">Scoped contribution portfolio</a><h2>Public sources</h2>${sources.length ? `<ul>${sources.map((url) => `<li><a rel="noreferrer" href="${escape(url)}">${escape(url)}</a></li>`).join("")}</ul>` : "<p>No public source link is available.</p>"}</article></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(metric.name)} contribution card</title></head><body><main><article aria-labelledby="card-title"><h1 id="card-title">${escape(metric.name)}</h1><p>${escape(actor.actor.login ?? actorId)}</p><p>${escape(value)}</p><dl><dt>Mode</dt><dd>${escape(mode)}</dd><dt>Snapshot date</dt><dd><time datetime="${escape(snapshot.generatedAt)}">${escape(snapshot.generatedAt)}</time></dd><dt>Period</dt><dd>${escape(period)}</dd><dt>Scope</dt><dd>${escape([scope.organization, scope.repository, scope.workstream].filter(Boolean).join(" / "))}</dd><dt>Activity selection</dt><dd>${escape(actorFilterLabels[read.actorFilter ?? "all"])}</dd><dt>Metric registry</dt><dd>${escape(snapshot.metricDefinitionVersion)}</dd><dt>Metric policy</dt><dd>${escape(policy)}</dd><dt>Coverage</dt><dd>${escape(row.result.coverage.state)}</dd></dl><p>This card describes the dated snapshot. Account type does not certify manual work; this is not a live-activity or productivity claim.</p><a href="${escape(href)}">Scoped contribution portfolio</a><h2>Public sources</h2>${sources.length ? `<ul>${sources.map((url) => `<li><a rel="noreferrer" href="${escape(url)}">${escape(url)}</a></li>`).join("")}</ul>` : "<p>No public source link is available.</p>"}</article></main></body></html>`;
 }
 
 /** A bounded passive SVG suitable for image embeds; no scripts, links or external assets. */
@@ -67,7 +68,7 @@ export function renderContributorCardImage(
     actor.actor.login ?? actorId,
     `${archived ? "Archived" : "Current dated"} snapshot: ${snapshot.generatedAt}`,
     `Period: ${scope.start ?? "available history"} to ${scope.end ?? "snapshot date"}`,
-    `Scope: ${[scope.organization, scope.repository, scope.workstream].filter(Boolean).join(" / ")}`,
+    `Scope: ${[scope.organization, scope.repository, scope.workstream].filter(Boolean).join(" / ")} / ${actorFilterLabels[read.actorFilter ?? "all"]}`,
     `Registry: ${snapshot.metricDefinitionVersion}`,
     `Policy: ${method?.policyVersion ?? "not supplied"}`,
     `Coverage: ${row.result.coverage.state}`,

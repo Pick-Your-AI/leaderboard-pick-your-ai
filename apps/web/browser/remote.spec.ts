@@ -151,6 +151,11 @@ async function service(page: Page) {
   });
   return {
     calls,
+    mixedActors() {
+      current.selected.actors[1]!.actor.executionMode = "automated";
+      current.selected.actors[2]!.actor.kind = "bot";
+      current.selected.actors[2]!.actor.executionMode = "automated";
+    },
     observedOnly() {
       current.selected.rows = [];
       current.selected.evidence = [];
@@ -216,6 +221,43 @@ async function service(page: Page) {
     },
   };
 }
+
+test("actor selections persist through controls and board-to-profile navigation", async ({ page }) => {
+  const api = await service(page);
+  api.mixedActors();
+  try {
+    await page.goto("/leaderboards/pr_opened?ui=api&metric=pr_opened&actors=user&limit=1");
+    const provenance = page.getByRole("region", { name: "Snapshot provenance" });
+    await expect(provenance).toContainText("User accounts");
+    await page.getByText("Exact scope and snapshot", { exact: true }).click();
+    const control = page.getByRole("combobox", { name: "Activity selection" });
+    await expect(control).toHaveValue("user");
+    await expect(page.getByText(/These views may overlap/)).toBeVisible();
+    await control.selectOption("automation");
+    await page.getByRole("button", { name: "Read exact scope" }).click();
+    await expect(provenance).toContainText("Automation");
+    const next = page.getByRole("link", { name: "Next cursor page" });
+    await expect(next).toHaveAttribute("href", /actors=automation/);
+    await expect(page.getByRole("link", { name: "Synthetic API B", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toHaveCount(0);
+    await page.getByRole("link", { name: "Synthetic API B", exact: true }).click();
+    await expect(page).toHaveURL(/actors=automation/);
+    await expect(provenance).toContainText("Automation");
+    await expect(page.getByRole("heading", { name: "Synthetic API B", exact: true })).toBeVisible();
+    await page.setViewportSize({ width: 360, height: 800 });
+    const results = await new AxeBuilder({ page }).analyze();
+    expect(results.violations).toEqual([]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBeTruthy();
+    expect(
+      api.calls
+        .filter((url) => url.pathname.endsWith("/boards"))
+        .at(-1)!
+        .searchParams.get("actors"),
+    ).toBe("automation");
+  } finally {
+    await api.close();
+  }
+});
 
 test("real service handler: exact scope, dense ties, cursors and pinned board → profile → evidence after head advances", async ({
   page,

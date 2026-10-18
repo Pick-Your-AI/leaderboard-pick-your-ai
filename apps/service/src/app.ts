@@ -1,6 +1,11 @@
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { metricRegistrySchema, type MetricRegistry } from "@pick-your-ai/contracts";
+import {
+  actorFilterSchema,
+  metricRegistrySchema,
+  type ActorFilter,
+  type MetricRegistry,
+} from "@pick-your-ai/contracts";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { acceptedAchievements, ACHIEVEMENT_RULE_VERSION } from "./achievements.js";
 import { renderContributorCard, renderContributorCardImage } from "./cards.js";
@@ -14,6 +19,7 @@ import {
 } from "./activity.js";
 import {
   projectRead,
+  filterPublicActors,
   PublicReadError,
   unavailableSource,
   type PublicRead,
@@ -34,6 +40,7 @@ export interface ServiceOptions {
   approvedAchievementRuleVersion?: typeof ACHIEVEMENT_RULE_VERSION;
 }
 const allowed = new Set([
+  "actors",
   "organization",
   "repository",
   "workstream",
@@ -89,6 +96,8 @@ export function createService(options: ServiceOptions = {}) {
     const params = new URL(request.url, "http://localhost").searchParams;
     for (const key of params.keys())
       if (!allowed.has(key) || params.getAll(key).length !== 1) fail(400, "invalid_query");
+    const actorSelection = actorFilterSchema.safeParse(params.get("actors") ?? "all");
+    if (!actorSelection.success) fail(400, "invalid_actor_filter");
     const item = (key: string) => {
       const value = params.get(key);
       if (value !== null && !identifier.test(value)) fail(400, "invalid_query");
@@ -130,6 +139,7 @@ export function createService(options: ServiceOptions = {}) {
     const format = params.get("format") ?? "json";
     if (!["json", "csv"].includes(format)) fail(400, "unsupported_export_format");
     return {
+      actors: actorSelection.data,
       scope,
       limit: Number(limitText),
       metric,
@@ -140,7 +150,7 @@ export function createService(options: ServiceOptions = {}) {
       format,
     };
   }
-  async function load(scope: PublicScope, pin: string | null): Promise<PublicRead> {
+  async function load(scope: PublicScope, pin: string | null, actors: ActorFilter): Promise<PublicRead> {
     if (reads >= maxReads) fail(429, "read_budget_exceeded");
     reads++;
     const controller = new AbortController();
@@ -173,7 +183,7 @@ export function createService(options: ServiceOptions = {}) {
         )
       )
         fail(409, "metric_definition_unavailable");
-      return projected;
+      return filterPublicActors(projected, actors);
     } finally {
       if (timer) clearTimeout(timer);
       controller.abort();
@@ -209,6 +219,7 @@ export function createService(options: ServiceOptions = {}) {
       policyVersion: read.controls.version,
       head: read.head,
       scope: read.selected.scope,
+      actorFilter: read.actorFilter ?? "all",
       coverage: snapshot.coverage,
       disabledMetrics: read.selected.disabledMetrics ?? [],
       methodology: read.selected.methodology ?? [],
@@ -347,11 +358,11 @@ export function createService(options: ServiceOptions = {}) {
     const q = query(request);
     if (q.metric === null) fail(400, "metric_required");
     if (q.category || q.search) fail(400, "unsupported_filter");
-    const binding = JSON.stringify(["board", q.scope, q.metric, q.limit]);
+    const binding = JSON.stringify(["board", q.scope, q.metric, q.limit, q.actors]);
     const cursor = q.cursor ? decodeCursor(q.cursor) : null;
     if (cursor && (cursor.binding !== binding || (q.snapshot !== null && q.snapshot !== cursor.pin)))
       fail(400, "cursor_scope_mismatch");
-    const read = await load(q.scope, cursor?.pin ?? q.snapshot);
+    const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors);
     const disabled = read.selected.disabledMetrics?.find((entry) => entry.id === q.metric);
     if (disabled)
       return reply
@@ -377,6 +388,7 @@ export function createService(options: ServiceOptions = {}) {
       nextCursor = `${value}.${sign(value)}`;
     }
     const share = new URLSearchParams({
+      actors: q.actors,
       organization: q.scope.organization,
       metric: q.metric,
       snapshot: read.selected.snapshot.snapshotId,
@@ -401,6 +413,7 @@ export function createService(options: ServiceOptions = {}) {
       // Downloads cannot be cached past a current-source authorization decision.
       reply
         .header("Content-Disposition", `attachment; filename="leaderboard.${q.format}"`)
+        .header("X-Leaderboard-Actor-Filter", q.actors)
         .header("Content-Security-Policy", "sandbox; default-src 'none'");
       return send(request, reply, exported.body, exported.contentType, "no-store");
     }
@@ -442,9 +455,17 @@ export function createService(options: ServiceOptions = {}) {
     if (q.metric) fail(400, "use_category_filter");
     if (q.search || q.format !== "json") fail(400, "unsupported_filter");
     if (groupId !== null && !/^[a-f0-9]{64}$/.test(groupId)) fail(400, "invalid_activity_group");
-    const binding = JSON.stringify(["activity", activityGroupingVersion, groupId, q.scope, q.category, q.limit]);
+    const binding = JSON.stringify([
+      "activity",
+      activityGroupingVersion,
+      groupId,
+      q.scope,
+      q.category,
+      q.limit,
+      q.actors,
+    ]);
     const cursor = boundCursor(q, binding);
-    const read = await load(q.scope, cursor?.pin ?? q.snapshot);
+    const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors);
     if (cursor && cursor.policy !== read.controls.version) fail(410, "cursor_policy_changed_refetch");
     const disabled = read.selected.disabledMetrics?.find((entry) => entry.id === q.category);
     if (disabled)
@@ -488,9 +509,9 @@ export function createService(options: ServiceOptions = {}) {
   app.get("/api/v1/contributors", async (request, reply) => {
     const q = query(request);
     if (q.metric) fail(400, "use_category_filter");
-    const binding = JSON.stringify(["directory", q.scope, q.search, q.category, q.limit]);
+    const binding = JSON.stringify(["directory", q.scope, q.search, q.category, q.limit, q.actors]);
     const cursor = boundCursor(q, binding);
-    const read = await load(q.scope, cursor?.pin ?? q.snapshot);
+    const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors);
     const entries = portfolio(read, q.category);
     const byActor = new Map<string, PortfolioEvidence[]>();
     for (const entry of entries) {
@@ -532,9 +553,9 @@ export function createService(options: ServiceOptions = {}) {
     const q = query(request);
     if (q.search || (q.category && q.metric && q.category !== q.metric)) fail(400, "unsupported_filter");
     const category = q.category ?? q.metric;
-    const binding = JSON.stringify(["profile", request.params.actorId, q.scope, category, q.limit]);
+    const binding = JSON.stringify(["profile", request.params.actorId, q.scope, category, q.limit, q.actors]);
     const cursor = boundCursor(q, binding);
-    const read = await load(q.scope, cursor?.pin ?? q.snapshot);
+    const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors);
     const actor = read.selected.actors.find((actor) => actor.actorId === request.params.actorId);
     if (!actor) fail(404, "profile_unavailable");
     const rows = read.selected.rows.filter(
@@ -579,7 +600,7 @@ export function createService(options: ServiceOptions = {}) {
     const q = query(request);
     if (q.metric || q.category || q.cursor || q.search || q.format !== "json") fail(400, "unsupported_filter");
     if (options.approvedAchievementRuleVersion !== ACHIEVEMENT_RULE_VERSION) fail(503, "achievement_policy_unapproved");
-    const read = await load(q.scope, q.snapshot);
+    const read = await load(q.scope, q.snapshot, q.actors);
     if (!read.selected.actors.some((actor) => actor.actorId === request.params.actorId))
       fail(404, "profile_unavailable");
     return send(
@@ -601,7 +622,7 @@ export function createService(options: ServiceOptions = {}) {
       fail(400, "card_requires_single_metric");
     const metric = registry.metrics.find((entry) => entry.id === q.metric);
     if (!metric) fail(404, "metric_unavailable");
-    const read = await load(q.scope, q.snapshot);
+    const read = await load(q.scope, q.snapshot, q.actors);
     const svg = renderContributorCardImage(read, request.params.actorId, metric, q.snapshot !== null);
     reply
       .header("Content-Security-Policy", "default-src 'none'; sandbox; frame-ancestors 'none'")
@@ -614,7 +635,7 @@ export function createService(options: ServiceOptions = {}) {
       fail(400, "card_requires_single_metric");
     const metric = registry.metrics.find((entry) => entry.id === q.metric);
     if (!metric) fail(404, "metric_unavailable");
-    const read = await load(q.scope, q.snapshot);
+    const read = await load(q.scope, q.snapshot, q.actors);
     const html = renderContributorCard(read, request.params.actorId, metric, q.snapshot !== null);
     reply
       .header(
@@ -627,7 +648,7 @@ export function createService(options: ServiceOptions = {}) {
   });
   app.get<{ Params: { contributionId: string } }>("/api/v1/evidence/:contributionId", async (request, reply) => {
     const q = query(request);
-    const read = await load(q.scope, q.snapshot);
+    const read = await load(q.scope, q.snapshot, q.actors);
     const evidence = [
       ...(read.selected.pendingEvidence ?? []),
       ...(read.selected.portfolioEvidence ?? []),
@@ -638,7 +659,7 @@ export function createService(options: ServiceOptions = {}) {
   });
   app.get("/api/v1/health", async (request, reply) => {
     const q = query(request);
-    const read = await load(q.scope, q.snapshot);
+    const read = await load(q.scope, q.snapshot, q.actors);
     const sources = read.selected.snapshot.coverage.map((coverage) => ({
       source: coverage.source,
       scopeId: coverage.scopeId,
@@ -678,8 +699,8 @@ export function createService(options: ServiceOptions = {}) {
     if (q.snapshot || q.cursor) fail(400, "updates_require_current_scope");
     streams++;
     try {
-      const read = await load(q.scope, null);
-      const eventId = `${read.head.revision}:${read.head.snapshotId}:${read.controls.version}`;
+      const read = await load(q.scope, null, q.actors);
+      const eventId = `${read.head.revision}:${read.head.snapshotId}:${read.controls.version}${q.actors === "all" ? "" : `:${q.actors}`}`;
       const prior = request.headers["last-event-id"];
       if (prior !== undefined && (typeof prior !== "string" || prior.length > 512 || !/^[A-Za-z0-9_.:-]+$/.test(prior)))
         fail(400, "invalid_event_cursor");
@@ -687,6 +708,7 @@ export function createService(options: ServiceOptions = {}) {
         ...meta(read),
         action: "refetch_snapshot",
         pollingUrl: `/api/v1/health?${new URLSearchParams({
+          actors: q.actors,
           organization: q.scope.organization,
           ...Object.fromEntries(
             Object.entries(q.scope).filter(([key, value]) => key !== "organization" && value !== null),
