@@ -152,7 +152,12 @@ export async function readPinnedGitDiff(options: {
   importedPaths?: readonly string[];
   generatedPaths?: readonly string[];
 }): Promise<PinnedPhysicalDiff> {
-  if (!pinnedSha(options.before) || !pinnedSha(options.after)) throw new Error("Pinned SHAs required for Git fallback");
+  // Bind both subprocesses and the returned evidence to this invocation, even
+  // when a caller reuses its options object or path arrays while we await Git.
+  const { repositoryPath, before, after } = options;
+  const importedPaths = options.importedPaths?.slice(),
+    generatedPaths = options.generatedPaths?.slice();
+  if (!pinnedSha(before) || !pinnedSha(after)) throw new Error("Pinned SHAs required for Git fallback");
   const maxFiles = options.maxFiles ?? 3000,
     maxBytes = options.maxBytes ?? 8 * 1024 * 1024,
     timeout = options.timeoutMs ?? 30_000;
@@ -164,7 +169,7 @@ export async function readPinnedGitDiff(options: {
     "--no-lazy-fetch",
     "--no-optional-locks",
     "-C",
-    options.repositoryPath,
+    repositoryPath,
     "-c",
     "core.hooksPath=",
     "diff",
@@ -174,8 +179,8 @@ export async function readPinnedGitDiff(options: {
     "-z",
     "--find-renames",
     ...(ignoreWhitespace ? ["--ignore-all-space"] : []),
-    options.before,
-    options.after,
+    before,
+    after,
     "--",
   ];
   // Sequential execution limits subprocess resource use and keeps failure atomic.
@@ -195,10 +200,10 @@ export async function readPinnedGitDiff(options: {
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const files = numstat(decoder.decode(raw.stdout)),
     nonWhitespace = new Map(numstat(decoder.decode(substantive.stdout)).map((file) => [file.path, file]));
-  if (files.length > maxFiles) return { before: options.before, after: options.after, complete: false, files: [] };
+  if (files.length > maxFiles) return { before, after, complete: false, files: [] };
   return {
-    before: options.before,
-    after: options.after,
+    before,
+    after,
     complete: true,
     files: files.map((file) => ({
       ...file,
@@ -206,8 +211,8 @@ export async function readPinnedGitDiff(options: {
         !file.binary &&
         file.additions + file.deletions > 0 &&
         (nonWhitespace.get(file.path)?.additions ?? 0) + (nonWhitespace.get(file.path)?.deletions ?? 0) === 0,
-      imported: options.importedPaths?.includes(file.path) ?? false,
-      generated: options.generatedPaths?.includes(file.path) ?? false,
+      imported: importedPaths?.includes(file.path) ?? false,
+      generated: generatedPaths?.includes(file.path) ?? false,
     })),
   };
 }

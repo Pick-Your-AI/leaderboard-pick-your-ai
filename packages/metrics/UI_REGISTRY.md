@@ -95,6 +95,17 @@ parameters on other routes are rejected, including explicit empty unsupported
 parameters. Cross-route links retain the selected scope/snapshot and drop these
 route-local discovery filters. A no-match search remains empty.
 
+Department selectors preserve the exact canonical IDs from the validated UI
+metadata, including spaces, Unicode and punctuation. They do not inherit the
+source identifier character or length restrictions. Empty or untrimmed
+selectors, duplicate parameters, unknown departments and queries beyond the
+existing complete navigation budget remain invalid; no selector is renamed or
+silently normalized to a different registry identity.
+Ill-formed UTF-16 department IDs fail registry admission and link generation
+before form or URL conversion can replace their characters. Department query
+values also reject malformed UTF-8 byte escapes. Valid paired Unicode, a literal
+replacement character (U+FFFD) and lossless percent punctuation remain supported.
+
 `/methodology/:metric` reads a definition without requiring a materialized board.
 This keeps all 98 methods discoverable, including deferred definitions, while
 making no claim that the selected scope has a snapshot, approved policy or

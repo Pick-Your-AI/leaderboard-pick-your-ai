@@ -77,6 +77,48 @@ for (const [kind, suffix] of [
   });
 }
 
+test("an in-flight read keeps its original revision pins when the caller reuses its options", async (t) => {
+  const repo = await repository(t);
+  const expected = await repo.read();
+  const options = { repositoryPath: repo.source, before: repo.before, after: repo.after };
+  const pending = readPinnedGitDiff(options);
+  options.before = repo.after;
+  options.after = repo.before;
+
+  assert.deepEqual(await pending, expected);
+});
+
+test("both comparisons keep the original repository when the caller reuses its options", async (t) => {
+  const repo = await repository(t);
+  const expected = await repo.read();
+  const options = { repositoryPath: repo.source, before: repo.before, after: repo.after };
+  const pending = readPinnedGitDiff(options);
+  options.repositoryPath = join(repo.directory, "not-the-requested-repository");
+
+  assert.deepEqual(await pending, expected);
+});
+
+test("an in-flight read copies caller-owned imported and generated path lists", async (t) => {
+  const repo = await repository(t);
+  const importedPaths = ["source.txt"];
+  const generatedPaths = ["format.txt"];
+  const options = {
+    repositoryPath: repo.source,
+    before: repo.before,
+    after: repo.after,
+    importedPaths,
+    generatedPaths,
+  };
+  const expected = await readPinnedGitDiff(options);
+  const pending = readPinnedGitDiff(options);
+  importedPaths.length = 0;
+  generatedPaths.length = 0;
+  options.importedPaths = ["format.txt"];
+  options.generatedPaths = ["source.txt"];
+
+  assert.deepEqual(await pending, expected);
+});
+
 test("missing promisor blobs fail the local read without fetching or hydrating the object store", async (t) => {
   const repo = await repository(t);
   const clone = repo.partial();

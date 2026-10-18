@@ -895,6 +895,8 @@ export function normalizeGithubObservation(
       !sha ||
       !pinnedSha(sha) ||
       !integration ||
+      !text(repository.defaultBranch) ||
+      integration.defaultBranch !== repository.defaultBranch ||
       integration.targetBranch !== integration.defaultBranch ||
       !integration.commitShas.includes(sha)
     ) {
@@ -1108,6 +1110,8 @@ export function normalizeGithubObservation(
   const integration = envelope.integration;
   if (integration?.diff) {
     if (
+      !text(repository.defaultBranch) ||
+      integration.defaultBranch !== repository.defaultBranch ||
       integration.targetBranch !== integration.defaultBranch ||
       integration.diff.before !== integration.before ||
       integration.diff.after !== integration.after ||
