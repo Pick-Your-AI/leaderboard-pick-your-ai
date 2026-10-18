@@ -1,0 +1,2015 @@
+{
+  "schema_version": "1",
+  "work_package": "LB-01.03",
+  "issue_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/23",
+  "collected_on": "2026-10-18",
+  "issue_pr_observation_window": {
+    "started_at": "2026-10-18T09:22:45Z",
+    "finished_at": "2026-10-18T09:23:20Z"
+  },
+  "scope": "Visible public organization repositories, their complete issue/PR collections, and the six public Projects with every configured field definition. This dated inventory is not a collector installation or public metric release.",
+  "organization": {
+    "login": "Pick-Your-AI",
+    "database_id": 343423069
+  },
+  "repository_discovery": {
+    "source_url": "https://github.com/orgs/Pick-Your-AI/repositories",
+    "query": "org:Pick-Your-AI",
+    "per_page": 100,
+    "page_counts": [
+      6,
+      0
+    ]
+  },
+  "project_discovery": {
+    "source_url": "https://github.com/orgs/Pick-Your-AI/projects?query=is%3Aopen",
+    "open_count": 6,
+    "closed_count": 0,
+    "metadata_source": "Public Project settings and the same page's application/json memex-data, memex-relay-ids, and memex-columns-data. Only project and field identity metadata is retained."
+  },
+  "reconciliation": {
+    "repository_count": 6,
+    "project_count": 6,
+    "project_field_count": 116,
+    "issue_count": 463,
+    "open_issue_count": 430,
+    "pull_request_count": 615,
+    "open_pull_request_count": 45,
+    "every_repository_page_terminated": true,
+    "duplicate_object_ids": 0,
+    "open_pull_request_lists_equal_issue_collection": true
+  },
+  "repositories": [
+    {
+      "id": 1422014674,
+      "node_id": "R_kgDOVMI40g",
+      "url": "https://github.com/Pick-Your-AI/.github",
+      "visibility": "public",
+      "default_branch": "main",
+      "archived": false,
+      "discussions_enabled": false,
+      "license": null,
+      "reviewed_revision": "533a94b85c5167a0cb8755a38e2ecdd6a5138764",
+      "boundary_source": "https://github.com/Pick-Your-AI/.github/blob/533a94b85c5167a0cb8755a38e2ecdd6a5138764/profile/README.md",
+      "pagination": [
+        {
+          "page": 1,
+          "url": "https://api.github.com/repos/Pick-Your-AI/.github/issues?page=1&per_page=100&direction=asc&sort=created&state=all",
+          "count": 6,
+          "first_number": 1,
+          "last_number": 6
+        }
+      ],
+      "issue_count": 1,
+      "open_issue_count": 0,
+      "unassigned_issue_count": 0,
+      "native_parented_issue_count": 0,
+      "pull_request_count": 5,
+      "open_pull_request_count": 0,
+      "duplicate_object_ids": 0,
+      "issue_assignees": [
+        {
+          "login": "CompleteDotTech",
+          "issue_numbers": [
+            2
+          ]
+        }
+      ],
+      "open_pull_request_source": "https://api.github.com/repos/Pick-Your-AI/.github/pulls?state=open&sort=created&direction=asc&per_page=100&page=1",
+      "open_pull_requests": []
+    },
+    {
+      "id": 1422238606,
+      "node_id": "R_kgDOVMWjjg",
+      "url": "https://github.com/Pick-Your-AI/pickyour.ai",
+      "visibility": "public",
+      "default_branch": "main",
+      "archived": false,
+      "discussions_enabled": false,
+      "license": "MIT",
+      "reviewed_revision": "dc66a9e269917ab7241c7d08fd0e7f2a2f039872",
+      "boundary_source": "https://github.com/Pick-Your-AI/pickyour.ai/blob/dc66a9e269917ab7241c7d08fd0e7f2a2f039872/docs/ARCHITECTURE.md",
+      "pagination": [
+        {
+          "page": 1,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pickyour.ai/issues?page=1&per_page=100&direction=asc&sort=created&state=all",
+          "count": 39,
+          "first_number": 1,
+          "last_number": 297
+        }
+      ],
+      "issue_count": 16,
+      "open_issue_count": 13,
+      "unassigned_issue_count": 6,
+      "native_parented_issue_count": 8,
+      "pull_request_count": 23,
+      "open_pull_request_count": 4,
+      "duplicate_object_ids": 0,
+      "issue_assignees": [
+        {
+          "login": "PUSHINGSQUARES",
+          "issue_numbers": [
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            24,
+            25,
+            26,
+            31
+          ]
+        }
+      ],
+      "open_pull_request_source": "https://api.github.com/repos/Pick-Your-AI/pickyour.ai/pulls?state=open&sort=created&direction=asc&per_page=100&page=1",
+      "open_pull_requests": [
+        {
+          "number": 293,
+          "url": "https://github.com/Pick-Your-AI/pickyour.ai/pull/293",
+          "title": "docs: refresh research evidence and integration gates",
+          "head_sha": "5fc719e44b3824ebc0bb27cb083586f057f1dab4",
+          "head_branch": "docs/refresh-research-evidence",
+          "base_branch": "fix/evidence-capture-dates",
+          "draft": false
+        },
+        {
+          "number": 294,
+          "url": "https://github.com/Pick-Your-AI/pickyour.ai/pull/294",
+          "title": "fix: distinguish incomplete builds from compatibility conflicts",
+          "head_sha": "73d3ca4d91f29020837828c5e965f38934f39229",
+          "head_branch": "fix/incomplete-build-label",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 295,
+          "url": "https://github.com/Pick-Your-AI/pickyour.ai/pull/295",
+          "title": "ci: enforce visual regression and Lighthouse budgets",
+          "head_sha": "ff63532f638015e675cd6f0e07c1f9f3d0ebc1c7",
+          "head_branch": "ci/visual-performance-gates",
+          "base_branch": "fix/incomplete-build-label",
+          "draft": false
+        },
+        {
+          "number": 296,
+          "url": "https://github.com/Pick-Your-AI/pickyour.ai/pull/296",
+          "title": "fix: show evidence dates without invented expiry or verification claims",
+          "head_sha": "a15af5495e4032b47fb6dfee0c6e761d4c01076f",
+          "head_branch": "fix/evidence-capture-dates",
+          "base_branch": "ci/visual-performance-gates",
+          "draft": false
+        }
+      ]
+    },
+    {
+      "id": 1421934086,
+      "node_id": "R_kgDOVMD-Bg",
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research",
+      "visibility": "public",
+      "default_branch": "main",
+      "archived": false,
+      "discussions_enabled": false,
+      "license": "MIT",
+      "reviewed_revision": "f0387630f00a95d3a78dfedba54abc96c8b833d0",
+      "boundary_source": "https://github.com/Pick-Your-AI/pick-your-ai-research/blob/f0387630f00a95d3a78dfedba54abc96c8b833d0/README.md",
+      "pagination": [
+        {
+          "page": 1,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues?page=1&per_page=100&direction=asc&sort=created&state=all",
+          "count": 100,
+          "first_number": 1,
+          "last_number": 107
+        },
+        {
+          "page": 2,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues?page=2&per_page=100&direction=asc&sort=created&state=all",
+          "count": 100,
+          "first_number": 108,
+          "last_number": 207
+        },
+        {
+          "page": 3,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues?page=3&per_page=100&direction=asc&sort=created&state=all",
+          "count": 80,
+          "first_number": 208,
+          "last_number": 287
+        }
+      ],
+      "issue_count": 55,
+      "open_issue_count": 55,
+      "unassigned_issue_count": 0,
+      "native_parented_issue_count": 47,
+      "pull_request_count": 225,
+      "open_pull_request_count": 3,
+      "duplicate_object_ids": 0,
+      "issue_assignees": [
+        {
+          "login": "appletechie",
+          "issue_numbers": [
+            1,
+            2,
+            3,
+            7,
+            9,
+            10,
+            15,
+            16,
+            24,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            42,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65
+          ]
+        },
+        {
+          "login": "CompleteDotTech",
+          "issue_numbers": [
+            24,
+            25,
+            26,
+            27,
+            28
+          ]
+        },
+        {
+          "login": "itisSomeone",
+          "issue_numbers": [
+            65,
+            66
+          ]
+        },
+        {
+          "login": "Mattycodes69",
+          "issue_numbers": [
+            4,
+            8,
+            9,
+            10,
+            11,
+            12,
+            25,
+            29,
+            33,
+            48,
+            53,
+            56,
+            59,
+            61
+          ]
+        },
+        {
+          "login": "PUSHINGSQUARES",
+          "issue_numbers": [
+            6,
+            14,
+            28,
+            32,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            41,
+            52,
+            58,
+            62,
+            64
+          ]
+        },
+        {
+          "login": "tynamite",
+          "issue_numbers": [
+            1,
+            2,
+            3,
+            5,
+            13,
+            27,
+            31,
+            40,
+            41,
+            42,
+            47,
+            51,
+            55,
+            57,
+            60,
+            66
+          ]
+        },
+        {
+          "login": "zabyxc01",
+          "issue_numbers": [
+            12,
+            13,
+            14,
+            15,
+            16,
+            65
+          ]
+        },
+        {
+          "login": "zwright8",
+          "issue_numbers": [
+            4,
+            5,
+            6,
+            7,
+            8,
+            11,
+            26,
+            30,
+            40,
+            49,
+            50,
+            54,
+            63
+          ]
+        }
+      ],
+      "open_pull_request_source": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/pulls?state=open&sort=created&direction=asc&per_page=100&page=1",
+      "open_pull_requests": [
+        {
+          "number": 284,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/284",
+          "title": "MR-01: reconcile CanIRun evidence and landscape summaries",
+          "head_sha": "9854f56d41927c7a13867fb652e235487dbc871a",
+          "head_branch": "research/mr01-landscape-reconciliation-20261018",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 286,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/286",
+          "title": "Reconcile delivered contributor guidance and remaining receiving gates",
+          "head_sha": "73847eee54032b892ff5cb8e9b411b373b312065",
+          "head_branch": "docs/reconcile-delivered-guidance-b16",
+          "base_branch": "main",
+          "draft": true
+        },
+        {
+          "number": 287,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/287",
+          "title": "Define bounded CD-7 native consumer integrity handoff",
+          "head_sha": "eeadc07c814352043a8964dc9dcc43aa80b47b55",
+          "head_branch": "research/cd7-native-consumer-e2303",
+          "base_branch": "main",
+          "draft": false
+        }
+      ]
+    },
+    {
+      "id": 1422874501,
+      "node_id": "R_kgDOVM9XhQ",
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard",
+      "visibility": "public",
+      "default_branch": "main",
+      "archived": false,
+      "discussions_enabled": false,
+      "license": "MIT",
+      "reviewed_revision": "90deab1aba84f479d1c1de04789f58db3e2b155d",
+      "boundary_source": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/blob/90deab1aba84f479d1c1de04789f58db3e2b155d/docs/runtime-foundation.md",
+      "pagination": [
+        {
+          "page": 1,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues?page=1&per_page=100&direction=asc&sort=created&state=all",
+          "count": 100,
+          "first_number": 1,
+          "last_number": 100
+        },
+        {
+          "page": 2,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues?page=2&per_page=100&direction=asc&sort=created&state=all",
+          "count": 100,
+          "first_number": 101,
+          "last_number": 200
+        },
+        {
+          "page": 3,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues?page=3&per_page=100&direction=asc&sort=created&state=all",
+          "count": 36,
+          "first_number": 201,
+          "last_number": 236
+        }
+      ],
+      "issue_count": 133,
+      "open_issue_count": 109,
+      "unassigned_issue_count": 133,
+      "native_parented_issue_count": 132,
+      "pull_request_count": 103,
+      "open_pull_request_count": 10,
+      "duplicate_object_ids": 0,
+      "issue_assignees": [],
+      "open_pull_request_source": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/pulls?state=open&sort=created&direction=asc&per_page=100&page=1",
+      "open_pull_requests": [
+        {
+          "number": 211,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/211",
+          "title": "Add an opt-in real-duration wall soak with bounded recovery evidence",
+          "head_sha": "cc6430a541609c9090d4eb033af8df0b12afba48",
+          "head_branch": "test/wall-soak-20261018-4bd8e",
+          "base_branch": "main",
+          "draft": true
+        },
+        {
+          "number": 212,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/212",
+          "title": "Expose privacy-fenced snapshot rank comparisons and retained history",
+          "head_sha": "fd7ac1d193881c1380805b9049a72b7724ba8b89",
+          "head_branch": "feat/public-rank-comparison-history",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 214,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/214",
+          "title": "Gate runtime checks on verified redacted credential scanning",
+          "head_sha": "219c442ba8db6ab4b12d0c54d1663ff81ada06a1",
+          "head_branch": "ci/credential-scan-a79f",
+          "base_branch": "main",
+          "draft": true
+        },
+        {
+          "number": 219,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/219",
+          "title": "Connect reviewers to private frozen-policy comparisons",
+          "head_sha": "659114685c065e26162afeb6a4fc1f894e010f63",
+          "head_branch": "fix/reviewer-policy-comparison-ui-20261018",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 228,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/228",
+          "title": "Expose complete frozen snapshot coverage at the point of interpretation",
+          "head_sha": "83c00e0206648512ef8d042d920d3a7e4309cb22",
+          "head_branch": "feat/complete-snapshot-coverage-f692-20261018",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 229,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/229",
+          "title": "Verify native zoom and preserve automatic dark-theme contrast",
+          "head_sha": "1e22cdddf4ff5770cd5ee83e397ed4a00e754852",
+          "head_branch": "fix/responsive-accessibility-4afbf",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 230,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/230",
+          "title": "Complete credential scanning for hidden history and unreadable sources",
+          "head_sha": "10eff6261c0e127496f5887395e23e83383eb11f",
+          "head_branch": "fix/verified-credential-source-scan-20261018",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 233,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/233",
+          "title": "Deliver reviewed frozen identity cache-budget correction",
+          "head_sha": "65d573c5fad07f2bd2d2647db5ed041febf15207",
+          "head_branch": "integration/signed-frozen-identity-cache-budget-44a55",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 235,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/235",
+          "title": "Integrate reviewed coverage and visual validation",
+          "head_sha": "f90db3d0ceb9408ceddf9cd12a58099c1b26af37",
+          "head_branch": "integration/reviewed-queue-29a3-20261018",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 236,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/236",
+          "title": "Sync accepted main into the signed cache correction",
+          "head_sha": "e3d68bc9a10f3504bff056c9af6a7c7974552114",
+          "head_branch": "sync/frozen-identity-main-e3d68bc-44a55",
+          "base_branch": "integration/signed-frozen-identity-cache-budget-44a55",
+          "draft": true
+        }
+      ]
+    },
+    {
+      "id": 1422897390,
+      "node_id": "R_kgDOVM-w7g",
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple",
+      "visibility": "public",
+      "default_branch": "main",
+      "archived": false,
+      "discussions_enabled": false,
+      "license": "MIT",
+      "reviewed_revision": "a12ab324e499907bd15abf4b80709d0f02667ae1",
+      "boundary_source": "https://github.com/Pick-Your-AI/pick-your-ai-apple/blob/a12ab324e499907bd15abf4b80709d0f02667ae1/README.md",
+      "pagination": [
+        {
+          "page": 1,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-apple/issues?page=1&per_page=100&direction=asc&sort=created&state=all",
+          "count": 100,
+          "first_number": 1,
+          "last_number": 100
+        },
+        {
+          "page": 2,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-apple/issues?page=2&per_page=100&direction=asc&sort=created&state=all",
+          "count": 100,
+          "first_number": 101,
+          "last_number": 200
+        },
+        {
+          "page": 3,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-apple/issues?page=3&per_page=100&direction=asc&sort=created&state=all",
+          "count": 37,
+          "first_number": 201,
+          "last_number": 237
+        }
+      ],
+      "issue_count": 129,
+      "open_issue_count": 124,
+      "unassigned_issue_count": 129,
+      "native_parented_issue_count": 128,
+      "pull_request_count": 108,
+      "open_pull_request_count": 21,
+      "duplicate_object_ids": 0,
+      "issue_assignees": [],
+      "open_pull_request_source": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-apple/pulls?state=open&sort=created&direction=asc&per_page=100&page=1",
+      "open_pull_requests": [
+        {
+          "number": 157,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/157",
+          "title": "Sign reviewed native Files import and export integration",
+          "head_sha": "24c644c82e6c79b607d72f88f0d0bedbb463a574",
+          "head_branch": "candidate/native-file-transfer",
+          "base_branch": "integration/signed-native-file-transfer",
+          "draft": false
+        },
+        {
+          "number": 181,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/181",
+          "title": "Keep newer editor input when a delayed draft read completes",
+          "head_sha": "c14fb6f27c2b544aa5cd21e3c1d8ca0d36fb0108",
+          "head_branch": "fix/draft-open-race-bb7719",
+          "base_branch": "integration/signed-draft-open-race-bb7719",
+          "draft": false
+        },
+        {
+          "number": 182,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/182",
+          "title": "Validate complete frozen catalog snapshot envelopes",
+          "head_sha": "d323da89450feb6c44694818c53bf174766051cb",
+          "head_branch": "candidate/catalog-snapshot-envelope-89e9-20261018",
+          "base_branch": "integration/signed-catalog-item-boundary",
+          "draft": true
+        },
+        {
+          "number": 184,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/184",
+          "title": "Integrate reviewed Files workflows and off-main database startup",
+          "head_sha": "aa537c4dcacca0bdecdec201759542f9f3acbe71",
+          "head_branch": "integration/signed-native-file-transfer",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 187,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/187",
+          "title": "Add bounded editor undo and debounced autosave",
+          "head_sha": "de09f59eb7bdedf2e694f18da6b1732fb7542a87",
+          "head_branch": "candidate/editor-undo-autosave-20261018-a53",
+          "base_branch": "integration/signed-editor-undo-autosave-20261018-a53",
+          "draft": false
+        },
+        {
+          "number": 188,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/188",
+          "title": "Integrate verified iPhone and iPad draft recovery journeys",
+          "head_sha": "8c8013111833a3500665bcfee841a1debb792dd4",
+          "head_branch": "integration/signed-native-ui-journey",
+          "base_branch": "main",
+          "draft": true
+        },
+        {
+          "number": 198,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/198",
+          "title": "Integrate editor, imported library and worker preparation with full native gates",
+          "head_sha": "8ab4358c1b892db20e20e5876cbb63342186d2eb",
+          "head_branch": "candidate/editor-reconciliation-bb7719",
+          "base_branch": "integration/signed-editor-reconciliation-bb7719",
+          "draft": true
+        },
+        {
+          "number": 204,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/204",
+          "title": "Integrate verified frozen catalog item boundaries",
+          "head_sha": "35d1142385714a14f4e7a39a3b7bb9615beeb457",
+          "head_branch": "integration/signed-catalog-item-boundary",
+          "base_branch": "main",
+          "draft": true
+        },
+        {
+          "number": 208,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/208",
+          "title": "Prepare imported previews and exports without blocking the main actor",
+          "head_sha": "16e5e364e2236eb044a6307f498619a562d873f8",
+          "head_branch": "feature/import-preparation-bb7719",
+          "base_branch": "integration/signed-import-preparation-bb7719",
+          "draft": false
+        },
+        {
+          "number": 211,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/211",
+          "title": "Add pinned synthetic catalog browser with persistent filters",
+          "head_sha": "aba37bb980f49e0e6772f11bcfaa8023a34d4839",
+          "head_branch": "candidate/catalog-browser-4afbf",
+          "base_branch": "integration/signed-catalog-browser-4afbf",
+          "draft": true
+        },
+        {
+          "number": 214,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/214",
+          "title": "feat(transfer): validate frozen Ruleset artifacts and oneOf boundaries",
+          "head_sha": "fbc7b043418688c514f9664789014753dc358be8",
+          "head_branch": "candidate/frozen-ruleset-boundary-89e9-20261018",
+          "base_branch": "candidate/catalog-snapshot-envelope-89e9-20261018",
+          "draft": true
+        },
+        {
+          "number": 221,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/221",
+          "title": "Bound catalog cache reads before decoding",
+          "head_sha": "dbf1924f4e01101dc2ba2874c2d37777a2fc3bdb",
+          "head_branch": "candidate/cache-envelope-bound-a79f5598",
+          "base_branch": "integration/signed-cache-envelope-bound-a79f5598",
+          "draft": false
+        },
+        {
+          "number": 227,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/227",
+          "title": "Deliver signed frozen catalog boundaries with current main preserved",
+          "head_sha": "1aaf515526bfa347c3f1176771c4b4dbe78a4d08",
+          "head_branch": "integration/signed-catalog-current-main-20261018",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 228,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/228",
+          "title": "Validate frozen dependency graph artifacts at the transfer boundary",
+          "head_sha": "5f08beeb64cd89ce42f554357aa4db6aa9a583a5",
+          "head_branch": "candidate/dependency-graph-boundary-29a3",
+          "base_branch": "integration/signed-dependency-graph-29a3",
+          "draft": false
+        },
+        {
+          "number": 229,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/229",
+          "title": "Deliver signed ResourceEstimate boundary with current main preserved",
+          "head_sha": "1ff74486caded5a67584966bd656c3bb450081be",
+          "head_branch": "integration/signed-resource-estimate-89e9-20261018",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 230,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/230",
+          "title": "Require complete dependency review and document vulnerability response",
+          "head_sha": "915acc89cf135fdb1bda0b3704474c990c61b016",
+          "head_branch": "security/exact-dependency-review-20261018",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 231,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/231",
+          "title": "Deliver signed comparison field-identity correction",
+          "head_sha": "c551982a80e0f5186c8a0fb2f1578e5c717c672a",
+          "head_branch": "integration/signed-comparison-field-identities-881c016",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 232,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/232",
+          "title": "Deliver signed Xcode 26 submission SDK validation",
+          "head_sha": "ef1a1b1d4f15d07bf574f2421bb6389e2ea65447",
+          "head_branch": "integration/signed-submission-sdk-a79f5598",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 234,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/234",
+          "title": "Reject ambiguous raw JSON in pricebooks and evaluation reports",
+          "head_sha": "8901e7c3a9c8cbeeb3436b730f85cbbd65559a4a",
+          "head_branch": "candidate/core-raw-json-e2303f1",
+          "base_branch": "integration/signed-core-raw-json-e2303f1",
+          "draft": false
+        },
+        {
+          "number": 236,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/236",
+          "title": "Deliver reviewed threat-model receiving acceptance",
+          "head_sha": "84bbc407098965b425b894653a026469a8c788ae",
+          "head_branch": "integration/signed-threat-model-acceptance-15dd",
+          "base_branch": "main",
+          "draft": true
+        },
+        {
+          "number": 237,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-apple/pull/237",
+          "title": "Deliver signed library and history notice recovery",
+          "head_sha": "b457b61b0455bff311f1a5b574c8898868c97cc5",
+          "head_branch": "integration/signed-library-history-recovery-44a55",
+          "base_branch": "main",
+          "draft": true
+        }
+      ]
+    },
+    {
+      "id": 1422897313,
+      "node_id": "R_kgDOVM-woQ",
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-android",
+      "visibility": "public",
+      "default_branch": "main",
+      "archived": false,
+      "discussions_enabled": false,
+      "license": "MIT",
+      "reviewed_revision": "f01685d943b0cefd8537ed05f812033d0b02be48",
+      "boundary_source": "https://github.com/Pick-Your-AI/pick-your-ai-android/blob/f01685d943b0cefd8537ed05f812033d0b02be48/README.md",
+      "pagination": [
+        {
+          "page": 1,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-android/issues?page=1&per_page=100&direction=asc&sort=created&state=all",
+          "count": 100,
+          "first_number": 1,
+          "last_number": 100
+        },
+        {
+          "page": 2,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-android/issues?page=2&per_page=100&direction=asc&sort=created&state=all",
+          "count": 100,
+          "first_number": 101,
+          "last_number": 200
+        },
+        {
+          "page": 3,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-android/issues?page=3&per_page=100&direction=asc&sort=created&state=all",
+          "count": 80,
+          "first_number": 201,
+          "last_number": 280
+        }
+      ],
+      "issue_count": 129,
+      "open_issue_count": 129,
+      "unassigned_issue_count": 129,
+      "native_parented_issue_count": 128,
+      "pull_request_count": 151,
+      "open_pull_request_count": 7,
+      "duplicate_object_ids": 0,
+      "issue_assignees": [],
+      "open_pull_request_source": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-android/pulls?state=open&sort=created&direction=asc&per_page=100&page=1",
+      "open_pull_requests": [
+        {
+          "number": 206,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-android/pull/206",
+          "title": "ci(android): verify installed guest lifecycle in a disposable emulator",
+          "head_sha": "14a89f088e477c2dff3c455a27994faf75d36f69",
+          "head_branch": "candidate/android-installed-emulator-319d693a",
+          "base_branch": "integration/android-installed-emulator-319d693a",
+          "draft": false
+        },
+        {
+          "number": 237,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-android/pull/237",
+          "title": "ci(android): run owned smoke with verified existing Intel macOS acceleration",
+          "head_sha": "899e917842bc62aedd9040c9622c87d17e12f1cf",
+          "head_branch": "fix/android-owned-guest-readiness-4afbf",
+          "base_branch": "candidate/android-installed-emulator-319d693a",
+          "draft": true
+        },
+        {
+          "number": 254,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-android/pull/254",
+          "title": "Integrate reviewed explicit local component controls",
+          "head_sha": "e44303df8a97b54edb615c88fb977fa791979f5c",
+          "head_branch": "integration/android-selection-controls-7f3d59b",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 255,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-android/pull/255",
+          "title": "ci(android): run installed synthetic preview on observed Intel HVF",
+          "head_sha": "b6ceb5985963935ab5b90ff0a88af00928ec9ea1",
+          "head_branch": "candidate/android-installed-hvf-c3fa-5342986",
+          "base_branch": "fix/android-owned-guest-readiness-4afbf",
+          "draft": false
+        },
+        {
+          "number": 277,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-android/pull/277",
+          "title": "fix(android): deliver reviewed cleanup and canceled-dialog guards",
+          "head_sha": "eca577d0513cf0ed9f707c6457eafa5130e4b0a2",
+          "head_branch": "integration/android-modal-receiving-0051676-b7",
+          "base_branch": "main",
+          "draft": true
+        },
+        {
+          "number": 279,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-android/pull/279",
+          "title": "docs(android): deliver reviewed inventory and acceptance placement",
+          "head_sha": "f62cd36ae65b7fdde80bb2ac2c22da6579eeab74",
+          "head_branch": "integration/signed-data-inventory-record-15dd",
+          "base_branch": "main",
+          "draft": false
+        },
+        {
+          "number": 280,
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-android/pull/280",
+          "title": "fix(android): deliver safe comparison restoration and literal rendering",
+          "head_sha": "75f5c43527ca1b7bf3998949300d8ab9c0fe31a9",
+          "head_branch": "stage/android-comparison-boundaries-526c-bb771",
+          "base_branch": "main",
+          "draft": true
+        }
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "number": 1,
+      "database_id": 27085351,
+      "node_id": "PVT_kwDOFHg4Xc4BnUon",
+      "title": "AI Builder Research",
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/1",
+      "settings_url": "https://github.com/orgs/Pick-Your-AI/projects/1/settings",
+      "public": true,
+      "closed_at": null,
+      "field_count": 20,
+      "fields": [
+        {
+          "database_id": 427412230,
+          "ui_id": "Title",
+          "name": "Title",
+          "data_type": "title",
+          "user_defined": false
+        },
+        {
+          "database_id": 427412231,
+          "ui_id": "Assignees",
+          "name": "Assignees",
+          "data_type": "assignees",
+          "user_defined": false
+        },
+        {
+          "database_id": 427412232,
+          "ui_id": "Status",
+          "name": "Status",
+          "data_type": "singleSelect",
+          "user_defined": false
+        },
+        {
+          "database_id": 427412233,
+          "ui_id": "Labels",
+          "name": "Labels",
+          "data_type": "labels",
+          "user_defined": false
+        },
+        {
+          "database_id": 427412234,
+          "ui_id": "Linked pull requests",
+          "name": "Linked pull requests",
+          "data_type": "linkedPullRequests",
+          "user_defined": false
+        },
+        {
+          "database_id": 427412235,
+          "ui_id": "Milestone",
+          "name": "Milestone",
+          "data_type": "milestone",
+          "user_defined": false
+        },
+        {
+          "database_id": 427412236,
+          "ui_id": "Repository",
+          "name": "Repository",
+          "data_type": "repository",
+          "user_defined": false
+        },
+        {
+          "database_id": 427412237,
+          "ui_id": "Type",
+          "name": "Type",
+          "data_type": "issueType",
+          "user_defined": false
+        },
+        {
+          "database_id": 427412238,
+          "ui_id": "Reviewers",
+          "name": "Reviewers",
+          "data_type": "reviewers",
+          "user_defined": false
+        },
+        {
+          "database_id": 427412239,
+          "ui_id": "Parent issue",
+          "name": "Parent issue",
+          "data_type": "parentIssue",
+          "user_defined": false
+        },
+        {
+          "database_id": 427412240,
+          "ui_id": "Sub-issues progress",
+          "name": "Sub-issues progress",
+          "data_type": "subIssuesProgress",
+          "user_defined": false
+        },
+        {
+          "database_id": 427412241,
+          "ui_id": "Created",
+          "name": "Created",
+          "data_type": "created",
+          "user_defined": false
+        },
+        {
+          "database_id": 427412242,
+          "ui_id": "Updated",
+          "name": "Updated",
+          "data_type": "updated",
+          "user_defined": false
+        },
+        {
+          "database_id": 427412243,
+          "ui_id": "Closed",
+          "name": "Closed",
+          "data_type": "closed",
+          "user_defined": false
+        },
+        {
+          "database_id": 427421216,
+          "ui_id": 427421216,
+          "name": "Priority",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427421224,
+          "ui_id": 427421224,
+          "name": "Tier",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427421245,
+          "ui_id": 427421245,
+          "name": "Readiness",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427438481,
+          "ui_id": 427438481,
+          "name": "Work Type",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427438714,
+          "ui_id": 427438714,
+          "name": "Research Confidence",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427438788,
+          "ui_id": 427438788,
+          "name": "Dependency Status",
+          "data_type": "singleSelect",
+          "user_defined": true
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "database_id": 27089046,
+      "node_id": "PVT_kwDOFHg4Xc4BnViW",
+      "title": "Pick Your AI — Market Research & Competitive Intelligence",
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/2",
+      "settings_url": "https://github.com/orgs/Pick-Your-AI/projects/2/settings",
+      "public": true,
+      "closed_at": null,
+      "field_count": 22,
+      "fields": [
+        {
+          "database_id": 427467112,
+          "ui_id": "Title",
+          "name": "Title",
+          "data_type": "title",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467113,
+          "ui_id": "Assignees",
+          "name": "Assignees",
+          "data_type": "assignees",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467114,
+          "ui_id": "Status",
+          "name": "Status",
+          "data_type": "singleSelect",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467115,
+          "ui_id": "Labels",
+          "name": "Labels",
+          "data_type": "labels",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467116,
+          "ui_id": "Linked pull requests",
+          "name": "Linked pull requests",
+          "data_type": "linkedPullRequests",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467117,
+          "ui_id": "Milestone",
+          "name": "Milestone",
+          "data_type": "milestone",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467118,
+          "ui_id": "Repository",
+          "name": "Repository",
+          "data_type": "repository",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467119,
+          "ui_id": "Type",
+          "name": "Type",
+          "data_type": "issueType",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467121,
+          "ui_id": "Reviewers",
+          "name": "Reviewers",
+          "data_type": "reviewers",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467123,
+          "ui_id": "Parent issue",
+          "name": "Parent issue",
+          "data_type": "parentIssue",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467125,
+          "ui_id": "Sub-issues progress",
+          "name": "Sub-issues progress",
+          "data_type": "subIssuesProgress",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467126,
+          "ui_id": "Created",
+          "name": "Created",
+          "data_type": "created",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467128,
+          "ui_id": "Updated",
+          "name": "Updated",
+          "data_type": "updated",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467130,
+          "ui_id": "Closed",
+          "name": "Closed",
+          "data_type": "closed",
+          "user_defined": false
+        },
+        {
+          "database_id": 427467451,
+          "ui_id": 427467451,
+          "name": "Priority",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427467452,
+          "ui_id": 427467452,
+          "name": "Research Area",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427467460,
+          "ui_id": 427467460,
+          "name": "Workstream",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427467482,
+          "ui_id": 427467482,
+          "name": "Work Type",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427467483,
+          "ui_id": 427467483,
+          "name": "Evidence Confidence",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427467514,
+          "ui_id": 427467514,
+          "name": "Research Readiness",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427467543,
+          "ui_id": 427467543,
+          "name": "Opportunity Impact",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427467562,
+          "ui_id": 427467562,
+          "name": "Effort",
+          "data_type": "singleSelect",
+          "user_defined": true
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "database_id": 27098526,
+      "node_id": "PVT_kwDOFHg4Xc4BnX2e",
+      "title": "PickYour.AI Website Implementation",
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/3",
+      "settings_url": "https://github.com/orgs/Pick-Your-AI/projects/3/settings",
+      "public": true,
+      "closed_at": null,
+      "field_count": 14,
+      "fields": [
+        {
+          "database_id": 427608359,
+          "ui_id": "Title",
+          "name": "Title",
+          "data_type": "title",
+          "user_defined": false
+        },
+        {
+          "database_id": 427608361,
+          "ui_id": "Assignees",
+          "name": "Assignees",
+          "data_type": "assignees",
+          "user_defined": false
+        },
+        {
+          "database_id": 427608363,
+          "ui_id": "Status",
+          "name": "Status",
+          "data_type": "singleSelect",
+          "user_defined": false
+        },
+        {
+          "database_id": 427608364,
+          "ui_id": "Labels",
+          "name": "Labels",
+          "data_type": "labels",
+          "user_defined": false
+        },
+        {
+          "database_id": 427608365,
+          "ui_id": "Linked pull requests",
+          "name": "Linked pull requests",
+          "data_type": "linkedPullRequests",
+          "user_defined": false
+        },
+        {
+          "database_id": 427608366,
+          "ui_id": "Milestone",
+          "name": "Milestone",
+          "data_type": "milestone",
+          "user_defined": false
+        },
+        {
+          "database_id": 427608367,
+          "ui_id": "Repository",
+          "name": "Repository",
+          "data_type": "repository",
+          "user_defined": false
+        },
+        {
+          "database_id": 427608368,
+          "ui_id": "Type",
+          "name": "Type",
+          "data_type": "issueType",
+          "user_defined": false
+        },
+        {
+          "database_id": 427608369,
+          "ui_id": "Reviewers",
+          "name": "Reviewers",
+          "data_type": "reviewers",
+          "user_defined": false
+        },
+        {
+          "database_id": 427608370,
+          "ui_id": "Parent issue",
+          "name": "Parent issue",
+          "data_type": "parentIssue",
+          "user_defined": false
+        },
+        {
+          "database_id": 427608371,
+          "ui_id": "Sub-issues progress",
+          "name": "Sub-issues progress",
+          "data_type": "subIssuesProgress",
+          "user_defined": false
+        },
+        {
+          "database_id": 427608372,
+          "ui_id": "Created",
+          "name": "Created",
+          "data_type": "created",
+          "user_defined": false
+        },
+        {
+          "database_id": 427608373,
+          "ui_id": "Updated",
+          "name": "Updated",
+          "data_type": "updated",
+          "user_defined": false
+        },
+        {
+          "database_id": 427608374,
+          "ui_id": "Closed",
+          "name": "Closed",
+          "data_type": "closed",
+          "user_defined": false
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "database_id": 27112201,
+      "node_id": "PVT_kwDOFHg4Xc4BnbMJ",
+      "title": "Pick Your AI — Android Application Delivery",
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/4",
+      "settings_url": "https://github.com/orgs/Pick-Your-AI/projects/4/settings",
+      "public": true,
+      "closed_at": null,
+      "field_count": 20,
+      "fields": [
+        {
+          "database_id": 427812177,
+          "ui_id": "Title",
+          "name": "Title",
+          "data_type": "title",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812178,
+          "ui_id": "Assignees",
+          "name": "Assignees",
+          "data_type": "assignees",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812179,
+          "ui_id": "Status",
+          "name": "Status",
+          "data_type": "singleSelect",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812180,
+          "ui_id": "Labels",
+          "name": "Labels",
+          "data_type": "labels",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812181,
+          "ui_id": "Linked pull requests",
+          "name": "Linked pull requests",
+          "data_type": "linkedPullRequests",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812182,
+          "ui_id": "Milestone",
+          "name": "Milestone",
+          "data_type": "milestone",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812183,
+          "ui_id": "Repository",
+          "name": "Repository",
+          "data_type": "repository",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812184,
+          "ui_id": "Type",
+          "name": "Type",
+          "data_type": "issueType",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812185,
+          "ui_id": "Reviewers",
+          "name": "Reviewers",
+          "data_type": "reviewers",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812186,
+          "ui_id": "Parent issue",
+          "name": "Parent issue",
+          "data_type": "parentIssue",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812187,
+          "ui_id": "Sub-issues progress",
+          "name": "Sub-issues progress",
+          "data_type": "subIssuesProgress",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812188,
+          "ui_id": "Created",
+          "name": "Created",
+          "data_type": "created",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812189,
+          "ui_id": "Updated",
+          "name": "Updated",
+          "data_type": "updated",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812190,
+          "ui_id": "Closed",
+          "name": "Closed",
+          "data_type": "closed",
+          "user_defined": false
+        },
+        {
+          "database_id": 427812191,
+          "ui_id": 427812191,
+          "name": "Priority",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427812199,
+          "ui_id": 427812199,
+          "name": "Phase",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427812207,
+          "ui_id": 427812207,
+          "name": "Workstream",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427812228,
+          "ui_id": 427812228,
+          "name": "Readiness",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427812229,
+          "ui_id": 427812229,
+          "name": "Acceptance Gate",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427812230,
+          "ui_id": 427812230,
+          "name": "Level",
+          "data_type": "singleSelect",
+          "user_defined": true
+        }
+      ]
+    },
+    {
+      "number": 5,
+      "database_id": 27112492,
+      "node_id": "PVT_kwDOFHg4Xc4BnbQs",
+      "title": "Pick Your AI — Apple/iOS Application Delivery",
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/5",
+      "settings_url": "https://github.com/orgs/Pick-Your-AI/projects/5/settings",
+      "public": true,
+      "closed_at": null,
+      "field_count": 20,
+      "fields": [
+        {
+          "database_id": 427816497,
+          "ui_id": "Title",
+          "name": "Title",
+          "data_type": "title",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816498,
+          "ui_id": "Assignees",
+          "name": "Assignees",
+          "data_type": "assignees",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816499,
+          "ui_id": "Status",
+          "name": "Status",
+          "data_type": "singleSelect",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816500,
+          "ui_id": "Labels",
+          "name": "Labels",
+          "data_type": "labels",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816501,
+          "ui_id": "Linked pull requests",
+          "name": "Linked pull requests",
+          "data_type": "linkedPullRequests",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816502,
+          "ui_id": "Milestone",
+          "name": "Milestone",
+          "data_type": "milestone",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816503,
+          "ui_id": "Repository",
+          "name": "Repository",
+          "data_type": "repository",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816504,
+          "ui_id": "Type",
+          "name": "Type",
+          "data_type": "issueType",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816505,
+          "ui_id": "Reviewers",
+          "name": "Reviewers",
+          "data_type": "reviewers",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816506,
+          "ui_id": "Parent issue",
+          "name": "Parent issue",
+          "data_type": "parentIssue",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816507,
+          "ui_id": "Sub-issues progress",
+          "name": "Sub-issues progress",
+          "data_type": "subIssuesProgress",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816508,
+          "ui_id": "Created",
+          "name": "Created",
+          "data_type": "created",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816509,
+          "ui_id": "Updated",
+          "name": "Updated",
+          "data_type": "updated",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816510,
+          "ui_id": "Closed",
+          "name": "Closed",
+          "data_type": "closed",
+          "user_defined": false
+        },
+        {
+          "database_id": 427816511,
+          "ui_id": 427816511,
+          "name": "Priority",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427816512,
+          "ui_id": 427816512,
+          "name": "Phase",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427816513,
+          "ui_id": 427816513,
+          "name": "Workstream",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427816514,
+          "ui_id": 427816514,
+          "name": "Readiness",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427816515,
+          "ui_id": 427816515,
+          "name": "Acceptance Gate",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427816516,
+          "ui_id": 427816516,
+          "name": "Level",
+          "data_type": "singleSelect",
+          "user_defined": true
+        }
+      ]
+    },
+    {
+      "number": 6,
+      "database_id": 27113479,
+      "node_id": "PVT_kwDOFHg4Xc4BnbgH",
+      "title": "Pick Your AI — Contributor Leaderboard Delivery",
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/6",
+      "settings_url": "https://github.com/orgs/Pick-Your-AI/projects/6/settings",
+      "public": true,
+      "closed_at": null,
+      "field_count": 20,
+      "fields": [
+        {
+          "database_id": 427831010,
+          "ui_id": "Title",
+          "name": "Title",
+          "data_type": "title",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831011,
+          "ui_id": "Assignees",
+          "name": "Assignees",
+          "data_type": "assignees",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831012,
+          "ui_id": "Status",
+          "name": "Status",
+          "data_type": "singleSelect",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831013,
+          "ui_id": "Labels",
+          "name": "Labels",
+          "data_type": "labels",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831014,
+          "ui_id": "Linked pull requests",
+          "name": "Linked pull requests",
+          "data_type": "linkedPullRequests",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831015,
+          "ui_id": "Milestone",
+          "name": "Milestone",
+          "data_type": "milestone",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831016,
+          "ui_id": "Repository",
+          "name": "Repository",
+          "data_type": "repository",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831017,
+          "ui_id": "Type",
+          "name": "Type",
+          "data_type": "issueType",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831018,
+          "ui_id": "Reviewers",
+          "name": "Reviewers",
+          "data_type": "reviewers",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831019,
+          "ui_id": "Parent issue",
+          "name": "Parent issue",
+          "data_type": "parentIssue",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831020,
+          "ui_id": "Sub-issues progress",
+          "name": "Sub-issues progress",
+          "data_type": "subIssuesProgress",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831021,
+          "ui_id": "Created",
+          "name": "Created",
+          "data_type": "created",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831022,
+          "ui_id": "Updated",
+          "name": "Updated",
+          "data_type": "updated",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831023,
+          "ui_id": "Closed",
+          "name": "Closed",
+          "data_type": "closed",
+          "user_defined": false
+        },
+        {
+          "database_id": 427831084,
+          "ui_id": 427831084,
+          "name": "Priority",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427831101,
+          "ui_id": 427831101,
+          "name": "Readiness",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427831110,
+          "ui_id": 427831110,
+          "name": "Level",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427831124,
+          "ui_id": 427831124,
+          "name": "Phase",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427831140,
+          "ui_id": 427831140,
+          "name": "Workstream",
+          "data_type": "singleSelect",
+          "user_defined": true
+        },
+        {
+          "database_id": 427831150,
+          "ui_id": 427831150,
+          "name": "Acceptance Gate",
+          "data_type": "singleSelect",
+          "user_defined": true
+        }
+      ]
+    }
+  ],
+  "receiving_owners": [
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/1",
+      "number": 1,
+      "title": "T0: Configuration",
+      "assignees": [
+        "tynamite",
+        "appletechie"
+      ],
+      "parent_issue_url": null
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/4",
+      "number": 4,
+      "title": "T1: Model Selection",
+      "assignees": [
+        "zwright8",
+        "Mattycodes69"
+      ],
+      "parent_issue_url": null
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/8",
+      "number": 8,
+      "title": "T2: Infrastructure",
+      "assignees": [
+        "zwright8",
+        "Mattycodes69"
+      ],
+      "parent_issue_url": null
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/12",
+      "number": 12,
+      "title": "T3: Knowledge & Retrieval",
+      "assignees": [
+        "Mattycodes69",
+        "zabyxc01"
+      ],
+      "parent_issue_url": null
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/24",
+      "number": 24,
+      "title": "T4: Agents & Integrations",
+      "assignees": [
+        "CompleteDotTech",
+        "appletechie"
+      ],
+      "parent_issue_url": null
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/29",
+      "number": 29,
+      "title": "T5: Training & Fine-Tuning",
+      "assignees": [
+        "Mattycodes69",
+        "appletechie"
+      ],
+      "parent_issue_url": null
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/34",
+      "number": 34,
+      "title": "T6: Deployment & Operations",
+      "assignees": [
+        "appletechie",
+        "PUSHINGSQUARES"
+      ],
+      "parent_issue_url": null
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/39",
+      "number": 39,
+      "title": "T6: Cost Estimate",
+      "assignees": [
+        "appletechie",
+        "PUSHINGSQUARES"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/34"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/40",
+      "number": 40,
+      "title": "T0: Component Schema & Compatibility Rules",
+      "assignees": [
+        "zwright8",
+        "tynamite"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/1"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/41",
+      "number": 41,
+      "title": "T0: Catalog Data Sources & Freshness",
+      "assignees": [
+        "tynamite",
+        "PUSHINGSQUARES"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/1"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/42",
+      "number": 42,
+      "title": "T0: Saved, Shared & Compared Builds",
+      "assignees": [
+        "tynamite",
+        "appletechie"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/1"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/47",
+      "number": 47,
+      "title": "Market Research Program — Pick Your AI",
+      "assignees": [
+        "tynamite",
+        "appletechie"
+      ],
+      "parent_issue_url": null
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/48",
+      "number": 48,
+      "title": "MR-01 — Competitive Landscape Discovery",
+      "assignees": [
+        "Mattycodes69",
+        "appletechie"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/47"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/49",
+      "number": 49,
+      "title": "MR-02 — Competitive Feature Matrix",
+      "assignees": [
+        "zwright8",
+        "appletechie"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/47"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/50",
+      "number": 50,
+      "title": "MR-03 — Competitor Deep Dives",
+      "assignees": [
+        "zwright8",
+        "appletechie"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/47"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/51",
+      "number": 51,
+      "title": "MR-04 — PCPartPicker Product Experience",
+      "assignees": [
+        "tynamite",
+        "appletechie"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/47"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/52",
+      "number": 52,
+      "title": "MR-05 — Customer Research & Personas",
+      "assignees": [
+        "appletechie",
+        "PUSHINGSQUARES"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/47"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/53",
+      "number": 53,
+      "title": "MR-06 — Market Size, Demand & Trends",
+      "assignees": [
+        "Mattycodes69",
+        "appletechie"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/47"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/54",
+      "number": 54,
+      "title": "MR-07 — Pricing & Monetization",
+      "assignees": [
+        "zwright8",
+        "appletechie"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/47"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/55",
+      "number": 55,
+      "title": "MR-08 — Data Sources & Integration Opportunities",
+      "assignees": [
+        "tynamite",
+        "appletechie"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/47"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/56",
+      "number": 56,
+      "title": "MR-09 — Technical Feasibility",
+      "assignees": [
+        "Mattycodes69",
+        "appletechie"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/47"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/57",
+      "number": 57,
+      "title": "MR-10 — Competitive Differentiation",
+      "assignees": [
+        "tynamite",
+        "appletechie"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/47"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/58",
+      "number": 58,
+      "title": "MR-11 — MVP Definition & Prioritization",
+      "assignees": [
+        "appletechie",
+        "PUSHINGSQUARES"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/47"
+    },
+    {
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/59",
+      "number": 59,
+      "title": "MR-12 — Research Quality, Synthesis & Handoffs",
+      "assignees": [
+        "Mattycodes69",
+        "appletechie"
+      ],
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/issues/47"
+    }
+  ],
+  "limitations": [
+    "GitHub can change between requests; the explicit observation window and immutable document revisions define this record.",
+    "Repository issue totals exclude pull requests. Closed pull requests are not assumed merged. Number gaps are not missing objects when the paginated collection is complete.",
+    "Project hierarchy rows are filtered and loaded separately from descendants. No Project membership or historical activity total is inferred from a rendered view or its initial page.",
+    "Project node IDs are opaque values read from GitHub. Field database IDs and UI IDs are separately named; they are not synthesized GraphQL node IDs or an executable field-option mapping.",
+    "All configured field definitions are recorded, including built-in fields. Project-specific vocabularies and existing assignees/parents are preserved.",
+    "Public visibility does not itself establish a collector installation, source-event coverage, individual consent, evidence acceptance or public release.",
+    "Research and market decision records remain in the research repository; its frozen builder contracts are separate from leaderboard contracts.",
+    "The 2026-10-17 planning/source-audit.json remains an unchanged historical snapshot."
+  ]
+}
