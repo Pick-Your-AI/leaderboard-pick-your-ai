@@ -130,6 +130,86 @@ test("timeline source retains actual event identity, actor and occurrence time",
   assert.equal(page.facts[0].occurredAt, "2026-10-01T12:00:00.000Z");
 });
 
+const unqualifiedSourceTimes = [
+  "2026-02-30T12:00:00Z",
+  "2025-02-29T12:00:00Z",
+  "2026-10-01",
+  "2026-10-01T12:00:00",
+  "2026-10-01T12:00:00+00:00",
+  "2026-10-01T12:00:00.000001Z",
+  "2026-10-01T12:00:00.0000Z",
+  "2026-10-01T24:00:00Z",
+  "2026-10-01T12:00:60Z",
+  "2026-10-01T12:00:00Z\n",
+  "October 1, 2026",
+  "",
+  0,
+  null,
+];
+
+test("timeline collection leaves unqualified source occurrence times unknown", async () => {
+  for (const created_at of unqualifiedSourceTimes) {
+    const event = {
+      id: 901,
+      event: "assigned",
+      created_at,
+      actor: { id: 3 },
+      issue: { html_url: `https://github.com/${repository.slug}/issues/20` },
+    };
+    const original = JSON.stringify(event);
+    const source = createGithubCollectionSource({
+      sourceId: "synthetic",
+      repositories: [{ ...repository, families: ["timelines"] }],
+      client: { rest: async () => ({ id: 2, private: false }), scanRest: async (scan) => scan.select([event]) },
+    });
+    const page = await source.readPage({ ...request, family: "timelines" });
+    assert.equal(page.facts[0].occurredAt, null, JSON.stringify(created_at));
+    assert.equal(page.facts[0].subjectId, "901");
+    assert.equal(page.facts[0].actorId, "3");
+    assert.equal(JSON.stringify(event), original);
+  }
+});
+
+test("collection preserves calendar-valid UTC source instants at supported precision", async () => {
+  for (const [created_at, expected] of [
+    ["2024-02-29T12:00:00Z", "2024-02-29T12:00:00.000Z"],
+    ["2026-10-01T12:00:00.1Z", "2026-10-01T12:00:00.100Z"],
+    ["2026-10-01T12:00:00.12Z", "2026-10-01T12:00:00.120Z"],
+    ["2026-10-01T12:00:00.123Z", "2026-10-01T12:00:00.123Z"],
+  ]) {
+    const event = {
+      id: 901,
+      event: "assigned",
+      created_at,
+      actor: { id: 3 },
+      issue: { html_url: `https://github.com/${repository.slug}/issues/20` },
+    };
+    const source = createGithubCollectionSource({
+      sourceId: "synthetic",
+      repositories: [{ ...repository, families: ["timelines"] }],
+      client: { rest: async () => ({ id: 2, private: false }), scanRest: async (scan) => scan.select([event]) },
+    });
+    assert.equal((await source.readPage({ ...request, family: "timelines" })).facts[0].occurredAt, expected);
+  }
+});
+
+test("unqualified timestamps cannot invent a current-state source revision", async () => {
+  for (const updated_at of unqualifiedSourceTimes) {
+    const issue = {
+      node_id: "I_synthetic",
+      html_url: `https://github.com/${repository.slug}/issues/20`,
+      state: "open",
+      updated_at,
+    };
+    const source = createGithubCollectionSource({
+      sourceId: "synthetic",
+      repositories: [{ ...repository, families: ["issues"] }],
+      client: { rest: async () => ({ id: 2, private: false }), scanRest: async (scan) => scan.select([issue]) },
+    });
+    await assert.rejects(source.readPage({ ...request, family: "issues" }), /source_identity_or_revision_unverified/);
+  }
+});
+
 test("Project collector traverses subject memberships and current field snapshots", async () => {
   const calls = [];
   const source = createGithubCollectionSource({

@@ -193,6 +193,9 @@ export async function harness(t, extra = {}) {
     await runtime.stop();
     controlsStore.close();
     await engine.close();
+    // Test hooks can outlive the case. Release the closed WASM database rather
+    // than retaining its memory through every saved runtime/db closure.
+    engine = null;
     assert.equal(dirname(resolve(directory)), resolve(tmpdir()));
     assert.match(basename(directory), /^leaderboard-pipeline-/);
     await rm(directory, { recursive: true, force: true });
@@ -207,7 +210,9 @@ export async function harness(t, extra = {}) {
     db,
     controlsStore,
     options,
-    engine,
+    get engine() {
+      return engine;
+    },
     directory,
     setPrivate(value) {
       privateRepository = value;
