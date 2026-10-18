@@ -243,6 +243,7 @@ export async function createPipeline(options) {
         classificationPolicies.documentation,
       ]),
     );
+  const identityNormalizationSignatures = [...new Set(frozenNormalizationSignatures)];
   const verifyConfig = options.verifyConfiguration ?? (async () => false);
   const authorizeCorrection = options.authorizeCorrection ?? (async () => false);
   const now = options.now ?? (() => new Date().toISOString());
@@ -331,12 +332,12 @@ export async function createPipeline(options) {
              AND ($4::jsonb IS NULL OR EXISTS (
                SELECT 1 FROM jsonb_to_recordset($4::jsonb) AS bound(fact_key text,document_hash text)
                WHERE bound.fact_key=f.fact_key AND bound.document_hash=n.document_hash
-             )) LIMIT 10001 FOR SHARE OF n`,
+             )) LIMIT $5 FOR SHARE OF n`,
             [
               binding.normalizationHashes,
               // Legacy documents still bind historical frozen actor evidence;
               // only signatures covering every current source classification are eligible.
-              frozenNormalizationSignatures,
+              identityNormalizationSignatures,
               authorization.sources.map((source) => source.repositoryId),
               normalizationSources === undefined
                 ? null
@@ -346,11 +347,12 @@ export async function createPipeline(options) {
                       document_hash: entry.documentHash,
                     })),
                   ),
+              10000 * identityNormalizationSignatures.length + 1,
             ],
           )
         ).rows;
         requireThat(
-          rows.length <= 10000 &&
+          new Set(rows.map((row) => JSON.stringify([row.fact_key, row.document_hash]))).size <= 10000 &&
             new Set(rows.map((row) => row.document_hash)).size === binding.normalizationHashes.length &&
             (normalizationSources === undefined ||
               new Set(rows.map((row) => row.fact_key)).size === normalizationSources.length),

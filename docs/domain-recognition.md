@@ -135,6 +135,12 @@ wrapper. Every accepted format binds all active documentation and research rules
 its stored records and preview results remain unchanged. Fresh normalization always
 uses the current projection, and changing classification cannot admit an older
 unclassified cache.
+
+The frozen identity budget remains 10,000 distinct source-and-document pairs.
+Byte-identical copies in retained cache generations do not consume additional
+source slots. The bounded read still locks and validates every matching cache
+copy, so a valid copy cannot hide corruption in another accepted generation.
+
 Synthetic provenance is carried through the pipeline's flattening step, and
 specialist recognition rejects a synthetic source even if its private attestation
 claims real data. Synthetic fixtures never become actual measurement credit.
