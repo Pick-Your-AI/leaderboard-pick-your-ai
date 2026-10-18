@@ -1,0 +1,50 @@
+name: Metric proposal
+description: Propose a versioned independent metric or policy change
+title: 'Metric: '
+body:
+- type: markdown
+  attributes:
+    value: This is a public issue. Do not include tokens, cookies, email addresses, private source payloads, personal
+      evidence or exploit details. Follow SECURITY.md for sensitive reports. Check existing issues first; small
+      steps belong in the existing work-package checklist. Native ownership and relationships are set during triage,
+      not inferred from this form.
+- type: textarea
+  id: scope
+  attributes:
+    label: Metric identity and purpose
+    description: Link an existing metric ID/work package or explain why a new definition is needed. Avoid a universal
+      productivity score.
+  validations:
+    required: true
+- type: textarea
+  id: definition
+  attributes:
+    label: Counting definition
+    description: Specify numerator, denominator, unit, eligibility, actor role, observed/qualified/reviewed class,
+      event clock, date basis, grouping and deduplication.
+  validations:
+    required: true
+- type: textarea
+  id: sources
+  attributes:
+    label: Source and coverage evidence
+    description: Link public source documentation and verification cases. Identify permissions, source gaps and
+      when results must remain unknown or unsupported.
+  validations:
+    required: true
+- type: textarea
+  id: fairness
+  attributes:
+    label: Examples and counterexamples
+    description: Provide synthetic accepted, pending, duplicate, missing-identity and boundary cases. Do not infer
+      human effort or AI usage from style.
+  validations:
+    required: true
+- type: textarea
+  id: rollout
+  attributes:
+    label: Compatibility and review
+    description: Describe definition version, same-dataset comparison, migration/backfill, rollback and affected
+      consumers. Identify the designated review role; do not assign a person by implication.
+  validations:
+    required: true
