@@ -1,4 +1,5 @@
 import React from "react";
+import { prototypeNavigation } from "../lib/prototype-url.ts";
 import { PageHeader } from "../components/Layout.tsx";
 import { ReferenceScope } from "../components/ScopeBar.tsx";
 import { CoverageLabel, EmptyState, StateLabel, evidenceLabels } from "../components/status.tsx";
@@ -427,11 +428,14 @@ export function PrototypeGuidePage() {
       <section className="section" aria-labelledby="required-states">
         <h2 id="required-states">Required states</h2>
         <ul>
-          {requiredStates.map(([label, href]) => (
-            <li key={label}>
-              <Link to={href}>{label}</Link> <span className="mono muted small">{href}</span>
-            </li>
-          ))}
+          {requiredStates.map(([label, path]) => {
+            const { href } = prototypeNavigation(path);
+            return (
+              <li key={label}>
+                <Link to={href}>{label}</Link> <span className="mono muted small">{href}</span>
+              </li>
+            );
+          })}
         </ul>
       </section>
       <section className="section" aria-labelledby="fixture">
