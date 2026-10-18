@@ -102,3 +102,12 @@ test("legacy shared Receipt keeps unavailable title, action, clocks and history 
   assert.match(html, /Unknown; neither acceptance nor its time can be inferred/);
   assert.match(html, /does not establish a complete history/);
 });
+
+test("shared Receipt renders measure membership canonically without changing source arrays", () => {
+  const metricIds = ["pr_opened", "documentation"];
+  const forward = render({ ...base, contribution: { ...base.contribution, metricIds } });
+  const reverse = render({ ...base, contribution: { ...base.contribution, metricIds: [...metricIds].reverse() } });
+  assert.equal(forward, reverse);
+  assert.deepEqual(metricIds, ["pr_opened", "documentation"]);
+  assert.ok(forward.indexOf(">documentation</a>") < forward.indexOf(">pr_opened</a>"));
+});

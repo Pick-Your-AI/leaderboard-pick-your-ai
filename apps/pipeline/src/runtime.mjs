@@ -593,16 +593,37 @@ export async function createPipeline(options) {
       };
     });
   }
-  function confirmPublication(publication, comparisonInput) {
+  const confirmationMatches = (confirmation, scope, snapshotId, revision) =>
+    confirmation?.configurationVersion === config.version &&
+    confirmation.configurationHash === digest(config) &&
+    confirmation.dataMode === dataMode &&
+    confirmation.scopeKey === scopeKey(scope) &&
+    confirmation.snapshotId === snapshotId &&
+    confirmation.revision === revision;
+  function confirmPublication(scope, publication, comparisonInput) {
     controlsStore.transaction((state) => {
       const overlay = restrictConfiguration(state);
       if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
       if (comparisonInput) publication.comparisonInput = policyComparisons.capture(state, comparisonInput);
       state.pipelinePublications ||= {};
-      state.pipelinePublications[publication.snapshotId] = {
+      const confirmation = {
         configurationVersion: config.version,
+        configurationHash: digest(config),
         controlsConfigurationRevision: runConfigurationRevision,
+        dataMode,
+        scopeKey: scopeKey(scope),
+        snapshotId: publication.snapshotId,
+        revision: publication.revision,
       };
+      state.pipelinePublications[publication.snapshotId] = confirmation;
+      state.pipelineHeads ||= {};
+      const head = state.pipelineHeads[scopeKey(scope)];
+      if (head && (!Number.isSafeInteger(head.revision) || head.revision < 1)) fail("confirmed_head_integrity_error");
+      if (head?.revision === publication.revision && head.snapshotId !== publication.snapshotId)
+        fail("confirmed_head_revision_conflict");
+      // The marker, preview capture and visible head are one durable SQLite
+      // commit. A delayed confirmation may acknowledge history, never rewind it.
+      if (!head || head.revision <= publication.revision) state.pipelineHeads[scopeKey(scope)] = confirmation;
     });
   }
   async function publish(scope, cutoff, observationCutoff, dispatch) {
@@ -627,12 +648,13 @@ export async function createPipeline(options) {
       )
     )
       fail("dispatch_source_generation_changed");
+    let priorPublication = null;
     if (dispatch) {
       // A committed operation can be acknowledged after another publisher advances
       // the head. Never repoint the head to its historical immutable revision.
       const prior = (
         await db.query(
-          `SELECT saved.document,saved.document_hash,saved.snapshot_id,saved.revision
+          `SELECT saved.document,saved.document_hash,saved.snapshot_id,saved.revision,saved.config_version
         FROM leaderboard_pipeline.dispatch_publications AS operation
         JOIN leaderboard_pipeline.snapshots AS saved USING(snapshot_id)
         WHERE operation.operation_key=$1 AND operation.scope_key=$2`,
@@ -640,11 +662,39 @@ export async function createPipeline(options) {
         )
       ).rows[0];
       if (prior) {
-        if (digest(prior.document) !== prior.document_hash) fail("dispatch_snapshot_integrity_error");
+        if (
+          digest(prior.document) !== prior.document_hash ||
+          prior.document.snapshot.snapshotId !== prior.snapshot_id ||
+          prior.document.snapshot.revision !== Number(prior.revision) ||
+          prior.config_version !== config.version ||
+          prior.document.dataMode !== dataMode
+        )
+          fail("dispatch_snapshot_integrity_error");
         await db.transaction((tx) => outbox.assertLease(tx, dispatch.lease));
-        const publication = { snapshotId: prior.snapshot_id, revision: Number(prior.revision), changed: false };
-        confirmPublication(publication);
-        return publication;
+        priorPublication = { snapshotId: prior.snapshot_id, revision: Number(prior.revision), changed: false };
+        if (!controlsStore.read().pipelineHeads?.[scopeKey(scope)]) {
+          const latest = (
+            await db.query("SELECT snapshot_id FROM leaderboard_pipeline.heads WHERE scope_key=$1", [scopeKey(scope)])
+          ).rows[0];
+          // Missing/legacy private authority has no trustworthy high-water mark.
+          // Only an authorized replay of the latest SQL publication may rebuild
+          // it; a delayed historical operation cannot choose an older baseline.
+          if (latest?.snapshot_id !== prior.snapshot_id) fail("confirmed_head_recovery_requires_latest_publication");
+        }
+        if (
+          confirmationMatches(
+            controlsStore.read().pipelinePublications?.[prior.snapshot_id],
+            scope,
+            prior.snapshot_id,
+            Number(prior.revision),
+          )
+        ) {
+          confirmPublication(scope, priorPublication);
+          return priorPublication;
+        }
+        // An unconfirmed SQL commit has no private preview capture. Recompute
+        // its exact frozen input before atomically confirming both; do not
+        // manufacture a marker or move the SQL head to a historical operation.
       }
     }
     const outputs = await normalizeStored(
@@ -881,6 +931,23 @@ export async function createPipeline(options) {
       repositoryIds: repos.map((repo) => repo.id),
     };
     const snapshotId = digest(content);
+    if (priorPublication && priorPublication.snapshotId !== snapshotId) fail("dispatch_snapshot_replay_changed");
+    const comparisonInputFor = (publication) => ({
+      input: frozen,
+      scope: engineScope,
+      policies: config.policies.map((item) => item.policy),
+      aggregates,
+      snapshot: { snapshotId: publication.snapshotId, revision: publication.revision },
+      authorization: {
+        configurationHash: digest(config),
+        dataMode,
+        controlsConfigurationRevision: runConfigurationRevision,
+        sources: generations.map((row) => ({
+          repositoryId: String(row.repository_id),
+          generation: String(row.generation),
+        })),
+      },
+    });
     const publicationStarted = performance.now();
     try {
       const publication = await db.transaction(async (tx) => {
@@ -929,6 +996,21 @@ export async function createPipeline(options) {
           ])
         ).rows[0];
         assertRunConfiguration();
+        if (priorPublication) {
+          const saved = (
+            await tx.query(
+              "SELECT document,document_hash FROM leaderboard_pipeline.receipts WHERE operation_key=$1 AND kind='snapshot_published'",
+              [`publish:${scopeKey(scope)}:${snapshotId}`],
+            )
+          ).rows[0];
+          if (
+            !saved ||
+            digest(saved.document) !== saved.document_hash ||
+            saved.document.comparisonInputHash !== digest(comparisonInputFor(priorPublication))
+          )
+            fail("dispatch_snapshot_input_changed_or_unbound");
+          return bindDispatch(priorPublication);
+        }
         if (current?.snapshot_id === snapshotId)
           return bindDispatch({ snapshotId, revision: Number(current.revision), changed: false });
         const revision = Number(current?.revision ?? 0) + 1;
@@ -984,6 +1066,7 @@ export async function createPipeline(options) {
           configuration: config.version,
           policySignatures: config.policies.map((item) => item.signature),
           datasetId: frozen.datasetId,
+          comparisonInputHash: digest(comparisonInputFor({ snapshotId, revision })),
           controlsRevision: state.revision,
         });
         assertRunConfiguration();
@@ -991,22 +1074,7 @@ export async function createPipeline(options) {
       });
       // PostgreSQL can commit while controls change. Confirm publication only in
       // the same synchronous SQLite boundary used by configuration activation.
-      confirmPublication(publication, {
-        input: frozen,
-        scope: engineScope,
-        policies: config.policies.map((item) => item.policy),
-        aggregates,
-        snapshot: { snapshotId: publication.snapshotId, revision: publication.revision },
-        authorization: {
-          configurationHash: digest(config),
-          dataMode,
-          controlsConfigurationRevision: runConfigurationRevision,
-          sources: generations.map((row) => ({
-            repositoryId: String(row.repository_id),
-            generation: String(row.generation),
-          })),
-        },
-      });
+      confirmPublication(scope, publication, comparisonInputFor(publication));
       monitorSuccess(scopeKey(scope), "publication", publicationStarted, String(publication.revision));
       return publication;
     } catch (error) {
@@ -1017,84 +1085,125 @@ export async function createPipeline(options) {
   const source = {
     async read(scope, pin, signal) {
       if (signal.aborted || !(await approved()) || !configuredScope(scope)) return null;
-      return db.transaction(async (tx) => {
-        const result = await tx.query(
-          `SELECT selected.document,selected.document_hash,selected.config_version,selected.repository_ids,selected.revision AS selected_revision,selected.snapshot_id AS selected_id,head.revision,
-      latest.snapshot_id AS head_id,latest.document->'snapshot'->>'generatedAt' AS published_at
-      FROM leaderboard_pipeline.heads AS head JOIN leaderboard_pipeline.snapshots AS latest ON latest.snapshot_id=head.snapshot_id
-      JOIN leaderboard_pipeline.snapshots AS selected ON selected.snapshot_id=COALESCE($2,head.snapshot_id)
-      WHERE head.scope_key=$1 AND selected.scope_key=head.scope_key`,
-          [scopeKey(scope), pin],
-        );
-        if (signal.aborted || !result.rows[0]) return null;
-        const selected = result.rows[0];
+      // The SQL head allocates revisions, not visibility. Only this private
+      // authority advances after confirmation. Bound retries if another runtime
+      // confirms a newer head while this reader is awaiting SQL/approval.
+      const retry = Symbol("confirmed_head_changed");
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const head = controlsStore.read().pipelineHeads?.[scopeKey(scope)];
         if (
-          digest(selected.document) !== selected.document_hash ||
-          selected.document.snapshot.snapshotId !== selected.selected_id ||
-          selected.document.snapshot.revision !== Number(selected.selected_revision)
-        )
-          fail("public_snapshot_integrity_error");
-        if (selected.config_version !== config.version || selected.document.dataMode !== dataMode) return null;
-        const access = (
-          await tx.query(
-            "SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE",
-            [selected.repository_ids],
-          )
-        ).rows;
-        if (
-          signal.aborted ||
-          access.length !== selected.repository_ids.length ||
-          access.some((row) => row.state !== "public")
+          !confirmationMatches(head, scope, head?.snapshotId, head?.revision) ||
+          !Number.isSafeInteger(head.revision) ||
+          head.revision < 1
         )
           return null;
-        const removed = (
-          await tx.query(
-            `SELECT subject_id FROM leaderboard_ingestion.object_suppressions WHERE repository_id=ANY($1::bigint[])
+        const result = await db.transaction(async (tx) => {
+          const result = await tx.query(
+            `SELECT selected.document,selected.document_hash,selected.config_version,selected.repository_ids,selected.revision AS selected_revision,selected.snapshot_id AS selected_id,latest.revision,
+      latest.snapshot_id AS head_id,latest.document AS head_document,latest.document_hash AS head_document_hash,
+      latest.config_version AS head_config_version,latest.repository_ids AS head_repository_ids,
+      latest.document->'snapshot'->>'generatedAt' AS published_at
+      FROM leaderboard_pipeline.snapshots AS latest
+      JOIN leaderboard_pipeline.snapshots AS selected ON selected.snapshot_id=COALESCE($2,latest.snapshot_id)
+      WHERE latest.scope_key=$1 AND selected.scope_key=latest.scope_key AND latest.snapshot_id=$3`,
+            [scopeKey(scope), pin, head.snapshotId],
+          );
+          if (signal.aborted || !result.rows[0]) return null;
+          const selected = result.rows[0];
+          if (
+            digest(selected.document) !== selected.document_hash ||
+            selected.document.snapshot.snapshotId !== selected.selected_id ||
+            selected.document.snapshot.revision !== Number(selected.selected_revision) ||
+            digest(selected.head_document) !== selected.head_document_hash ||
+            selected.head_document.snapshot.snapshotId !== head.snapshotId ||
+            selected.head_document.snapshot.revision !== head.revision ||
+            Number(selected.revision) !== head.revision ||
+            scopeKey(selected.document.scope) !== scopeKey(scope) ||
+            scopeKey(selected.head_document.scope) !== scopeKey(scope) ||
+            canonical(selected.repository_ids) !== canonical(repositoriesFor(scope).map((repo) => repo.id)) ||
+            canonical(selected.head_repository_ids) !== canonical(selected.repository_ids)
+          )
+            fail("public_snapshot_integrity_error");
+          if (
+            selected.config_version !== config.version ||
+            selected.document.dataMode !== dataMode ||
+            selected.head_config_version !== config.version ||
+            selected.head_document.dataMode !== dataMode
+          )
+            return null;
+          const access = (
+            await tx.query(
+              "SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE",
+              [selected.repository_ids],
+            )
+          ).rows;
+          if (
+            signal.aborted ||
+            access.length !== selected.repository_ids.length ||
+            access.some((row) => row.state !== "public")
+          )
+            return null;
+          const removed = (
+            await tx.query(
+              `SELECT subject_id FROM leaderboard_ingestion.object_suppressions WHERE repository_id=ANY($1::bigint[])
       UNION SELECT artifact_id AS subject_id FROM leaderboard_pipeline.corrections WHERE repository_id=ANY($1::bigint[])`,
-            [selected.repository_ids],
+              [selected.repository_ids],
+            )
+          ).rows.map((row) => row.subject_id);
+          if (!(await approved()) || signal.aborted) return null;
+          // Read current private controls after all awaited I/O, even for pinned historical snapshots.
+          const controls = controlsStore.read();
+          const overlay = restrictConfiguration(controls);
+          if (canonical(controls.pipelineHeads?.[scopeKey(scope)]) !== canonical(head)) return retry;
+          if (
+            !confirmationMatches(
+              controls.pipelinePublications?.[selected.selected_id],
+              scope,
+              selected.selected_id,
+              Number(selected.selected_revision),
+            ) ||
+            !confirmationMatches(
+              controls.pipelinePublications?.[selected.head_id],
+              scope,
+              selected.head_id,
+              Number(selected.revision),
+            )
           )
-        ).rows.map((row) => row.subject_id);
-        if (signal.aborted) return null;
-        // Read current private controls after all awaited I/O, even for pinned historical snapshots.
-        const controls = controlsStore.read();
-        const overlay = restrictConfiguration(controls);
-        if (
-          [selected.selected_id, selected.head_id].some(
-            (id) => controls.pipelinePublications?.[id]?.configurationVersion !== config.version,
-          )
-        )
-          return null;
-        const document = copy(selected.document);
-        document.disabledMetrics = overlay.disabledMetrics.map((entry) => ({
-          ...entry,
-          reason: /^[a-z0-9_:-]{1,100}$/.test(entry.reason)
-            ? entry.reason
-            : "metric_disabled_by_approved_configuration",
-        }));
-        const disabled = new Set(overlay.disabledMetricIds);
-        document.rows = document.rows.filter((row) => !disabled.has(row.result.metricId));
-        document.ranking = document.ranking.filter((row) => !disabled.has(row.metricId));
-        if (document.diagnostics)
-          document.diagnostics = document.diagnostics.filter((row) => !disabled.has(row.metricId));
-        const evidenceIds = new Set(document.rows.flatMap((row) => row.evidenceIds));
-        document.evidence = document.evidence.filter((entry) => evidenceIds.has(entry.contribution.contributionId));
-        return {
-          head: {
-            snapshotId: selected.head_id,
-            revision: Number(selected.revision),
-            publishedAt: selected.published_at,
-          },
-          selected: document,
-          controls: {
-            version: `controls-${controls.revision}-${overlay.revision}-${digest([config.version, access.map((row) => [String(row.repository_id), String(row.generation)]), [...removed].sort()]).slice(0, 16)}`,
-            suppressedActorIds: Object.entries(controls.profiles)
-              .filter(([, profile]) => profile.suppressed)
-              .map(([id]) => id),
-            suppressedArtifactIds: removed,
-            revokedSnapshotIds: [],
-          },
-        };
-      });
+            return null;
+          const document = copy(selected.document);
+          document.disabledMetrics = overlay.disabledMetrics.map((entry) => ({
+            ...entry,
+            reason: /^[a-z0-9_:-]{1,100}$/.test(entry.reason)
+              ? entry.reason
+              : "metric_disabled_by_approved_configuration",
+          }));
+          const disabled = new Set(overlay.disabledMetricIds);
+          document.rows = document.rows.filter((row) => !disabled.has(row.result.metricId));
+          document.ranking = document.ranking.filter((row) => !disabled.has(row.metricId));
+          if (document.diagnostics)
+            document.diagnostics = document.diagnostics.filter((row) => !disabled.has(row.metricId));
+          const evidenceIds = new Set(document.rows.flatMap((row) => row.evidenceIds));
+          document.evidence = document.evidence.filter((entry) => evidenceIds.has(entry.contribution.contributionId));
+          return {
+            head: {
+              snapshotId: selected.head_id,
+              revision: Number(selected.revision),
+              publishedAt: selected.published_at,
+            },
+            selected: document,
+            controls: {
+              version: `controls-${controls.revision}-${overlay.revision}-${digest([config.version, access.map((row) => [String(row.repository_id), String(row.generation)]), [...removed].sort()]).slice(0, 16)}`,
+              suppressedActorIds: Object.entries(controls.profiles)
+                .filter(([, profile]) => profile.suppressed)
+                .map(([id]) => id),
+              suppressedArtifactIds: removed,
+              revokedSnapshotIds: [],
+            },
+          };
+        });
+        if (result !== retry) return result;
+      }
+      return null;
     },
   };
   const app = c.service.createService({
@@ -1239,7 +1348,12 @@ export async function createPipeline(options) {
         const confirmation = controlsStore.read().pipelinePublications?.[publication.snapshotId];
         if (
           !receipt ||
-          confirmation?.configurationVersion !== config.version ||
+          !confirmationMatches(
+            confirmation,
+            config.scopes.find((scope) => scopeKey(scope) === publication.scopeKey),
+            publication.snapshotId,
+            publication.revision,
+          ) ||
           confirmation?.controlsConfigurationRevision !== runConfigurationRevision
         )
           fail("dispatch_publication_unconfirmed");

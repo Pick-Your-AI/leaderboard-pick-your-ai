@@ -132,7 +132,7 @@ export function Receipt({ value, selected }: { value: Evidence; selected: Select
       </dd>
       <dt>Measures</dt>
       <dd>
-        {value.contribution.metricIds.map((id) => (
+        {[...value.contribution.metricIds].sort().map((id) => (
           <p key={id}>
             <a data-api-nav href={uiHref(`/leaderboards/${encodeURIComponent(id)}`, selected, { metric: id })}>
               {id}

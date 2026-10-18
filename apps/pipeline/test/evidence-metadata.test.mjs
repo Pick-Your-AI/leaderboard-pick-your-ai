@@ -172,6 +172,11 @@ test("recollection selects a bounded as-collected label deterministically withou
   assert.deepEqual(selectEvidenceMetadata(old, newer), newer);
   assert.deepEqual(selectEvidenceMetadata(newer, old), newer);
   assert.equal(selectEvidenceMetadata(old, newer).evidenceMetadata.history.records.length, 1);
+  const projected = materializeEvidenceMetadata(selectEvidenceMetadata(old, newer), normalized("Old label").facts[0]);
+  assert.equal(projected.evidenceMetadata.artifactTitle.value, "New label");
+  assert.equal(projected.evidenceMetadata.artifactTitle.collectedAt, "2026-10-04T10:00:00.000Z");
+  assert.equal(projected.evidenceMetadata.observedAt, collected);
+
   const conflict = structuredClone(newer);
   conflict.evidenceMetadata.sourceAction = "issue_closed";
   assert.throws(() => selectEvidenceMetadata(old, conflict), /conflicting_evidence_metadata/);
