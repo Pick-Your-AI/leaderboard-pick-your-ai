@@ -1,3 +1,4 @@
+import { sourceEventSchema } from "@pick-your-ai/contracts";
 import { metadata, parameters, publicLink, ReadFailure, type Selection } from "./client.ts";
 const id = /^[A-Za-z0-9_.:-]{1,200}$/;
 const fail = (): never => {
@@ -15,7 +16,9 @@ const identity = (value: unknown) => {
 };
 const date = (value: unknown) => {
   const result = text(value, 40);
-  return Number.isFinite(Date.parse(result)) && new Date(result).toISOString() === result ? result : fail();
+  return sourceEventSchema.shape.occurredAt.safeParse(result).success && Number.isFinite(Date.parse(result))
+    ? result
+    : fail();
 };
 const list = (value: unknown, maximum: number): unknown[] =>
   Array.isArray(value) && value.length <= maximum ? value : fail();
@@ -61,7 +64,11 @@ export function achievements(value: unknown, selected: Selection, actorId: strin
         fail();
       seen.add(rule);
       const occurredAt = date(item.occurredAt);
-      if ((selected.start && occurredAt < selected.start) || (selected.end && occurredAt >= selected.end)) fail();
+      if (
+        (selected.start && Date.parse(occurredAt) < Date.parse(selected.start)) ||
+        (selected.end && Date.parse(occurredAt) >= Date.parse(selected.end))
+      )
+        fail();
       const evidenceIds = list(item.evidenceIds, 1).map(identity);
       const artifactIds = list(item.artifactIds, 1).map(identity);
       const sourceUrls = list(item.sourceUrls, 1).map((value) => publicLink(text(value)) ?? fail());
