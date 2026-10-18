@@ -66,7 +66,7 @@ PR155 is already merged in the inspected main revision. PR status is a point-in-
 | [LB-17 / #18](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/18) — Administration, moderation and contributor controls | OPEN | `apps/controls/src; apps/controls/test/controls.test.mjs; docs/contributor-controls.md`. Protected controls, OAuth/session primitives and projection suppression exist. Complete operator/account/evidence-review UI and real identity-provider acceptance remain owned work. | Coordinate PR154 admin/account/receipt/policy changes; prove direct API authorization, durable receipts and actual public correction impact. Complete accepted child outcomes before epic closure. |
 | [LB-18 / #19](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/19) — Security, privacy and operational safeguards | OPEN | `docs/security-candidate.md; apps/controls/src; apps/service/src/public-source.ts; infra/recovery`. Fail-closed projections, content restrictions, session boundaries and recovery candidates exist. Evidence-retention purge policy/jobs and deployment secret drill remain distinct gaps. | Audit retention architecture and source boundaries; review PR157 safeguards; require independent final security/privacy evidence. Complete accepted child outcomes before epic closure. |
 | [LB-19 / #20](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/20) — Verification, accessibility and performance | OPEN | `tests; packages/metrics/test; apps/web/browser; infra/recovery/test; docs/ui-validation.md`. Synthetic invariant/browser/database suites exist; no claim of real-data reconciliation, manual accessibility, accepted scale budgets or staging recovery follows. | Run required suite on reviewed head; add meaningful missing adversarial coverage; obtain actual source/participant/staging evidence. Complete accepted child outcomes before epic closure. |
-| [LB-20 / #21](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/21) — Hosting, observability and release operations | OPEN | `infra/observability; infra/recovery; docs/OBSERVABILITY.md; docs/RECOVERY.md; docs/OPERATIONS_PLAN.md; docs/PUBLIC_TARGET.md`. Observability and local recovery primitives exist; target domain selected. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent. | Review PR157 then obtain approved existing host and operator inputs; perform measured drills and anonymous release readback before launch. Complete accepted child outcomes before epic closure. |
+| [LB-20 / #21](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/21) — Hosting, observability and release operations | OPEN | `infra/observability; infra/recovery; docs/OBSERVABILITY.md; docs/RECOVERY.md; docs/OPERATIONS_PLAN.md; docs/PUBLIC_TARGET.md`. Observability and local recovery primitives exist; target domain configured in local plans/examples. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent. | Review PR157 then obtain approved existing host and operator inputs; perform measured drills and anonymous release readback before launch. Complete accepted child outcomes before epic closure. |
 
 ## Work-package ledger
 
@@ -111,7 +111,7 @@ Every package below retains its exact baseline acceptance criteria, dependency I
 - Dependencies (baseline): LB-01.03.
 - Implementation/test evidence: `planning/decision-register.json; docs/GOVERNANCE.md; docs/PRODUCT.md; docs/PUBLIC_TARGET.md`.
 - Remaining evidence / limit: Public target leaderboard.pickyour.ai is selected in docs/PUBLIC_TARGET.md; host capabilities, budget and operator are still unresolved.
-- Next action: Preserve domain decision; obtain verified approved host/runtime and accountable operator receipt.
+- Next action: Preserve configured domain value; obtain verified approved host/runtime and accountable operator receipt.
 - Acceptance criteria to verify against evidence:
   - Architecture decision identifies actual host capabilities and owner
   - No assumption that existing cPanel host runs Node services
@@ -1368,7 +1368,7 @@ Every package below retains its exact baseline acceptance criteria, dependency I
 - Dependencies (baseline): LB-01.04, LB-18.04.
 - Implementation/test evidence: `infra/observability; infra/recovery; docs/OBSERVABILITY.md; docs/RECOVERY.md; docs/OPERATIONS_PLAN.md; docs/PUBLIC_TARGET.md`.
 - Package-specific notes: [GOVERNANCE.md](GOVERNANCE.md).
-- Remaining evidence / limit: Observability and local recovery primitives exist; target domain selected. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent.
+- Remaining evidence / limit: Observability and local recovery primitives exist; target domain configured in local plans/examples. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent.
 - Next action: Review PR157 then obtain approved existing host and operator inputs; perform measured drills and anonymous release readback before launch.
 - Acceptance criteria to verify against evidence:
   - Host capability and recurring-cost assumptions are verified
@@ -1380,7 +1380,7 @@ Every package below retains its exact baseline acceptance criteria, dependency I
 - Dependencies (baseline): LB-20.01, LB-12.05.
 - Implementation/test evidence: `infra/observability; infra/recovery; docs/OBSERVABILITY.md; docs/RECOVERY.md; docs/OPERATIONS_PLAN.md; docs/PUBLIC_TARGET.md`.
 - Package-specific notes: [OBSERVABILITY.md](OBSERVABILITY.md).
-- Remaining evidence / limit: Observability and local recovery primitives exist; target domain selected. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent.
+- Remaining evidence / limit: Observability and local recovery primitives exist; target domain configured in local plans/examples. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent.
 - Next action: Review PR157 then obtain approved existing host and operator inputs; perform measured drills and anonymous release readback before launch.
 - Acceptance criteria to verify against evidence:
   - An injected collection failure produces a useful actionable alert
@@ -1392,7 +1392,7 @@ Every package below retains its exact baseline acceptance criteria, dependency I
 - Dependencies (baseline): LB-20.01, LB-06.06.
 - Implementation/test evidence: `infra/observability; infra/recovery; docs/OBSERVABILITY.md; docs/RECOVERY.md; docs/OPERATIONS_PLAN.md; docs/PUBLIC_TARGET.md`.
 - Package-specific notes: [GOVERNANCE.md](GOVERNANCE.md), [OPERATIONS_PLAN.md](OPERATIONS_PLAN.md), [RECOVERY.md](RECOVERY.md).
-- Remaining evidence / limit: Observability and local recovery primitives exist; target domain selected. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent.
+- Remaining evidence / limit: Observability and local recovery primitives exist; target domain configured in local plans/examples. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent.
 - Next action: Review PR157 then obtain approved existing host and operator inputs; perform measured drills and anonymous release readback before launch.
 - Acceptance criteria to verify against evidence:
   - Restore drill reproduces a known snapshot and correction state
@@ -1404,7 +1404,7 @@ Every package below retains its exact baseline acceptance criteria, dependency I
 - Dependencies (baseline): LB-19.06, LB-20.02.
 - Implementation/test evidence: `infra/observability; infra/recovery; docs/OBSERVABILITY.md; docs/RECOVERY.md; docs/OPERATIONS_PLAN.md; docs/PUBLIC_TARGET.md`.
 - Package-specific notes: [GOVERNANCE.md](GOVERNANCE.md), [OPERATIONS_PLAN.md](OPERATIONS_PLAN.md), [RECOVERY.md](RECOVERY.md).
-- Remaining evidence / limit: Observability and local recovery primitives exist; target domain selected. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent.
+- Remaining evidence / limit: Observability and local recovery primitives exist; target domain configured in local plans/examples. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent.
 - Next action: Review PR157 then obtain approved existing host and operator inputs; perform measured drills and anonymous release readback before launch.
 - Acceptance criteria to verify against evidence:
   - Each phase exit has actual evidence and named decision role
@@ -1415,7 +1415,7 @@ Every package below retains its exact baseline acceptance criteria, dependency I
 - State: OPEN / partial or acceptance unverified. Gate: Verified public release.
 - Dependencies (baseline): LB-20.04, LB-15.04.
 - Implementation/test evidence: `infra/observability; infra/recovery; docs/OBSERVABILITY.md; docs/RECOVERY.md; docs/OPERATIONS_PLAN.md; docs/PUBLIC_TARGET.md`.
-- Remaining evidence / limit: Observability and local recovery primitives exist; target domain selected. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent.
+- Remaining evidence / limit: Observability and local recovery primitives exist; target domain configured in local plans/examples. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent.
 - Next action: Review PR157 then obtain approved existing host and operator inputs; perform measured drills and anonymous release readback before launch.
 - Acceptance criteria to verify against evidence:
   - Organization and website links reach the actual live leaderboard
@@ -1427,7 +1427,7 @@ Every package below retains its exact baseline acceptance criteria, dependency I
 - Dependencies (baseline): LB-20.04, LB-17.05.
 - Implementation/test evidence: `infra/observability; infra/recovery; docs/OBSERVABILITY.md; docs/RECOVERY.md; docs/OPERATIONS_PLAN.md; docs/PUBLIC_TARGET.md`.
 - Package-specific notes: [METRICS.md](METRICS.md), [OBSERVABILITY.md](OBSERVABILITY.md).
-- Remaining evidence / limit: Observability and local recovery primitives exist; target domain selected. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent.
+- Remaining evidence / limit: Observability and local recovery primitives exist; target domain configured in local plans/examples. Provisioning, cost/operator acceptance, real staging/production and handoff remain absent.
 - Next action: Review PR157 then obtain approved existing host and operator inputs; perform measured drills and anonymous release readback before launch.
 - Acceptance criteria to verify against evidence:
   - Operational owner and review cadence are explicitly accepted
