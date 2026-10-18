@@ -172,6 +172,31 @@ async function service(page: Page) {
         activityState: index % 2 ? "pending" : "observed",
       }));
     },
+    activityHistory() {
+      const [first, second, third] = current.selected.portfolioEvidence;
+      current.selected.rows = [];
+      current.selected.evidence = [];
+      current.selected.portfolioEvidence = Array.from({ length: 205 }, (_, index) => ({
+        ...structuredClone(first!),
+        artifact: {
+          ...first!.artifact,
+          stableId: `burst-${index}`,
+          publicUrl: `https://github.com/synthetic-api/example/pull/${index + 1}`,
+        },
+        contribution: {
+          ...first!.contribution,
+          canonicalEventId: `burst-event-${index}`,
+          contributionId: `burst-proof-${String(index).padStart(3, "0")}`,
+          artifactId: `burst-${index}`,
+        },
+        occurredAt: new Date(Date.parse(at) - 2 * 3600000 + index * 1000).toISOString(),
+        observedAt: at,
+      }));
+      current.selected.portfolioEvidence.push(
+        { ...structuredClone(second!), activityState: "pending", occurredAt: "2026-10-17T11:00:00.000Z" },
+        { ...structuredClone(third!), activityState: "accepted" },
+      );
+    },
     close: () => app.close(),
     next() {
       current = snapshot("api-2", 2);
@@ -459,6 +484,111 @@ test("profile pages navigate beyond 100 equal-time records and fail closed when 
     await page.getByRole("button", { name: "Recheck current publication controls" }).click();
     await expect(page.getByRole("alert")).toBeVisible();
     await expect(page.getByRole("link", { name: "many-100", exact: true })).toHaveCount(0);
+  } finally {
+    await api.close();
+  }
+});
+
+test("activity uses its public feed API, compact bursts and all source proofs with pinned category and Back navigation", async ({
+  page,
+}) => {
+  const api = await service(page);
+  api.activityHistory();
+  try {
+    await page.goto("/activity?ui=api&category=documentation&repository=repo-1&limit=100");
+    await expect(page.getByRole("heading", { name: "Public activity", exact: true })).toBeVisible();
+    const groups = page.getByRole("list", { name: "Public activity groups" }).locator(":scope > li");
+    await expect(groups).toHaveCount(3);
+    await expect(groups.nth(0)).toContainText("Independently accepted work");
+    await expect(groups.nth(1)).toContainText("In-progress work");
+    await expect(groups.nth(2)).toContainText("205 artifacts · 205 canonical facts · 205 evidence records");
+    await expect(groups.nth(2)).toContainText("200 more artifacts in this group");
+    await expect(groups.nth(2).getByRole("list", { name: "Artifact preview" }).getByRole("listitem")).toHaveCount(5);
+    await expect(groups.nth(2)).toContainText("Collection occurred after the action");
+    expect(api.calls.some((call) => call.pathname === "/api/v1/boards")).toBe(false);
+    expect(
+      api.calls
+        .filter((call) => call.pathname === "/api/v1/activity")
+        .every((call) => call.searchParams.get("category") === "documentation" && !call.searchParams.has("metric")),
+    ).toBe(true);
+    await page.getByRole("link", { name: "Explore 205 source proofs" }).click();
+    await expect(page.getByRole("heading", { name: "Public activity", exact: true })).toBeFocused();
+    await expect(page.getByRole("list", { name: "Grouped source proofs" }).locator(":scope > li")).toHaveCount(100);
+    const nextHref = await page.getByRole("link", { name: "Next source proofs page" }).getAttribute("href");
+    expect(new URL(nextHref!, page.url()).searchParams.get("snapshot")).toBe("api-1");
+    expect(new URL(nextHref!, page.url()).searchParams.get("category")).toBe("documentation");
+    api.next();
+    await page.getByRole("link", { name: "Next source proofs page" }).click();
+    await expect(page.getByRole("list", { name: "Grouped source proofs" }).locator(":scope > li")).toHaveCount(100);
+    await page.getByRole("link", { name: "Next source proofs page" }).click();
+    await expect(page.getByRole("list", { name: "Grouped source proofs" }).locator(":scope > li")).toHaveCount(5);
+    await expect(page.getByRole("link", { name: "Next source proofs page" })).toHaveCount(0);
+    const proof = page
+      .getByRole("list", { name: "Grouped source proofs" })
+      .getByRole("link", { name: /^burst-proof-/ })
+      .first();
+    await proof.click();
+    await expect(page.getByRole("heading", { name: "Contribution evidence", exact: true })).toBeFocused();
+    await page.goBack();
+    await expect(page.getByRole("list", { name: "Grouped source proofs" }).locator(":scope > li")).toHaveCount(5);
+    expect(new URL(page.url()).searchParams.get("snapshot")).toBe("api-1");
+    await page.getByRole("link", { name: "Return to this snapshot’s activity" }).click();
+    await expect(page.getByRole("link", { name: "Explore 205 source proofs" })).toBeVisible();
+    await page.getByRole("combobox", { name: "Contribution category" }).selectOption("pr_opened");
+    await page.getByRole("button", { name: "Filter contributions" }).click();
+    expect(new URL(page.url()).searchParams.get("category")).toBe("pr_opened");
+    await expect(page.getByRole("link", { name: "Explore 205 source proofs" })).toBeVisible();
+    expect(
+      (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
+    ).toEqual([]);
+  } finally {
+    await api.close();
+  }
+});
+
+test("activity holds new publications and preserves focused proof links and scroll during recheck, then removes suppressed work", async ({
+  page,
+}) => {
+  const api = await service(page);
+  api.activityHistory();
+  try {
+    await page.setViewportSize({ width: 360, height: 700 });
+    await page.goto("/activity?ui=api");
+    const explore = page.getByRole("link", { name: "Explore 205 source proofs" });
+    await explore.scrollIntoViewIfNeeded();
+    await explore.focus();
+    const readingPosition = (await explore.boundingBox())!.y;
+    const calls = api.calls.length;
+    api.next();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect.poll(() => api.calls.length).toBeGreaterThan(calls);
+    await expect(page.getByText("Rechecking…")).toHaveCount(0);
+    await expect(explore).toBeFocused();
+    // Native scroll anchoring may adjust scrollY when the held-update notice grows above the feed.
+    // Preserve the reader’s actual viewport position, not an obsolete document offset.
+    expect(Math.abs((await explore.boundingBox())!.y - readingPosition)).toBeLessThanOrEqual(1);
+    await expect(page.getByText("Update held: snapshot api-2 is available.")).toBeVisible();
+    await expect(page.getByRole("checkbox", { name: /Follow while/ })).not.toBeChecked();
+    const overflow = await page.evaluate(() => ({
+      viewport: innerWidth,
+      width: document.documentElement.scrollWidth,
+      elements: [...document.querySelectorAll("main *")]
+        .filter((element) => element.getBoundingClientRect().right > innerWidth + 1)
+        .slice(0, 8)
+        .map((element) => ({ tag: element.tagName, className: element.className })),
+    }));
+    expect(overflow, "activity filter controls must not widen the mobile viewport").toMatchObject({
+      width: overflow.viewport,
+      elements: [],
+    });
+    api.suppress();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(explore).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Synthetic API B", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toHaveCount(0);
+    expect(
+      (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
+    ).toEqual([]);
   } finally {
     await api.close();
   }

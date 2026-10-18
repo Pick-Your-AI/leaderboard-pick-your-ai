@@ -267,8 +267,6 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
       if (
         !["observed", "pending", "accepted", "unknown"].includes(entry.activityState) ||
         !date(entry.observedAt) ||
-        entry.observedAt === null ||
-        entry.occurredAt === null ||
         !id(entry.contribution.contributionId) ||
         entry.contribution.roles.includes("unknown")
       )
