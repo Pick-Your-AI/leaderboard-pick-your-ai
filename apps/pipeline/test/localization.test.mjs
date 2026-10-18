@@ -720,106 +720,110 @@ test("a fully classified cache from before locale emission is retained for froze
   assert.deepEqual((await preview()).comparison.before, historic);
 });
 
-test("a retained v1 rename cache preserves its frozen destination while a restarted run classifies both locales", async (t) => {
-  const h = await localizationHarness(
-    t,
-    (config) => {
-      config.recognitionBindings = [];
-    },
-    (envelope) => {
-      envelope.integration.diff.files = [
-        {
-          path: "docs/de/moved.md",
-          previousPath: "docs/fr/original.md",
-          additions: 1,
-          deletions: 1,
-        },
-      ];
-      return envelope;
-    },
-  );
-  await h.runtime.stop();
-  h.options.authorizePolicyPreview = async () => true;
-  const normalize = components.github.createGithubEvidenceNormalizer({
-    client: h.options.githubClient,
-    source: h.options.sourceId,
-    allowedRepositoryIds: [2],
-    isSynthetic: true,
-    documentationPolicies: h.config.documentationPolicies,
-    enrich: h.options.githubEnrich,
-  });
-  // The earlier v1 classifier ignored a substantive rename's original locale.
-  // Retain its exact destination-only projection as an actual stored snapshot.
-  const oldProjection = await createPipeline({
-    ...h.options,
-    normalizer: async (input) => {
-      const output = await normalize(input);
-      const omitted = new Set(
-        output.evidence
-          .filter(
-            (entry) =>
-              entry.contribution.metricIds.includes("localization") &&
-              entry.contribution.reasonCodes.includes("locale:fr"),
-          )
-          .map((entry) => entry.contribution.contributionId),
-      );
-      return {
-        ...output,
-        facts: output.facts.filter((fact) => !omitted.has(fact.id)),
-        evidence: output.evidence.filter((entry) => !omitted.has(entry.contribution.contributionId)),
-      };
-    },
-  });
-  const cutoff = h.ago(0);
-  const publication = (await oldProjection.runOnce({ cutoff })).publications[0];
-  const locales = (read) =>
-    read.selected.portfolioEvidence
-      .filter((entry) => entry.contribution.metricIds.includes("localization"))
-      .flatMap((entry) => entry.contribution.reasonCodes.filter((reason) => reason.startsWith("locale:")))
-      .sort();
-  assert.deepEqual(
-    locales(await oldProjection.source.read(publicScope, publication.snapshotId, new AbortController().signal)),
-    ["locale:de"],
-  );
-  const saved = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows[0];
-  const oldSignature = comparisonHash([
-    "documentation-locales/v1",
-    comparisonHash([
-      normalizationDocumentVersion,
-      comparisonHash([
-        "current-state-selection-v2",
-        "synthetic",
-        h.config.policies.map((entry) => entry.signature),
-        { documentation: h.config.documentationPolicies, research: [] },
-      ]),
-    ]),
-  ]);
-  await h.db.query(
-    "UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1 WHERE fact_key=$2 AND policy_signature=$3",
-    [oldSignature, saved.fact_key, saved.policy_signature],
-  );
-  await oldProjection.stop();
-  await h.reopenDatabase();
-  const restarted = await createPipeline(h.options);
-  t.after(() => restarted.stop());
-  const preview = () =>
-    restarted.previewPolicy({
-      snapshotId: publication.snapshotId,
-      policy: { ...h.config.policies[0].policy, version: "synthetic-rename-cache-preview", rank: false },
-      operatorId: "201",
+for (const withMergePins of [false, true])
+  test(`a retained v1 rename cache ${withMergePins ? "with verified merge pins " : ""}preserves its frozen destination while a restarted run classifies both locales`, async (t) => {
+    const h = await localizationHarness(
+      t,
+      (config) => {
+        config.recognitionBindings = [];
+      },
+      (envelope) => {
+        envelope.integration.diff.files = [
+          {
+            path: "docs/de/moved.md",
+            previousPath: "docs/fr/original.md",
+            additions: 1,
+            deletions: 1,
+          },
+        ];
+        return envelope;
+      },
+    );
+    await h.runtime.stop();
+    h.options.authorizePolicyPreview = async () => true;
+    const normalize = components.github.createGithubEvidenceNormalizer({
+      client: h.options.githubClient,
+      source: h.options.sourceId,
+      allowedRepositoryIds: [2],
+      isSynthetic: true,
+      documentationPolicies: h.config.documentationPolicies,
+      enrich: h.options.githubEnrich,
     });
-  const historical = (await preview()).comparison.before;
-  const freshCutoff = new Date(Date.parse(cutoff) + 1).toISOString();
-  const current = (await restarted.runOnce({ cutoff: freshCutoff })).publications[0];
-  assert.deepEqual(
-    locales(await restarted.source.read(publicScope, current.snapshotId, new AbortController().signal)),
-    ["locale:de", "locale:fr"],
-  );
-  const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
-  assert.equal(rows.length, 2);
-  assert.deepEqual(rows.find((row) => row.policy_signature === oldSignature).document, saved.document);
-  assert.deepEqual((await preview()).comparison.before, historical);
-});
+    // The earlier v1 classifier ignored a substantive rename's original locale.
+    // Retain its exact destination-only projection as an actual stored snapshot.
+    const oldProjection = await createPipeline({
+      ...h.options,
+      normalizer: async (input) => {
+        const output = await normalize(input);
+        const omitted = new Set(
+          output.evidence
+            .filter(
+              (entry) =>
+                entry.contribution.metricIds.includes("localization") &&
+                entry.contribution.reasonCodes.includes("locale:fr"),
+            )
+            .map((entry) => entry.contribution.contributionId),
+        );
+        return {
+          ...output,
+          facts: output.facts.filter((fact) => !omitted.has(fact.id)),
+          evidence: output.evidence.filter((entry) => !omitted.has(entry.contribution.contributionId)),
+        };
+      },
+    });
+    const cutoff = h.ago(0);
+    const publication = (await oldProjection.runOnce({ cutoff })).publications[0];
+    const locales = (read) =>
+      read.selected.portfolioEvidence
+        .filter((entry) => entry.contribution.metricIds.includes("localization"))
+        .flatMap((entry) => entry.contribution.reasonCodes.filter((reason) => reason.startsWith("locale:")))
+        .sort();
+    assert.deepEqual(
+      locales(await oldProjection.source.read(publicScope, publication.snapshotId, new AbortController().signal)),
+      ["locale:de"],
+    );
+    const saved = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows[0];
+    const oldDocumentationSignature = comparisonHash([
+      "documentation-locales/v1",
+      comparisonHash([
+        normalizationDocumentVersion,
+        comparisonHash([
+          "current-state-selection-v2",
+          "synthetic",
+          h.config.policies.map((entry) => entry.signature),
+          { documentation: h.config.documentationPolicies, research: [] },
+        ]),
+      ]),
+    ]);
+    const oldSignature = withMergePins
+      ? comparisonHash(["verified-default-branch-merge-pins/v1", oldDocumentationSignature])
+      : oldDocumentationSignature;
+    await h.db.query(
+      "UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1 WHERE fact_key=$2 AND policy_signature=$3",
+      [oldSignature, saved.fact_key, saved.policy_signature],
+    );
+    await oldProjection.stop();
+    await h.reopenDatabase();
+    const restarted = await createPipeline(h.options);
+    t.after(() => restarted.stop());
+    const preview = () =>
+      restarted.previewPolicy({
+        snapshotId: publication.snapshotId,
+        policy: { ...h.config.policies[0].policy, version: "synthetic-rename-cache-preview", rank: false },
+        operatorId: "201",
+      });
+    const historical = (await preview()).comparison.before;
+    const freshCutoff = new Date(Date.parse(cutoff) + 1).toISOString();
+    const current = (await restarted.runOnce({ cutoff: freshCutoff })).publications[0];
+    assert.deepEqual(
+      locales(await restarted.source.read(publicScope, current.snapshotId, new AbortController().signal)),
+      ["locale:de", "locale:fr"],
+    );
+    const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows.find((row) => row.policy_signature === oldSignature).document, saved.document);
+    assert.deepEqual((await preview()).comparison.before, historical);
+  });
 
 for (const withResearch of [false, true])
   test(`frozen locale identities require every active classification policy with research ${withResearch ? "enabled" : "absent"}`, async (t) => {

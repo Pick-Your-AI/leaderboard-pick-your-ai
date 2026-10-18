@@ -1,5 +1,6 @@
 import {
   publicDocumentationReasons,
+  publicDocumentationRecognitionReasons,
   matchesActorFilter,
   type ActorFilter,
   publicEvidenceMetadataSchema,
@@ -373,6 +374,7 @@ export function projectRead(
                     ].includes(reason),
                   ),
                   ...classification,
+                  ...publicDocumentationRecognitionReasons(parsed),
                 ],
               }
             : {}),
@@ -453,6 +455,9 @@ export function projectRead(
         reasonCodes: [
           `public_${portfolioMetadata.get(entry.contribution.contributionId)!.activityState}_work`,
           ...publicDocumentationReasons(entry.contribution),
+          ...(portfolioMetadata.get(entry.contribution.contributionId)!.activityState === "accepted"
+            ? publicDocumentationRecognitionReasons(entry.contribution)
+            : []),
         ],
       },
     }))

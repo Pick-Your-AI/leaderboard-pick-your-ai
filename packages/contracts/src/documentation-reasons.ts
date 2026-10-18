@@ -1,5 +1,32 @@
 import type { Contribution } from "./v1/schemas.js";
 
+const documentationRecognitionReasons = [
+  "domain_metric:documentation",
+  "domain_clock:merged_at",
+  "domain_authorship:authored",
+] as const;
+
+/** Preserve the complete fixed explanation of an accepted documentation unit.
+ * This projection confers no authority and never invents missing recognition.
+ * Keep it separate from the three-label locale classification contract.
+ */
+export function publicDocumentationRecognitionReasons(
+  contribution: Pick<Contribution, "metricIds" | "reasonCodes">,
+): string[] {
+  if (!contribution.metricIds.includes("documentation") || contribution.metricIds.includes("localization")) return [];
+  if (contribution.reasonCodes.length > 32) throw new Error("Documentation explanation exceeds reason bound");
+  if (
+    !contribution.reasonCodes.some((reason) =>
+      ["independent_recognition_receipt", "public_accepted_work"].includes(reason),
+    ) ||
+    !documentationRecognitionReasons.every(
+      (reason) => contribution.reasonCodes.filter((value) => value === reason).length === 1,
+    )
+  )
+    return [];
+  return [...documentationRecognitionReasons];
+}
+
 /** Copy only the bounded, explicit documentation classification into public proof.
  * Internal acceptance, correction and actor-resolution reasons are never copied.
  * Legacy evidence with no classification remains readable without invented labels.

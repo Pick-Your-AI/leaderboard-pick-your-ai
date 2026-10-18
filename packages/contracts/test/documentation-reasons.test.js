@@ -1,10 +1,31 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { publicDocumentationReasons } from "../dist/index.js";
+import { publicDocumentationReasons, publicDocumentationRecognitionReasons } from "../dist/index.js";
 
 const policy = "documentation_path_policy:synthetic-docs-v1";
 const labels = [policy, "locale:fr", "localization_category:documentation"];
 const project = (reasonCodes, metricIds = ["localization"]) => publicDocumentationReasons({ reasonCodes, metricIds });
+
+test("accepted documentation copies only its complete fixed recognition explanation", () => {
+  const reasons = ["domain_metric:documentation", "domain_clock:merged_at", "domain_authorship:authored"];
+  const copied = (reasonCodes, metricIds = ["documentation"]) =>
+    publicDocumentationRecognitionReasons({ reasonCodes, metricIds });
+  for (const marker of ["independent_recognition_receipt", "public_accepted_work"]) {
+    const source = ["domain_secret:PRIVATE", ...reasons.toReversed(), marker, "private receipt ID"];
+    assert.deepEqual(copied(source), reasons);
+    assert.deepEqual(copied(source, ["localization"]), []);
+    assert.deepEqual(copied(source, ["documentation", "localization"]), []);
+    assert.deepEqual(source, ["domain_secret:PRIVATE", ...reasons.toReversed(), marker, "private receipt ID"]);
+  }
+  for (const source of [
+    [], ["public_accepted_work"], reasons, ["public_observed_work", ...reasons],
+    ["public_pending_work", ...reasons],
+    ...reasons.map((_, index) => ["public_accepted_work", ...reasons.filter((__, other) => index !== other)]),
+    ["public_accepted_work", ...reasons, reasons[0]],
+  ]) assert.deepEqual(copied(source), []);
+  assert.throws(() => copied(["public_accepted_work", ...reasons, ...Array(29).fill("private")]));
+  assert.deepEqual(project(["independent_recognition_receipt", ...labels]), labels);
+});
 
 test("public documentation classification copies only explicit bounded policy and locale labels", () => {
   const reasons = ["private reviewer context SECRET", labels[2], labels[0], "independent_recognition_receipt", labels[1]];
