@@ -1,6 +1,7 @@
 import { classifyDocumentation, validateDocumentationPolicy, type DocumentationPathPolicy } from "./documentation.js";
 import { createHash } from "node:crypto";
 import {
+  publicDocumentationReasons,
   serviceAccountClassificationSchema,
   type ServiceAccountClassification,
   publicEvidenceActionSchema,
@@ -404,6 +405,8 @@ function creditedAction(fact: NormalizedGithubFact, family: string, envelopeActi
     title_scope_edits: "title_or_body_edited",
     issue_transfers: "issue_transferred",
     reverted_delivery: "revert_observed",
+    documentation: "pull_request_merged",
+    localization: "pull_request_merged",
   };
   if (fact.metricId === "review_wait" && !fact.readyAt) return "unknown";
   if (fact.metricId === "pr_accepted_rate")
@@ -1078,6 +1081,24 @@ export function normalizeGithubObservation(
         evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
         evidence.contribution.reasonCodes.push(`documentation_path_policy:${documentationPolicy.version}`);
       }
+      for (const { locale, category } of classification.localizations) {
+        const fact = emit(
+          "localization",
+          author,
+          "author",
+          mergedAt,
+          JSON.stringify([repository.id, id, "localization", locale, category]),
+          { rawState: `merged_locale_participation:${locale}:${category}` },
+        );
+        const evidence = out.evidence.find((entry) => entry.contribution.contributionId === fact.id)!;
+        evidence.sourceRevision = integration.after;
+        evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
+        evidence.contribution.reasonCodes.push(
+          `documentation_path_policy:${documentationPolicy.version}`,
+          `locale:${locale}`,
+          `localization_category:${category}`,
+        );
+      }
     }
   }
   for (const link of envelope.lineage ?? []) {
@@ -1146,16 +1167,16 @@ export function applyRecognitionReceipt(
   ) {
     throw new Error("Independent verified recognition receipt is required");
   }
+  // Localization is one PR/language/category unit. A bulk changeset must never
+  // collapse different languages or mint another unit for the same source fact.
+  const unit = receipt.metricId === "localization" ? target.canonicalKey : (receipt.changesetId ?? target.canonicalKey);
+  if (receipt.metricId === "localization" && target.state !== "observed")
+    throw new Error("Localization acceptance must target its original observed source fact");
   const fact = {
     ...target,
     metricId: receipt.metricId,
-    id: stable("recognized", receipt.metricId, receipt.changesetId ?? target.canonicalKey, receipt.actorId),
-    canonicalKey: stable(
-      "recognized-unit",
-      receipt.metricId,
-      receipt.changesetId ?? target.canonicalKey,
-      receipt.actorId,
-    ),
+    id: stable("recognized", receipt.metricId, unit, receipt.actorId),
+    canonicalKey: stable("recognized-unit", receipt.metricId, unit, receipt.actorId),
     state: receipt.decision === "accepted" ? ("qualified" as const) : ("excluded" as const),
     acceptedAt: time(receipt.acceptedAt),
     acceptedBy: receipt.reviewerId,
@@ -1166,7 +1187,7 @@ export function applyRecognitionReceipt(
   if (evidence)
     out.evidence.push({
       ...structuredClone(evidence),
-      occurredAt: fact.acceptedAt,
+      occurredAt: receipt.metricId === "localization" ? target.occurredAt : fact.acceptedAt,
       ...(evidence.evidenceMetadata
         ? {
             evidenceMetadata: {
@@ -1183,7 +1204,12 @@ export function applyRecognitionReceipt(
         canonicalEventId: fact.canonicalKey,
         metricIds: [fact.metricId],
         qualification: receipt.decision === "accepted" ? "eligible" : "ineligible",
-        reasonCodes: ["independent_recognition_receipt"],
+        reasonCodes: [
+          "independent_recognition_receipt",
+          ...(receipt.metricId === target.metricId && ["documentation", "localization"].includes(target.metricId)
+            ? publicDocumentationReasons(evidence.contribution)
+            : []),
+        ],
       },
     });
   return out;

@@ -787,6 +787,74 @@ function withPortfolio(data = fixture()) {
   return data;
 }
 
+function withLocalization() {
+  const data = fixture();
+  data.selected.ranking = [{ metricId: "localization", direction: "descending", rank: false }];
+  for (const row of data.selected.rows) row.result.metricId = "localization";
+  for (const entry of data.selected.evidence) {
+    entry.contribution.metricIds = ["localization"];
+    entry.contribution.reasonCodes = [
+      "documentation_path_policy:synthetic-locales-v1",
+      "locale:fr",
+      "localization_category:documentation",
+    ];
+  }
+  return withPortfolio(data);
+}
+
+test("locale proof retains explicit labels in public views and rejects conflicting copies", async (t) => {
+  const h = harness(t, withLocalization());
+  h.data.selected.portfolioEvidence[0].contribution.reasonCodes.push("private reviewer context SECRET");
+  const proof = await h.app.inject("/api/v1/evidence/e-alice");
+  assert.equal(proof.statusCode, 200, proof.body);
+  assert.deepEqual(
+    proof.json().contribution.reasonCodes.filter((reason) => !reason.startsWith("public_")),
+    ["documentation_path_policy:synthetic-locales-v1", "locale:fr", "localization_category:documentation"],
+  );
+  const profile = await h.app.inject("/api/v1/contributors/alice");
+  assert.equal(profile.statusCode, 200, profile.body);
+  assert.doesNotMatch(proof.body + profile.body, /SECRET/);
+  h.data.selected.portfolioEvidence[0].contribution.reasonCodes[1] = "locale:de";
+  assert.equal((await h.app.inject("/api/v1/evidence/e-alice")).statusCode, 503);
+  assert.equal((await h.app.inject("/api/v1/boards?metric=localization")).statusCode, 503);
+  h.data.selected.portfolioEvidence[0].contribution.reasonCodes = ["public_observed_work"];
+  assert.equal((await h.app.inject("/api/v1/contributors/alice")).statusCode, 503);
+});
+
+test("primary-only locale proof cannot expose internal reason strings", async (t) => {
+  const data = withLocalization();
+  delete data.selected.portfolioEvidence;
+  data.selected.evidence[0].contribution.reasonCodes.push("private reviewer context SECRET email@example.invalid");
+  const { app } = harness(t, data);
+  for (const path of ["evidence/e-alice", "contributors/alice", "boards?metric=localization"]) {
+    const response = await app.inject(`/api/v1/${path}`);
+    assert.equal(response.statusCode, 200, response.body);
+    assert.doesNotMatch(response.body, /SECRET|email@example/);
+  }
+  assert.ok((await app.inject("/api/v1/evidence/e-alice")).json().contribution.reasonCodes.includes("locale:fr"));
+});
+
+test("malformed locale proof fails closed while historical documentation without portfolio labels remains readable", async (t) => {
+  const h = harness(t, withLocalization());
+  for (const entry of [h.data.selected.evidence[0], h.data.selected.portfolioEvidence[0]])
+    entry.contribution.reasonCodes[1] = "locale:und";
+  assert.equal((await h.app.inject("/api/v1/evidence/e-alice")).statusCode, 503);
+  const data = fixture();
+  data.selected.ranking = [{ metricId: "documentation", direction: "descending", rank: false }];
+  for (const row of data.selected.rows) row.result.metricId = "documentation";
+  for (const entry of data.selected.evidence) {
+    entry.contribution.metricIds = ["documentation"];
+    entry.contribution.reasonCodes = ["documentation_path_policy:synthetic-historical-v1"];
+  }
+  withPortfolio(data);
+  for (const entry of data.selected.portfolioEvidence) entry.contribution.reasonCodes = ["public_observed_work"];
+  h.set(data);
+  assert.equal((await h.app.inject("/api/v1/contributors/alice")).statusCode, 200);
+  const detail = await h.app.inject("/api/v1/evidence/e-alice");
+  assert.equal(detail.statusCode, 200, detail.body);
+  assert.doesNotMatch(detail.body, /locale:|localization_category:/);
+});
+
 test("directory includes observed-only public contributors without ranking, membership or identity leakage", async (t) => {
   const h = harness(t, withPortfolio());
   h.data.selected.rows = [];

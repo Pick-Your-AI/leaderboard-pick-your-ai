@@ -14,7 +14,15 @@ export function recognitionFingerprint(state) {
     .digest("hex");
 }
 
-export function materializeRecognition(input, state, bindings, policies, applyReceipt, cutoff) {
+export function materializeRecognition(
+  input,
+  state,
+  bindings,
+  policies,
+  applyReceipt,
+  cutoff,
+  publicReasons = () => [],
+) {
   let output = structuredClone(input);
   for (const request of Object.values(state.requests ?? {})) {
     if (request.kind !== "evidence" || request.status !== "accepted" || state.profiles?.[request.owner]?.suppressed)
@@ -25,12 +33,39 @@ export function materializeRecognition(input, state, bindings, policies, applyRe
     if (!matches.length) continue;
     if (matches.length !== 1) throw new Error("ambiguous_recognition_binding");
     const binding = matches[0];
+    let localeReasons = null;
+    if (
+      binding.metricId === "localization" ||
+      binding.sourceMetricId === "localization" ||
+      binding.localization !== undefined
+    ) {
+      const locale = binding.localization;
+      if (
+        binding.metricId !== "localization" ||
+        binding.sourceMetricId !== "localization" ||
+        !locale ||
+        typeof locale !== "object" ||
+        Array.isArray(locale) ||
+        Object.keys(locale).sort().join(",") !== "category,locale,policyVersion" ||
+        ![locale.policyVersion, locale.locale, locale.category].every((value) => typeof value === "string")
+      )
+        throw new Error("invalid_localization_binding");
+      localeReasons = publicReasons({
+        metricIds: ["localization"],
+        reasonCodes: [
+          `documentation_path_policy:${locale.policyVersion}`,
+          `locale:${locale.locale}`,
+          `localization_category:${locale.category}`,
+        ],
+      });
+      if (localeReasons.length !== 3) throw new Error("invalid_localization_binding");
+    }
     if (
       !policies.some(
         (p) =>
           p.policy.metricId === binding.metricId &&
           p.policy.version === binding.policyVersion &&
-          p.policy.dateBasis === "acceptedAt",
+          p.policy.dateBasis === (binding.metricId === "localization" ? "occurredAt" : "acceptedAt"),
       )
     )
       throw new Error("recognition_policy_not_configured");
@@ -65,7 +100,8 @@ export function materializeRecognition(input, state, bindings, policies, applyRe
           (e) =>
             e.contribution.contributionId === f.id &&
             e.artifact.publicUrl === request.locator &&
-            e.artifact.visibility === "public",
+            e.artifact.visibility === "public" &&
+            (localeReasons === null || JSON.stringify(publicReasons(e.contribution)) === JSON.stringify(localeReasons)),
         ),
     );
     if (!candidates.length) continue;
@@ -88,6 +124,6 @@ export function materializeRecognition(input, state, bindings, policies, applyRe
   }
   // Audit receipt identifiers remain private even when the normalizer annotates evidence.
   for (const entry of output.evidence.slice(input.evidence.length))
-    entry.contribution.reasonCodes = ["independent_recognition_receipt"];
+    entry.contribution.reasonCodes = ["independent_recognition_receipt", ...publicReasons(entry.contribution)];
   return output;
 }

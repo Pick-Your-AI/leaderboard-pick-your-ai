@@ -213,6 +213,13 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
   )
     throw new Error("Exactly one evidence class is required; observed, qualified and reviewed values stay separate");
   if (
+    policy.metricId === "localization" &&
+    (policy.rankedStates[0] === "observed" || policy.groupBy !== "canonical" || policy.dateBasis !== "occurredAt")
+  )
+    throw new Error(
+      "Localization accepted units require independent acceptance, canonical language/category grouping and the source merge clock",
+    );
+  if (
     !policy.roles.length ||
     policy.roles.some((role) => !knownRoles.includes(role) || role === "unknown") ||
     !policy.sources.length ||

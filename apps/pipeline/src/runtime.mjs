@@ -938,6 +938,7 @@ export async function createPipeline(options) {
         config.policies,
         c.github.applyRecognitionReceipt,
         observationCutoff,
+        c.contracts.publicDocumentationReasons,
       );
       outputs = [
         ...outputs,
@@ -1089,7 +1090,7 @@ export async function createPipeline(options) {
                 roles: [fact.role],
                 qualification: "eligible",
                 metricIds: [fact.metricId],
-                reasonCodes: ["public_pending_work"],
+                reasonCodes: ["public_pending_work", ...c.contracts.publicDocumentationReasons(original.contribution)],
               },
               occurredAt: fact.occurredAt,
               observedAt: fact.observedAt,
@@ -1120,7 +1121,10 @@ export async function createPipeline(options) {
             roles: [fact.role],
             qualification: "eligible",
             metricIds: [fact.metricId],
-            reasonCodes: [`public_${activityState}_work`],
+            reasonCodes: [
+              `public_${activityState}_work`,
+              ...c.contracts.publicDocumentationReasons(original.contribution),
+            ],
           },
           occurredAt: fact.occurredAt,
           observedAt: fact.observedAt,
