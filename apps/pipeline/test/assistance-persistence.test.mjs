@@ -7,13 +7,15 @@ import { harness, components, ago, clock } from "./harness.mjs";
 
 const artifactId = "SYNTHETIC_PR_ASSISTED";
 const boardUrl = "/api/v1/boards?metric=pr_merged";
-const privateFields = /assistance|participation|Claude|"5\.5"|synthetic-model|example\.invalid|manual/;
+// Match the whole private version without treating ISO timestamp seconds as attribution.
+const privateFields = /assistance|participation|Claude|(?<![\d.])5\.5(?![\d.])|synthetic-model|example\.invalid|manual/;
 
 test("private model version detector rejects JSON/CSV values without matching source timestamp fractions", () => {
   assert.doesNotMatch(JSON.stringify({ occurredAt: "2026-10-17T05:26:35.586Z" }), privateFields);
   for (const value of [
     JSON.stringify({ version: "5.5" }),
     '"5.5"',
+    "5.5",
     JSON.stringify({ assistance: [] }),
     JSON.stringify({ participation: [] }),
     "Claude Opus",
