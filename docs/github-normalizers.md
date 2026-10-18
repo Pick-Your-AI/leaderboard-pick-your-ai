@@ -12,6 +12,10 @@ Only explicitly public repositories and safe GitHub artifact URLs produce public
 
 Public evidence uses contribution IDs matching fact IDs. `qualification: eligible` with `reasonCodes: [raw_observed_only]` means eligibility for a raw observation board, not acceptance of an outcome. Qualified recognition is a separate fact with independent receipt provenance. The API's evidence date is the effective raw/acceptance clock; original source dates remain on the fact and observation and in the optional [strict public metadata projection](public-evidence-metadata.md). That projection adds bounded as-collected labels, actual credited-fact actions, independent acceptance time without private receipt identifiers, and explicitly public partial history records.
 
+The [contributor identity foundation](contributor-identity-foundation.md) distinguishes
+the pipeline's stable serving aliases from node-first source-event identity, and
+unavailable source attribution from protected account-wide suppression.
+
 ## Reviewed service accounts
 
 See [service-account classification and migration](service-account-classification.md)
