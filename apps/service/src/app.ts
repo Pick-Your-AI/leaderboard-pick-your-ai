@@ -7,6 +7,7 @@ import {
   type MetricRegistry,
 } from "@pick-your-ai/contracts";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
+import { comparePublishedRanks, type ComparedRanks } from "./rank-comparison.js";
 import { acceptedAchievements, ACHIEVEMENT_RULE_VERSION } from "./achievements.js";
 import { renderContributorCard, renderContributorCardImage } from "./cards.js";
 import { renderPublicExport } from "./exports.js";
@@ -55,6 +56,9 @@ const allowed = new Set([
   "format",
   "search",
   "category",
+  "compare",
+  "compareStart",
+  "compareEnd",
 ]);
 const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
 function fail(status: number, code: string): never {
@@ -116,6 +120,22 @@ export function createService(options: ServiceOptions = {}) {
         fail(400, "invalid_date");
       return value;
     };
+    const compare = item("compare");
+    const compareStart = date("compareStart"),
+      compareEnd = date("compareEnd");
+    if (
+      (compareStart === null) !== (compareEnd === null) ||
+      (compareStart !== null &&
+        compareEnd !== null &&
+        (compareStart >= compareEnd || Date.parse(compareEnd) - Date.parse(compareStart) > 366 * 86400000)) ||
+      (compare === null && (compareStart !== null || compareEnd !== null))
+    )
+      fail(400, "invalid_comparison_window");
+    if (
+      compare !== null &&
+      !["/api/v1/boards", "/api/v1/exports"].includes(new URL(request.url, "http://localhost").pathname)
+    )
+      fail(400, "unsupported_filter");
     const scope: PublicScope = {
       organization: item("organization") ?? "Pick-Your-AI",
       repository: item("repository"),
@@ -142,6 +162,13 @@ export function createService(options: ServiceOptions = {}) {
     if (!["json", "csv"].includes(format)) fail(400, "unsupported_export_format");
     return {
       actors: actorSelection.data,
+      comparison:
+        compare === null
+          ? null
+          : {
+              snapshotId: compare,
+              scope: { ...scope, ...(compareStart === null ? {} : { start: compareStart, end: compareEnd }) },
+            },
       scope,
       limit: Number(limitText),
       metric,
@@ -152,23 +179,14 @@ export function createService(options: ServiceOptions = {}) {
       format,
     };
   }
-  async function load(
-    scope: PublicScope,
-    pin: string | null,
-    actors: ActorFilter,
-    health = false,
-  ): Promise<PublicRead> {
+  async function boundedRead<T>(read: (signal: AbortSignal) => Promise<T>): Promise<T> {
     if (reads >= maxReads) fail(429, "read_budget_exceeded");
     reads++;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Keep a slot occupied until the provider actually settles, even if it ignores cancellation.
     const pending = Promise.resolve()
-      .then(() =>
-        health && source.readHealth
-          ? source.readHealth(scope, pin, controller.signal)
-          : source.read(scope, pin, controller.signal),
-      )
+      .then(() => read(controller.signal))
       .finally(() => {
         reads--;
       });
@@ -182,23 +200,83 @@ export function createService(options: ServiceOptions = {}) {
           }, timeout);
         }),
       ]);
-      if (result === null) fail(pin ? 410 : 503, pin ? "snapshot_expired_refetch" : "public_snapshot_unavailable");
-      const projected = projectRead(result, scope, pin, registry.metrics);
-      if (projected.selected.snapshot.metricDefinitionVersion !== registry.policy_version)
-        fail(409, "metric_definition_unavailable");
-      const knownMetrics = new Set(registry.metrics.map((metric) => metric.id));
-      if (
-        projected.selected.rows.some((row) => !knownMetrics.has(row.result.metricId)) ||
-        [...projected.selected.evidence, ...(projected.selected.portfolioEvidence ?? [])].some((entry) =>
-          entry.contribution.metricIds.some((metricId) => !knownMetrics.has(metricId)),
-        )
-      )
-        fail(409, "metric_definition_unavailable");
-      return filterPublicActors(projected, actors);
+      return result;
     } finally {
       if (timer) clearTimeout(timer);
       controller.abort();
     }
+  }
+  function project(result: PublicRead | null, scope: PublicScope, pin: string | null, actors: ActorFilter): PublicRead {
+    if (result === null) fail(pin ? 410 : 503, pin ? "snapshot_expired_refetch" : "public_snapshot_unavailable");
+    const projected = projectRead(result, scope, pin, registry.metrics);
+    if (projected.selected.snapshot.metricDefinitionVersion !== registry.policy_version)
+      fail(409, "metric_definition_unavailable");
+    const knownMetrics = new Set(registry.metrics.map((metric) => metric.id));
+    if (
+      projected.selected.rows.some((row) => !knownMetrics.has(row.result.metricId)) ||
+      [...projected.selected.evidence, ...(projected.selected.portfolioEvidence ?? [])].some((entry) =>
+        entry.contribution.metricIds.some((metricId) => !knownMetrics.has(metricId)),
+      )
+    )
+      fail(409, "metric_definition_unavailable");
+    return filterPublicActors(projected, actors);
+  }
+  async function load(
+    scope: PublicScope,
+    pin: string | null,
+    actors: ActorFilter,
+    health = false,
+  ): Promise<PublicRead> {
+    return project(
+      await boundedRead((signal) =>
+        health && source.readHealth ? source.readHealth(scope, pin, signal) : source.read(scope, pin, signal),
+      ),
+      scope,
+      pin,
+      actors,
+    );
+  }
+  async function loadBoard(
+    q: ReturnType<typeof query>,
+    pin: string | null,
+  ): Promise<{ read: PublicRead; compared?: ComparedRanks }> {
+    if (!q.comparison) return { read: await load(q.scope, pin, q.actors) };
+    if (!source.readComparison) {
+      const read = await load(q.scope, pin, q.actors);
+      return { read, compared: comparePublishedRanks(read, null, null, null, q.metric!) };
+    }
+    const paired = await boundedRead((signal) => source.readComparison!(q.scope, pin, q.comparison!, signal));
+    if (paired?.previous) {
+      const authority = (read: PublicRead) =>
+        JSON.stringify([
+          read.controls.version,
+          [...read.controls.suppressedActorIds].sort(),
+          [...read.controls.suppressedArtifactIds].sort(),
+          [...read.controls.revokedSnapshotIds].sort(),
+        ]);
+      // A broken provider pairing must not publish earlier current rows under a
+      // different privacy authority merely because movement can be withheld.
+      if (authority(paired.current) !== authority(paired.previous)) fail(503, "public_comparison_authority_changed");
+    }
+    const read = project(paired?.current ?? null, q.scope, pin, q.actors);
+    let previous: PublicRead | null = null;
+    if (paired?.previous) {
+      try {
+        previous = project(paired.previous, q.comparison.scope, q.comparison.snapshotId, q.actors);
+      } catch {
+        /* Unavailable/revoked history cannot expose old rows or change current totals. */
+      }
+    }
+    return {
+      read,
+      compared: comparePublishedRanks(
+        read,
+        previous,
+        paired?.currentHistory ?? null,
+        paired?.previousHistory ?? null,
+        q.metric!,
+      ),
+    };
   }
   function send(
     request: FastifyRequest,
@@ -369,11 +447,18 @@ export function createService(options: ServiceOptions = {}) {
     const q = query(request);
     if (q.metric === null) fail(400, "metric_required");
     if (q.category || q.search) fail(400, "unsupported_filter");
-    const binding = JSON.stringify(["board", q.scope, q.metric, q.limit, q.actors]);
+    const binding = JSON.stringify([
+      "board",
+      q.scope,
+      q.metric,
+      q.limit,
+      q.actors,
+      ...(q.comparison ? [q.comparison] : []),
+    ]);
     const cursor = q.cursor ? decodeCursor(q.cursor) : null;
     if (cursor && (cursor.binding !== binding || (q.snapshot !== null && q.snapshot !== cursor.pin)))
       fail(400, "cursor_scope_mismatch");
-    const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors);
+    const { read, compared } = await loadBoard(q, cursor?.pin ?? q.snapshot);
     const disabled = read.selected.disabledMetrics?.find((entry) => entry.id === q.metric);
     if (disabled)
       return reply
@@ -382,7 +467,11 @@ export function createService(options: ServiceOptions = {}) {
         .send({ ...meta(read), error: "metric_disabled", metric: disabled });
     if (cursor && cursor.policy !== read.controls.version) fail(410, "cursor_policy_changed_refetch");
     const offset = cursor?.offset ?? 0;
-    const rows = ranked(read, q.metric);
+    const movement = new Map(compared?.movement.map((row) => [row.actorId, row]) ?? []);
+    const rows = ranked(read, q.metric).map((row) => ({
+      ...row,
+      ...(compared ? { movement: movement.get(row.actorId)! } : {}),
+    }));
     const page = rows.slice(offset, offset + q.limit);
     const nextOffset = offset + page.length;
     let nextCursor: string | null = null;
@@ -406,8 +495,16 @@ export function createService(options: ServiceOptions = {}) {
     });
     for (const key of ["repository", "workstream", "start", "end"] as const)
       if (q.scope[key] !== null) share.set(key, q.scope[key]);
+    if (q.comparison) {
+      share.set("compare", q.comparison.snapshotId);
+      if (q.comparison.scope.start !== null && q.comparison.scope.end !== null) {
+        share.set("compareStart", q.comparison.scope.start);
+        share.set("compareEnd", q.comparison.scope.end);
+      }
+    }
     const body = {
       ...meta(read),
+      ...(compared ? { comparison: compared.comparison } : {}),
       metric: definition(q.metric),
       ranking: read.selected.ranking.find((entry) => entry.metricId === q.metric) ?? null,
       diagnostics:
