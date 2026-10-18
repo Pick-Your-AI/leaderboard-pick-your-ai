@@ -169,7 +169,7 @@ export function apiBase(raw = "/api/v1"): string {
     url.search ||
     url.hash ||
     (url.protocol !== "https:" && url.origin !== window.location.origin) ||
-    !/^\/[A-Za-z0-9/_-]+$/.test(url.pathname)
+    !/^\/(?!\/)[A-Za-z0-9/_-]+$/.test(url.pathname)
   )
     throw new ReadFailure(500, "invalid_public_api_configuration");
   return url.href.replace(/\/$/, "");
