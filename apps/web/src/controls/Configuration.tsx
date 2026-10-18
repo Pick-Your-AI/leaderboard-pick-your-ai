@@ -138,8 +138,12 @@ export function Configuration({ state, session, run }: { state: ConfigurationSta
               {state.active.document.metrics.find((m) => m.id === target)?.policyLink}
             </p>
             <label className="control-field">
-              Disable explanation
+              Public disable explanation
               <textarea name="reason" required maxLength={500} />
+              <span>
+                This explanation is published with the disabled metric. Do not include private request details or
+                personal information.
+              </span>
             </label>
             <label className="control-field">
               Disable proposal version

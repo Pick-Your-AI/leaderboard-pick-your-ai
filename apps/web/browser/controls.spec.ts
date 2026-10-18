@@ -271,7 +271,7 @@ test("operators preview approve and activate exact configuration bindings then p
     },
     { path: `/controls/configuration/proposals/${id}/activate`, body: { version: 3, approvalId: "approval-id" } },
   ]);
-  await page.getByLabel("Disable explanation").fill("Source quality under review");
+  await page.getByLabel("Public disable explanation").fill("Source quality under review");
   await page.getByLabel("Disable proposal version").fill("config-v2");
   await page.getByLabel(/Propose disabling pr_opened/).check();
   await page.getByRole("button", { name: "Propose metric disable" }).click();
