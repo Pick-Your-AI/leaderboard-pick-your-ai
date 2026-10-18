@@ -166,11 +166,11 @@ for (const field of ["generatedAt", "head.publishedAt"] as const) {
   test(`an invalid ${field} response cannot replace the last verified snapshot`, async ({ page }) => {
     const api = await evidenceService(page);
     try {
-      const response = page.waitForResponse((value) => new URL(value.url()).pathname === "/api/v1/boards");
       await page.goto(selectedBoard);
-      const original = await (await response).json();
       const actor = page.getByRole("link", { name: "Synthetic API A", exact: true });
       await expect(actor).toBeVisible();
+      // Capture actual handler bytes before browser navigation can discard them.
+      const original = api.boardResponse();
       const invalidDate = "2026-02-30T00:00:00Z";
       const malformed =
         field === "generatedAt"
@@ -264,11 +264,10 @@ test("an unpublished prototype wall pin shows the canonical fallback warning", a
 test("a response rejected by the registry cannot replace the last verified snapshot date", async ({ page }) => {
   const api = await evidenceService(page);
   try {
-    const response = page.waitForResponse((value) => new URL(value.url()).pathname === "/api/v1/boards");
     await page.goto(selectedBoard);
-    const original = await (await response).json();
     const actor = page.getByRole("link", { name: "Synthetic API A", exact: true });
     await expect(actor).toBeVisible();
+    const original = api.boardResponse();
     const rejectedDate = "2026-10-18T09:00:00.000Z";
     await page.route("**/api/v1/boards?**", async (route) => {
       await route.fulfill({

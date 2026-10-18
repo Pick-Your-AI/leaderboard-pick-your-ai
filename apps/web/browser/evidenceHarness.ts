@@ -140,17 +140,23 @@ export async function evidenceService(page: Page) {
     },
   });
   const calls: URL[] = [];
+  let lastBoardResponse: string | null = null;
   let evidenceGate: Promise<void> | null = null;
   let releaseEvidence = () => {};
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     calls.push(url);
     const response = await app.inject({ method: "GET", url: url.pathname + url.search });
+    if (url.pathname === "/api/v1/boards" && response.statusCode === 200) lastBoardResponse = response.body;
     if (url.pathname.includes("/evidence/") && evidenceGate) await evidenceGate;
     await route.fulfill({ status: response.statusCode, headers: response.headers, body: response.body });
   });
   return {
     calls,
+    boardResponse() {
+      if (lastBoardResponse === null) throw Error("No successful synthetic board response");
+      return JSON.parse(lastBoardResponse);
+    },
     holdEvidenceReads() {
       evidenceGate = new Promise<void>((resolve) => {
         releaseEvidence = resolve;
@@ -215,8 +221,9 @@ export async function evidenceService(page: Page) {
         Object.assign(list[0]!.artifact, { visibility: "unavailable", publicUrl: undefined });
       }
     },
-    close: () => {
+    close: async () => {
       releaseEvidence();
+      await page.unrouteAll({ behavior: "wait" });
       return app.close();
     },
     next() {
