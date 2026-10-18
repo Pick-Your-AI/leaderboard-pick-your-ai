@@ -52,7 +52,8 @@ export function githubOAuthProvider({ clientId, clientSecret, fetcher = fetch })
       });
       requireThat(typeof token.access_token === "string", 502, "Identity exchange failed");
       try {
-        requireThat(!token.scope, 502, "Unexpected OAuth scopes");
+        // Missing or non-string metadata cannot confirm the approved empty scope.
+        requireThat(token.scope === "", 502, "Unexpected OAuth scopes");
         const user = await request("https://api.github.com/user", {
           headers: {
             accept: "application/vnd.github+json",
