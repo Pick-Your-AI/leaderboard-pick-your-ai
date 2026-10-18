@@ -9,7 +9,7 @@ Partial implementation for [#80](https://github.com/Pick-Your-AI/pick-your-ai-le
 
 The private pipeline can materialize reviewed research, catalog and craft
 contributions from an exact collected source revision. These are the existing
-19 registry metrics, with their existing units and event clocks. Decision records
+20 registry metrics, with their existing units and event clocks. Decision records
 and localization retain their separate record/blob and locale/category source
 adapters. No metric,
 source grant, production catalog, reviewer roster or policy is activated by this
@@ -29,7 +29,7 @@ these keys:
 | Key | Meaning |
 | --- | --- |
 | `version` | `domain-evidence/v1` |
-| `ownerIds` | Enrolled affected-owner reviewers for catalog, pricebook, compatibility and evidence-manifest acceptance |
+| `ownerIds` | Enrolled affected-owner reviewers for catalog, pricebook, compatibility, evidence-manifest and data-correction acceptance |
 | `contractReviewerIds` | Central compatibility reviewers, additionally required for compatibility recognition |
 | `disclosureReviewerIds` | Public-disclosure reviewers, additionally required for security recognition |
 | `freshnessIntervalSeconds` | Reviewed recheck interval, an integer from 1 second through 366 days, used only for freshness units |
@@ -91,6 +91,7 @@ executable schemas are in `apps/pipeline/src/domain-recognition.mjs`.
 | `assumptions_resolved` | Decision identity, sources and supported/rejected/unknown conclusion | Decision identity | Acceptance |
 | `market_research` | Study/version, explicit method and sources; participant material limited to approved sanitized aggregates | Study identity | Acceptance |
 | `evidence_manifests` | Artifact identity/hash, approved source use, sources and owner review | Artifact identity/hash | Acceptance |
+| `data_quality` | Correction identity/version and target kind/ID; exact changed before/after pins, factual and owner review, supporting sources and complete reviewed origin | Target kind/ID/correction identity | Acceptance |
 | `documentation` | Actual source authorship, substantive review and documentation/example/guide category | PR/category | Merge |
 | `tests` | Actual source authorship and substantive test-artifact review | PR/test category | Merge |
 | `regressions_prevented` | Scenario and fixture hash, distinct before/after revisions, fails-before and passes-after evidence | Failure scenario | Acceptance |
@@ -112,6 +113,30 @@ qualify. Separately accepted findings within one study are distinct units.
 Revisions, additional sources and repeated acceptance of the same study/finding
 retain one unit. Finding and study identifiers, revisions and acceptance details
 remain private; public method reasons do not expose them.
+
+Data corrections require actual source authorship or coauthorship and an
+independent affected-owner reviewer. Their `details` contain exactly
+`canonicalKind`, `canonicalId`, `correctionId`, `correctionVersion`,
+`correctionType` (`incorrect` or `stale`), `factualReview`, `sourceIds`,
+`before`, `after` and `origin`. Each before/after pin has exactly `revision`,
+`sourceRevisionUrl` and `contentHash`. Revisions and SHA-256 content hashes must
+both differ. The two immutable URLs identify the same repository and locator:
+either two commits or the same blob path. The after revision and URL must match
+the collected source evidence exactly. A changed hash or a passing validator alone does not
+establish a factual improvement; the host must review the named before/after
+relationship and supporting sources before enrolling the private attestation.
+
+The correction's `origin` has exactly `kind`, `complete` and `contributorIds`.
+Complete reviewed `prior_contributors` attribution must be nonempty and exclude
+the claimant and every currently listed collaborator. Alternatively, a reviewed
+`external_source_change` can explain a stale record, with complete origin and an
+empty contributor list. Missing history cannot be interpreted as external
+staleness or independence. Unknown or incomplete origin, an unchanged artifact,
+an unrelated source, and a correction of an error introduced by the claimant or
+a listed collaborator remain unqualified. These are protected review assertions,
+not automated judgments of blame. Revisions of one correction's proof, source
+list or receipt retain one canonical correction unit; the host must preserve its
+canonical identity when accepting another version of the same work.
 
 The target metric policy must use canonical grouping and the qualified evidence
 class, keeping observed participation separate. Its time basis must match the
@@ -150,6 +175,13 @@ relevant audited decisions, requests and suppression. Removing, replacing or dup
 entry invalidates a run's confirmation and previously pinned public reads.
 Unrelated audit activity does not revoke recognition. Withdrawal, renewed review,
 appeal and contributor suppression continue to remove accepted recognition.
+Bindings for `data_quality` additionally pin qualifier authority to
+`data-quality-recognition/v1`. Older generic correction publications lack that
+authority and are withheld on current and historical reads until recomputed from
+valid current evidence. Configurations without a `data_quality` binding retain
+their exact prior fingerprint bytes. A configuration containing both correction
+and other metric bindings retires its whole bound snapshot; the authority fence
+does not preserve individual metrics inside that mixed snapshot.
 
 Public evidence carries its immutable source link and fixed, bounded explanation
 codes for the metric, clock, reviewed outcome/method and contribution class.
@@ -170,10 +202,10 @@ so preserving documentation explanations cannot qualify or retarget a locale.
 
 ## Verification and remaining acceptance
 
-The synthetic suite exercises all 19 qualification/exclusion pairs, immutable
+The synthetic suite exercises all 20 qualification/exclusion pairs, immutable
 revision mismatches, stale or ambiguous audits, reviewer roles, policy clocks,
 private-field rejection, source-mode provenance, canonical aliases and proof
-variations, withdrawal and exact performance arithmetic. Each of the 19 metrics
+variations, withdrawal and exact performance arithmetic. Each of the 20 metrics
 also has a source-to-qualification-to-engine case that counts one canonical unit,
 preserves it through repeated review and observation delivery in either order,
 and checks exact half-open event-clock boundaries. These cases support only the
@@ -188,6 +220,14 @@ specialist snapshot, plus a marker-free fictional real-mode publication proving
 that accepted documentation keeps its bounded explanation through both stored
 proof copies and the actual evidence and contributor API routes. Existing
 raw-source and generic recognition tests remain applicable.
+
+Data-correction cases cover 40- and 64-character commit/blob pins, changed versus
+unchanged artifacts, collected-source mismatches, complete prior attribution,
+reviewed external staleness, self/collaborator exclusions, private-field and
+identifier boundaries, canonical correction conservation and independent units.
+The publication regression uses fictional marker-free data through the actual
+pipeline and API, then reopens its persisted database to verify that obsolete
+generic correction authority cannot retain public proof or private explanations.
 
 Actual source installations, configured path/category mappings, rights and
 measurement review, reviewer enrollment, affected-owner acceptance, external
