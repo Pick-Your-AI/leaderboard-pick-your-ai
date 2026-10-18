@@ -28,12 +28,19 @@ async function service(page: Page) {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/v1/contributors/101") calls++;
     const response = await app.inject({ method: "GET", url: url.pathname + url.search });
-    const body = response.json();
-    if (legacy) delete body.activitySummary;
-    await route.fulfill({ status: response.statusCode, headers: response.headers, body: JSON.stringify(body) });
+    let body = response.body;
+    if (legacy && url.pathname === "/api/v1/contributors/101" && response.statusCode === 200) {
+      const profile = response.json();
+      delete profile.activitySummary;
+      body = JSON.stringify(profile);
+    }
+    await route.fulfill({ status: response.statusCode, headers: response.headers, body });
   });
   return {
-    close: () => app.close(),
+    async close() {
+      await page.unrouteAll({ behavior: "wait" });
+      await app.close();
+    },
     calls: () => calls,
     suppress: () => {
       current.controls.suppressedActorIds = ["101"];
