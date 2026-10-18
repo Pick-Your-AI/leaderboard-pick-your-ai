@@ -30,6 +30,8 @@ Distinct contribution roles can share an artifact, but a repeated event or impor
 
 The dedicated repository boundary has been selected. The [metric and recognition decision](metric-recognition-policy.md) and its [definition review](metric-definition-review.md) specify this project's policy choices; review and merge record their acceptance. Each register entry retains its unresolved source, role or operating evidence. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
 
+The [release-phase decision](release-decision.md) defines transition evidence and proposed evaluation targets. Its adoption does not establish that a phase has passed or turn a proposed role into a named operational commitment.
+
 **Id:** DEC-01
 
 **Question:** What is the product and repository boundary?
@@ -206,7 +208,11 @@ The dedicated repository boundary has been selected. The [metric and recognition
 - LB-19.04
 - LB-20.04
 
-**Status:** Targets only; unmeasured
+**Status:** Evaluation targets specified; host-specific measurement and operating acceptance remain required
+
+**Decision:** release-gates/v1 retains proposed p95 durable acknowledgement under two seconds and receive-to-publication under sixty seconds within a declared load envelope. Report failures, unpublished/oldest-pending events, upstream lag, quiet successful collection and source disconnection separately. Review and merge adopt the evaluation policy, not measured latency or a live-service promise.
+
+**Decision record:** docs/release-decision.md
 
 **Id:** DEC-09
 
@@ -231,7 +237,7 @@ The dedicated repository boundary has been selected. The [metric and recognition
 
 **Question:** What are retention, recovery and operating commitments?
 
-**Recommended:** Choose minimized payload retention, backup deletion bounds, RTO/RPO and accepted operational owner before launch; test rather than claim
+**Recommended:** Evaluate 99.5% public read availability over thirty days, recovery within four hours and at most twenty-four hours of unrecovered acknowledged public source observations; preserve current privacy state before serving; separately select retention and actual operating commitments
 
 ### Alternatives
 
@@ -246,7 +252,35 @@ The dedicated repository boundary has been selected. The [metric and recognition
 - LB-20.03
 - LB-20.04
 
-**Status:** Unselected numeric retention/RTO/RPO; decision scoped
+**Status:** Proposed availability/recovery evaluation profile specified; numeric retention, host, budget and operating acceptance remain unresolved
+
+**Decision:** release-gates/v1 defines complete observation denominators, recovery start/end and reconciliation evidence in planning/release-manifest.json and docs/release-decision.md. Missing measurements and unknown data loss cannot pass. The source-observation recovery allowance does not permit losing privacy, consent, correction or deletion restrictions. Current authoritative restrictions and independent readback precede public serving even if a time objective is missed. The actual host/cost/operator profile, backup schedule, encrypted storage/key access and retention/deletion bounds remain separate decisions.
+
+**Decision record:** docs/release-decision.md
+
+**Id:** DEC-11
+
+**Question:** What evidence permits each release phase to advance?
+
+**Recommended:** Adopt release-gates/v1: distinct concept, synthetic, shadow, beta, production and full-project gates with exact source/scope, actual receiving evidence and explicit unresolved findings
+
+### Alternatives
+
+- Keep an explicitly labeled synthetic prototype until actual source/operating inputs are accepted
+- Use an explicitly periodic static preview after its own reviewed source/privacy/release acceptance
+
+**Decision role:** Project scope authority, affected source/metric/privacy/accessibility roles and actual operations/release authority
+
+### Before
+
+- LB-19.06
+- LB-20.04
+
+**Status:** Decision specified; review and merge of LB-01.06 record gate-policy adoption
+
+**Decision:** Each transition requires the release manifest evidence and attributable receiving review. Existing mandatory and conditional work-package lists remain in force. The local phase decision can use unresolved hosting alternatives as planning input; it cannot certify source activation, appoint a person, authorize spending or substitute rendered/synthetic output for deployment, participant or operational evidence. Full project acceptance retains every in-scope package unless explicitly descoped by reviewed authority.
+
+**Decision record:** docs/release-decision.md
 
 ## Related policies
 
