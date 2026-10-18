@@ -3,6 +3,7 @@ import test from "node:test";
 import { createService } from "../../service/dist/app.js";
 import { at, snapshot } from "../browser/wallFixture.ts";
 import { responseClassification, WallCycleTracker, wallSoakPages } from "../soak/assertions.ts";
+import { CycleCoverage } from "../soak/monitor.ts";
 
 const ids = [["a", "b"], ["c"], ["a", "b"], ["c", "d"], ["e"]];
 function observe(tracker, index, elapsed, changes = {}) {
@@ -109,13 +110,51 @@ test("a missed page or pages from different publications cannot certify a comple
   }
 });
 
-test("observed inactive or empty states start a fresh recovery window without retaining page identities", () => {
-  for (const changes of [{ automatic: false }, { actorIDs: [] }, { snapshot: null }]) {
+test("an observed inactive state starts a fresh recovery window without retaining page identities", () => {
+  const tracker = new WallCycleTracker();
+  observe(tracker, 0, 0);
+  observe(tracker, 1, 20_000, { automatic: false });
+  for (let index = 0; index < wallSoakPages.length; index++) observe(tracker, index, 3_600_000 + index * 20_000);
+  assert.equal(tracker.summary().completeCycles, 1);
+  assert.equal(tracker.summary().automaticWindows, 2);
+});
+
+test("empty or missing-pin automatic frames clear only the partial cycle", () => {
+  for (const changes of [{ actorIDs: [] }, { snapshot: null }]) {
     const tracker = new WallCycleTracker();
     observe(tracker, 0, 0);
     observe(tracker, 1, 20_000, changes);
-    for (let index = 0; index < wallSoakPages.length; index++) observe(tracker, index, 3_600_000 + index * 20_000);
-    assert.equal(tracker.summary().completeCycles, 1);
-    assert.equal(tracker.summary().automaticWindows, 2);
+    assert.equal(tracker.summary().currentCycleObservedPages, 0);
+    for (let index = 2; index < wallSoakPages.length; index++) observe(tracker, index, index * 20_000);
+    assert.equal(tracker.summary().completeCycles, 0);
+    assert.equal(tracker.summary().automaticWindows, 1);
+    assert.throws(() => observe(tracker, 0, 240_000), /must keep completing every board and roll page/);
   }
+});
+
+test("brief automatic blanks cannot conceal missing coherent cycles behind complete page coverage", () => {
+  const tracker = new WallCycleTracker();
+  const identities = wallSoakPages.map((entry) => `${entry.view}:${entry.page}`);
+  const coverage = new CycleCoverage(identities);
+  for (let index = 0; index < wallSoakPages.length; index++) {
+    observe(tracker, index, index * 20_000);
+    coverage.observe(index * 20_000, true, identities[index]);
+  }
+  const sample = (elapsed, step) => {
+    const index = Math.floor(step / 2) % 5;
+    const blank = step % 2 === 0;
+    // This is a synthetic tracker probe, not real elapsed-time soak evidence.
+    coverage.observe(elapsed, true, blank ? null : identities[index]);
+    observe(tracker, index, elapsed, {
+      automatic: true,
+      snapshot: blank ? null : `new-publication-${step}`,
+      actorIDs: blank ? [] : ids[index],
+    });
+  };
+  let step = 0;
+  for (let elapsed = 100_000; elapsed < 325_000; elapsed += 15_000) sample(elapsed, step++);
+  assert.equal(tracker.summary().completeCycles, 1);
+  assert(coverage.summary().completeWindows >= 2, "Every individual page continues to appear within its bound");
+  assert.throws(() => sample(325_000, step), /must keep completing every board and roll page/);
+  assert.equal(tracker.summary().automaticWindows, 1);
 });

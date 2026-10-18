@@ -1,4 +1,6 @@
 import {
+  publicDocumentationReasons,
+  publicDocumentationRecognitionReasons,
   matchesActorFilter,
   type ActorFilter,
   publicEvidenceMetadataSchema,
@@ -14,9 +16,11 @@ import {
   type Artifact,
   type Contribution,
   type MetricResult,
+  type MetricDefinition,
   type PendingCount,
   type Snapshot,
 } from "@pick-your-ai/contracts";
+import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { compareSourceInstants } from "./source-time.js";
 
 /** An exact materialized scope, never a request to sum overlapping aggregates. */
@@ -77,8 +81,23 @@ export interface PublishedSnapshot {
   methodology?: { metricId: string; policyVersion: string; policySignature: string; policyLink: string | null }[];
   diagnostics?: PublicDiagnostic[];
 }
+/** Current receipts for an authorized repository, separate from frozen source coverage.
+ * No source connectivity, historical completeness or publication success is implied.
+ */
+export interface PublicSourceHealth {
+  scopeId: string;
+  state: "reconciled" | "no_activity_in_window" | "collecting" | "degraded" | "unknown";
+  lastAttemptAt: string | null;
+  lastSuccessfulSync: string | null;
+  reconciledThrough: string | null;
+  /** Age of oldest unfinished retained supported webhook receipt, not delivery latency. */
+  webhookLagSeconds: number | null;
+  webhookState: "idle" | "pending" | "degraded" | "unknown";
+}
 /** Current controls must be read atomically even for a historical snapshot. */
 export interface PublicRead {
+  /** Must be scoped and read under the same current source authorization as selected. */
+  currentSourceHealth?: PublicSourceHealth[];
   /** Applied only after current privacy projection; never a source authorization. */
   actorFilter?: ActorFilter;
   head: { snapshotId: string; revision: number; publishedAt: string };
@@ -95,6 +114,10 @@ export interface PublicSnapshotSource {
    * Implementations must honor signal cancellation and enforce current controls.
    */
   read(scope: PublicScope, snapshotId: string | null, signal: AbortSignal): Promise<PublicRead | null>;
+  /** Optional current diagnostics with the identical publication/privacy boundary.
+   * Ordinary board and evidence reads need not scan the operational receipt stores.
+   */
+  readHealth?(scope: PublicScope, snapshotId: string | null, signal: AbortSignal): Promise<PublicRead | null>;
 }
 export const unavailableSource: PublicSnapshotSource = {
   async read() {
@@ -161,7 +184,12 @@ const date = (value: string | null) => sourceEventSchema.shape.occurredAt.safePa
 const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,200}$/.test(value);
 
 /** Validate and construct a fresh allowlisted public object. Never serialize provider objects. */
-export function projectRead(input: PublicRead, scope: PublicScope, pin: string | null): PublicRead {
+export function projectRead(
+  input: PublicRead,
+  scope: PublicScope,
+  pin: string | null,
+  definitions: readonly MetricDefinition[] = metricRegistryV1.metrics,
+): PublicRead {
   const reject = () => {
     throw new PublicReadError(503, "public_projection_unavailable");
   };
@@ -188,10 +216,15 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
   )
     return reject();
   const ranking = selected.ranking.map((entry) => {
+    const definition = definitions.find((metric) => metric.id === entry.metricId)?.definition;
+    const descriptive =
+      definition?.release_eligibility === "descriptive-only" ||
+      ["ratio", "median_and_p75_of_elapsed_hours"].includes(definition?.aggregation ?? "");
     if (
       !id(entry.metricId) ||
       !["ascending", "descending"].includes(entry.direction) ||
-      (entry.rank !== undefined && typeof entry.rank !== "boolean")
+      (entry.rank !== undefined && typeof entry.rank !== "boolean") ||
+      (descriptive && entry.rank !== false)
     )
       return reject();
     return { metricId: entry.metricId, direction: entry.direction, rank: entry.rank !== false };
@@ -240,6 +273,42 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
   const disabled = new Set(disabledMetrics.map((entry) => entry.id));
   if (new Set(ranking.map((entry) => entry.metricId)).size !== ranking.length) return reject();
   const snapshot = snapshotSchema.parse(selected.snapshot);
+  if (
+    input.currentSourceHealth !== undefined &&
+    (!Array.isArray(input.currentSourceHealth) || input.currentSourceHealth.length > 100)
+  )
+    return reject();
+  const currentSourceHealth = input.currentSourceHealth?.map((entry) => {
+    if (
+      !entry ||
+      !id(entry.scopeId) ||
+      !snapshot.coverage.some(
+        (coverage) => coverage.scopeId === entry.scopeId && coverage.source.startsWith("github_"),
+      ) ||
+      (scope.repository !== null && scope.repository !== entry.scopeId) ||
+      !["reconciled", "no_activity_in_window", "collecting", "degraded", "unknown"].includes(entry.state) ||
+      !["idle", "pending", "degraded", "unknown"].includes(entry.webhookState) ||
+      ![entry.lastAttemptAt, entry.lastSuccessfulSync, entry.reconciledThrough].every(date) ||
+      (entry.webhookLagSeconds !== null &&
+        (!Number.isSafeInteger(entry.webhookLagSeconds) || entry.webhookLagSeconds < 0)) ||
+      (entry.webhookState === "unknown" && entry.webhookLagSeconds !== null)
+    )
+      return reject();
+    return {
+      scopeId: entry.scopeId,
+      state: entry.state,
+      lastAttemptAt: entry.lastAttemptAt,
+      lastSuccessfulSync: entry.lastSuccessfulSync,
+      reconciledThrough: entry.reconciledThrough,
+      webhookLagSeconds: entry.webhookLagSeconds,
+      webhookState: entry.webhookState,
+    };
+  });
+  if (
+    currentSourceHealth &&
+    new Set(currentSourceHealth.map((entry) => entry.scopeId)).size !== currentSourceHealth.length
+  )
+    return reject();
   const controls = input.controls;
   if (
     !id(controls.version) ||
@@ -273,14 +342,42 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
     );
   if (new Set(actors.map((actor) => actor.actorId)).size !== actors.length) return reject();
   const actorIds = new Set(actors.map((actor) => actor.actorId));
-  const metadataByContribution = new Map<string, string | null>();
+  const metadataByContribution = new Map<string, string>();
+  const documentationClassificationByContribution = new Map<string, string>();
   const projectEvidence = (entries: PublicEvidence[]) =>
     entries
       .map((entry) => {
         const artifact = artifactSchema.parse(entry.artifact);
         const parsed = contributionSchema.parse(entry.contribution);
+        const classification = publicDocumentationReasons(parsed);
+        if (parsed.metricIds.includes("documentation") && classification.length > 0) {
+          // Legacy copies can lack labels. Every present classification must
+          // still agree, even if an unlabeled copy appears between two of them.
+          const current = JSON.stringify(classification);
+          const previous = documentationClassificationByContribution.get(parsed.contributionId);
+          if (previous !== undefined && previous !== current) return reject();
+          documentationClassificationByContribution.set(parsed.contributionId, current);
+        }
         const contribution = {
           ...parsed,
+          ...(parsed.metricIds.some((metric) => metric === "documentation" || metric === "localization")
+            ? {
+                reasonCodes: [
+                  ...parsed.reasonCodes.filter((reason) =>
+                    [
+                      "raw_observed_only",
+                      "independent_recognition_receipt",
+                      "public_observed_work",
+                      "public_pending_work",
+                      "public_accepted_work",
+                      "public_unknown_work",
+                    ].includes(reason),
+                  ),
+                  ...classification,
+                  ...publicDocumentationRecognitionReasons(parsed),
+                ],
+              }
+            : {}),
           metricIds: parsed.metricIds.filter(
             (metricId) => !disabled.has(metricId) && ranking.some((policy) => policy.metricId === metricId),
           ),
@@ -288,9 +385,15 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
         if (!date(entry.occurredAt) || (entry.sourceRevision !== null && !id(entry.sourceRevision))) return reject();
         const metadata =
           entry.evidenceMetadata === undefined ? undefined : publicEvidenceMetadataSchema.parse(entry.evidenceMetadata);
-        // Absence is part of the projection too: route preference must not choose
-        // a legacy copy over a richer copy of the same contribution (or vice versa).
-        const serialized = metadata === undefined ? null : JSON.stringify(metadata);
+        // Absence is part of the metadata projection too: route preference must
+        // not choose a legacy copy over a richer copy of the same contribution.
+        // Locale units require identical labels on every copy. Earlier generic
+        // documentation snapshots omitted path-policy reasons in portfolio proof,
+        // so retain their readability without inventing missing classifications.
+        const serialized = JSON.stringify({
+          metadata: metadata ?? null,
+          classification: parsed.metricIds.includes("localization") ? classification : null,
+        });
         if (
           metadataByContribution.has(contribution.contributionId) &&
           metadataByContribution.get(contribution.contributionId) !== serialized
@@ -349,7 +452,13 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
       ...portfolioMetadata.get(entry.contribution.contributionId)!,
       contribution: {
         ...entry.contribution,
-        reasonCodes: [`public_${portfolioMetadata.get(entry.contribution.contributionId)!.activityState}_work`],
+        reasonCodes: [
+          `public_${portfolioMetadata.get(entry.contribution.contributionId)!.activityState}_work`,
+          ...publicDocumentationReasons(entry.contribution),
+          ...(portfolioMetadata.get(entry.contribution.contributionId)!.activityState === "accepted"
+            ? publicDocumentationRecognitionReasons(entry.contribution)
+            : []),
+        ],
       },
     }))
     .filter((entry) => entry.contribution.metricIds.length > 0);
@@ -370,7 +479,10 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
     ...entry,
     activityState: "pending" as const,
     observedAt: pendingMetadata.get(entry.contribution.contributionId)!,
-    contribution: { ...entry.contribution, reasonCodes: ["public_pending_work"] },
+    contribution: {
+      ...entry.contribution,
+      reasonCodes: ["public_pending_work", ...publicDocumentationReasons(entry.contribution)],
+    },
   }));
   const pendingEvidenceMap = new Map(pendingEvidence.map((entry) => [entry.contribution.contributionId, entry]));
   function pendingProjection(entry: PublicRow, result: MetricResult): PendingCount | undefined {
@@ -492,6 +604,7 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
   });
   return {
     head: { snapshotId: input.head.snapshotId, revision: input.head.revision, publishedAt: input.head.publishedAt },
+    ...(currentSourceHealth === undefined ? {} : { currentSourceHealth }),
     controls: { version: controls.version, suppressedActorIds: [], suppressedArtifactIds: [], revokedSnapshotIds: [] },
     selected: {
       approvedPublic: true,

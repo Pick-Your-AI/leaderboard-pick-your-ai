@@ -367,6 +367,11 @@ function WallDisplay({
       });
     return () => controller.abort();
   }, [base, selected, options, mode, position, nonce, visible]);
+  useEffect(() => {
+    // Removing a focused contributor need not dispatch a bubbling blur event.
+    // Keep surviving focus intact, but release a hold whose node is gone.
+    if (focusInside && !region.current?.contains(document.activeElement)) setFocusInside(false);
+  }, [frame, focusInside]);
   const automatic = mode !== "frozen" && !paused && !reduced && visible && !pointerInside && !focusInside;
   const advance = () => {
     if (!frame || reading || document.visibilityState !== "visible") return;
@@ -393,15 +398,19 @@ function WallDisplay({
   };
   const advanceRef = useRef(advanceAutomatically);
   advanceRef.current = advanceAutomatically;
+  const displayedPosition = frame?.position;
   // A 20-second privacy recheck must not perpetually reset a slower rotation timer.
+  // Only a successfully displayed page starts its full interval. The position
+  // object stays stable across privacy reads, but changes for a new page.
   useEffect(() => {
     automaticDue.current = false;
+    if (!displayedPosition || displayedPosition !== position) return;
     if (paused || reduced || !visible || pointerInside || focusInside || mode === "frozen") return;
     const timer = setInterval(() => {
       advanceRef.current();
     }, interval * 1000);
     return () => clearInterval(timer);
-  }, [paused, reduced, visible, pointerInside, focusInside, mode, interval, position]);
+  }, [paused, reduced, visible, pointerInside, focusInside, mode, interval, position, displayedPosition]);
   useEffect(() => {
     if (!automatic) automaticDue.current = false;
     else if (automaticDue.current && !reading) advanceRef.current();
@@ -416,19 +425,19 @@ function WallDisplay({
   };
   const content = frame?.content;
   const meta = content?.value;
-  const pageSummary = frame
-    ? `${frame.content.kind === "board" ? frame.content.value.metric.name : "Contributor roll"} · page ${frame.position.page} · snapshot ${frame.content.value.snapshotId}.`
+  const displaySummary = frame
+    ? `${frame.content.kind === "board" ? frame.content.value.metric.name : "Contributor roll"} · page ${frame.position.page} · snapshot ${frame.content.value.snapshotId}. Source health: ${frame.health.status === "stale_or_degraded" ? "stale or degraded" : "recently reconciled"}.`
     : "";
   useEffect(() => {
-    if (!pageSummary || !visible) {
+    if (!displaySummary || !visible) {
       setAnnouncement("");
       return;
     }
-    // Announce only a successfully displayed page, coalescing rapid manual
-    // changes. Same-page privacy checks do not repeat the announcement.
-    const timer = setTimeout(() => setAnnouncement(pageSummary), 1_000);
+    // Coalesce displayed page and source-health changes. An unchanged same-page
+    // privacy check does not repeat the announcement.
+    const timer = setTimeout(() => setAnnouncement(displaySummary), 1_000);
     return () => clearTimeout(timer);
-  }, [pageSummary, visible]);
+  }, [displaySummary, visible]);
   const controlLabel =
     mode === "frozen"
       ? "Frozen snapshot — automatic advance off"
@@ -574,7 +583,8 @@ function WallDisplay({
             <>
               <h1>Contributors in this scope</h1>
               <p className="api-wall-summary">
-                Alphabetical and unranked · includes attributable work that does not qualify for a ranking
+                Unranked · ordered by GitHub login; unavailable logins first. Includes attributable work that does not
+                qualify for a ranking.
               </p>
               <p className="api-wall-page">
                 Page {frame!.position.page} · {content.value.totalContributors} contributors
@@ -593,6 +603,9 @@ function WallDisplay({
                       >
                         {label}
                       </a>
+                      <span className="api-wall-detail">
+                        {entry.actor.login ? `@${entry.actor.login}` : `Login unavailable · ${entry.actorId}`}
+                      </span>
                     </li>
                   );
                 })}

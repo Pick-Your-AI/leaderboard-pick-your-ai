@@ -45,6 +45,32 @@ test("strict registry validation rejects broken mappings, fake enablement and un
   }
 });
 
+test("localization exposes only its independently qualified source-merge candidate view", () => {
+  const ui = getMetricUi("localization");
+  const pair = { state: "qualified", date_basis: "occurredAt" };
+  assert.equal(ui.maturity, "synthetic_verified");
+  assert.equal(ui.source_class, "evidence_reviewed");
+  assert.deepEqual(ui.supported_states, [pair.state]);
+  assert.deepEqual(ui.supported_date_bases, [pair.date_basis]);
+  assert.deepEqual(ui.supported_combinations, [pair]);
+  assert.deepEqual(selectMetricView("localization"), pair);
+  for (const unsupported of [
+    { state: "observed", date_basis: "occurredAt" },
+    { state: "qualified", date_basis: "acceptedAt" },
+    { state: "reviewed", date_basis: "occurredAt" },
+  ]) assert.throws(() => selectMetricView("localization", unsupported), /Unsupported/);
+  validateMetricPolicy({
+    metricId: "localization", version: "synthetic-localization/v1", definitionVersion: metricRegistryV1.policy_version,
+    unit: metricRegistryV1.metrics.find(metric => metric.id === "localization").definition.unit,
+    aggregation: "count", dateBasis: pair.date_basis, rankedStates: [pair.state], roles: ["author"],
+    groupBy: "canonical", sources: ["github_rest"], minimumSamples: 1, rank: false,
+  });
+  assert.ok(ui.verification_cases.includes("apps/pipeline/test/localization.test.mjs"));
+  assert.ok(ui.verification_cases.includes("packages/github/test/localization.test.mjs"));
+  assert.equal(metricRegistryV1.ui_metadata.public_enabled, false);
+  assert.deepEqual(ui.lead_view, { overview: false, wall: false, order: null });
+});
+
 test("every advertised triage combination must match the pinned engine grouping policy", () => {
   for (const invalid of [
     {state: "qualified", date_basis: "acceptedAt"},

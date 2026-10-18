@@ -40,6 +40,8 @@ export interface MetricFact {
   outcome?: "merged" | "closed_unmerged" | "pending";
   readyAt?: string | null;
   firstReviewAt?: string | null;
+  /** Exact observed locale fact whose accepted representation replaces current portfolio display. */
+  recognitionSourceFactId?: string;
 }
 export interface EngineActor {
   id: string;
@@ -164,6 +166,10 @@ function instant(value: string): number {
     throw new Error("Invalid UTC instant");
   return ms;
 }
+function compareInstants(a: string | null, b: string | null): number {
+  if (a === null || b === null) return a === b ? 0 : a === null ? -1 : 1;
+  return instant(a) - instant(b);
+}
 function number(value: number, name: string): number {
   if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be finite and nonnegative`);
   return value;
@@ -212,6 +218,13 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
     policy.rankedStates.some((state) => !["observed", "qualified", "reviewed"].includes(state))
   )
     throw new Error("Exactly one evidence class is required; observed, qualified and reviewed values stay separate");
+  if (
+    policy.metricId === "localization" &&
+    (policy.rankedStates[0] === "observed" || policy.groupBy !== "canonical" || policy.dateBasis !== "occurredAt")
+  )
+    throw new Error(
+      "Localization accepted units require independent acceptance, canonical language/category grouping and the source merge clock",
+    );
   if (
     !policy.roles.length ||
     policy.roles.some((role) => !knownRoles.includes(role) || role === "unknown") ||
@@ -270,10 +283,14 @@ export function resolveMetricWindow(
   let start: number | null;
   if (["7d", "30d", "90d"].includes(preset)) start = end - Number.parseInt(preset, 10) * 86400000;
   else if (preset === "all") start = null;
-  else if (preset === "month") start = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
-  else if (preset === "quarter") start = Date.UTC(date.getUTCFullYear(), Math.floor(date.getUTCMonth() / 3) * 3, 1);
-  else if (preset === "year") start = Date.UTC(date.getUTCFullYear(), 0, 1);
-  else if (preset === "custom" && custom) {
+  else if (preset === "month" || preset === "quarter" || preset === "year") {
+    const month =
+      preset === "year" ? 0 : preset === "quarter" ? Math.floor(date.getUTCMonth() / 3) * 3 : date.getUTCMonth();
+    // Preserve the validated year: Date.UTC remaps years 0–99 to 1900–1999.
+    date.setUTCMonth(month, 1);
+    date.setUTCHours(0, 0, 0, 0);
+    start = date.getTime();
+  } else if (preset === "custom" && custom) {
     start = instant(custom.from);
     const to = instant(custom.to);
     if (start >= to || to > end) throw new Error("Custom window must precede cutoff and have from < to");
@@ -437,7 +454,7 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
       reject(bucket, "ambiguous_canonical_action");
       continue;
     }
-    const fact = [...bucket].sort((a, b) => compare(a.observedAt, b.observedAt) || compare(a.id, b.id))[0]!;
+    const fact = [...bucket].sort((a, b) => compareInstants(a.observedAt, b.observedAt) || compare(a.id, b.id))[0]!;
     if (bucket.length > 1)
       reject(
         bucket.filter((item) => item !== fact),
@@ -554,7 +571,7 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
       (a, b) =>
         Number(!policy.rankedStates.includes(a.state as never)) -
           Number(!policy.rankedStates.includes(b.state as never)) ||
-        compare(a.occurredAt ?? "", b.occurredAt ?? "") ||
+        compareInstants(a.occurredAt ?? null, b.occurredAt ?? null) ||
         compare(a.id, b.id),
     );
     retained.push(ordered[0]!);
@@ -577,7 +594,7 @@ export function selectPortfolioFacts(
 ): MetricFact[] {
   validateMetricPolicy(policy);
   const scope = canonicalScope(requestedScope);
-  return prepare(
+  const selected = prepare(
     input,
     {
       ...policy,
@@ -589,6 +606,31 @@ export function selectPortfolioFacts(
     },
     scope,
   ).facts.filter((fact) => fact.role !== "unknown" && fact.occurredAt !== null);
+  const observed = new Map(selected.filter((fact) => fact.state === "observed").map((fact) => [fact.id, fact]));
+  const acceptedSources = new Set<string>();
+  for (const fact of selected) {
+    if (
+      fact.metricId !== "localization" ||
+      !["qualified", "reviewed"].includes(fact.state) ||
+      !fact.recognitionSourceFactId
+    )
+      continue;
+    const source = observed.get(fact.recognitionSourceFactId);
+    if (
+      source?.metricId === "localization" &&
+      source.actorId === fact.actorId &&
+      source.artifactId === fact.artifactId &&
+      source.repoId === fact.repoId &&
+      source.role === fact.role &&
+      source.rawState === fact.rawState &&
+      source.occurredAt === fact.occurredAt &&
+      source.observedAt === fact.observedAt
+    )
+      acceptedSources.add(source.id);
+  }
+  // Keep both immutable facts for audit and recomputation, but expose one current
+  // locale activity unit. An unaccepted or unrelated language remains observed.
+  return selected.filter((fact) => !acceptedSources.has(fact.id));
 }
 
 export function aggregateMetric(
@@ -972,7 +1014,7 @@ export function participationView(
   return unique(current.map((fact) => fact.actorId!)).map((actorId) => {
     const historyFacts = all
       .filter((fact) => fact.actorId === actorId)
-      .sort((a, b) => compare(a[policy.dateBasis] ?? "", b[policy.dateBasis] ?? "") || compare(a.id, b.id));
+      .sort((a, b) => compareInstants(a[policy.dateBasis], b[policy.dateBasis]) || compare(a.id, b.id));
     const first = historyFacts[0];
     const activeWeeks = unique(
       current

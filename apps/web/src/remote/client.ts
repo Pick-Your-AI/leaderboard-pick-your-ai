@@ -1,4 +1,11 @@
+import { stableJSON } from "@pick-your-ai/metrics";
+import { parseCSVExport } from "./csv-export.ts";
+import { onlyExportKeys, parseExportJSON } from "./export-json.ts";
 import {
+  compareSourceInstants,
+  participationWeekDenominator,
+  publicParticipationSchema,
+  type PublicParticipation,
   actorFilterSchema,
   actorKindSchema,
   executionModeSchema,
@@ -161,18 +168,31 @@ export function uiHref(
   if (extra.cursor) params.set("cursor", extra.cursor);
   return `${path}?${params}`;
 }
-export function apiBase(raw = "/api/v1"): string {
-  const url = new URL(raw, window.location.origin);
+function configuredServiceBase(raw: string): URL {
+  let url: URL;
+  try {
+    url = new URL(raw, window.location.origin);
+  } catch {
+    throw new ReadFailure(500, "invalid_public_api_configuration");
+  }
   if (
     url.username ||
     url.password ||
     url.search ||
     url.hash ||
     (url.protocol !== "https:" && url.origin !== window.location.origin) ||
-    !/^\/[A-Za-z0-9/_-]+$/.test(url.pathname)
+    !/^\/(?!\/)[A-Za-z0-9/_-]+$/.test(url.pathname)
   )
     throw new ReadFailure(500, "invalid_public_api_configuration");
+  return url;
+}
+export function apiBase(raw = "/api/v1"): string {
+  const url = configuredServiceBase(raw);
   return url.href.replace(/\/$/, "");
+}
+/** An explicitly configured top-level account link, never a public request base. */
+export function controlsNavigationBase(raw: string): string {
+  return configuredServiceBase(raw).href.replace(/\/$/, "");
 }
 export function publicLink(raw: string | null | undefined): string | null {
   if (!raw || raw.length > 2048) return null;
@@ -287,6 +307,7 @@ export async function exportPage(
   selected: Selection,
   format: "json" | "csv",
   signal: AbortSignal,
+  expectedMetric: MetricDefinition,
 ): Promise<Blob> {
   const params = parameters(selected, { board: true, cursor: selected.cursor });
   params.set("format", format);
@@ -327,12 +348,14 @@ export async function exportPage(
   } catch {
     throw new ReadFailure(502, "invalid_export_response");
   }
-  if (format === "json") {
-    try {
-      validateExport(JSON.parse(raw), selected);
-    } catch {
-      throw new ReadFailure(502, "invalid_export_response");
-    }
+  try {
+    validateExport(
+      format === "json" ? parseExportJSON(raw) : parseCSVExport(raw, expectedMetric, Number(selected.limit)),
+      selected,
+      expectedMetric,
+    );
+  } catch {
+    throw new ReadFailure(502, "invalid_export_response");
   }
   return new Blob([raw], { type });
 }
@@ -369,10 +392,40 @@ function selectedActor(value: unknown, selected: Selection): Actor {
   if (!matchesActorFilter(actor, selected.actors ?? "all")) throw new ReadFailure(502, "api_actor_filter_mismatch");
   return actor;
 }
+function descriptiveMetric(metric: MetricDefinition): boolean {
+  return (
+    metric.definition.release_eligibility === "descriptive-only" ||
+    ["ratio", "median_and_p75_of_elapsed_hours"].includes(metric.definition.aggregation)
+  );
+}
 /** Validate the minimized export contract, which intentionally has no actor profile or live head. */
-export function validateExport(value: unknown, selected: Selection): void {
+export function validateExport(value: unknown, selected: Selection, expectedMetric: MetricDefinition): void {
   const data = object(value),
     scope = object(data.scope);
+  onlyExportKeys(data, [
+    "exportSchemaVersion",
+    "schemaVersion",
+    "snapshotId",
+    "revision",
+    "generatedAt",
+    "metricDefinitionVersion",
+    "computationVersion",
+    "policyVersion",
+    "scope",
+    "actorFilter",
+    "metric",
+    "ranking",
+    "coverage",
+    "methodology",
+    "totalRows",
+    "pageRows",
+    "nextCursor",
+    "diagnostics",
+    "rows",
+    "evidence",
+    "pendingEvidence",
+  ]);
+  onlyExportKeys(scope, scopeKeys);
   if (data.exportSchemaVersion !== "public-export/v1" || data.schemaVersion !== "leaderboard/v1")
     throw new ReadFailure(502, "invalid_export_response");
   const filter = actorSelection(data, selected);
@@ -386,10 +439,17 @@ export function validateExport(value: unknown, selected: Selection): void {
   identity(data.policyVersion);
   const metric = metricDefinitionSchema.parse(data.metric);
   if (metric.id !== selected.metric) throw new ReadFailure(502, "api_metric_mismatch");
+  if (!expectedMetric || stableJSON(metric) !== stableJSON(expectedMetric))
+    throw new ReadFailure(502, "api_metric_definition_mismatch");
   const ranking = data.ranking === null ? null : object(data.ranking);
+  if (ranking) onlyExportKeys(ranking, ["metricId", "direction", "rank"]);
   if (
     ranking &&
-    (!["ascending", "descending"].includes(String(ranking.direction)) || typeof ranking.rank !== "boolean")
+    (ranking.metricId !== metric.id ||
+      typeof ranking.direction !== "string" ||
+      !["ascending", "descending"].includes(ranking.direction) ||
+      typeof ranking.rank !== "boolean" ||
+      (descriptiveMetric(metric) && ranking.rank !== false))
   )
     throw new ReadFailure(502, "invalid_export_response");
   array(data.coverage, 500).forEach((item) => coverageSchema.parse(item));
@@ -397,10 +457,26 @@ export function validateExport(value: unknown, selected: Selection): void {
   if (integer(data.pageRows) !== rows.length || integer(data.totalRows) < rows.length)
     throw new ReadFailure(502, "invalid_export_response");
   if (data.nextCursor !== null) string(data.nextCursor);
+  const evidenceBindings = new Map<string, string>();
+  const bindEvidence = (id: string, entry: Record<string, unknown>) => {
+    const binding = stableJSON(entry),
+      previous = evidenceBindings.get(id);
+    if (previous !== undefined && previous !== binding) throw new ReadFailure(502, "invalid_export_response");
+    evidenceBindings.set(id, binding);
+  };
   const evidenceIds = new Set<string>();
   for (const value of array(data.evidence, 2000)) {
     const entry = object(value),
       id = identity(entry.evidenceId);
+    onlyExportKeys(entry, [
+      "evidenceId",
+      "repositoryId",
+      "sourceUrl",
+      "occurredAt",
+      "sourceRevision",
+      "sourceRevisionUrl",
+    ]);
+    bindEvidence(id, entry);
     if (evidenceIds.has(id) || publicLink(string(entry.sourceUrl)) === null)
       throw new ReadFailure(502, "invalid_export_response");
     evidenceIds.add(id);
@@ -414,6 +490,15 @@ export function validateExport(value: unknown, selected: Selection): void {
   for (const value of array(data.pendingEvidence ?? [], 2000)) {
     const entry = object(value),
       id = identity(entry.evidenceId);
+    onlyExportKeys(entry, [
+      "evidenceId",
+      "repositoryId",
+      "sourceUrl",
+      "occurredAt",
+      "sourceRevision",
+      "sourceRevisionUrl",
+    ]);
+    bindEvidence(id, entry);
     if (pendingIds.has(id) || publicLink(string(entry.sourceUrl)) === null)
       throw new ReadFailure(502, "invalid_export_response");
     pendingIds.add(id);
@@ -426,9 +511,11 @@ export function validateExport(value: unknown, selected: Selection): void {
   const referencedPending = new Set<string>();
   const pageActors = new Set<string>(),
     referencedEvidence = new Set<string>();
+  const rowPending = new Map<string, PendingCount | undefined>();
   for (const value of rows) {
     const row = object(value),
       result = metricResultSchema.parse(row.result);
+    onlyExportKeys(row, ["actorId", "login", "actorKind", "executionMode", "rank", "result", "evidenceIds", "pending"]);
     const actorId = identity(row.actorId);
     if (pageActors.has(actorId)) throw new ReadFailure(502, "invalid_export_response");
     pageActors.add(actorId);
@@ -442,10 +529,15 @@ export function validateExport(value: unknown, selected: Selection): void {
       (actorKind === null || executionMode === null || !matchesActorFilter({ kind: actorKind, executionMode }, filter))
     )
       throw new ReadFailure(502, "api_actor_filter_mismatch");
-    if (result.metricId !== metric.id || (row.rank !== null && (integer(row.rank) < 1 || ranking?.rank === false)))
+    if (
+      result.metricId !== metric.id ||
+      (row.rank !== null && (integer(row.rank) < 1 || ranking?.rank === false || descriptiveMetric(metric)))
+    )
       throw new ReadFailure(502, "invalid_export_response");
-    if (row.pending !== undefined)
-      for (const id of pendingCountSchema.parse(row.pending).evidenceIds) {
+    const pending = row.pending === undefined ? undefined : pendingCountSchema.parse(row.pending);
+    rowPending.set(actorId, pending);
+    if (pending !== undefined)
+      for (const id of pending.evidenceIds) {
         if (!pendingIds.has(id)) throw new ReadFailure(502, "invalid_export_response");
         referencedPending.add(id);
       }
@@ -457,11 +549,33 @@ export function validateExport(value: unknown, selected: Selection): void {
   }
   if (referencedPending.size !== pendingIds.size) throw new ReadFailure(502, "invalid_export_response");
   if (referencedEvidence.size !== evidenceIds.size) throw new ReadFailure(502, "invalid_export_response");
-  for (const entry of diagnostics(data.diagnostics))
-    if (entry.metricId !== metric.id || !pageActors.has(entry.actorId))
+  for (const value of array(data.diagnostics ?? []))
+    onlyExportKeys(object(value), [
+      "metricId",
+      "actorId",
+      "numerator",
+      "denominator",
+      "sampleCount",
+      "censored",
+      "missingReadiness",
+      "p75",
+      "pending",
+    ]);
+  const diagnosticActors = new Set<string>();
+  for (const entry of diagnostics(data.diagnostics)) {
+    if (
+      entry.metricId !== metric.id ||
+      !pageActors.has(entry.actorId) ||
+      diagnosticActors.has(entry.actorId) ||
+      (entry.pending !== undefined && stableJSON(entry.pending) !== stableJSON(rowPending.get(entry.actorId))) ||
+      [entry.numerator, entry.denominator, entry.p75].some((value) => value !== null && value < 0)
+    )
       throw new ReadFailure(502, "invalid_export_response");
+    diagnosticActors.add(entry.actorId);
+  }
   for (const value of array(data.methodology, 98)) {
     const entry = object(value);
+    onlyExportKeys(entry, ["metricId", "policyVersion", "policySignature", "policyLink"]);
     if (identity(entry.metricId) !== metric.id) throw new ReadFailure(502, "api_metric_mismatch");
     identity(entry.policyVersion);
     string(entry.policySignature);
@@ -571,7 +685,10 @@ export function board(value: unknown, selected: Selection): Board {
   const metric = metricDefinitionSchema.parse(data.metric);
   if (
     metric.id !== selected.metric ||
-    (method && (!["ascending", "descending"].includes(String(method.direction)) || typeof method.rank !== "boolean"))
+    (method &&
+      (!["ascending", "descending"].includes(String(method.direction)) ||
+        typeof method.rank !== "boolean" ||
+        (descriptiveMetric(metric) && method.rank !== false)))
   )
     throw new ReadFailure(502, "api_metric_mismatch");
   return {
@@ -581,7 +698,10 @@ export function board(value: unknown, selected: Selection): Board {
     rows: array(data.rows, 100).map((value) => {
       const row = object(value),
         result = metricResultSchema.parse(row.result);
-      if (result.metricId !== metric.id || (row.rank !== null && (integer(row.rank) < 1 || method?.rank === false)))
+      if (
+        result.metricId !== metric.id ||
+        (row.rank !== null && (integer(row.rank) < 1 || method?.rank === false || descriptiveMetric(metric)))
+      )
         throw new ReadFailure(502, "invalid_api_response");
       return {
         rank: row.rank === null ? null : integer(row.rank),
@@ -696,6 +816,7 @@ export interface Profile extends Metadata {
   actorId: string;
   actor: Actor;
   results: MetricResult[];
+  activitySummary: PublicParticipation | null;
   diagnostics: Diagnostic[];
   roleBreakdown: { role: string; contributions: number }[];
   timeline: Evidence[];
@@ -707,11 +828,33 @@ export interface Profile extends Metadata {
 export function profile(value: unknown, selected: Selection): Profile {
   const data = object(value);
   if ((data.category ?? null) !== selected.category) throw new ReadFailure(502, "api_filter_mismatch");
+  const results = array(data.results, 98).map((item) => metricResultSchema.parse(item));
+  const participation =
+    data.activitySummary === undefined ? null : publicParticipationSchema.safeParse(data.activitySummary);
+  if (
+    participation !== null &&
+    (!participation.success ||
+      participation.data.denominatorWeeks !== participationWeekDenominator(selected.start, selected.end) ||
+      participation.data.metrics.some((entry) => {
+        const result = results.find((result) => result.metricId === entry.metricId);
+        const earliest = entry.earliestDatedEvidence;
+        return (
+          result === undefined ||
+          ["pr_accepted_rate", "review_wait"].includes(entry.metricId) ||
+          (entry.state === "measured" && entry.activeWeeks === 0 && result.value !== 0) ||
+          (earliest !== null &&
+            ((selected.start !== null && compareSourceInstants(earliest.effectiveAt, selected.start) < 0) ||
+              (selected.end !== null && compareSourceInstants(earliest.effectiveAt, selected.end) >= 0)))
+        );
+      }))
+  )
+    throw new ReadFailure(502, "invalid_participation_response");
   return {
     ...metadata(value, selected),
     actorId: identity(data.actorId),
     actor: selectedActor(data.actor, selected),
-    results: array(data.results, 98).map((item) => metricResultSchema.parse(item)),
+    results,
+    activitySummary: participation?.success ? participation.data : null,
     diagnostics: diagnostics(data.diagnostics),
     roleBreakdown: array(data.roleBreakdown, 30).map((value) => {
       const item = object(value);
@@ -862,16 +1005,16 @@ function activityGroup(value: unknown, selected: Selection): ActivityGroup {
     (result.firstCollectedAt === null) !== (result.lastCollectedAt === null) ||
     (result.latestOccurredAt !== null &&
       result.earliestOccurredAt !== null &&
-      (Date.parse(result.earliestOccurredAt) > Date.parse(result.latestOccurredAt) ||
+      (compareSourceInstants(result.earliestOccurredAt, result.latestOccurredAt) > 0 ||
         Math.floor(Date.parse(result.earliestOccurredAt) / 3600000) !==
           Math.floor(Date.parse(result.latestOccurredAt) / 3600000))) ||
     (result.firstCollectedAt !== null &&
       result.lastCollectedAt !== null &&
-      Date.parse(result.firstCollectedAt) > Date.parse(result.lastCollectedAt)) ||
+      compareSourceInstants(result.firstCollectedAt, result.lastCollectedAt) > 0) ||
     (selected.start !== null &&
-      (result.earliestOccurredAt === null || Date.parse(result.earliestOccurredAt) < Date.parse(selected.start))) ||
+      (result.earliestOccurredAt === null || compareSourceInstants(result.earliestOccurredAt, selected.start) < 0)) ||
     (selected.end !== null &&
-      (result.latestOccurredAt === null || Date.parse(result.latestOccurredAt) >= Date.parse(selected.end)))
+      (result.latestOccurredAt === null || compareSourceInstants(result.latestOccurredAt, selected.end) >= 0))
   )
     throw new ReadFailure(502, "invalid_activity_response");
   return result;
@@ -915,8 +1058,8 @@ export function activityDetail(value: unknown, selected: Selection): ActivityDet
       (result.occurredAt !== null &&
         group.latestOccurredAt !== null &&
         group.earliestOccurredAt !== null &&
-        (Date.parse(result.occurredAt) > Date.parse(group.latestOccurredAt) ||
-          Date.parse(result.occurredAt) < Date.parse(group.earliestOccurredAt)))
+        (compareSourceInstants(result.occurredAt, group.latestOccurredAt) > 0 ||
+          compareSourceInstants(result.occurredAt, group.earliestOccurredAt) < 0))
     )
       throw new ReadFailure(502, "invalid_activity_response");
     return {

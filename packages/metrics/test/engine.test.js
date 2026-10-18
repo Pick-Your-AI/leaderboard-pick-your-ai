@@ -18,6 +18,29 @@ const coverage = (patch = {}) => ({ schemaVersion: "leaderboard/v1", state: "com
 const input = (facts = [], patch = {}) => ({ datasetId: "synthetic-frozen-dataset", cutoff: to, backfillRevision: "synthetic-backfill-1", repositoryIds: ["synthetic-repo"], actors: [actor("a"), actor("b"), actor("c")], facts, coverage: [coverage()], ...patch });
 const board = (facts, policyPatch = {}, scopePatch = {}, inputPatch = {}) => aggregateMetric(input(facts, inputPatch), policy(policyPatch), scope(scopePatch));
 
+test("localization accepted units reject raw counts and preserve distinct accepted locale categories", () => {
+  const configured = policy({ metricId: "localization", groupBy: "canonical", dateBasis: "occurredAt", rank: false });
+  assert.throws(() => validateMetricPolicy({ ...configured, rankedStates: ["observed"] }), /independent acceptance/);
+  assert.throws(() => validateMetricPolicy({ ...configured, groupBy: "actor_artifact" }), /canonical language/);
+  assert.throws(() => validateMetricPolicy({ ...configured, dateBasis: "acceptedAt" }), /source merge clock/);
+  const common = { metricId: "localization", artifactId: "synthetic-same-pr" };
+  const raw = fact("raw-fr", { ...common, canonicalKey: "synthetic-fr", state: "observed", acceptedAt: null, acceptedBy: null, acceptanceReceipt: null });
+  const other = fact("raw-de", { ...raw, id: "raw-de", canonicalKey: "synthetic-de" });
+  const rawOnly = input([raw, other]);
+  assert.ok(aggregateMetric(rawOnly, configured, scope()).rows.every((row) => row.value === null || row.value === 0));
+  assert.equal(selectPortfolioFacts(rawOnly, configured, scope()).length, 2);
+  const accepted = [fact("accepted-fr", { ...common, canonicalKey: "synthetic-accepted-fr" }), fact("accepted-de", { ...common, canonicalKey: "synthetic-accepted-de" })];
+  const result = aggregateMetric(input([...rawOnly.facts, ...accepted]), configured, scope());
+  assert.equal(result.rows[0].value, 2);
+  assert.deepEqual(result.rows[0].evidenceIds, ["accepted-de", "accepted-fr"]);
+  const mergedWindow = scope({ from: "2026-10-04T00:00:00Z", to: "2026-10-05T00:00:00Z" });
+  const reviewedWindow = scope({ from: "2026-10-05T00:00:00Z", to: "2026-10-06T00:00:00Z" });
+  assert.equal(aggregateMetric(input(accepted), configured, mergedWindow).rows[0].value, 2);
+  assert.deepEqual(aggregateMetric(input(accepted), configured, reviewedWindow).rows, []);
+  const selfReviewed = accepted.map((entry) => ({ ...entry, acceptedBy: entry.actorId }));
+  assert.equal(aggregateMetric(input(selfReviewed), configured, scope()).rows.length, 0);
+});
+
 test("accepted counts reconcile to evidence while pending stays outside dense ranks", () => {
   const facts = Array.from({ length: 14 }, (_, n) => fact(`accepted-${n}`));
   facts.push(...Array.from({ length: 3 }, (_, n) => fact(`pending-${n}`, { state: "pending", acceptedAt: null })));
@@ -206,6 +229,61 @@ test("newcomers remain unknown with incomplete organization history; active week
   assert.equal(known[0].newcomer, true);
   const older = fact("old", { occurredAt: "2026-02-01T10:00:00Z", acceptedAt: "2026-02-02T10:00:00Z", observedAt: "2026-02-03T10:00:00Z" });
   assert.equal(participationView(input([older, ...facts]), policy(), scope(), { originAt: "2026-01-01T00:00:00Z", reviewReceipt: "synthetic-history-review" })[0].newcomer, false);
+});
+
+test("participation orders UTC instants rather than fractional timestamp spelling", () => {
+  const history = { originAt: "2026-01-01T00:00:00Z", reviewReceipt: "synthetic-history-review" };
+  for (const dateBasis of ["occurredAt", "acceptedAt"]) {
+    for (const [earlier, later, boundary] of [
+      ["2026-10-05T10:00:00Z", "2026-10-05T10:00:00.1Z", "2026-10-05T10:00:00.050Z"],
+      ["2026-10-05T10:00:00.1Z", "2026-10-05T10:00:00.11Z", "2026-10-05T10:00:00.105Z"],
+    ]) {
+      const facts = [
+        fact("z-earlier", { occurredAt: earlier, acceptedAt: earlier }),
+        fact("a-later", { occurredAt: later, acceptedAt: later }),
+      ];
+      const frozen = input(facts), original = stableJSON(frozen);
+      const selected = scope({ from: boundary });
+      const rows = participationView(frozen, policy({ dateBasis }), selected, history);
+      assert.equal(rows[0].firstContributionId, "z-earlier");
+      assert.equal(rows[0].firstContributionAt, earlier);
+      assert.equal(rows[0].newcomer, false);
+      assert.equal(rows[0].historyCoverage, "complete_known_history");
+      assert.deepEqual(participationView(input([...facts].reverse()), policy({ dateBasis }), selected, history), rows);
+      assert.equal(stableJSON(frozen), original);
+    }
+  }
+});
+
+test("equal participation instants use stable fact identity despite alternate UTC spelling", () => {
+  const facts = [
+    fact("z-fraction", { acceptedAt: "2026-10-05T10:00:00.000Z" }),
+    fact("a-whole", { acceptedAt: "2026-10-05T10:00:00Z" }),
+  ];
+  const history = { originAt: "2026-01-01T00:00:00Z", reviewReceipt: "synthetic-history-review" };
+  const rows = participationView(input(facts), policy(), scope(), history);
+  assert.equal(rows[0].firstContributionId, "a-whole");
+  assert.deepEqual(participationView(input([...facts].reverse()), policy(), scope(), history), rows);
+});
+
+test("duplicate observations retain the chronologically earliest receipt and stable equal-time identity", () => {
+  const original = fact("z-earliest", { observedAt: "2026-10-06T10:00:00Z" });
+  const later = { ...original, id: "a-later", observedAt: "2026-10-06T10:00:00.1Z" };
+  assert.deepEqual(board([later, original]).rows[0].evidenceIds, ["z-earliest"]);
+  assert.deepEqual(board([original, later]).rows[0].evidenceIds, ["z-earliest"]);
+  const equal = { ...original, id: "a-equal", observedAt: "2026-10-06T10:00:00.000Z" };
+  assert.deepEqual(board([original, equal]).rows[0].evidenceIds, ["a-equal"]);
+});
+
+test("repeated policy units retain the earliest action across UTC fractional spellings", () => {
+  const earlier = fact("z-earlier", { artifactId: "same-artifact", occurredAt: "2026-10-04T10:00:00Z" });
+  const later = fact("a-later", { artifactId: "same-artifact", occurredAt: "2026-10-04T10:00:00.1Z" });
+  for (const facts of [[later, earlier], [earlier, later]]) {
+    const result = board(facts);
+    assert.equal(result.rows[0].value, 1);
+    assert.deepEqual(result.rows[0].evidenceIds, ["z-earlier"]);
+    assert.ok(result.audit.some(entry => entry.reason === "repeated_policy_unit" && entry.factIds.includes("a-later")));
+  }
 });
 
 test("malformed policies, times, cutoffs and identities fail closed", () => {

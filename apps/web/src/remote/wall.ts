@@ -115,6 +115,8 @@ function samePublication(first: Metadata, second: Metadata): void {
     "policyVersion",
   ] as const)
     if (first[key] !== second[key]) throw new ReadFailure(409, "wall_publication_changed_during_read");
+  for (const key of ["snapshotId", "revision", "publishedAt"] as const)
+    if (first.head[key] !== second.head[key]) throw new ReadFailure(409, "wall_publication_changed_during_read");
 }
 
 export async function readWallFrame(
@@ -163,7 +165,7 @@ export async function readWallFrame(
 }
 
 /** Visit every bounded page, including the unranked roll, before adopting a newer snapshot. */
-export function nextWallPage(frame: WallFrame, mode: WallMode): { position: WallPosition; pin: string } {
+export function nextWallPage(frame: WallFrame, mode: WallMode): { position: WallPosition; pin: string | null } {
   const { position, content } = frame;
   if (content.value.nextCursor)
     return {
@@ -180,6 +182,8 @@ export function nextWallPage(frame: WallFrame, mode: WallMode): { position: Wall
     return { position: { ...firstWallPage(), stage: position.stage + 1 }, pin: content.value.snapshotId };
   return {
     position: firstWallPage(),
-    pin: mode === "frozen" ? content.value.snapshotId : frame.health.head.snapshotId,
+    // The next cycle obtains its current publication from a fresh health read;
+    // the final page's observed head may already have been superseded.
+    pin: mode === "frozen" ? content.value.snapshotId : null,
   };
 }

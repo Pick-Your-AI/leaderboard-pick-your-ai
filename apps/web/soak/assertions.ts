@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 export function responseClassification(status: number, body: unknown): string {
   if (status < 400) return String(status);
   const error = body && typeof body === "object" && "error" in body ? body.error : null;
-  return `${status}:${typeof error === "string" && error.length ? error : "unknown"}`;
+  return `${status}:${typeof error === "string" && /^[a-z][a-z0-9_]{0,127}$/.test(error) ? error : "unknown"}`;
 }
 
 export const wallSoakPages = [
@@ -50,14 +50,14 @@ export class WallCycleTracker {
     this.maximumGap = maximumGap;
   }
 
-  /** Planned holds and observed interruptions start a new automatic window. */
+  /** Actual holds, hidden tabs and intentional outages start a new automatic window. */
   interrupt() {
     this.windowAnchor = null;
     this.cycle = null;
   }
 
   observe(value: Observation) {
-    if (!value.automatic || !value.snapshot || value.actorIDs.length === 0) {
+    if (!value.automatic) {
       this.interrupt();
       return;
     }
@@ -69,6 +69,11 @@ export class WallCycleTracker {
     assert(gap >= 0, "Cycle observations must use a monotonic elapsed clock");
     this.longestGap = Math.max(this.longestGap, gap);
     assert(gap < this.maximumGap, "A healthy automatic window must keep completing every board and roll page");
+    if (!value.snapshot || value.actorIDs.length === 0) {
+      // An incidental blank cannot certify a partial cycle or erase the deadline.
+      this.cycle = null;
+      return;
+    }
     const index = wallSoakPages.findIndex((page) => page.view === value.view && page.page === value.page);
     assert(index >= 0, "An automatic page must belong to the configured synthetic cycle");
     const actors = new Set(value.actorIDs);

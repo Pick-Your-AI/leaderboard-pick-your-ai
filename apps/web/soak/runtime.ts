@@ -6,17 +6,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
-import { chromium, test as base, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import {
+  chromium,
+  test as base,
+  type Browser,
+  type BrowserContext,
+  type CDPSession,
+  type Page,
+} from "@playwright/test";
+import { createAttempt } from "./monitor.ts";
+import { finalizeAttempt } from "./receipt.ts";
 
 interface Runtime {
   browser: Browser;
   context: BrowserContext;
   page: Page;
+  cdp: CDPSession;
   executableSha256: string;
   browserSelection: "explicit executable override" | "Playwright pinned executable";
+  attempt: { id: string; directory: string; startedAt: string };
+  outputPath: (name: string) => string;
+  timezoneId: string;
 }
 
-export async function cleanupOwned(path: string, steps: [string, () => Promise<unknown>][]) {
+export async function cleanupOwned(path: string, attemptId: string, steps: [string, () => Promise<unknown>][]) {
   const failures: string[] = [];
   for (const [name, run] of steps) {
     try {
@@ -31,7 +44,7 @@ export async function cleanupOwned(path: string, steps: [string, () => Promise<u
     }
   }
   try {
-    await writeFile(path, JSON.stringify({ at: new Date().toISOString(), failures }, null, 2) + "\n");
+    await writeFile(path, JSON.stringify({ attemptId, at: new Date().toISOString(), failures }, null, 2) + "\n");
   } catch (error) {
     failures.push(`cleanup receipt: ${String(error).slice(0, 1000)}`);
   }
@@ -63,17 +76,26 @@ export async function compiledOutputs() {
 
 export const soakTest = base.extend<{ runtime: Runtime }>({
   runtime: async ({}, use, info) => {
-    const profile = await mkdtemp(join(tmpdir(), "pyai-wall-soak-profile-"));
+    const attempt = {
+      ...(await createAttempt(fileURLToPath(new URL("../../../", import.meta.url)))),
+      startedAt: new Date().toISOString(),
+    };
+    const outputPath = (name: string) => join(attempt.directory, name);
+    let profile: string | null = null;
     const executable = process.env.WALL_SOAK_BROWSER_PATH ?? chromium.executablePath();
     let log: FileHandle | null = null;
     let child: ChildProcess | null = null;
     let browser: Browser | null = null;
+    let cdp: CDPSession | null = null;
     let launchError: Error | null = null;
     let exited: Promise<void> = Promise.resolve();
     try {
+      await writeFile(outputPath("attempt.json"), JSON.stringify(attempt, null, 2) + "\n", { flag: "wx" });
+      console.log(`wall soak attempt: ${attempt.id}; receipts: ${attempt.directory}`);
+      profile = await mkdtemp(join(tmpdir(), "pyai-wall-soak-profile-"));
       const hash = createHash("sha256");
       for await (const chunk of createReadStream(executable)) hash.update(chunk);
-      log = await open(info.outputPath("browser.log"), "w");
+      log = await open(outputPath("browser.log"), "wx");
       // This is always a new owned profile and a loopback-only debugging endpoint.
       // No signed-in browser or existing display session is selected.
       child = spawn(
@@ -128,43 +150,59 @@ export const soakTest = base.extend<{ runtime: Runtime }>({
       const page = context.pages()[0] ?? (await context.newPage());
       await page.setViewportSize({ width: 1920, height: 1080 });
       await page.emulateMedia({ reducedMotion: "no-preference" });
-      const cdp = await context.newCDPSession(page);
-      await cdp.send("Emulation.setTimezoneOverride", { timezoneId: info.project.use.timezoneId ?? "Etc/UTC" });
-      await cdp.detach();
+      cdp = await context.newCDPSession(page);
+      const timezoneId = info.project.use.timezoneId ?? "Etc/UTC";
+      await cdp.send("Emulation.setTimezoneOverride", { timezoneId });
+      // Chrome removes this override when its owning session detaches. Keep one
+      // session for initial setup, navigation and the later display-zone change.
       await use({
         browser,
         context,
         page,
+        cdp,
         executableSha256: hash.digest("hex"),
         browserSelection: process.env.WALL_SOAK_BROWSER_PATH
           ? "explicit executable override"
           : "Playwright pinned executable",
+        attempt,
+        outputPath,
+        timezoneId,
       });
     } finally {
       const stopped = () => !child?.pid || child.exitCode !== null || child.signalCode !== null;
-      await cleanupOwned(info.outputPath("browser-cleanup.json"), [
-        ["disconnect CDP", async () => browser?.close()],
-        [
-          "stop owned browser",
-          async () => {
-            if (!stopped()) child!.kill("SIGTERM");
-            await Promise.race([exited, delay(1_000, undefined, { ref: false })]);
-            if (!stopped()) {
-              child!.kill("SIGKILL");
-              await Promise.race([exited, delay(2_000, undefined, { ref: false })]);
-            }
-            if (!stopped()) throw new Error(`Owned browser ${child!.pid} has not exited; retain its profile`);
-          },
-        ],
-        ["close browser log", async () => log?.close()],
-        [
-          "remove owned profile",
-          async () => {
-            if (!stopped()) throw new Error(`Profile retained for unconfirmed browser exit: ${profile}`);
-            await rm(profile, { recursive: true, force: true });
-          },
-        ],
-      ]);
+      let cleanupFailure: unknown = null;
+      try {
+        await cleanupOwned(outputPath("browser-cleanup.json"), attempt.id, [
+          ["detach owned emulation session", async () => cdp?.detach()],
+          ["disconnect CDP", async () => browser?.close()],
+          [
+            "stop owned browser",
+            async () => {
+              if (!stopped()) child!.kill("SIGTERM");
+              await Promise.race([exited, delay(1_000, undefined, { ref: false })]);
+              if (!stopped()) {
+                child!.kill("SIGKILL");
+                await Promise.race([exited, delay(2_000, undefined, { ref: false })]);
+              }
+              if (!stopped()) throw new Error(`Owned browser ${child!.pid} has not exited; retain its profile`);
+            },
+          ],
+          ["close browser log", async () => log?.close()],
+          [
+            "remove owned profile",
+            async () => {
+              if (!stopped()) throw new Error(`Profile retained for unconfirmed browser exit: ${profile}`);
+              if (profile) await rm(profile, { recursive: true, force: true });
+            },
+          ],
+        ]);
+      } catch (error) {
+        cleanupFailure = error;
+      }
+      const final = await finalizeAttempt(attempt, info.status ?? "unknown");
+      if (cleanupFailure) throw cleanupFailure;
+      if (info.status === "passed" && !final.completed)
+        throw new Error("Wall soak did not finalize successfully; inspect its primary summary");
     }
   },
 });

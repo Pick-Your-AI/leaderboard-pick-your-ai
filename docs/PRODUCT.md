@@ -35,6 +35,8 @@ Discover every attributable contributor through the searchable directory, includ
 
 ## Public journeys
 
+The [audience and product-success decision](product-journeys.md) defines measurable acceptance scenarios for all five audiences, evaluates discovery and evidence understanding, and reviews examples from every current repository and Project. Its targets are an evaluation protocol, not a claim of measured usability or public-service acceptance.
+
 1. A visitor selects a contribution category, period and source scope, then opens a contributor's evidence.
 2. A contributor shares a portfolio with contribution roles, source links, accepted outcomes and coverage caveats.
 3. A newcomer finds a way to help through source issues and their existing owners.
@@ -55,7 +57,7 @@ These are intended boundaries for the leaderboard. Statements about the existing
 
 **Website boundary:** Current React/Vite website is static on cPanel; retain it as an independently deployed frontend. The proposed leaderboard server requires separately approved infrastructure.
 
-**Mobile boundary:** Android/Apple Projects are consumers and contribution scopes. Their 258 Backlog planning items are not shipped applications. No duplicate mobile backend is introduced.
+**Mobile boundary:** Android/Apple Projects are consumers and contribution scopes. The original 258-item planning baseline is historical; live issues, reviewed changes and acceptance records carry subsequent progress. Mobile release acceptance remains separate, and no duplicate mobile backend is introduced.
 
 **Unboarded work:** Include eligible repository activity even without Project membership; .github#2 and website#31/#32/#33 demonstrate why boards alone are incomplete.
 

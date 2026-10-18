@@ -4,7 +4,8 @@ import { appendFile, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, type Page } from "@playwright/test";
 import { soakTest as test, cleanupOwned, compiledOutputs } from "./runtime.ts";
-import { responseClassification, WallCycleTracker } from "./assertions.ts";
+import { assertPageActors, CycleCoverage, fixturePages, responseKey } from "./monitor.ts";
+import { WallCycleTracker } from "./assertions.ts";
 import { requireSoakMidnightWindow } from "./midnight.ts";
 import { scope, snapshot } from "../browser/wallFixture.ts";
 
@@ -13,13 +14,8 @@ const full = minutes >= 480;
 const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
 const contributors = (page: Page) => page.locator('.api-wall-content a[href*="/contributors/"]');
 
-test("real elapsed wall display, bounded resources and recovery", async ({ runtime }, info) => {
-  const { page, context, browser } = runtime;
-  if (full) {
-    const timeZone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
-    const window = requireSoakMidnightWindow(timeZone, Date.now());
-    await writeFile(info.outputPath("midnight-window.json"), JSON.stringify(window, null, 2) + "\n");
-  }
+test("real elapsed wall display, bounded resources and recovery", async ({ runtime }) => {
+  const { page, context, browser, cdp, attempt, outputPath } = runtime;
   const sourceStartedAt = new Date().toISOString();
   const input = {
     head: git("rev-parse", "HEAD"),
@@ -28,12 +24,15 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
   };
   if (full) assert.equal(input.status, "", "An acceptance-length run requires committed, clean tracked inputs");
   const built = await compiledOutputs();
-  await writeFile(info.outputPath("build-inputs.json"), JSON.stringify(built, null, 2) + "\n");
-  const samplesPath = info.outputPath("samples.jsonl");
-  const summaryPath = info.outputPath("summary.json");
-  const eventsPath = info.outputPath("events.jsonl");
+  await writeFile(outputPath("build-inputs.json"), JSON.stringify({ attemptId: attempt.id, ...built }, null, 2) + "\n");
+  const samplesPath = outputPath("samples.jsonl");
+  const summaryPath = outputPath("summary.json");
+  const eventsPath = outputPath("events.jsonl");
   const record = async (event: string, detail: unknown = null) =>
-    appendFile(eventsPath, JSON.stringify({ at: new Date().toISOString(), event, detail }) + "\n");
+    appendFile(
+      eventsPath,
+      JSON.stringify({ attemptId: attempt.id, at: new Date().toISOString(), event, detail }) + "\n",
+    );
   const checks: Record<string, boolean> = {};
   const cycles = new WallCycleTracker();
   const counters = {
@@ -45,6 +44,12 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
     responses: {} as Record<string, number>,
   };
   let current = snapshot("wall-soak-1", 1, sourceStartedAt);
+  const stages = [
+    { heading: "PRs merged", actors: current.selected.rows.map((row) => row.actorId) },
+    { heading: "Contributors in this scope", actors: current.selected.actors.map((entry) => entry.actorId) },
+  ];
+  let expectedPages = fixturePages(stages);
+  const coverage = new CycleCoverage(expectedPages.keys());
   const history = new Map([[current.head.snapshotId, current]]);
   const controls = current.controls;
   let revision = 1,
@@ -106,7 +111,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         const url = new URL(route.request().url());
         const response = await app.inject({ method: "GET", url: url.pathname + url.search });
         counters.bytes += Buffer.byteLength(response.body);
-        const code = responseClassification(response.statusCode, response.statusCode >= 400 ? response.json() : null);
+        const code = responseKey(response);
         counters.responses[code] = (counters.responses[code] ?? 0) + 1;
         await route.fulfill({ status: response.statusCode, headers: response.headers, body: response.body });
       } catch (error) {
@@ -126,7 +131,6 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         heartbeatFailure ??= error;
       }
     }, 120_000);
-    const cdp = await context.newCDPSession(page);
     await cdp.send("Performance.enable");
     // Playwright's focus emulation can mask real tab backgrounding. Disable the
     // emulation and require the browser's actual visibilitychange behavior.
@@ -159,6 +163,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
       await page.mouse.move(0, 0);
     };
     const pause = async () => {
+      coverage.reset();
       cycles.interrupt();
       const button = page.getByRole("button", { name: "Pause wall", exact: true });
       if (await button.count()) await button.click();
@@ -276,6 +281,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             );
             await healthy();
             checks.suppressionApplied = true;
+            expectedPages = fixturePages(stages, suppressedActor);
             await resume();
           },
         },
@@ -393,16 +399,27 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             checks.sourceFreshAgain = true;
           },
         },
-        {
-          at: 360 * 60_000,
-          name: "change-display-timezone",
-          run: async () => {
-            await cdp.send("Emulation.setTimezoneOverride", { timezoneId: "Pacific/Kiritimati" });
-            checks.timezoneChanged = true;
-          },
-        },
       );
     actions.push(
+      {
+        at: full ? 360 * 60_000 : 90_000,
+        name: "change-display-timezone",
+        run: async () => {
+          const before = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
+          const timezoneId = before === "Pacific/Kiritimati" ? "Etc/UTC" : "Pacific/Kiritimati";
+          await cdp.send("Emulation.setTimezoneOverride", { timezoneId });
+          const after = await page.evaluate(
+            (requested) => ({
+              actual: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              expected: new Intl.DateTimeFormat("en", { timeZone: requested }).resolvedOptions().timeZone,
+            }),
+            timezoneId,
+          );
+          assert.equal(after.actual, after.expected, "The browser must use the requested display timezone");
+          assert.notEqual(after.actual, before, "The browser must actually change its display timezone");
+          checks.timezoneChanged = true;
+        },
+      },
       {
         at: full ? 150 * 60_000 : 100_000,
         name: "real-tab-background",
@@ -440,6 +457,25 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
       await page.goto("http://127.0.0.1:4277/live?ui=api&mode=cycle&boards=pr_merged&interval=20");
       await healthy();
       await releaseReading();
+      const zones = await page.evaluate(
+        (requested) => ({
+          actual: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          expected: new Intl.DateTimeFormat("en", { timeZone: requested }).resolvedOptions().timeZone,
+        }),
+        runtime.timezoneId,
+      );
+      await writeFile(
+        outputPath("timezone-start.json"),
+        JSON.stringify({ attemptId: attempt.id, requested: runtime.timezoneId, ...zones }, null, 2) + "\n",
+      );
+      assert.equal(zones.actual, zones.expected, "The configured display timezone must survive navigation");
+      if (full) {
+        const window = requireSoakMidnightWindow(zones.actual, Date.now());
+        await writeFile(
+          outputPath("midnight-window.json"),
+          JSON.stringify({ attemptId: attempt.id, ...window }, null, 2) + "\n",
+        );
+      }
       start = performance.now();
       startedAt = new Date().toISOString();
       await record("start", {
@@ -500,6 +536,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
               document.documentElement.scrollHeight > innerHeight + 1,
           };
         });
+        const identity = `${state.heading}:${state.page.split(" · ")[0]}`;
         assert(state.links.length <= 6, "Only the current bounded page may remain mounted");
         assert.equal(
           new Set(state.links.map((link) => link.id)).size,
@@ -511,6 +548,11 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
           "Displayed contributor links share a publication pin",
         );
         if (state.links.length) {
+          assertPageActors(
+            expectedPages,
+            identity,
+            state.links.map((link) => link.id),
+          );
           assert(state.snapshot, "A nonempty page must name its visible source publication");
           const published = history.get(state.snapshot);
           assert(published, "Displayed publication must remain in the real test source history");
@@ -549,11 +591,13 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             );
           }
         }
-        const automatic =
+        const automaticMode =
           state.visibility === "visible" &&
-          state.links.length > 0 &&
-          state.controlState.startsWith("Automatic page boundaries");
-        const identity = `${state.heading}:${state.page.split(" · ")[0]}`;
+          state.controlState.startsWith("Automatic page boundaries") &&
+          !networkFailed &&
+          !sourceFailed;
+        const automatic = automaticMode && state.links.length > 0;
+        coverage.observe(performance.now() - start, automaticMode, state.links.length ? identity : null);
         if (!automatic || !wasAutomatic || identity !== lastPage) lastPageChange = performance.now();
         if (automatic)
           assert(
@@ -564,7 +608,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         lastPage = identity;
         cycles.observe({
           elapsed: performance.now() - start,
-          automatic,
+          automatic: automaticMode,
           snapshot: state.snapshot,
           view: state.heading,
           page: state.page.split(" · ")[0]!,
@@ -585,6 +629,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         await appendFile(
           samplesPath,
           JSON.stringify({
+            attemptId: attempt.id,
             at: new Date().toISOString(),
             elapsedMilliseconds: elapsed,
             ...state,
@@ -592,6 +637,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             requestCount: counters.requests,
             retainedSnapshots: history.size,
             cycles: cycles.summary(),
+            cycleCoverage: coverage.summary(),
           }) + "\n",
         );
         if (elapsed - lastProgress >= 60_000) {
@@ -608,6 +654,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
       assert(counters.networkAborts > 0 && checks.networkCleared && checks.networkRecovered);
       assert.equal(history.size <= 16, true);
       assert(checks.realBackgroundCleared && checks.realForegroundRecovered);
+      assert(checks.timezoneChanged);
       if (full) {
         assert(naturalRollover, "The unmodified real clock must cross a local midnight during the run");
         assert(seen.size >= 5, "The full board and unranked roll must continue cycling");
@@ -645,7 +692,9 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         summaryPath,
         JSON.stringify(
           {
-            result,
+            attemptId: attempt.id,
+            result: result === "failed" ? "failed" : "pending-owned-cleanup",
+            matrixResult: result === "failed" ? null : result,
             failure,
             startedAt,
             endedAt: new Date().toISOString(),
@@ -663,6 +712,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             naturalRollover,
             sampleCount,
             pagesSeen: [...seen],
+            cycleCoverage: coverage.summary(),
             cycles: cycles.summary(),
             counters,
             baseline,
@@ -685,11 +735,15 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
           2,
         ) + "\n",
       );
-      await record("end", { result, elapsedMilliseconds: elapsed });
+      await record("matrix-end", {
+        matrixResult: result,
+        elapsedMilliseconds: elapsed,
+        acceptance: "pending-owned-cleanup",
+      });
     }
   } finally {
     if (heartbeat) clearInterval(heartbeat);
-    await cleanupOwned(info.outputPath("service-cleanup.json"), [
+    await cleanupOwned(outputPath("service-cleanup.json"), attempt.id, [
       ["close owned background tab", async () => background.page?.close()],
       ["finish public routes", async () => page.unrouteAll({ behavior: "wait" })],
       ["close synthetic service", async () => app.close()],

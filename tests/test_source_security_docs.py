@@ -17,6 +17,7 @@ class SourceSecurityCandidateTests(unittest.TestCase):
             "SSRF",
             "unknown",
             "test and owner role",
+            "implemented boundaries",
             "local receiver verifies signatures",
             "escaped plain text only",
             "meta CSP cannot enforce",

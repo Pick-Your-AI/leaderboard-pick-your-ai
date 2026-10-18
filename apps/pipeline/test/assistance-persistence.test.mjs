@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createPipeline } from "../src/index.mjs";
+import { normalizationDocumentVersion } from "../src/private-attribution.mjs";
 import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
 import { harness, components, ago, clock } from "./harness.mjs";
 
@@ -9,6 +10,22 @@ const artifactId = "SYNTHETIC_PR_ASSISTED";
 const boardUrl = "/api/v1/boards?metric=pr_merged";
 // Match the whole private version without treating ISO timestamp seconds as attribution.
 const privateFields = /assistance|participation|Claude|(?<![\d.])5\.5(?![\d.])|synthetic-model|example\.invalid|manual/;
+
+test("private model version detector rejects JSON/CSV values without matching source timestamp fractions", () => {
+  assert.doesNotMatch(JSON.stringify({ occurredAt: "2026-10-17T05:26:35.586Z" }), privateFields);
+  for (const value of [
+    JSON.stringify({ version: "5.5" }),
+    '"5.5"',
+    "5.5",
+    JSON.stringify({ assistance: [] }),
+    JSON.stringify({ participation: [] }),
+    "Claude Opus",
+    "synthetic-model@example.invalid",
+    "manual",
+  ]) {
+    assert.match(value, privateFields);
+  }
+});
 
 async function assistedHarness(t) {
   let enrichCalls = 0;
@@ -137,57 +154,69 @@ test("declared model/version and conserved participation survive collection, cac
   assert.deepEqual(await assertPrivateAndUncredited(h, restarted), original);
 });
 
-test("legacy cache recomputes missing attribution while exact frozen identity replay remains authorized", async (t) => {
-  const h = await assistedHarness(t);
-  const cutoff = clock();
-  const publication = (await h.runtime.runOnce({ cutoff })).publications[0];
-  const saved = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows[0];
-  const legacy = structuredClone(saved.document);
-  delete legacy.assistance;
-  delete legacy.participation;
-  const legacySignature = createHash("sha256")
-    .update(
-      JSON.stringify(["current-state-selection-v1", "synthetic", h.config.policies.map((entry) => entry.signature)]),
-    )
-    .digest("hex");
-  const legacyHash = comparisonHash(legacy);
-  await h.db.query(
-    "UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1,document=$2::jsonb,document_hash=$3 WHERE fact_key=$4",
-    [legacySignature, JSON.stringify(legacy), legacyHash, saved.fact_key],
-  );
-  const frozen = (await h.db.query("SELECT document FROM leaderboard_pipeline.frozen_inputs")).rows[0].document;
-  frozen.identityAuthorization.identityEvidence.normalizationHashes = [legacyHash];
-  await h.db.query("UPDATE leaderboard_pipeline.frozen_inputs SET document=$1::jsonb,document_hash=$2", [
-    JSON.stringify(frozen),
-    comparisonHash(frozen),
-  ]);
-  await h.reopenDatabase();
-  const restarted = await createPipeline(h.options);
-  t.after(() => restarted.stop());
-  const preview = () =>
-    restarted.previewPolicy({
-      snapshotId: publication.snapshotId,
-      policy: { ...h.config.policies[0].policy, version: "synthetic-legacy-preview", rank: false },
-      operatorId: "201",
-    });
-  assert.ok((await preview()).comparison.before.rows.some((row) => row.actorId === "101"));
-  assert.equal(h.enrichCalls(), 1);
-  await restarted.runOnce({ cutoff });
-  assert.equal(h.enrichCalls(), 2);
-  const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
-  assert.equal(rows.length, 2);
-  assert.deepEqual(rows.find((row) => row.policy_signature === legacySignature).document, legacy);
-  assert.deepEqual(rows.find((row) => row.policy_signature !== legacySignature).document.assistance, [
-    { artifactId, model: "Claude Opus", version: "5.5" },
-  ]);
-  assert.ok((await preview()).comparison.before.rows.some((row) => row.actorId === "101"));
-  // A matching hash is insufficient without the same policy, source and mode.
-  await h.db.query("UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1 WHERE policy_signature=$2", [
-    "f".repeat(64),
-    legacySignature,
-  ]);
-  await assert.rejects(preview(), /identity evidence unavailable/);
-});
+for (const legacyKind of ["without_private_fields", "without_documentation_policy"])
+  test(`earlier cache ${legacyKind} follows the current projection while exact frozen identity replay remains authorized`, async (t) => {
+    const h = await assistedHarness(t);
+    const cutoff = clock();
+    const publication = (await h.runtime.runOnce({ cutoff })).publications[0];
+    const saved = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows[0];
+    const legacy = structuredClone(saved.document);
+    if (legacyKind === "without_private_fields") {
+      delete legacy.assistance;
+      delete legacy.participation;
+    }
+    const legacyPolicySignature = createHash("sha256")
+      .update(
+        JSON.stringify(["current-state-selection-v1", "synthetic", h.config.policies.map((entry) => entry.signature)]),
+      )
+      .digest("hex");
+    const legacySignature =
+      legacyKind === "without_private_fields"
+        ? legacyPolicySignature
+        : comparisonHash([normalizationDocumentVersion, legacyPolicySignature]);
+    const isCurrentProjection = legacySignature === saved.policy_signature;
+    const legacyHash = comparisonHash(legacy);
+    await h.db.query(
+      "UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1,document=$2::jsonb,document_hash=$3 WHERE fact_key=$4",
+      [legacySignature, JSON.stringify(legacy), legacyHash, saved.fact_key],
+    );
+    const frozen = (await h.db.query("SELECT document FROM leaderboard_pipeline.frozen_inputs")).rows[0].document;
+    frozen.identityAuthorization.identityEvidence.normalizationHashes = [legacyHash];
+    await h.db.query("UPDATE leaderboard_pipeline.frozen_inputs SET document=$1::jsonb,document_hash=$2", [
+      JSON.stringify(frozen),
+      comparisonHash(frozen),
+    ]);
+    await h.reopenDatabase();
+    const restarted = await createPipeline(h.options);
+    t.after(() => restarted.stop());
+    const preview = () =>
+      restarted.previewPolicy({
+        snapshotId: publication.snapshotId,
+        policy: { ...h.config.policies[0].policy, version: "synthetic-legacy-preview", rank: false },
+        operatorId: "201",
+      });
+    assert.ok((await preview()).comparison.before.rows.some((row) => row.actorId === "101"));
+    assert.equal(h.enrichCalls(), 1);
+    // A matching hash is insufficient without the same policy, source and mode.
+    await h.db.query("UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1 WHERE policy_signature=$2", [
+      "f".repeat(64),
+      legacySignature,
+    ]);
+    await assert.rejects(preview(), /identity evidence unavailable/);
+    await h.db.query("UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1 WHERE policy_signature=$2", [
+      legacySignature,
+      "f".repeat(64),
+    ]);
+    await restarted.runOnce({ cutoff });
+    assert.equal(h.enrichCalls(), isCurrentProjection ? 1 : 2);
+    const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
+    assert.equal(rows.length, isCurrentProjection ? 1 : 2);
+    assert.deepEqual(rows.find((row) => row.policy_signature === legacySignature).document, legacy);
+    assert.deepEqual(rows.find((row) => row.policy_signature === saved.policy_signature).document.assistance, [
+      { artifactId, model: "Claude Opus", version: "5.5" },
+    ]);
+    assert.ok((await preview()).comparison.before.rows.some((row) => row.actorId === "101"));
+  });
 
 test("malformed private attribution fails before normalization persistence or publication", async (t) => {
   const h = await harness(t, {

@@ -575,7 +575,12 @@ test("default collection adapter rejects a revoked response before following its
       cursor: null,
       limit: 100,
     }),
-    /synthetic_source_revoked/,
+    (error) => {
+      assert.ok(error instanceof components.github.GithubClientError);
+      assert.equal(error.outcome.kind, "unsafe_request");
+      assert.equal(error.message, "GitHub source request failed: unsafe_request");
+      return true;
+    },
   );
   assert.equal(calls.length, 2);
   assert.equal(
@@ -793,6 +798,16 @@ test("accepted controls receipt materializes a separate lens and withdrawal fenc
   assert.equal(acceptedEvidence.evidenceMetadata.artifactTitle.value, "Synthetic collected issue title");
   assert.notEqual(acceptedEvidence.evidenceMetadata.sourceOccurredAt, acceptedEvidence.evidenceMetadata.acceptedAt);
   assert.doesNotMatch(JSON.stringify(acceptedEvidence), /synthetic-receipt/);
+  // A used audit record is current authority, including for a pinned snapshot.
+  // Mutating only that store must revoke reads and cached publication reuse.
+  h.controlsStore.transaction((s) => {
+    s.audit = s.audit.filter((entry) => entry.id !== event.id);
+  });
+  assert.equal(await runtime.source.read(publicScope, publication.snapshotId, signal), null);
+  await assert.rejects(runtime.runOnce(), /recognition_decision_unverified/);
+  h.controlsStore.transaction((s) => {
+    s.audit.push(event);
+  });
   await assert.rejects(
     runtime.previewPolicy({
       snapshotId: publication.snapshotId,

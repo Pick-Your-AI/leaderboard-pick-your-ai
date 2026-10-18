@@ -58,38 +58,70 @@ fallbacks, so a candidate about to cross midnight is skipped without assuming
 that every local day has twenty-four hours. This reserves startup time and an
 hour before the scheduled six-hour timezone change. An explicit
 `WALL_SOAK_TIMEZONE` must meet the same window for a full run; short rehearsals
-only require a valid zone and make no midnight claim. After browser setup, the
+only require a valid zone and make no midnight claim. After browser setup and the initial healthy page, the
 test reads the browser's actual timezone and requires the transition still to
 be fifteen minutes to five hours away, retaining that observation in
 `midnight-window.json`. A missed startup window fails before the long matrix.
+One owned CDP session retains the display timezone through navigation and the
+later zone change; detaching it during setup would restore the host timezone.
+Every run records the requested and actual canonical zones in
+`timezone-start.json` and rejects a mismatch before elapsed time begins. The
+short rehearsal also executes and verifies a real display-zone change, without
+changing the clock or claiming a natural midnight.
 Selection and validation use observed real dates and do not alter either clock.
 Every two minutes the source republishes the same synthetic input with a fresh
 source-sync timestamp. It retains at most sixteen snapshots, allowing the held
 cursor to expire while its snapshot remains available. It does not retain all
 request URLs or response bodies.
 
-Samples append to `test-results/wall-soak/.../samples.jsonl` every fifteen seconds
-(five in a rehearsal). Separate event and summary files record exact Git input,
+Each invocation creates an exclusive `attempt-*` directory beneath
+`test-results/wall-soak-attempts/`, outside both configured Playwright output
+directories (`wall-soak` and `browser`) that normal runner startup removes.
+A regression runs the actual Playwright runner twice and verifies earlier
+receipts survive both cleanup passes. The attempt path is printed at startup. Existing attempt
+logs and summaries are never appended to or reused. `attempt.json` identifies
+the attempt. The test body writes a `pending-owned-cleanup` primary summary;
+the runtime publishes a completed result only after both cleanup receipts carry
+the same attempt identity and empty failure lists. It writes the final summary
+atomically, after the event and runtime-status receipts. A missing, malformed or
+failed cleanup receipt turns primary success into failure. If an interruption
+prevents the body from writing a summary, runtime teardown records an explicit
+interrupted primary receipt. A killed process may leave a pending or missing
+receipt; neither is a successful run. A completed result must also have passed
+runtime status and a duration-matched full or short matrix label.
+
+Samples append within that attempt to `samples.jsonl` every fifteen seconds
+(every five seconds in a rehearsal). Event and sample entries also carry the attempt ID.
+Separate event and summary files record exact Git input,
 actual browser/Node versions, real start/end time, elapsed duration, scenario
 completion, response-code counts and resource limits. Tracing and video are off
 to avoid retaining every network body or eight hours of video. The application
 retains at most the current six contributor rows. Every nonempty sample binds
 each contributor link to the visible snapshot and its actual retained source
-timestamp. A healthy automatic page must advance within two minutes, and the
-initial full-run cycle must visit all five pages within three real minutes.
-The source error counter reads the actual public API's string `error` field, so
-the natural 410 `cursor_expired_refetch` result is distinguishable from other
-failures. The opt-in command first runs a short actual-handler cursor-expiry
-regression and deterministic cycle-guard tests; their simulated inputs do not
-advance the real soak clock or supply long-duration evidence.
+timestamp. The response counter reads the actual service's string-valued `error`
+field; unexpected bodies produce a bounded `unknown` counter. A focused test
+uses an actual service-generated cursor-expiry response to verify that recorder.
+That test's injected clock supplies no real-duration soak evidence.
+
+A healthy automatic page must advance within two minutes. Every uninterrupted
+automatic period must visit all five pages within three real minutes and keep
+each page's subsequent absence below that bound throughout the run. Changing
+publication pins does not reset this coverage. An actual hold or deliberately
+injected outage starts a fresh bounded period on resumption. Transient empty
+displays while otherwise automatic do not erase the deadline. Each nonempty page must contain its
+complete expected fixture actors, in order, including the current suppression.
+This detects skipped rows and actors repeated from earlier pages as well as
+duplicates within one page; the same actor may appear once in the board and once
+in the separate unranked roll.
 
 A separate bounded tracker requires a whole observed, single-publication cycle
 at least once every four minutes of continuous healthy automatic display. It
 starts at board page one and observes both board pages and all three contributor
 pages. Every view's successive pages must contain disjoint actor IDs; refreshing
 one page and appearing in both the board and contributor roll remain valid.
-Planned pauses and actual interruption states clear a partial observation before
-recovery. Changing snapshots or repeatedly alternating between only two pages
+An incidental empty or missing-pin frame clears the partial observation but
+retains its deadline. Only an actual hold, hidden tab or deliberate network/source
+outage resets the full automatic window. Changing snapshots or repeatedly alternating between only two pages
 cannot reset the healthy-window deadline or reuse an earlier successful cycle.
 Missed sampled pages cannot certify a full cycle. Samples and the final receipt
 retain the completed-cycle count, automatic-window count and observed deadline
