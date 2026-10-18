@@ -94,7 +94,8 @@ test("an explicitly hydrated promisor repository retains exact changes and forma
   const expected = await repo.read();
   const clone = repo.partial();
   // Explicit fixture setup, separate from the read-only function being tested.
-  repo.git(clone, "fetch", "--quiet", "--no-filter", "--refetch", "origin");
+  // Keep background maintenance from racing the object-store snapshots below.
+  repo.git(clone, "fetch", "--quiet", "--no-auto-maintenance", "--no-filter", "--refetch", "origin");
   const objectsBefore = (await readdir(join(clone, "objects"), { recursive: true })).sort();
   assert.deepEqual(await repo.read(clone), expected);
   assert.deepEqual((await readdir(join(clone, "objects"), { recursive: true })).sort(), objectsBefore);
