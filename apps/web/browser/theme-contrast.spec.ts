@@ -41,7 +41,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       const api = await evidenceService(page);
       try {
         await page.emulateMedia({ colorScheme, contrast: "no-preference", forcedColors: "none" });
-        await page.goto("/leaderboards/pr_opened?ui=api&snapshot=api-1");
+        await page.goto("/leaderboards/pr_merged?ui=api&snapshot=api-1");
         await expect(page.getByRole("link", { name: "e-api-a", exact: true })).toBeVisible();
         await page.getByRole("combobox", { name: "Theme", exact: true }).selectOption(preference);
         if (preference === "system") await expect(page.locator("html")).not.toHaveAttribute("data-theme");

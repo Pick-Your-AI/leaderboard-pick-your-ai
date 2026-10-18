@@ -89,7 +89,7 @@ function fixture(times = ["2026-10-17T10:30:00.000Z"]) {
       rows: [],
       evidence: [],
       portfolioEvidence,
-      ranking: [{ metricId: "pr_opened", direction: "descending" }],
+      ranking: [{ metricId: "pr_opened", direction: "descending", rank: false }],
     },
   };
 }

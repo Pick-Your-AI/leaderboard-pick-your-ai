@@ -54,7 +54,7 @@ for (const factor of [2, 4]) {
         { name: "forced-colors", colorScheme: "light", forcedColors: "active" },
       ] as const) {
         await page.emulateMedia({ colorScheme: media.colorScheme, forcedColors: media.forcedColors });
-        await page.goto("/leaderboards/pr_opened?ui=api&snapshot=api-1&repository=repo-1&limit=1");
+        await page.goto("/leaderboards/pr_merged?ui=api&snapshot=api-1&repository=repo-1&limit=1");
         const opener = page.getByRole("link", { name: "e-api-a", exact: true });
         await expect(opener).toBeVisible();
         const receipt = await nativeZoom(context, page, factor);
