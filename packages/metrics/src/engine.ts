@@ -1,5 +1,6 @@
 import {
   actorKindSchema,
+  compareSourceInstants,
   contributionRoleSchema,
   executionModeSchema,
   serviceAccountClassificationSchema,
@@ -305,7 +306,8 @@ export function resolveMetricWindow(
   };
 }
 
-function coverageComplete(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): boolean {
+/** Necessary source coverage only; qualification and release authority remain separate. */
+export function hasCompleteSourceCoverage(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): boolean {
   if (scope.from === null) return false; // Known history is not proof of complete all-time history.
   const repos = scope.repos.length ? scope.repos : input.repositoryIds;
   if (!repos.length) return false;
@@ -322,6 +324,8 @@ function coverageComplete(input: FrozenInput, policy: MetricPolicy, scope: Metri
             instant(item.windowStart) <= instant(scope.from!) &&
             item.windowEnd !== null &&
             instant(item.windowEnd) >= instant(scope.to) &&
+            typeof item.sourceWatermark === "string" &&
+            compareSourceInstants(item.sourceWatermark, scope.to) >= 0 &&
             item.knownStart !== null &&
             instant(item.knownStart) <= instant(scope.from!) &&
             item.missingPages === 0 &&
@@ -650,7 +654,7 @@ export function aggregateMetric(
   validateMetricPolicy(policy);
   const scope = canonicalScope(requestedScope);
   const prepared = prepare(input, policy, scope);
-  const complete = coverageComplete(input, policy, scope) && !hasUncertainty(prepared);
+  const complete = hasCompleteSourceCoverage(input, policy, scope) && !hasUncertainty(prepared);
   const actorsById = new Map(input.actors.map((actor) => [actor.id, actor]));
   const byActor = new Map<string, MetricFact[]>();
   for (const fact of prepared.facts) {
@@ -1028,7 +1032,7 @@ export function participationView(
   const complete =
     Boolean(history) &&
     (scope.from === null || instant(history!.originAt) <= instant(scope.from)) &&
-    coverageComplete(input, policy, historyScope) &&
+    hasCompleteSourceCoverage(input, policy, historyScope) &&
     !hasUncertainty(historical);
   const monday = (at: string) => {
     const date = new Date(instant(at));
@@ -1040,14 +1044,26 @@ export function participationView(
   if (scope.from !== null)
     for (let at = instant(monday(scope.from)); at < instant(scope.to); at += 604800000)
       weeks.add(new Date(at).toISOString());
-  return unique(current.map((fact) => fact.actorId!)).map((actorId) => {
-    const historyFacts = all
-      .filter((fact) => fact.actorId === actorId)
-      .sort((a, b) => compareInstants(a[policy.dateBasis], b[policy.dateBasis]) || compare(a.id, b.id));
+  const indexByActor = (facts: MetricFact[]) => {
+    const indexed = new Map<string, MetricFact[]>();
+    for (const fact of facts) {
+      const actorId = fact.actorId!;
+      const bucket = indexed.get(actorId) ?? [];
+      bucket.push(fact);
+      indexed.set(actorId, bucket);
+    }
+    return indexed;
+  };
+  const historyByActor = indexByActor(all);
+  const currentByActor = indexByActor(current);
+  return unique([...currentByActor.keys()]).map((actorId) => {
+    const historyFacts = (historyByActor.get(actorId) ?? []).sort(
+      (a, b) => compareInstants(a[policy.dateBasis], b[policy.dateBasis]) || compare(a.id, b.id),
+    );
     const first = historyFacts[0];
     const activeWeeks = unique(
-      current
-        .filter((fact) => fact.actorId === actorId)
+      currentByActor
+        .get(actorId)!
         .flatMap((fact) => (fact[policy.dateBasis] === null ? [] : [monday(fact[policy.dateBasis]!)])),
     );
     return {
