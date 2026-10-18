@@ -174,7 +174,12 @@ test("retained confirmed fallback requires current exact configuration and appli
           digest: "a".repeat(64),
           approval: { id: "synthetic-control-approval" },
           document: {
-            repositories: [{ id: "2" }],
+            repositories: h.config.repositories.map((repository) => ({
+              id: String(repository.id),
+              installationId: String(repository.installationId),
+              slug: repository.slug,
+              capabilities: repository.families,
+            })),
             projects: [],
             metrics: [
               {

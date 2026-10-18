@@ -1,6 +1,6 @@
 # Contributor-recognition repository instructions
 
-Read CONTRIBUTING.md, docs/DELIVERY_PLAN.md and the issue's acceptance gate before editing. This repository currently publishes a complete delivery baseline; runtime implementation and public service deployment remain future work.
+Read CONTRIBUTING.md, docs/DELIVERY_PLAN.md and the issue's acceptance gate before editing. This repository contains the delivery baseline and a tested local runtime. Remaining implementation and public-service acceptance are tracked separately; merged synthetic implementation does not establish a live service.
 
 - Preserve live GitHub Assignees, issue types, native hierarchy, blocker links and contextual Project fields. Never infer ownership from the plan's owner-role text.
 - Use planning/project-backlog.json as the scope baseline, and update metric/UI mappings when changing scope. GitHub remains authoritative for execution status. Do not reset progress from the initial baseline.

@@ -18,20 +18,38 @@ function Time({ value, unknown }: { value: string | null; unknown: string }) {
   return value && Number.isFinite(Date.parse(value)) ? <time dateTime={value}>{value}</time> : <span>{unknown}</span>;
 }
 
-/** API fields only. No fixture title, acceptance clock or private audit trail can enter this view. */
+/** Only the strict public metadata projection, shared by drawer, route and activity proofs. */
 export function Receipt({ value, selected }: { value: Evidence; selected: Selection }) {
+  const metadata = value.evidenceMetadata;
   return (
     <dl className="receipt" data-evidence-body>
       <dt>Contribution</dt>
       <dd>{value.contribution.contributionId}</dd>
       <dt>Artifact title</dt>
-      <dd>Not supplied by the public evidence API</dd>
+      <dd>
+        {metadata?.artifactTitle ? (
+          <>
+            {metadata.artifactTitle.value}
+            <br />
+            Label as collected at <Time value={metadata.artifactTitle.collectedAt} unknown="Unknown" />; not an
+            event-time title.
+          </>
+        ) : (
+          "Not supplied by the public evidence API"
+        )}
+      </dd>
       <dt>Artifact</dt>
       <dd>
         {value.artifact.kind} · {value.artifact.stableId ?? "Unknown artifact ID"}
       </dd>
       <dt>Action</dt>
-      <dd>Action details are not supplied by this evidence contract</dd>
+      <dd>
+        {metadata && metadata.sourceAction !== "unknown"
+          ? metadata.sourceAction.replaceAll("_", " ")
+          : metadata
+            ? "Action unknown; no envelope action is inferred"
+            : "Action details are not supplied by this evidence contract"}
+      </dd>
       <dt>Work state</dt>
       <dd>{value.activityState === "unknown" ? "Acceptance state unknown" : value.activityState}</dd>
       <dt>Qualification</dt>
@@ -52,6 +70,11 @@ export function Receipt({ value, selected }: { value: Evidence; selected: Select
       <dd>
         <Time value={value.occurredAt} unknown="Unknown; no event time is inferred" />
       </dd>
+      <dt>Source occurrence time</dt>
+      <dd>
+        <Time value={metadata?.sourceOccurredAt ?? null} unknown="Unknown original source time" />. The occurrence time
+        above follows this evidence period; acceptance can use a different clock.
+      </dd>
       <dt>Collected at</dt>
       <dd>
         <Time value={value.observedAt} unknown="Unknown collection time" />. Collection time can be later than the
@@ -59,11 +82,17 @@ export function Receipt({ value, selected }: { value: Evidence; selected: Select
       </dd>
       <dt>Acceptance time</dt>
       <dd>
-        {value.activityState === "accepted"
-          ? "Unknown; the API supplies no acceptance timestamp"
-          : value.activityState === "unknown"
-            ? "Unknown; neither acceptance nor its time can be inferred"
-            : "No acceptance time is supplied for observed or in-progress work"}
+        {metadata?.acceptedAt ? (
+          <>
+            <Time value={metadata.acceptedAt} unknown="Unknown acceptance time" /> · Independent recognition receipt
+          </>
+        ) : value.activityState === "accepted" ? (
+          "Unknown; the API supplies no acceptance timestamp"
+        ) : value.activityState === "unknown" ? (
+          "Unknown; neither acceptance nor its time can be inferred"
+        ) : (
+          "No acceptance time is supplied for observed or in-progress work"
+        )}
       </dd>
       <dt>Eligibility reasons</dt>
       <dd>{value.contribution.reasonCodes.join(", ") || "No additional reason code supplied"}</dd>
@@ -84,12 +113,26 @@ export function Receipt({ value, selected }: { value: Evidence; selected: Select
       </dd>
       <dt>Revision and correction history</dt>
       <dd>
-        Not supplied by the public evidence API. The current source revision above does not establish a complete
-        history.
+        {metadata?.history.coverage === "partial" ? (
+          <>
+            Partial public history only; missing records do not establish that no revisions or corrections occurred.
+            <ul>
+              {metadata.history.records.map((record, index) => (
+                <li key={index}>
+                  {record.kind === "correction" ? "Public correction" : `Source revision ${record.revision}`} ·{" "}
+                  <Time value={record.occurredAt} unknown="Unknown record time" /> ·{" "}
+                  <Source href={record.publicUrl}>Open public record</Source>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          "Not supplied by the public evidence API. The current source revision above does not establish a complete history."
+        )}
       </dd>
       <dt>Measures</dt>
       <dd>
-        {value.contribution.metricIds.map((id) => (
+        {[...value.contribution.metricIds].sort().map((id) => (
           <p key={id}>
             <a data-api-nav href={uiHref(`/leaderboards/${encodeURIComponent(id)}`, selected, { metric: id })}>
               {id}

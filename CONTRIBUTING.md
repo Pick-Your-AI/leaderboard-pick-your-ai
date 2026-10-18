@@ -1,6 +1,6 @@
 # Contributing
 
-This repository owns the Pick Your AI contributor-recognition delivery plan and future service. Read the [product scope](docs/PRODUCT.md), [delivery plan](docs/DELIVERY_PLAN.md) and your issue before starting. The repository currently contains planning and validation tools; runtime delivery remains tracked work.
+This repository owns the Pick Your AI contributor-recognition delivery plan and service implementation. Read the [product scope](docs/PRODUCT.md), [delivery plan](docs/DELIVERY_PLAN.md) and your issue before starting. The repository contains planning tools, source and metric packages, public and protected services, and a browser application. Remaining implementation, source authorization and public release remain tracked work.
 
 ## Choose and own work
 
@@ -25,6 +25,8 @@ Use native blocked-by links for genuine delivery prerequisites. Information inpu
 Create a branch and pull request against `main`. Reference the work-package issue, describe the resulting behavior or decision and supply its required evidence. Use `Refs #n` for partial progress; use `Closes #n` only when the full acceptance gate is satisfied. Repository creation does not close engineering foundation, installation or deployment work by itself.
 
 The canonical baseline is [planning/project-backlog.json](planning/project-backlog.json). When scope changes, update metric/UI mappings, decision and release records, then regenerate documentation. Match existing stable LB IDs to native issues rather than publishing duplicates. GitHub carries live execution state; the baseline must not reset assignees or progress.
+
+Use the [offline-first publication reconciler](docs/PUBLICATION.md) to verify existing issues and native parents. Its CLI is read-only. Authorized publication uses durable receipts and a connected-integration adapter; never force a retry by discarding an uncertain receipt or overwrite live issue bodies from the baseline.
 
 ```bash
 python scripts/sync_baseline.py

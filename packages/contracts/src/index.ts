@@ -49,3 +49,10 @@ export type {
   Snapshot,
   SourceEvent,
 } from "./v1/schemas.js";
+
+export {
+  publicEvidenceActionSchema,
+  publicEvidenceHistorySchema,
+  publicEvidenceMetadataSchema,
+} from "./v1/evidence-metadata.js";
+export type { PublicEvidenceAction, PublicEvidenceHistory, PublicEvidenceMetadata } from "./v1/evidence-metadata.js";
