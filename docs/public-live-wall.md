@@ -77,10 +77,13 @@ contributor, the wall reconciles its reading hold with the actual remaining DOM
 focus; a removed node cannot leave automatic rotation permanently paused. Other
 pause, pointer, reduced-motion and visibility holds still apply.
 
-Cursor expiry, cursor-policy invalidation and a publication change during a read
-restart the current stage at page one on the next bounded recheck, using the same
-snapshot pin. An expired or revoked snapshot lets live modes restart from the
-current publication. Frozen mode continues to require its explicit pin and stays
+Cursor expiry and cursor-policy invalidation restart the current stage at page
+one on the next bounded recheck, using the same snapshot pin. A publication-head
+change during a read clears the incoherent display, then retries the same page
+and cursor: that race alone does not invalidate the continuation. Completed page
+progress is retained, and live modes adopt the latest publication at the next
+complete cycle boundary. An expired or revoked snapshot lets live modes restart
+from the current publication. Frozen mode continues to require its explicit pin and stays
 unavailable if that snapshot is revoked. Other errors remain explicit; they do
 not silently broaden the scope or adopt an unrelated publication.
 
