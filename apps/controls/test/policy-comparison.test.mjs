@@ -1,6 +1,6 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -677,6 +677,28 @@ test("approved capture registry capacity degrades without partial bindings or hi
   assert.throws(() => h.store.transaction((state) => h.comparisons.capture(state, next)), /authorization changed/);
 });
 
+let runtimeStorage;
+after(async () => {
+  if (runtimeStorage) await (await runtimeStorage).close();
+});
+async function runtimeStorageFixture() {
+  runtimeStorage ??= (async () => {
+    const { PGlite } = await import("@electric-sql/pglite");
+    const { migratePipeline } = await import("../../pipeline/src/scope-storage.mjs");
+    const engine = new PGlite();
+    try {
+      for (const name of ["001_ingestion.up.sql", "002_snapshots.up.sql", "003_collection.up.sql"])
+        await engine.exec(readFileSync(new URL(`../../../packages/ingestion/sql/${name}`, import.meta.url), "utf8"));
+      await migratePipeline(engine);
+      return engine;
+    } catch (error) {
+      await engine.close();
+      throw error;
+    }
+  })();
+  return runtimeStorage;
+}
+
 async function runtimePreviewHarness(t, { verifyConfiguration, fence, correction } = {}) {
   const { createPipeline } = await import("../../pipeline/src/runtime.mjs");
   const { createPolicyComparisonManager } = await import("../src/policy-comparison.mjs");
@@ -715,7 +737,13 @@ async function runtimePreviewHarness(t, { verifyConfiguration, fence, correction
       ...patch,
     });
   update();
+  const storage = await runtimeStorageFixture();
+  let starting = true;
   const db = {
+    query: (sql, params) => {
+      assert.equal(starting, true, "Protected comparison escaped its existing transaction");
+      return storage.query(sql, params);
+    },
     transaction: async (work) =>
       work({
         query: async (sql) => {
@@ -744,6 +772,7 @@ async function runtimePreviewHarness(t, { verifyConfiguration, fence, correction
     verifyConfiguration: verifyConfiguration ? () => verifyConfiguration(update) : async () => true,
     policyComparisonAuthorityCurrent: fence === "absent" ? undefined : (fence ?? authority.isCurrent),
   });
+  starting = false;
   t.after(() => runtime.stop());
   const input = capture();
   input.authorization.configurationHash = comparisonHash(config);
@@ -777,9 +806,9 @@ async function runtimePreviewHarness(t, { verifyConfiguration, fence, correction
 
 test("runtime comparison refreshes approval through the existing source transaction", async (t) => {
   let approvals = 0;
-  // This harness deliberately exposes query only on its transaction. Calling the
-  // outer database during a protected response would escape the transaction and
-  // can deadlock adapters that serialize all database work.
+  // Startup reads the actual migrated schema. After startup, the outer database
+  // refuses queries: protected responses must retain their existing transaction
+  // and must not deadlock adapters that serialize all database work.
   const h = await runtimePreviewHarness(t, {
     verifyConfiguration: async () => {
       approvals++;

@@ -70,7 +70,10 @@ function invalid(): never {
   throw new Error("invalid_export_csv");
 }
 
-function records(raw: string, rowLimit: number): { rows: string[][]; columns: readonly Column[]; version: string } {
+function records(
+  raw: string,
+  rowLimit: number,
+): { rows: string[][]; columns: readonly Column[]; version: string; withComparison: boolean } {
   if (!Number.isSafeInteger(rowLimit) || rowLimit < 1 || rowLimit > 100 || raw.length > 2_000_000) invalid();
   const result: string[][] = [];
   let index = 0;
@@ -95,7 +98,7 @@ function records(raw: string, rowLimit: number): { rows: string[][]; columns: re
       if (!closed || formula(cell) || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(cell)) invalid();
       if (new TextEncoder().encode(cell).byteLength > 256 * 1024) invalid();
       row.push(cell);
-      if (row.length > legacyColumns.length + 4) invalid();
+      if (row.length > legacyColumns.length + 6) invalid();
       if (raw[index] === ",") {
         index++;
         continue;
@@ -110,10 +113,15 @@ function records(raw: string, rowLimit: number): { rows: string[][]; columns: re
   const header = result[0];
   const variant = variants.find(
     ({ columns }) =>
-      header && header.length === columns.length && columns.every((column, index) => header[index] === column),
+      header &&
+      (header.length === columns.length ||
+        (header.length === columns.length + 2 &&
+          header[columns.length] === "comparison" &&
+          header[columns.length + 1] === "movement")) &&
+      columns.every((column, index) => header[index] === column),
   );
-  if (result.length < 2 || !variant || result.some((row) => row.length !== variant.columns.length)) invalid();
-  return { rows: result.slice(1), ...variant };
+  if (result.length < 2 || !variant || result.some((row) => row.length !== header!.length)) invalid();
+  return { rows: result.slice(1), ...variant, withComparison: header!.length === variant.columns.length + 2 };
 }
 
 function number(cell: string): number {
@@ -139,7 +147,7 @@ function entries(cell: string): Record<string, unknown>[] {
  * returned download remains the original CSV bytes, including formula guards. */
 export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, rowLimit: number): unknown {
   const parsed = records(raw, rowLimit);
-  const { columns, version } = parsed;
+  const { columns, version, withComparison } = parsed;
   const [metadata, ...data] = parsed.rows;
   const metadataEnd = columns.indexOf("actor_id");
   if (!metadata) invalid();
@@ -150,10 +158,12 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
   };
   if (
     metadata[0] !== "metadata" ||
-    metadata.slice(metadataEnd).some((cell) => cell !== "") ||
+    metadata.slice(metadataEnd, columns.length).some((cell) => cell !== "") ||
+    (withComparison && metadata[columns.length + 1] !== "") ||
     at(metadata, "export_schema_version") !== version
   )
     invalid();
+  const comparison = withComparison ? parseExportJSON(metadata[columns.length]!) : undefined;
   if (
     !expectedMetric ||
     at(metadata, "metric") !== protectedText(expectedMetric.id) ||
@@ -176,6 +186,8 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
   const diagnostics: unknown[] = [];
   const rows = data.map((row) => {
     if (row[0] !== "row" || row.slice(1, metadataEnd).some((cell, index) => cell !== metadata[index + 1])) invalid();
+    if (withComparison && row[columns.length] !== metadata[columns.length]) invalid();
+    const movement = withComparison ? parseExportJSON(row[columns.length + 1]!) : undefined;
     const actorId = originalText(at(row, "actor_id"));
     const diagnosticColumns = [
       "numerator",
@@ -220,9 +232,11 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
       },
       evidenceIds,
       ...(pending === undefined ? {} : { pending }),
+      ...(withComparison ? { movement } : {}),
     };
   });
   return {
+    ...(withComparison ? { comparison } : {}),
     exportSchemaVersion: at(metadata, "export_schema_version"),
     schemaVersion: "leaderboard/v1",
     snapshotId: originalText(at(metadata, "snapshot")),
