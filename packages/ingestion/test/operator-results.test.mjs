@@ -10,7 +10,9 @@ const files = [
   "002_snapshots",
   "003_collection",
   "004_outbox_dispatch",
+  "006_delivery_payload_expiry",
   "007_operator_replay_results",
+  "008_dispatch_publication_scope_capacity",
 ];
 const allow = async () => ({ policyVersion: "synthetic-replay-policy", revision: "grant-1" });
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;

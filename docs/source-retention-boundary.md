@@ -20,6 +20,17 @@ the earlier baseline; this component resolves part of its checkpoint obstacle,
 while the coordinated SQL, controls, publication and restore requirements remain.
 The checkpoint operation alone is not completion of #95.
 
+## Pipeline-owned derived component
+
+[Pipeline-derived retirement](pipeline-derived-retirement.md) consumes the exact
+committed collection-retirement authority and removes explicitly bound unlinked
+pipeline payloads through bounded PostgreSQL/SQLite manifests and acknowledgements.
+It preserves unrelated sources and immutable dispatch/replay proof, reports retained
+proof as incomplete, and fences delayed derived writes and private confirmation.
+Its scoped receipt does not cover general controls records, other stores, backup
+copies, retention windows or a deployed purge schedule. The historical investigation
+below remains the baseline for the remaining cross-store requirements.
+
 ## Verified obstacles at the investigation baseline
 
 | Boundary                        | Actual implementation                                                                                                                                                                          | Why a generic purge coordinator is insufficient                                                                                                                                                                                                                                         |
