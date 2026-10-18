@@ -176,3 +176,43 @@ for (const padding of ["a".repeat(2 * 1024 * 1024), "€".repeat(800000)]) {
     assert.equal(result.states.at(-1).transport, "polling");
   });
 }
+
+test("stopping live updates makes queued stream callbacks inert", async (t) => {
+  const listeners = new Map(),
+    visibilityListeners = new Map();
+  let connection,
+    closes = 0;
+  const result = observe(t, async () => new Response(JSON.stringify(health)), {
+    document: {
+      hidden: false,
+      addEventListener: (name, listener) => visibilityListeners.set(name, listener),
+      removeEventListener: (name) => visibilityListeners.delete(name),
+    },
+    eventSource: () => {
+      connection = {
+        close() {
+          closes++;
+        },
+        addEventListener: (name, listener) => listeners.set(name, listener),
+      };
+      return connection;
+    },
+  });
+  await until(() => listeners.has("reset"));
+  connection.onopen();
+  const states = structuredClone(result.states),
+    notices = structuredClone(result.notices);
+  result.stop();
+  assert.equal(closes, 1);
+  assert.equal(visibilityListeners.size, 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  connection.onopen();
+  connection.onerror(new Event("error"));
+  listeners.get("reset")({
+    data: JSON.stringify({ ...health, snapshotId: "stopped-public-2", revision: 2 }),
+  });
+  assert.deepEqual(result.states, states, "stopped callbacks cannot change transport or freshness");
+  assert.deepEqual(result.notices, notices, "stopped callbacks cannot request a snapshot refetch");
+  result.stop();
+  assert.equal(closes, 1, "cleanup is idempotent and does not re-close a stale connection");
+});
