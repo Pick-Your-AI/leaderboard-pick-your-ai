@@ -52,11 +52,17 @@ receipts record failures; no existing browser session is used.
 | 360 minutes       | Change only the display timezone. Source UTC timestamp text retains its original representation.                                                                                                        |
 | Throughout        | Observe a natural local midnight, complete board and unranked-roll cycles, consistent publication pins, no duplicate rows, bounded DOM and retained memory, and no uncaught page or harness exceptions. |
 
-The configuration chooses a real timezone with midnight in the next six hours.
-`WALL_SOAK_TIMEZONE` can select a different IANA timezone, but the full test still
-requires a real date transition. Timezone selection does not alter the clock.
-The candidate zones include New York so a start shortly after UTC midnight also
-has an eligible natural transition within six hours.
+The full-run configuration selects a real timezone whose next local date change
+is thirty minutes to five hours away. Named zones have hourly fixed-offset
+fallbacks, so a candidate about to cross midnight is skipped without assuming
+that every local day has twenty-four hours. This reserves startup time and an
+hour before the scheduled six-hour timezone change. An explicit
+`WALL_SOAK_TIMEZONE` must meet the same window for a full run; short rehearsals
+only require a valid zone and make no midnight claim. After browser setup, the
+test reads the browser's actual timezone and requires the transition still to
+be fifteen minutes to five hours away, retaining that observation in
+`midnight-window.json`. A missed startup window fails before the long matrix.
+Selection and validation use observed real dates and do not alter either clock.
 Every two minutes the source republishes the same synthetic input with a fresh
 source-sync timestamp. It retains at most sixteen snapshots, allowing the held
 cursor to expire while its snapshot remains available. It does not retain all

@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { expect, type Page } from "@playwright/test";
 import { soakTest as test, cleanupOwned, compiledOutputs } from "./runtime.ts";
 import { responseClassification, WallCycleTracker } from "./assertions.ts";
+import { requireSoakMidnightWindow } from "./midnight.ts";
 import { scope, snapshot } from "../browser/wallFixture.ts";
 
 const minutes = Number(process.env.WALL_SOAK_MINUTES ?? "480");
@@ -14,6 +15,11 @@ const contributors = (page: Page) => page.locator('.api-wall-content a[href*="/c
 
 test("real elapsed wall display, bounded resources and recovery", async ({ runtime }, info) => {
   const { page, context, browser } = runtime;
+  if (full) {
+    const timeZone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
+    const window = requireSoakMidnightWindow(timeZone, Date.now());
+    await writeFile(info.outputPath("midnight-window.json"), JSON.stringify(window, null, 2) + "\n");
+  }
   const sourceStartedAt = new Date().toISOString();
   const input = {
     head: git("rev-parse", "HEAD"),
