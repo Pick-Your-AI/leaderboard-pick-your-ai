@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import {
+  FileCheckpointStore,
+  GithubClientError,
   GithubReadClient,
   createGithubEvidenceNormalizer,
   githubSnapshotRevision,
   projectSubjectSnapshotRevision,
   readPublicSubjectProjectSnapshot,
 } from "../../../packages/github/dist/index.js";
+import { syntheticCheckpointStore } from "../../../packages/github/test/synthetic-client.mjs";
 import { aggregateMetric, getMetricDefinition, metricRegistryV1 } from "../../../packages/metrics/dist/index.js";
 import { createGithubCollectionSource } from "../src/github-source.mjs";
 
@@ -63,14 +69,13 @@ const payload = (number, pull = false) => ({
 });
 
 /** No stubbed collector/normalizer outputs: only the HTTP boundary supplies synthetic GitHub data. */
-function harness() {
+function harness(checkpointStore = syntheticCheckpointStore()) {
   const state = {
     subjects: [payload(1), payload(2, true)],
     memberships: { I_synthetic: [member("alpha"), member("beta")], PR_synthetic: [] },
     selectedOptions: {},
   };
   const calls = [];
-  const checkpoints = new Map();
   const binding = (subject) => ({
     __typename: subject.pull_request ? "PullRequest" : "Issue",
     id: subject.node_id,
@@ -81,10 +86,7 @@ function harness() {
     apiOrigin: "https://api.synthetic.invalid",
     token: async () => "synthetic-token",
     maxRetries: 0,
-    checkpoints: {
-      load: async (key) => structuredClone(checkpoints.get(key)),
-      save: async (key, value) => checkpoints.set(key, structuredClone(value)),
-    },
+    checkpoints: checkpointStore,
     fetch: async (value, options) => {
       const url = new URL(value);
       let body;
@@ -184,6 +186,52 @@ function harness() {
   });
   const normalize = normalizer();
   return { state, calls, client, source, normalizer, input, normalize: (fact, patch) => normalize(input(fact, patch)) };
+}
+
+async function checkpointFixture(t) {
+  const directory = await mkdtemp(join(tmpdir(), "project-context-retirement-"));
+  t.after(async () => rm(directory, { recursive: true, force: true }));
+  const cache = join(directory, "cache");
+  return { cache, store: new FileCheckpointStore(cache) };
+}
+
+test("native Project normalization keeps actual collector and hydration payloads in its repository namespace", async (t) => {
+  const { cache, store } = await checkpointFixture(t);
+  const h = harness(store);
+  const fact = (await h.source.readPage(request)).facts[0];
+  assert.deepEqual(await readdir(cache), ["repositories-v1"]);
+  const output = await h.normalize(fact);
+  assert.deepEqual(output.projectContext.context.projects, ["PVT_alpha", "PVT_beta"]);
+  assert.deepEqual(output.facts, []);
+  assert.deepEqual(output.actors, []);
+  assert.deepEqual(output.evidence, []);
+  assert.ok((await readdir(join(cache, "repositories-v1", String(repository.id)))).length > 0);
+  assert.deepEqual(await readdir(cache), ["repositories-v1"]);
+});
+
+for (const reopened of [false, true]) {
+  test(`native Project normalization denies retired repository payloads before HTTP${reopened ? " after reopening the store" : " in the existing client"}`, async (t) => {
+    const { cache, store } = await checkpointFixture(t);
+    const h = harness(store);
+    const fact = (await h.source.readPage(request)).facts[0];
+    const before = await h.normalize(fact);
+    assert.deepEqual(before.projectContext.context.projects, ["PVT_alpha", "PVT_beta"]);
+    assert.deepEqual(before.facts, []);
+    const receipt = await store.forRepository(repository.id).retire({
+      operationId: "synthetic-project-context-retirement",
+      policyId: "synthetic-retention-policy-v1",
+      authorizationId: "synthetic-retention-authorization",
+    });
+    assert.equal(receipt.repositoryId, repository.id);
+    assert.equal(receipt.checkpointPayloadsRemoved, true);
+    const selected = reopened ? harness(new FileCheckpointStore(cache)) : h;
+    const callsBefore = selected.calls.length;
+    await assert.rejects(
+      selected.normalize(fact),
+      (error) => error instanceof GithubClientError && error.outcome.kind === "unsafe_request",
+    );
+    assert.equal(selected.calls.length, callsBefore, "retired normalization must stop before another GraphQL request");
+  });
 }
 
 function policy(metricId = "issues_opened") {
