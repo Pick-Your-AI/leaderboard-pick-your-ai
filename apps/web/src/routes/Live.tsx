@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { RankCell } from "../components/BoardTable.tsx";
-import { PageHeader, SyntheticDataBanner } from "../components/Layout.tsx";
+import { WindowBounds } from "../components/DisplayTimeZone.tsx";
+import { Layout, PageHeader, SyntheticDataBanner } from "../components/Layout.tsx";
+import { ScopeIssues } from "../components/ScopeBar.tsx";
 import { ErrorState, FreshnessIndicator, SnapshotNotices } from "../components/status.tsx";
 import { getMetric } from "../data/registry.ts";
 import { listContributors, SourceError } from "../data/source.ts";
@@ -27,18 +29,26 @@ function readWallParams(params: Record<string, string>) {
   return { mode, boards, interval, format };
 }
 
-export function LivePage() {
+export function LivePage({ standalone = false }: { standalone?: boolean }) {
   const { params } = useScope();
+  let fallback: React.ReactNode;
   try {
     const wall = readWallParams(params);
-    return wall.mode ? <WallPage {...wall} mode={wall.mode} /> : <WallConfigurator />;
+    if (wall.mode) return <WallPage {...wall} mode={wall.mode} />;
+    fallback = <WallConfigurator />;
   } catch (error) {
-    return <ErrorState error={error instanceof Error ? error : new Error("Invalid wall selection")} />;
+    fallback = (
+      <>
+        <PageHeader eyebrow="Public display" title="Live wall" />
+        <ErrorState error={error instanceof Error ? error : new Error("Invalid wall selection")} />
+      </>
+    );
   }
+  return standalone ? <Layout title="Live wall">{fallback}</Layout> : fallback;
 }
 
 function WallConfigurator() {
-  const { scope } = useScope();
+  const { scope, issues } = useScope();
   const latest = useLatestSnapshotId();
   const [mode, setMode] = useState<WallMode>("cycle");
   const [boards, setBoards] = useState<string[]>(wallMetricIds().slice(0, 3));
@@ -58,6 +68,7 @@ function WallConfigurator() {
           only public data is shown.
         </p>
       </PageHeader>
+      <ScopeIssues issues={issues} />
       <form className="wall-config" onSubmit={(event) => event.preventDefault()}>
         <fieldset>
           <legend>Mode</legend>
@@ -157,7 +168,7 @@ function WallPage({
   interval: number;
   format: WallFormat;
 }) {
-  const { scope, params } = useScope();
+  const { scope, params, issues } = useScope();
   const latest = useLatestSnapshotId();
   const [appliedLatest, setAppliedLatest] = useState(latest);
   const [index, setIndex] = useState(0);
@@ -204,13 +215,26 @@ function WallPage({
             {wallScope.actor === "user" ? "User accounts" : wallScope.actor === "all" ? "All activity" : "Automation"}
             {mode === "frozen" && " · Frozen snapshot: this display never changes"}
           </p>
+          {content.kind !== "error" && (
+            <WindowBounds
+              start={content.data.window.start?.toISOString() ?? null}
+              end={content.data.window.end.toISOString()}
+              timeZone={wallScope.timeZone}
+            />
+          )}
         </header>
         {snapshotView && <SnapshotNotices view={snapshotView} />}
         <div className="visually-hidden" role="status" aria-live="polite">
           {announcement}
         </div>
         <main className="wall-body">
-          {content.kind === "error" && <ErrorState error={content.error} />}
+          <ScopeIssues issues={issues} />
+          {content.kind === "error" && (
+            <>
+              <h1>Live wall</h1>
+              <ErrorState error={content.error} />
+            </>
+          )}
           {content.kind === "credits" && (
             <>
               <h1>Contributors in this period</h1>

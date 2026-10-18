@@ -61,7 +61,7 @@ export function App() {
   const { pathname, search } = useRouter();
 
   // A configured wall is a full-screen display without site chrome.
-  if (matchPath("/live", pathname) && new URLSearchParams(search).has("mode")) return <LivePage />;
+  if (matchPath("/live", pathname) && new URLSearchParams(search).has("mode")) return <LivePage standalone />;
 
   for (const route of routes) {
     const params = matchPath(route.pattern, pathname);
