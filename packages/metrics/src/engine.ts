@@ -405,7 +405,7 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
         actor.kind !== "service_account" ||
         String(classification.githubDatabaseId) !== actor.id ||
         (classification.githubNodeId !== undefined && classification.githubNodeId !== actor.githubNodeId) ||
-        Date.parse(classification.reviewedAt) > cutoff
+        compareSourceInstants(classification.reviewedAt, input.cutoff) > 0
       )
         throw new Error("Service-account evidence must match the actor and frozen cutoff");
     }
@@ -1049,7 +1049,7 @@ export function participationView(
 ) {
   validateMetricPolicy(policy);
   const scope = canonicalScope(requestedScope);
-  // Newcomer discovery uses organization history, independent of the selected repository lens.
+  // Newcomer discovery uses policy-eligible organization history, independent of selected lenses.
   const historyScope = canonicalScope({
     ...scope,
     period: "custom",
@@ -1057,6 +1057,7 @@ export function participationView(
     repos: [],
     projects: [],
     workstreams: [],
+    roles: [],
   });
   if (history) {
     instant(history.originAt);
