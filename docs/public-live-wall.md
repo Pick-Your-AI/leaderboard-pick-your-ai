@@ -84,6 +84,37 @@ current publication. Frozen mode continues to require its explicit pin and stays
 unavailable if that snapshot is revoked. Other errors remain explicit; they do
 not silently broaden the scope or adopt an unrelated publication.
 
+## Startup fallback and operator recovery
+
+The delivered HTML contains a readable **Live data has not loaded** message before
+the application starts. It identifies source freshness as unknown and shows no
+contribution rows. The message remains when JavaScript is disabled or the entry
+script cannot load; a `noscript` explanation identifies disabled JavaScript. Its
+separate external stylesheet uses the existing same-origin CSP, and the semantic
+message remains readable if that stylesheet also fails. The first application
+render replaces it. This startup message does not recover a later application
+crash or replace the wall's active source-failure handling.
+
+Use the visible state to choose the next check:
+
+| Visible state | Meaning and next check |
+| --- | --- |
+| Live data has not loaded | Application startup has not completed. Keep the exact URL, including scope and snapshot, when reloading. Check that JavaScript is enabled and the page's generated script and stylesheet URLs return their expected content types. A stale asset URL, failed download, CSP rejection or an asset incorrectly rewritten to the SPA document can prevent startup. Repair the deployment or connection; do not weaken CSP. |
+| PUBLIC READ LOST | The running wall could not complete a coherent authorized public read and has cleared contributor content. Check the served source health and network response. Each request has an eight-second deadline; while visible, the wall rechecks every 20 seconds and also offers an explicit recheck. |
+| STALE OR DEGRADED DATA | A coherent publication is visible, while served source health is stale, incomplete, missing or degraded. Inspect its coverage, publication and source-sync timestamps; an older publication is not evidence of current collection success. |
+| Recently reconciled | The served health reports recent reconciliation. A quiet board or zero count alone does not establish complete source coverage. |
+
+For a collection problem, an authorized operator can open the protected `/admin`
+console, find **Collection diagnostics and inbox replay**, enter the affected
+**Repository numeric ID** and choose **Load protected diagnostics**. The host must
+enable that adapter and grant the current operator access to that repository; a
+role alone does not grant it. Follow the [protected diagnostics and audited replay
+guide](operator-operations.md) to inspect retained inbox counts, collection runs,
+sanitized failure codes and existing receipts. Keep private diagnostic output out
+of the public wall. Counts describe processing, and a queued replay does not prove
+collection recovery or a resulting publication. After an uncertain replay result,
+read its durable receipt before deciding on another action.
+
 ## Verification and remaining acceptance
 
 [`wall.spec.ts`](../apps/web/browser/wall.spec.ts) uses the actual Fastify public

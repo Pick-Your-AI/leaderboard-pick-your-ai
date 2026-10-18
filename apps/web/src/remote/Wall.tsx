@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import "../styles/wall.css";
 import { actorFilterLabels, type Actor, type MetricRegistry } from "@pick-your-ai/contracts";
 import { getLeadMetrics } from "@pick-your-ai/metrics";
+import { LastVerifiedSnapshot, type SnapshotReference } from "./LastVerifiedSnapshot.tsx";
 import {
   apiBase,
   catalog,
@@ -48,11 +49,19 @@ function Scope({ selected }: { selected: Selection }) {
     </p>
   );
 }
-function Failure({ error }: { error: ReadFailure }) {
+function Failure({ error, previousSnapshot }: { error: ReadFailure; previousSnapshot?: SnapshotReference | null }) {
   return (
     <section className="notice notice-error" role="alert">
-      <h2>{error.status === 410 ? "Selection expired or revoked" : "Public wall unavailable"}</h2>
+      <h2>
+        {error.status === 410
+          ? "Selection expired or revoked"
+          : error.status === 429
+            ? "Requests temporarily limited"
+            : "Public wall unavailable"}
+      </h2>
       <p>{error.code}</p>
+      {error.status === 429 && <p>Wait before retrying this selection.</p>}
+      {previousSnapshot && <LastVerifiedSnapshot value={previousSnapshot} />}
       <p>No saved contributor response or fixture is used after this failure.</p>
     </section>
   );
@@ -289,6 +298,7 @@ function WallDisplay({
   const [announcement, setAnnouncement] = useState("");
   const [fullscreenMessage, setFullscreenMessage] = useState("");
   const pin = useRef<string | null>(selected.snapshot);
+  const lastVerified = useRef<SnapshotReference | null>(null);
   const active = useRef<AbortController | null>(null);
   const recovery = useRef<"page" | "cycle" | null>(null);
   const automaticDue = useRef(false);
@@ -337,6 +347,12 @@ function WallDisplay({
     void readWallFrame(base, selected, options, position, pin.current, controller.signal)
       .then((value) => {
         if (controller.signal.aborted) return;
+        // The complete frame and current controls have passed validation.
+        // Keep only this historical date/reference if a later read fails.
+        lastVerified.current = {
+          snapshotId: value.content.value.snapshotId,
+          generatedAt: value.content.value.generatedAt,
+        };
         pin.current = value.content.value.snapshotId;
         recovery.current = null;
         setFrame(value);
@@ -501,7 +517,7 @@ function WallDisplay({
           {error && (
             <>
               <h1>Public live wall</h1>
-              <Failure error={error} />
+              <Failure error={error} previousSnapshot={lastVerified.current} />
             </>
           )}
           {content?.kind === "board" && (

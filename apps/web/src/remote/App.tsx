@@ -11,6 +11,7 @@ import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
 import { RankComparisonControls, RankMovementValue } from "./RankComparison.tsx";
+import { LastVerifiedSnapshot, type SnapshotReference } from "./LastVerifiedSnapshot.tsx";
 import {
   discoverMetrics,
   isCatalogPath,
@@ -381,6 +382,7 @@ export function RemoteApp() {
   const active = useRef<AbortController | null>(null);
   const activeExport = useRef<AbortController | null>(null);
   const displayedPage = useRef<{ location: string; href: string } | null>(null);
+  const lastVerified = useRef<(SnapshotReference & { location: typeof url }) | null>(null);
   const preserveDisplayedPage = useCallback(() => {
     // Make the previous page reproducible when Back is used after a new head arrives.
     // Store only the pin in the URL; no contributor response is kept in browser history.
@@ -595,6 +597,12 @@ export function RemoteApp() {
         if (data.kind === "method") registryMetric(registry, data.metricId);
         if (data.kind === "catalog") discoverMetrics(registry, selected);
         if (data.kind === "board") verifyBoardDefinition(registry, data.value.metric);
+        // Retain only a dated reference after every response/registry check.
+        // It belongs to this selection, never a cache of contributor content.
+        lastVerified.current =
+          "value" in data
+            ? { location: url, snapshotId: data.value.snapshotId, generatedAt: data.value.generatedAt }
+            : null;
         setChecking(false);
         // Explicit pins are already reproducible, including proof URLs and their
         // drawer history marker. Only an implicit displayed selection needs pinning.
@@ -627,6 +635,7 @@ export function RemoteApp() {
   }, [state, selected.proof]);
   const data = state.status === "ready" ? state.data : null;
   const meta = data && "value" in data ? data.value : null;
+  const previousSnapshot = lastVerified.current?.location === url ? lastVerified.current : null;
   const pending = meta && !selected.snapshot && meta.head.snapshotId !== meta.snapshotId ? meta.head.snapshotId : null;
   const apply = useCallback(() => {
     if (pending) {
@@ -795,10 +804,17 @@ export function RemoteApp() {
                 ? "Public record unavailable"
                 : state.error.status === 410
                   ? "Selection expired or revoked"
-                  : "Public read unavailable"}
+                  : state.error.status === 429
+                    ? "Requests temporarily limited"
+                    : "Public read unavailable"}
             </h2>
             <p>{state.error.code}</p>
+            {state.error.status === 429 && <p>Wait before retrying this selection.</p>}
+            {previousSnapshot && <LastVerifiedSnapshot value={previousSnapshot} />}
             <p>No fixture data or stored personal content is shown after this failure.</p>
+            <button type="button" className="button" onClick={refresh} disabled={checking}>
+              Retry this selection
+            </button>{" "}
             {link(url.pathname, "Restart from the current publication", { snapshot: null, cursor: null })}
           </section>
         )}
