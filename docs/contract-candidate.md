@@ -10,7 +10,7 @@ An event observation does not itself create a contribution. Contributions name o
 
 Identity alias, merge and split corrections carry evidence and review fields; an accepted correction cannot validate without a reviewer and evidence. Artifact lineage records same-change, squash, cherry-pick, mirror or imported relationships as evidence-bearing facts. These primitives do not themselves allocate fractional credit or count imported copies as new work.
 
-The versioned registry copies all 98 canonical metric definitions from `planning/metrics-and-ingestion.json` without rewriting their meanings. It marks policy version `candidate-0.1.0`; registry presence does not enable a metric. Registry-wide UI fields that lack approved values in the planning source (department, synonyms, maturity, supported states and date bases, and lead view) are marked unresolved and must be supplied by product and metric owners before enablement.
+The versioned registry copies all 98 canonical metric definitions from `planning/metrics-and-ingestion.json` without rewriting their meanings. It marks policy version `candidate-0.1.0`; registry presence does not enable a metric. The separately versioned `leaderboard-ui/v1` metadata supplies conservative navigation defaults, maturity, synonyms and explicit selectable state/date pairs for every definition. These engineering defaults are implemented; they do not authorize source collection or public recognition. See [UI registry policy](../packages/metrics/UI_REGISTRY.md) for capability boundaries and the deterministic triage policy.
 
 ## Candidate compatibility rules
 
@@ -26,7 +26,7 @@ The versioned registry copies all 98 canonical metric definitions from `planning
 - Approve the evidence, identity-link, opt-out, correction and retention policies before public recognition or account-link workflows are enabled.
 - Approve the source capability matrix after installation and canary evidence. Current package types do not establish endpoint permission or historical completeness.
 - Review each metric's source adapter, actor rule, dedupe key, qualification gate and verification example before enabling it.
-- Choose and approve department mapping, synonyms, maturity, supported state/date bases, lead-view metadata and tie presentation from accountable product and metric owners.
+- Public release still requires accepted source and metric evidence; implemented navigation defaults and synthetic verification do not provide that evidence.
 - Establish migration and historical recomputation procedures for persisted production data before a production schema is declared stable.
 
 ## Validation limits

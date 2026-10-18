@@ -2,6 +2,7 @@ import React, { useId, useState } from "react";
 import { useScope } from "../lib/hooks.ts";
 import { formatDateTime } from "../lib/format.ts";
 import type { PeriodPreset, Scope, ScopeIssue, TimeWindow } from "../lib/scope.ts";
+import { getMetricUi } from "../data/registry.ts";
 import { projects, repositories, snapshots } from "../data/source.ts";
 
 const periodLabels: Record<PeriodPreset, string> = {
@@ -43,21 +44,52 @@ export function ScopeIssues({ issues }: { issues: ScopeIssue[] }) {
 export function ScopeBar({
   timeWindow,
   showSnapshot = true,
+  metricId,
 }: {
   timeWindow: TimeWindow | null;
   showSnapshot?: boolean;
+  metricId?: string;
 }) {
-  const { scope, issues, setScope } = useScope();
+  const { scope, issues, params, setScope } = useScope();
   const id = useId();
   const [customFrom, setCustomFrom] = useState(scope.from ?? "");
   const [customTo, setCustomTo] = useState(scope.to ?? "");
   const [pendingCustom, setPendingCustom] = useState(scope.period === "custom");
+  const ui = metricId ? getMetricUi(metricId) : undefined;
+  const requestedView = `${params.state ?? ui?.default_combination?.state ?? ""}:${params.date_basis ?? ui?.default_combination?.date_basis ?? ""}`;
+  const knownView = ui?.supported_combinations.some((pair) => `${pair.state}:${pair.date_basis}` === requestedView);
   const update = (patch: Partial<Scope>) => setScope({ ...scope, ...patch });
 
   return (
     <section className="scope-bar" aria-label="Scope">
       <ScopeIssues issues={issues} />
       <div className="scope-controls">
+        {metricId && (
+          <label>
+            <span>Evidence and date basis</span>
+            <select
+              value={requestedView}
+              disabled={!ui?.supported_combinations.length}
+              onChange={(event) => {
+                const [state, date_basis] = event.target.value.split(":");
+                setScope(scope, { ...params, state: state!, date_basis: date_basis! });
+              }}
+            >
+              {!knownView && (
+                <option value={requestedView} disabled>
+                  {params.state !== undefined || params.date_basis !== undefined
+                    ? `Unsupported: ${requestedView}`
+                    : "No selectable view"}
+                </option>
+              )}
+              {ui?.supported_combinations.map((pair) => (
+                <option key={`${pair.state}:${pair.date_basis}`} value={`${pair.state}:${pair.date_basis}`}>
+                  {pair.state} · {pair.date_basis}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label>
           <span>Period</span>
           <select

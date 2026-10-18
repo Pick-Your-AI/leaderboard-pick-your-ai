@@ -5,6 +5,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { MetricDefinition, MetricRegistry } from "@pick-your-ai/contracts";
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
 import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
+import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
+import {
+  discoverMetrics,
+  isCatalogPath,
+  registryMetric,
+  validateCatalogRoute,
+  verifyBoardDefinition,
+} from "./registry.ts";
 import {
   activity,
   activityDetail,
@@ -37,6 +45,7 @@ import {
 
 type Data =
   | { kind: "catalog" }
+  | { kind: "method"; metricId: string }
   | { kind: "health"; value: Health }
   | { kind: "board"; value: Board }
   | { kind: "activity"; value: Activity }
@@ -209,6 +218,10 @@ function Filters({
             const value = String(input.get(key) ?? "").trim();
             if (value) params.set(key, value);
           }
+          if (isCatalogPath(path)) {
+            if (selected.catalogQuery) params.set("q", selected.catalogQuery);
+            if (selected.department) params.set("department", selected.department);
+          }
           params.set("ui", "api");
           navigate(`${path}?${params}`);
         }}
@@ -242,7 +255,7 @@ function Filters({
     </details>
   );
 }
-function Methods({ metric, meta }: { metric: MetricDefinition; meta?: Metadata }) {
+function Methods({ metric, registry, meta }: { metric: MetricDefinition; registry: MetricRegistry; meta?: Metadata }) {
   const method = meta?.methodology.find((item) => item.metricId === metric.id);
   return (
     <section className="section">
@@ -254,6 +267,10 @@ function Methods({ metric, meta }: { metric: MetricDefinition; meta?: Metadata }
         <dd>
           {metric.definition.unit}; {metric.definition.aggregation}
         </dd>
+        <dt>Numerator</dt>
+        <dd>{metric.definition.numerator}</dd>
+        <dt>Source definition</dt>
+        <dd>{metric.source}</dd>
         <dt>Event clock</dt>
         <dd>{metric.event_clock}</dd>
         <dt>Attribution</dt>
@@ -277,6 +294,7 @@ function Methods({ metric, meta }: { metric: MetricDefinition; meta?: Metadata }
           )}
         </dd>
       </dl>
+      <RegistryMetadata registry={registry} metric={metric} />
       <p>Registry presence alone does not enable a measure or prove source coverage.</p>
     </section>
   );
@@ -360,6 +378,7 @@ export function RemoteApp() {
   const parsed = useMemo(() => {
     try {
       const selected = selection(url.search);
+      validateCatalogRoute(url.pathname, url.search);
       if (
         selected.proof &&
         (!selected.snapshot ||
@@ -436,8 +455,8 @@ export function RemoteApp() {
     const boardQuery = parameters(exact, { board: true, cursor: selected.cursor });
     const load = async (): Promise<Data> => {
       const path = url.pathname;
-      if (path === "/leaderboards" || path === "/methodology" || path === "/methodology/changes")
-        return { kind: "catalog" };
+      if (isCatalogPath(path)) return { kind: "catalog" };
+      if (/^\/methodology\/[^/]+$/.test(path)) return { kind: "method", metricId: exact.metric };
       if (path === "/" || path === "/health" || path === "/coverage")
         return { kind: "health", value: health(await request(parsed.base, "health", qs, controller.signal), exact) };
       const actor = /^\/contributors\/([^/]+)$/.exec(path),
@@ -482,12 +501,7 @@ export function RemoteApp() {
         if (value.group.groupId !== activityGroup[1]) throw new ReadFailure(502, "api_activity_group_mismatch");
         return { kind: "activity-detail", value };
       }
-      if (
-        /^\/leaderboards\/[^/]+$/.test(path) ||
-        path === "/live" ||
-        /^\/projects\/[^/]+$/.test(path) ||
-        /^\/methodology\/[^/]+$/.test(path)
-      )
+      if (/^\/leaderboards\/[^/]+$/.test(path) || path === "/live" || /^\/projects\/[^/]+$/.test(path))
         return {
           kind: "board",
           value: board(await request(parsed.base, "boards", boardQuery, controller.signal), exact),
@@ -499,6 +513,9 @@ export function RemoteApp() {
         if (controller.signal.aborted) return;
         if ("value" in data && registry.policy_version !== data.value.metricDefinitionVersion)
           throw new ReadFailure(409, "metric_definition_unavailable");
+        if (data.kind === "method") registryMetric(registry, data.metricId);
+        if (data.kind === "catalog") discoverMetrics(registry, selected);
+        if (data.kind === "board") verifyBoardDefinition(registry, data.value.metric);
         setChecking(false);
         if (
           data.kind === "directory" ||
@@ -729,20 +746,23 @@ export function RemoteApp() {
             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusInside(false);
           }}
         >
-          {data?.kind === "catalog" && (
+          {data?.kind === "catalog" && state.status === "ready" && (
+            <RegistryCatalog
+              key={`${url.pathname}${url.search}`}
+              registry={state.registry}
+              selected={selected}
+              path={url.pathname}
+              navigate={navigate}
+            />
+          )}
+          {data?.kind === "method" && state.status === "ready" && (
             <>
+              <Methods metric={registryMetric(state.registry, data.metricId)} registry={state.registry} />
               <p>
-                Definitions are read from the API registry. Enablement and coverage are verified when a board is opened.
+                This method sheet describes the loaded registry definition. It does not assert an available snapshot or
+                published policy for this scope.
               </p>
-              <ul className="directory">
-                {catalogEntries.map((metric) => (
-                  <li key={metric.id}>
-                    <h2>{link(`/leaderboards/${metric.id}`, metric.name, { metric: metric.id })}</h2>
-                    <p>{metric.counting_rule}</p>
-                    {link(`/methodology/${metric.id}`, "Method sheet", { metric: metric.id })}
-                  </li>
-                ))}
-              </ul>
+              {link(`/leaderboards/${data.metricId}`, "Check published board availability", { metric: data.metricId })}
             </>
           )}
           {data?.kind === "health" && url.pathname === "/" && import.meta.env.VITE_PUBLIC_CONTROLS_BASE && (
@@ -772,7 +792,7 @@ export function RemoteApp() {
               {link("/leaderboards", "Browse published metric definitions")}
             </>
           )}
-          {data?.kind === "board" && (
+          {data?.kind === "board" && state.status === "ready" && (
             <>
               <h2>{data.value.metric.name}</h2>
               <p className="inline-list">
@@ -796,7 +816,7 @@ export function RemoteApp() {
                 </button>
               </p>
               {url.pathname.startsWith("/methodology/") ? (
-                <Methods metric={data.value.metric} meta={data.value} />
+                <Methods metric={data.value.metric} registry={state.registry} meta={data.value} />
               ) : (
                 <>
                   <p>
@@ -876,7 +896,7 @@ export function RemoteApp() {
                       </a>
                     </p>
                   )}
-                  <Methods metric={data.value.metric} meta={data.value} />
+                  <Methods metric={data.value.metric} registry={state.registry} meta={data.value} />
                 </>
               )}
             </>

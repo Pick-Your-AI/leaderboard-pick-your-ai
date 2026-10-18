@@ -3977,15 +3977,2555 @@
     }
   ],
   "ui_metadata": {
-    "decision_state": "unresolved",
-    "fields": [
-      "department",
-      "synonyms",
-      "maturity",
-      "supported_states",
-      "supported_date_bases",
-      "lead_view"
+    "decision_state": "candidate",
+    "version": "leaderboard-ui/v1",
+    "public_enabled": false,
+    "note": "Reversible navigation defaults use existing metric families, not organizational ownership. Capabilities describe tested candidate consumers, never approval or live source coverage. Empty supported combinations mean no selectable implementation in this UI version.",
+    "departments": [
+      {
+        "id": "research",
+        "label": "Research",
+        "order": 0
+      },
+      {
+        "id": "issues",
+        "label": "Issues",
+        "order": 1
+      },
+      {
+        "id": "triage",
+        "label": "Triage and stewardship",
+        "order": 2
+      },
+      {
+        "id": "delivery",
+        "label": "Code delivery",
+        "order": 3
+      },
+      {
+        "id": "review",
+        "label": "Review",
+        "order": 4
+      },
+      {
+        "id": "craft",
+        "label": "Craft and quality",
+        "order": 5
+      },
+      {
+        "id": "lines",
+        "label": "Lines of change",
+        "order": 6
+      },
+      {
+        "id": "operations",
+        "label": "Operations and maintenance",
+        "order": 7
+      },
+      {
+        "id": "community",
+        "label": "Community",
+        "order": 8
+      },
+      {
+        "id": "breadth",
+        "label": "Breadth and milestones",
+        "order": 9
+      }
     ],
-    "note": "No values are inferred where the canonical metric plan does not define them. Product and metric owners must review these fields before any metric is enabled."
-  }
+    "metrics": [
+      {
+        "metric_id": "pr_opened",
+        "department": "delivery",
+        "synonyms": [
+          "pr opened"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "pr_ready",
+        "department": "delivery",
+        "synonyms": [
+          "pr ready"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "pr_merged",
+        "department": "delivery",
+        "synonyms": [
+          "merged pull requests",
+          "merged PRs"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "reconstructible",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
+          "overview": true,
+          "wall": true,
+          "order": 3
+        },
+        "verification_cases": [
+          "apps/web/test/fixtures.test.ts",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only the listed state/date pair is supported; other requests fail closed."
+        ]
+      },
+      {
+        "metric_id": "pr_coauthored",
+        "department": "delivery",
+        "synonyms": [
+          "pr coauthored"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "commits_integrated",
+        "department": "delivery",
+        "synonyms": [
+          "commits integrated"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "maintainer_merges",
+        "department": "delivery",
+        "synonyms": [
+          "maintainer merges"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "direct_changes",
+        "department": "delivery",
+        "synonyms": [
+          "direct changes"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "reverted_delivery",
+        "department": "delivery",
+        "synonyms": [
+          "reverted delivery"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "pr_accepted_rate",
+        "department": "delivery",
+        "synonyms": [
+          "pr accepted rate"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "release_changes",
+        "department": "delivery",
+        "synonyms": [
+          "release changes"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "pr_lines_added",
+        "department": "lines",
+        "synonyms": [
+          "pr lines added"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "pr_lines_removed",
+        "department": "lines",
+        "synonyms": [
+          "pr lines removed"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "pr_lines_changed",
+        "department": "lines",
+        "synonyms": [
+          "pull request churn",
+          "additions and deletions"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "reconstructible",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
+          "overview": true,
+          "wall": true,
+          "order": 6
+        },
+        "verification_cases": [
+          "apps/web/test/fixtures.test.ts",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only the listed state/date pair is supported; other requests fail closed."
+        ]
+      },
+      {
+        "metric_id": "net_lines",
+        "department": "lines",
+        "synonyms": [
+          "net lines"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "commit_attributed_lines",
+        "department": "lines",
+        "synonyms": [
+          "commit attributed lines"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "files_changed",
+        "department": "lines",
+        "synonyms": [
+          "files changed"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "retained_lines",
+        "department": "lines",
+        "synonyms": [
+          "retained lines"
+        ],
+        "maturity": "deferred",
+        "source_class": "unsupported",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "prs_reviewed",
+        "department": "review",
+        "synonyms": [
+          "pull request reviews",
+          "review participation"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "reconstructible",
+        "supported_states": [
+          "observed"
+        ],
+        "supported_date_bases": [
+          "occurredAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "observed",
+            "date_basis": "occurredAt"
+          }
+        ],
+        "default_combination": {
+          "state": "observed",
+          "date_basis": "occurredAt"
+        },
+        "lead_view": {
+          "overview": true,
+          "wall": true,
+          "order": 4
+        },
+        "verification_cases": [
+          "apps/web/test/fixtures.test.ts",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only the listed state/date pair is supported; other requests fail closed."
+        ]
+      },
+      {
+        "metric_id": "review_rounds",
+        "department": "review",
+        "synonyms": [
+          "review rounds"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "review_feedback",
+        "department": "review",
+        "synonyms": [
+          "review feedback"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "review_threads_resolved",
+        "department": "review",
+        "synonyms": [
+          "review threads resolved"
+        ],
+        "maturity": "definition_only",
+        "source_class": "conditional",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "accepted_suggestions",
+        "department": "review",
+        "synonyms": [
+          "accepted suggestions"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "first_reviews",
+        "department": "review",
+        "synonyms": [
+          "first reviews"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "cross_workstream_reviews",
+        "department": "review",
+        "synonyms": [
+          "cross workstream reviews"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "evidence_reviews",
+        "department": "review",
+        "synonyms": [
+          "evidence reviews"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "review_wait",
+        "department": "review",
+        "synonyms": [
+          "review wait"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "issues_opened",
+        "department": "issues",
+        "synonyms": [
+          "issue creation"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "reconstructible",
+        "supported_states": [
+          "observed"
+        ],
+        "supported_date_bases": [
+          "occurredAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "observed",
+            "date_basis": "occurredAt"
+          }
+        ],
+        "default_combination": {
+          "state": "observed",
+          "date_basis": "occurredAt"
+        },
+        "lead_view": {
+          "overview": true,
+          "wall": true,
+          "order": 1
+        },
+        "verification_cases": [
+          "apps/web/test/fixtures.test.ts",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only the listed state/date pair is supported; other requests fail closed."
+        ]
+      },
+      {
+        "metric_id": "accepted_findings",
+        "department": "issues",
+        "synonyms": [
+          "accepted findings"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "confirmed_bugs",
+        "department": "issues",
+        "synonyms": [
+          "confirmed bugs"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "reproductions",
+        "department": "issues",
+        "synonyms": [
+          "reproductions"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "issue_resolution",
+        "department": "issues",
+        "synonyms": [
+          "issue resolution"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "issue_closure_stewardship",
+        "department": "issues",
+        "synonyms": [
+          "issue closure stewardship"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "issue_answers",
+        "department": "issues",
+        "synonyms": [
+          "issue answers"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "issue_clarifications",
+        "department": "issues",
+        "synonyms": [
+          "issue clarifications"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "duplicate_resolution",
+        "department": "issues",
+        "synonyms": [
+          "duplicate resolution"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "items_triaged",
+        "department": "triage",
+        "synonyms": [
+          "raw triage groups"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "reconstructible",
+        "supported_states": [
+          "observed"
+        ],
+        "supported_date_bases": [
+          "occurredAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "observed",
+            "date_basis": "occurredAt"
+          }
+        ],
+        "default_combination": {
+          "state": "observed",
+          "date_basis": "occurredAt"
+        },
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [
+          "packages/metrics/test/registry-ui.test.js"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only the listed state/date pair is supported; other requests fail closed."
+        ]
+      },
+      {
+        "metric_id": "labels_applied",
+        "department": "triage",
+        "synonyms": [
+          "label applications"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "reconstructible",
+        "supported_states": [
+          "observed"
+        ],
+        "supported_date_bases": [
+          "occurredAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "observed",
+            "date_basis": "occurredAt"
+          }
+        ],
+        "default_combination": {
+          "state": "observed",
+          "date_basis": "occurredAt"
+        },
+        "lead_view": {
+          "overview": true,
+          "wall": true,
+          "order": 2
+        },
+        "verification_cases": [
+          "apps/web/test/fixtures.test.ts",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only the listed state/date pair is supported; other requests fail closed."
+        ]
+      },
+      {
+        "metric_id": "labels_corrected",
+        "department": "triage",
+        "synonyms": [
+          "labels corrected"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "assignments_coordinated",
+        "department": "triage",
+        "synonyms": [
+          "assignments coordinated"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "milestones_curated",
+        "department": "triage",
+        "synonyms": [
+          "milestones curated"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "title_scope_edits",
+        "department": "triage",
+        "synonyms": [
+          "title scope edits"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "reference_links",
+        "department": "triage",
+        "synonyms": [
+          "reference links"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "closing_links",
+        "department": "triage",
+        "synonyms": [
+          "closing links"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "parent_child_links",
+        "department": "triage",
+        "synonyms": [
+          "parent child links"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "blocker_links",
+        "department": "triage",
+        "synonyms": [
+          "blocker links"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "related_links",
+        "department": "triage",
+        "synonyms": [
+          "related links"
+        ],
+        "maturity": "definition_only",
+        "source_class": "since_installation",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "project_items_curated",
+        "department": "triage",
+        "synonyms": [
+          "project items curated"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "project_status_updates",
+        "department": "triage",
+        "synonyms": [
+          "project status updates"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "project_field_updates",
+        "department": "triage",
+        "synonyms": [
+          "project field updates"
+        ],
+        "maturity": "definition_only",
+        "source_class": "since_installation",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "issue_field_updates",
+        "department": "triage",
+        "synonyms": [
+          "issue field updates"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "project_updates",
+        "department": "triage",
+        "synonyms": [
+          "project updates"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "routing_handoffs",
+        "department": "triage",
+        "synonyms": [
+          "routing handoffs"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "label_taxonomy",
+        "department": "triage",
+        "synonyms": [
+          "label taxonomy"
+        ],
+        "maturity": "definition_only",
+        "source_class": "conditional",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "milestone_definitions",
+        "department": "triage",
+        "synonyms": [
+          "milestone definitions"
+        ],
+        "maturity": "definition_only",
+        "source_class": "conditional",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "project_configuration",
+        "department": "triage",
+        "synonyms": [
+          "project configuration"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "issue_transfers",
+        "department": "triage",
+        "synonyms": [
+          "issue transfers"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "issue_ordering",
+        "department": "triage",
+        "synonyms": [
+          "issue ordering"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "public_moderation",
+        "department": "triage",
+        "synonyms": [
+          "public moderation"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "decision_records",
+        "department": "research",
+        "synonyms": [
+          "decision records",
+          "research decisions"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "evidence_reviewed",
+        "supported_states": [
+          "reviewed"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "reviewed",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "reviewed",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
+          "overview": true,
+          "wall": true,
+          "order": 0
+        },
+        "verification_cases": [
+          "apps/web/test/fixtures.test.ts",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only the listed state/date pair is supported; other requests fail closed."
+        ]
+      },
+      {
+        "metric_id": "catalog_proposals",
+        "department": "research",
+        "synonyms": [
+          "catalog proposals"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "pricebook_proposals",
+        "department": "research",
+        "synonyms": [
+          "pricebook proposals"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "compatibility_proposals",
+        "department": "research",
+        "synonyms": [
+          "compatibility proposals"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "primary_sources",
+        "department": "research",
+        "synonyms": [
+          "primary sources"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "freshness_checks",
+        "department": "research",
+        "synonyms": [
+          "freshness checks"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "reproduced_measurements",
+        "department": "research",
+        "synonyms": [
+          "reproduced measurements"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "negative_findings",
+        "department": "research",
+        "synonyms": [
+          "negative findings"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "rights_reviews",
+        "department": "research",
+        "synonyms": [
+          "rights reviews"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "assumptions_resolved",
+        "department": "research",
+        "synonyms": [
+          "assumptions resolved"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "market_research",
+        "department": "research",
+        "synonyms": [
+          "market research"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "evidence_manifests",
+        "department": "research",
+        "synonyms": [
+          "evidence manifests"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "documentation",
+        "department": "craft",
+        "synonyms": [
+          "documentation changes",
+          "docs"
+        ],
+        "maturity": "synthetic_verified",
+        "source_class": "reconstructible",
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
+        "lead_view": {
+          "overview": true,
+          "wall": true,
+          "order": 5
+        },
+        "verification_cases": [
+          "apps/web/test/fixtures.test.ts",
+          "apps/web/test/registry-ui.test.ts"
+        ],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "Only the listed state/date pair is supported; other requests fail closed."
+        ]
+      },
+      {
+        "metric_id": "tests",
+        "department": "craft",
+        "synonyms": [
+          "tests"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "regressions_prevented",
+        "department": "craft",
+        "synonyms": [
+          "regressions prevented"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "accessibility",
+        "department": "craft",
+        "synonyms": [
+          "accessibility"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "design",
+        "department": "craft",
+        "synonyms": [
+          "design"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "usability",
+        "department": "craft",
+        "synonyms": [
+          "usability"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "localization",
+        "department": "craft",
+        "synonyms": [
+          "localization"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "performance",
+        "department": "craft",
+        "synonyms": [
+          "performance"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "security",
+        "department": "craft",
+        "synonyms": [
+          "security"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "automation",
+        "department": "craft",
+        "synonyms": [
+          "automation"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "discussions_started",
+        "department": "community",
+        "synonyms": [
+          "discussions started"
+        ],
+        "maturity": "definition_only",
+        "source_class": "unsupported",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "discussion_answers",
+        "department": "community",
+        "synonyms": [
+          "discussion answers"
+        ],
+        "maturity": "definition_only",
+        "source_class": "unsupported",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "helpful_feedback",
+        "department": "community",
+        "synonyms": [
+          "helpful feedback"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "mentorship",
+        "department": "community",
+        "synonyms": [
+          "mentorship"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "onboarding",
+        "department": "community",
+        "synonyms": [
+          "onboarding"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "governance",
+        "department": "community",
+        "synonyms": [
+          "governance"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "outreach",
+        "department": "community",
+        "synonyms": [
+          "outreach"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "appreciation",
+        "department": "community",
+        "synonyms": [
+          "appreciation"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "release_stewardship",
+        "department": "operations",
+        "synonyms": [
+          "release stewardship"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "deployment_work",
+        "department": "operations",
+        "synonyms": [
+          "deployment work"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "incidents",
+        "department": "operations",
+        "synonyms": [
+          "incidents"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "maintenance",
+        "department": "operations",
+        "synonyms": [
+          "maintenance"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "data_quality",
+        "department": "operations",
+        "synonyms": [
+          "data quality"
+        ],
+        "maturity": "definition_only",
+        "source_class": "evidence_reviewed",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "first_contribution",
+        "department": "breadth",
+        "synonyms": [
+          "first contribution"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "repositories",
+        "department": "breadth",
+        "synonyms": [
+          "repositories"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "workstreams",
+        "department": "breadth",
+        "synonyms": [
+          "workstreams"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "collaborations",
+        "department": "breadth",
+        "synonyms": [
+          "collaborations"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      },
+      {
+        "metric_id": "active_periods",
+        "department": "breadth",
+        "synonyms": [
+          "active periods"
+        ],
+        "maturity": "definition_only",
+        "source_class": "reconstructible",
+        "supported_states": [],
+        "supported_date_bases": [],
+        "supported_combinations": [],
+        "default_combination": null,
+        "lead_view": {
+          "overview": false,
+          "wall": false,
+          "order": null
+        },
+        "verification_cases": [],
+        "limitations": [
+          "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
+          "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
+          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+        ]
+      }
+    ]
+  },
+  "grouping_policies": [
+    {
+      "version": "triage-raw-state/v1",
+      "metric_id": "items_triaged",
+      "state": "observed",
+      "date_basis": "occurredAt",
+      "group_by": "actor_artifact_state_interval",
+      "grouping_seconds": 3600,
+      "interval_origin": "1970-01-01T00:00:00Z",
+      "raw_state_rule": "exact_source_value",
+      "repeated_state_rule": "one_actor_artifact_raw_state_per_interval",
+      "missing_state_or_time": "exclude_unknown",
+      "semantic_classifier": "none",
+      "public_enabled": false
+    }
+  ]
 }
