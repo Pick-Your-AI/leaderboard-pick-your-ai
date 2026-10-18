@@ -17,6 +17,7 @@ import { coverage, projects, repositories, snapshots } from "../data/source.ts";
 import { fixtureMetrics, SYNTHETIC_DATASET_ID } from "../data/synthetic.ts";
 import { formatDate, formatDateTime } from "../lib/format.ts";
 import { useScope } from "../lib/hooks.ts";
+import { prototypeNavigation } from "../lib/prototype-url.ts";
 import { Link, ScopedLink } from "../lib/router.tsx";
 
 export function MethodologyPage() {
@@ -427,11 +428,14 @@ export function PrototypeGuidePage() {
       <section className="section" aria-labelledby="required-states">
         <h2 id="required-states">Required states</h2>
         <ul>
-          {requiredStates.map(([label, href]) => (
-            <li key={label}>
-              <Link to={href}>{label}</Link> <span className="mono muted small">{href}</span>
-            </li>
-          ))}
+          {requiredStates.map(([label, path]) => {
+            const href = prototypeNavigation(path).href;
+            return (
+              <li key={label}>
+                <Link to={href}>{label}</Link> <span className="mono muted small">{href}</span>
+              </li>
+            );
+          })}
         </ul>
       </section>
       <section className="section" aria-labelledby="fixture">

@@ -79,6 +79,20 @@ test("a copied predefined walkthrough link selects synthetic data in a fresh API
   await readInFreshRecipient(browser, page, (await link.getAttribute("href"))!, "PRs merged", info, "api", {});
 });
 
+test("a copied displayed guide URL selects the same partial-history prototype for a fresh recipient", async ({
+  page,
+  browser,
+}, info) => {
+  await page.goto("/prototype?ui=prototype");
+  const row = page
+    .getByRole("region", { name: "Required states", exact: true })
+    .getByRole("listitem")
+    .filter({ has: page.getByRole("link", { name: "Partial history", exact: true }) });
+  const displayed = await row.locator("span").innerText();
+  await readInFreshRecipient(browser, page, displayed, "PRs merged", info, null, { repo: selected.repo });
+  await expect(row.getByRole("link")).toHaveAttribute("href", displayed);
+});
+
 test("a prototype selected from stored preference makes its current address reproducible", async ({
   page,
   browser,
