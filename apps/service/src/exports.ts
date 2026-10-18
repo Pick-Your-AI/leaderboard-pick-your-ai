@@ -1,5 +1,6 @@
 import type { PublicRankComparison, RankMovement } from "./rank-comparison.js";
 import type { Actor, MetricRegistry, MetricResult, PendingCount } from "@pick-your-ai/contracts";
+import { publicScopeSchemaVersion } from "@pick-your-ai/contracts";
 import { PublicReadError, safePublicUrl, type PublicRead, type PublicDiagnostic } from "./public-source.js";
 
 /** Serialization limits, not policy eligibility or source-publication approval. */
@@ -11,7 +12,6 @@ export const PUBLIC_EXPORT_LIMITS = Object.freeze({
   nodes: 100_000,
   depth: 24,
 });
-const exportVersion = "public-export/v1";
 interface ExportBoard {
   comparison?: PublicRankComparison;
   metric: MetricRegistry["metrics"][number];
@@ -110,6 +110,8 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
   const evidence = [...ids].sort().map(serializeEvidence);
   const pendingEvidence = [...pendingIds].sort().map(serializeEvidence);
   const snapshot = read.selected.snapshot;
+  const extendedScope = read.selected.scope.schemaVersion === publicScopeSchemaVersion;
+  const exportVersion = extendedScope ? "public-export/v2" : "public-export/v1";
   // Deliberately omit raw/provider fields, display names, internal event IDs and control lists.
   const document = {
     ...(board.comparison === undefined ? {} : { comparison: board.comparison }),
@@ -162,6 +164,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     "organization",
     "repository",
     "workstream",
+    ...(extendedScope ? ["scope_schema_version", "context", "projects"] : []),
     "start",
     "end",
     "metric",
@@ -206,6 +209,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     s.organization,
     s.repository,
     s.workstream,
+    ...(extendedScope ? [s.schemaVersion!, s.context!, boundedJson(s.projects!)] : []),
     s.start,
     s.end,
     board.metric.id,
