@@ -55,7 +55,22 @@ this service nor a database credential grants permission to publish a source.
 
 The public projection revalidates contracts, copies allowlisted fields, removes
 hidden/deleted/unlinked actors and non-public/ineligible evidence, and applies the
-current suppression overlay before every response. Removing an artifact removes
+current suppression overlay before every response. Actor IDs must be unique across
+the complete provider actor list, before hidden, deleted, unlinked or unresolved
+records are removed. Contribution IDs must likewise be unique within the provider's
+primary evidence collection before non-public or ineligible proof is removed.
+That check uses the contract-parsed contribution ID, including its whitespace
+normalization. In the selected read, a contradictory public copy cannot survive
+by discarding its non-public counterpart; duplicate identities reject that read,
+including historical pins and conditional responses. Visibility must also agree
+across primary, portfolio and pending proof
+for each contribution ID and each known artifact stable ID or contribution artifact
+reference. Null or omitted artifact identities do not create a shared identity.
+Legitimate matching proof across collections and multiple contributions to one
+artifact are still supported. If only a prior rank-comparison baseline cannot be
+projected, valid current totals remain available with comparison availability
+withheld. Unique non-public actors remain suppressed without withholding unrelated
+contributors. Removing an artifact removes
 its dependent aggregate row; the service never subtracts evidence counts from
 ratios or weighted values. Public URLs must be HTTPS GitHub repository URLs without
 userinfo or query parameters; fragments are restricted to GitHub's numeric public
@@ -132,8 +147,9 @@ assignment alone never establishes directory inclusion. See the
 JSON and CSV downloads use the `public-export/v1` export envelope. Markdown
 portfolio, print, HTML and SVG presentation exports are disabled: `format=markdown`,
 `format=print` and other unknown formats return 400. No rendering/Markdown/URL-fetch
-pipeline is enabled by the export module. Export changes are candidate implementation
-for #108/#110, not publication permission or completion of their review gates.
+pipeline is enabled by the export module. The JSON/CSV automated package is accepted in
+[#110](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/110).
+That acceptance does not grant publication permission.
 
 Both formats preserve the exact organization/repository/workstream/half-open date
 scope, selected snapshot ID/revision/date, metric-definition version, computation
@@ -339,10 +355,12 @@ SSE reset/heartbeat and conditional polling/pause/fallback. A separate process s
 test starts the service from dist-only workspace packages with no metrics source
 tree, verifying the exported metrics registry package boundary. They do not verify a real
 GitHub App, source permissions, metric correctness on real observations or deployment.
-Issues #99, #105, #106, #92 and #110 still require their applicable prerequisite policy
-and affected-owner acceptance, plus a reviewed public projection producer. Anonymous
-production readback additionally requires actual approved hosting/deployment. These
-facts must not be inferred from passing scaffold/runtime tests.
+The bounded automated packages #99, #105, #106, #92 and #110 have reviewed completion
+receipts. Their combined outcome and this projection ambiguity correction are mapped
+in [public API acceptance](public-api-acceptance.md). Source authorization, complete
+real-data reconciliation, assistive-technology journeys and operational/public-release
+acceptance retain their separate gates. Anonymous production readback requires actual
+approved hosting/deployment; passing synthetic runtime tests does not establish it.
 
 ## Bounded public activity feed (#121, partial delivery)
 
