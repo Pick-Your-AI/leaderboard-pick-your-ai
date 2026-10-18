@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import "../styles/wall.css";
 import { actorFilterLabels, type Actor, type MetricRegistry } from "@pick-your-ai/contracts";
 import { getLeadMetrics } from "@pick-your-ai/metrics";
+import { WindowBounds } from "../components/DisplayTimeZone.tsx";
 import {
   apiBase,
   catalog,
@@ -39,13 +40,16 @@ const oldestSync = (status: Health) => {
 };
 function Scope({ selected }: { selected: Selection }) {
   return (
-    <p className="api-wall-scope">
-      {selected.organization}
-      {selected.repository && ` · repository ${selected.repository}`}
-      {selected.workstream && ` · workstream ${selected.workstream}`} · {actorFilterLabels[selected.actors ?? "all"]}
-      <br />
-      {selected.start ? `${selected.start} to ${selected.end} (end exclusive)` : "All-time materialized scope"}
-    </p>
+    <div className="api-wall-scope">
+      <p>
+        {selected.organization}
+        {selected.repository && ` · repository ${selected.repository}`}
+        {selected.workstream && ` · workstream ${selected.workstream}`} · {actorFilterLabels[selected.actors ?? "all"]}
+        <br />
+        {selected.start ? `${selected.start} to ${selected.end} (end exclusive)` : "All-time materialized scope"}
+      </p>
+      <WindowBounds start={selected.start} end={selected.end} timeZone={selected.timeZone ?? "UTC"} />
+    </div>
   );
 }
 function Failure({ error }: { error: ReadFailure }) {

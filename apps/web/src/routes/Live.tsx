@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { RankCell } from "../components/BoardTable.tsx";
+import { WindowBounds } from "../components/DisplayTimeZone.tsx";
 import { PageHeader, SyntheticDataBanner } from "../components/Layout.tsx";
 import { ErrorState, FreshnessIndicator, SnapshotNotices } from "../components/status.tsx";
 import { getMetric } from "../data/registry.ts";
@@ -204,6 +205,13 @@ function WallPage({
             {wallScope.actor === "user" ? "User accounts" : wallScope.actor === "all" ? "All activity" : "Automation"}
             {mode === "frozen" && " · Frozen snapshot: this display never changes"}
           </p>
+          {content.kind !== "error" && (
+            <WindowBounds
+              start={content.data.window.start?.toISOString() ?? null}
+              end={content.data.window.end.toISOString()}
+              timeZone={wallScope.timeZone}
+            />
+          )}
         </header>
         {snapshotView && <SnapshotNotices view={snapshotView} />}
         <div className="visually-hidden" role="status" aria-live="polite">

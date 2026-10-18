@@ -1,4 +1,5 @@
 import { stableJSON } from "@pick-your-ai/metrics";
+import { defaultDisplayTimeZone, isDisplayTimeZone } from "../lib/display-time-zone.ts";
 import { parseCSVExport } from "./csv-export.ts";
 import { onlyExportKeys, parseExportJSON } from "./export-json.ts";
 import {
@@ -56,6 +57,7 @@ const supported = new Set([
   "proof",
   "q",
   "department",
+  "tz",
 ]);
 export interface Selection {
   actors?: ActorFilter;
@@ -74,6 +76,8 @@ export interface Selection {
   /** Local catalog discovery only; never sent as a source-data filter. */
   catalogQuery?: string | null;
   department?: string | null;
+  /** Local display only; never included in source requests or export identities. */
+  timeZone?: string;
 }
 export function selection(query: string): Selection {
   const params = new URLSearchParams(query);
@@ -82,6 +86,8 @@ export function selection(query: string): Selection {
       throw new ReadFailure(400, "unsupported_or_duplicate_filter");
   const actorFilter = actorFilterSchema.safeParse(params.get("actors") ?? "all");
   if (!actorFilter.success) throw new ReadFailure(400, "invalid_actor_filter");
+  const timeZone = params.get("tz") ?? defaultDisplayTimeZone;
+  if (!isDisplayTimeZone(timeZone)) throw new ReadFailure(400, "invalid_display_timezone");
   const id = (key: string) => {
     const value = params.get(key);
     if (value !== null && !identifier.test(value)) throw new ReadFailure(400, "invalid_identifier");
@@ -117,6 +123,7 @@ export function selection(query: string): Selection {
   if (search !== null && !/^[A-Za-z0-9-]{1,39}$/.test(search)) throw new ReadFailure(400, "invalid_search");
   return {
     actors: actorFilter.data,
+    timeZone,
     catalogQuery: catalogQuery?.trim() || null,
     department: id("department"),
     search: search?.toLowerCase() ?? null,
@@ -158,6 +165,7 @@ export function uiHref(
   params.set("metric", extra.metric ?? value.metric);
   params.set("limit", value.limit);
   params.set("ui", "api");
+  if (value.timeZone && value.timeZone !== defaultDisplayTimeZone) params.set("tz", value.timeZone);
   if ((path.startsWith("/contributors") || path === "/activity" || path.startsWith("/activity/")) && value.category)
     params.set("category", value.category);
   if (path === "/contributors" && value.search) params.set("search", value.search);
