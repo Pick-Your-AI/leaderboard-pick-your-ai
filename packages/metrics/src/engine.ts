@@ -432,11 +432,19 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
   for (const bucket of versions.values()) {
     const revision = Math.max(...bucket.map((fact) => fact.revision));
     const latest = bucket.filter((fact) => fact.revision === revision);
-    if (new Set(latest.map(stableJSON)).size !== 1) {
+    // The same source fact can be observed again without changing its revision.
+    // Observation time describes collection, not a competing semantic fact.
+    const semantic = (fact: MetricFact) => {
+      const { observedAt, ...rest } = fact;
+      return stableJSON(rest);
+    };
+    if (new Set(latest.map(semantic)).size !== 1) {
       reject(latest, "conflicting_revision");
       continue;
     }
-    current.push(latest[0]!);
+    current.push(
+      latest.sort((a, b) => compareInstants(a.observedAt, b.observedAt) || compare(a.observedAt, b.observedAt))[0]!,
+    );
   }
   const canonical = new Map<string, MetricFact[]>();
   for (const fact of current) {
