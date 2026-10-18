@@ -180,17 +180,19 @@ export async function readPinnedGitDiff(options: {
   const raw = await exec("git", argumentsFor(false), {
     timeout,
     maxBuffer: maxBytes,
-    encoding: "utf8",
+    encoding: "buffer",
     windowsHide: true,
   });
   const substantive = await exec("git", argumentsFor(true), {
     timeout,
     maxBuffer: maxBytes,
-    encoding: "utf8",
+    encoding: "buffer",
     windowsHide: true,
   });
-  const files = numstat(raw.stdout),
-    nonWhitespace = new Map(numstat(substantive.stdout).map((file) => [file.path, file]));
+  // Git paths may contain arbitrary bytes; lossy decoding cannot certify an exact manifest.
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const files = numstat(decoder.decode(raw.stdout)),
+    nonWhitespace = new Map(numstat(decoder.decode(substantive.stdout)).map((file) => [file.path, file]));
   if (files.length > maxFiles) return { before: options.before, after: options.after, complete: false, files: [] };
   return {
     before: options.before,
