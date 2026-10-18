@@ -30,6 +30,8 @@ Repository filters intersect the explicit allowed repository IDs. Project/workst
 
 Complete coverage requires every requested allowed repository and every policy source to have complete, error-free coverage enclosing the entire window and a known history start no later than that window. Missing sources/repos, shortened watermarks, unknown/late history, gaps and ambiguous normalized facts prevent a complete result. Numeric zero is exposed only with complete coverage and no unknown evidence. Empty datasets do not invent zero-valued people. Unbounded all-time coverage is conservatively incomplete. Coverage intervals currently must be supplied as one enclosing record per source/repository; disjoint intervals are not silently joined.
 
+The reconciled `sourceWatermark` must reach the selected exclusive end. Its comparison preserves fractional precision and equivalent source offsets; an absent or unparseable watermark cannot establish completeness. `hasCompleteSourceCoverage` exposes that necessary source check for retained consumers, independently of qualification and public release authority. Positive partial results keep their observed values, evidence and within-snapshot ranks; they cannot certify zero, complete newcomer history or rank movement. The existing frozen `input.cutoff` check separately rejects a selected window extending past that cutoff.
+
 For pending work on an acceptance-clock board, the separate pending column uses occurrence time because acceptance has not occurred. It is an observed pending cohort, not part of the decided or accepted denominator. Rebuilding a frozen input never substitutes ingestion time for a ranked metric's occurrence/acceptance clock.
 
 ## Aggregate lookup and tie bounds
@@ -67,6 +69,27 @@ Ranks are dense, with equal values sharing rank. Codepoint login/ID order resolv
 `pr_accepted_rate` counts merged / (merged + closed-unmerged), dated by decision time supplied as `acceptedAt`; closed-unmerged means a source decision, not evidence of accepted work. Pending remains separate and below-threshold denominators have no ratio. `review_wait` samples elapsed hours from evidenced readiness to first submitted review for the readiness cohort. It returns the sample values, n, median and nearest-rank p75, plus missing readiness and unresolved censoring. Reviews are observed through the frozen cutoff, including reviews after the cohort window ends. Missing readiness is disclosed separately and cannot enter a date-assigned duration sample. Neither diagnostic has a personal quality/speed rank.
 
 `participationView` returns first qualifying evidence in organization history, observed/effective times, active UTC Monday-based weeks and the explicit number of weeks intersecting a bounded window. All-time has no invented denominator. Incomplete organization history, including unknown/ambiguous/conflicting normalization or unreviewed historic revisions, returns `newcomer: null`. A complete-known-history answer requires an explicitly reviewed origin and enclosing coverage for every allowed repository/source. Historical effective time, rather than a recent ingestion timestamp, determines newcomer inclusion. The result always states that first observed qualifying work is neither employment start nor proof of no earlier work. These descriptive views never normalize or change raw-count ranks.
+
+Participation groups the prepared organization history and selected-window facts
+by actor once, then reads each actor's own facts. This avoids scanning both entire
+collections for every participant. The indexes retain references proportional to
+the supplied facts; existing preparation, chronological sorting and week ordering
+retain their own costs. Organization-wide first evidence remains independent of
+the selected repository lens, and actor order, UTC weeks, stable evidence-ID ties
+and unknown-history behavior remain unchanged.
+
+The synthetic [participation scale cases](../packages/metrics/test/participation-scale.test.mjs)
+check every result for 10,000 contributors and bound source actor-identity reads
+independently of host speed. The same case required **200,150,000 identity reads**
+before grouping and **160,000** after grouping. A second case checks cross-repository
+history, equivalent timestamp spellings, repeated weeks, stable actor ordering,
+permuted immutable input, missing history and all-time denominators. These are
+algorithmic and semantic regression checks, not production latency measurements.
+Reproduce them after building the workspace:
+
+```sh
+node --test --test-isolation=none packages/metrics/test/participation-scale.test.mjs
+```
 
 ## Policy comparison and release boundary
 

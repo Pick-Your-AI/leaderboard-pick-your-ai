@@ -687,6 +687,10 @@ export class GithubReadClient {
     // An earlier child can lose access while a later child is still pending.
     for (const authorization of authorizations)
       await this.authorize(authorization.source, authorization.assertAuthorized);
+    // A later marker read can yield after an earlier child's host policy check.
+    // Finish without another await so every captured policy guards this result.
+    for (const authorization of authorizations)
+      checkAuthorization(authorization.source, authorization.assertAuthorized);
     return result;
   }
 }

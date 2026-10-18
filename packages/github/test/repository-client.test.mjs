@@ -27,6 +27,95 @@ const denied = (error) => {
   return true;
 };
 
+for (const revoke of [false, true]) {
+  test(`nested final marker checks retain every child host policy: revoke=${revoke}`, { timeout: 5000 }, async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "leaderboard-final-child-policy-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const fileStore = new FileCheckpointStore(directory);
+    const repositoryStore = fileStore.forRepository(2);
+    const saved = new Set();
+    const entered = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    let finalASeen = false;
+    let pauseMarker = false;
+    let paused = false;
+    let authorizedA = true;
+    let calls = 0;
+    const client = new GithubReadClient({
+      apiOrigin: origin,
+      token: async () => undefined,
+      maxRetries: 0,
+      concurrency: 1,
+      checkpoints: {
+        load: (key) => fileStore.load(key),
+        save: (key, value) => fileStore.save(key, value),
+        forRepository(id) {
+          assert.equal(id, 2);
+          return {
+            repositoryId: id,
+            load: (key) => repositoryStore.load(key),
+            async save(key, value) {
+              await repositoryStore.save(key, value);
+              if (key.startsWith("scan:")) saved.add(value.items[0].id);
+            },
+            retire: (value) => repositoryStore.retire(value),
+            async assertActive() {
+              if (pauseMarker && !paused) {
+                paused = true;
+                entered.resolve();
+                await release.promise;
+              }
+              await repositoryStore.assertActive();
+            },
+          };
+        },
+      },
+      fetch: async (_url, init) => {
+        calls++;
+        const parent = JSON.parse(init.body).variables.parent;
+        return json({
+          data: {
+            items: {
+              nodes: [{ id: parent }],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        });
+      },
+    }).forRepository(2);
+    const parents = ["synthetic-child-a", "synthetic-child-b"];
+    const pending = client.scanNestedGraphql(parents, (parent) => ({
+      source: parent,
+      key: "synthetic-final-host-policy",
+      query: "query Items($parent: ID!) { items(parent: $parent) { nodes { id } pageInfo { hasNextPage endCursor } } }",
+      variables: { parent },
+      maxPages: 1,
+      select: (data) => data.items,
+      assertAuthorized() {
+        if (parent === parents[0]) {
+          if (saved.has(parents[1])) finalASeen = true;
+          if (!authorizedA) throw new Error("synthetic private child policy revoked");
+        } else if (finalASeen) {
+          // Both children are durably complete; hold only the final later marker.
+          pauseMarker = true;
+        }
+      },
+    }));
+    await entered.promise;
+    assert.deepEqual([...saved], parents);
+    assert.equal(calls, 2);
+    if (revoke) authorizedA = false;
+    release.resolve();
+    if (revoke) await assert.rejects(pending, denied);
+    else
+      assert.deepEqual(
+        await pending,
+        parents.map((parent) => ({ parent, items: [{ id: parent }] })),
+      );
+    assert.equal(calls, 2, "the final authorization sweep never retries a completed source");
+  });
+}
+
 async function setup(t, fetch, extra = {}) {
   const directory = await mkdtemp(join(tmpdir(), "leaderboard-repository-client-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
