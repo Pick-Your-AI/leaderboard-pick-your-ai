@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
@@ -7,7 +8,8 @@ import { createServer } from "vite";
 // Load real TSX through the app's compiler so these checks cover rendered hrefs.
 test("primary navigation and evidence links retain the selected scope and snapshot", async () => {
   const server = await createServer({
-    configFile: "apps/web/vite.config.ts",
+    root: fileURLToPath(new URL("../../..", import.meta.url)),
+    configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
     server: { middlewareMode: true },
     appType: "custom",
   });
