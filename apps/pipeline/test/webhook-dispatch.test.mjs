@@ -374,6 +374,7 @@ test("dispatch recovers SQL commit before failed confirmation without a second s
   assert.equal(await h.runtime.dispatchOnce(), "retry_scheduled");
   assert.equal((await dispatchRow(h)).completion, null);
   assert.equal((await h.runtime.app.inject(boardUrl)).statusCode, 503);
+  assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM policy_preview_inputs").get().n, 0);
   assert.equal(
     (await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.dispatch_publications")).rows[0].n,
     1,
@@ -383,6 +384,7 @@ test("dispatch recovers SQL commit before failed confirmation without a second s
   assert.equal(await h.runtime.dispatchOnce(), "processed");
   assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 1);
   assert.equal((await h.runtime.app.inject(boardUrl)).statusCode, 200);
+  assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM policy_preview_inputs").get().n, 1);
 });
 
 test("crash after publication before acknowledgment resumes its pinned operation without reverting a newer head", async (t) => {
@@ -656,4 +658,136 @@ test("failed dispatch persists authoritative target suppression before rejecting
     (await h.runtime.app.inject(`/api/v1/evidence/${evidenceId}?snapshot=${original.snapshotId}`)).statusCode,
     404,
   );
+});
+
+test("delayed failed dispatch preserves the last confirmed snapshot and cannot rewind a newer recovered head", async (t) => {
+  const h = await harness(t, { webhookDispatch: true });
+  const first = (await h.runtime.runOnce()).publications[0];
+  await enqueueNotice(h);
+  const transaction = h.controlsStore.transaction.bind(h.controlsStore);
+  h.controlsStore.transaction = (change, options) =>
+    transaction((state) => {
+      change(state);
+      throw Error("synthetic_confirmation_failure");
+    }, options);
+  assert.equal(await h.runtime.dispatchOnce(), "retry_scheduled");
+  h.controlsStore.transaction = transaction;
+  const failed = (await h.db.query("SELECT snapshot_id,revision FROM leaderboard_pipeline.heads")).rows[0];
+  assert.equal(Number(failed.revision), 2);
+  assert.equal((await getBoard(h.runtime)).snapshotId, first.snapshotId);
+  assert.equal((await getBoard(h.runtime, `&snapshot=${first.snapshotId}`)).head.snapshotId, first.snapshotId);
+  assert.equal((await h.runtime.app.inject(`${boardUrl}&snapshot=${failed.snapshot_id}`)).statusCode, 410);
+  assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM policy_preview_inputs").get().n, 1);
+  const third = (await h.runtime.runOnce()).publications[0];
+  assert.equal(third.revision, 3);
+  await h.reopenDatabase();
+  await readyDispatch(h);
+  const recovered = await createPipeline(h.options);
+  t.after(() => recovered.stop());
+  assert.equal(await recovered.dispatchOnce(), "processed");
+  const done = await dispatchRow(h);
+  assert.equal(done.completion.publications[0].snapshotId, failed.snapshot_id);
+  assert.equal((await getBoard(recovered)).snapshotId, third.snapshotId);
+  const pinned = await getBoard(recovered, `&snapshot=${failed.snapshot_id}`);
+  assert.equal(pinned.snapshotId, failed.snapshot_id);
+  assert.equal(pinned.head.snapshotId, third.snapshotId);
+  assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 3);
+  assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM policy_preview_inputs").get().n, 3);
+  assert.doesNotMatch(JSON.stringify(h.controlsStore.publicSnapshot()), /pipelineHeads|pipelinePublications|audit/);
+});
+
+test("unconfirmed dispatch cannot attach changed private inputs to identical public snapshot content", async (t) => {
+  const h = await harness(t, { webhookDispatch: true });
+  await h.runtime.runOnce();
+  const before = await getBoard(h.runtime);
+  await enqueueNotice(h);
+  const transaction = h.controlsStore.transaction.bind(h.controlsStore);
+  h.controlsStore.transaction = (change, options) =>
+    transaction((state) => {
+      change(state);
+      throw Error("synthetic_confirmation_failure");
+    }, options);
+  assert.equal(await h.runtime.dispatchOnce(), "retry_scheduled");
+  h.controlsStore.transaction = transaction;
+  const unconfirmed = (await h.db.query("SELECT snapshot_id FROM leaderboard_pipeline.heads")).rows[0].snapshot_id;
+  const requestId = fixtureId(901);
+  const factId = before.rows.find((row) => row.actorId === "101").evidenceIds[0];
+  h.controlsStore.transaction((state) => {
+    state.requests[requestId] = {
+      id: requestId,
+      kind: "correction",
+      owner: "102",
+      locator: "https://github.com/synthetic-org/synthetic-repo/issues/1",
+      status: "pending",
+      version: 1,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      history: [],
+    };
+  });
+  await h.runtime.applyCorrection({
+    requestId,
+    expectedVersion: 1,
+    factId,
+    operatorId: "201",
+    approvalReceipt: "synthetic-correction-approval",
+  });
+  // This correction is later than the dispatch's frozen observation cutoff.
+  // It changes private input/audit provenance without changing the old public
+  // aggregate. The stored full-input receipt, not public content equality, fences it.
+  const dbTransaction = h.db.transaction;
+  let rejectedInput = null;
+  h.db.transaction = (work) =>
+    dbTransaction(work).catch((error) => {
+      rejectedInput = error.message;
+      throw error;
+    });
+  await readyDispatch(h);
+  assert.equal(await h.runtime.dispatchOnce(), "retry_scheduled");
+  assert.equal((await dispatchRow(h)).reason_code, "publication_unavailable");
+  assert.equal(rejectedInput, "dispatch_snapshot_input_changed_or_unbound");
+  assert.equal(h.controlsStore.read().pipelinePublications[unconfirmed], undefined);
+  assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM policy_preview_inputs").get().n, 1);
+  const retained = await getBoard(h.runtime);
+  assert.equal(retained.snapshotId, before.snapshotId);
+  assert.deepEqual(
+    retained.rows.map((row) => row.actorId),
+    ["102"],
+  );
+  assert.equal((await h.runtime.app.inject(`${boardUrl}&snapshot=${unconfirmed}`)).statusCode, 410);
+});
+
+test("a delayed historical dispatch cannot initialize missing private head authority", async (t) => {
+  const h = await harness(t, { webhookDispatch: true });
+  await enqueueNotice(h);
+  h.runtime.outbox.complete = async () => {
+    throw Error("synthetic process loss");
+  };
+  h.runtime.outbox.fail = async () => {
+    throw Error("synthetic process loss");
+  };
+  await assert.rejects(h.runtime.dispatchOnce(), /synthetic process loss/);
+  const old = await getBoard(h.runtime);
+  const newer = (await h.runtime.runOnce()).publications[0];
+  h.controlsStore.transaction((state) => {
+    delete state.pipelineHeads;
+  });
+  await h.db.query(
+    "UPDATE leaderboard_ingestion.outbox SET lease_until=clock_timestamp()-interval '1 second' WHERE state='leased'",
+  );
+  const recovered = await createPipeline(h.options);
+  t.after(() => recovered.stop());
+  assert.equal(await recovered.dispatchOnce(), "retry_scheduled");
+  assert.equal((await recovered.app.inject(boardUrl)).statusCode, 503);
+  assert.equal(h.controlsStore.read().pipelineHeads, undefined);
+  assert.equal(
+    (await h.db.query("SELECT snapshot_id FROM leaderboard_pipeline.heads")).rows[0].snapshot_id,
+    newer.snapshotId,
+  );
+  const fresh = (await recovered.runOnce()).publications[0];
+  assert.equal(fresh.revision, 3);
+  await readyDispatch(h);
+  assert.equal(await recovered.dispatchOnce(), "processed");
+  assert.equal((await getBoard(recovered)).snapshotId, fresh.snapshotId);
+  assert.equal((await getBoard(recovered, `&snapshot=${old.snapshotId}`)).head.snapshotId, fresh.snapshotId);
 });
