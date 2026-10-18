@@ -2,7 +2,7 @@
 
 This branch adds a working design prototype for the information architecture and visual system epic, [LB 13](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/14). It builds on the runtime scaffold in [runtime-foundation.md](runtime-foundation.md). It runs only on synthetic data. It is not a production leaderboard, not an accepted design specification and not evidence about any real contributor. [docs/UI.md](UI.md) remains the generated design baseline. This document records what the prototype implements against that baseline and what is still open.
 
-Run it with `npm run dev:web` and open `/prototype`. That page links every journey and every required state.
+Run it with `npm run dev:web` and open `/prototype?ui=prototype`. That page links every journey and every required state.
 
 ## Issue coverage
 
@@ -44,7 +44,7 @@ The consultation ran on 2026-10-17 with requested and observed model `claude-opu
 
 **Adapted (master plan prevails):** dense instead of competition ranks; a last-30-days default instead of the calendar quarter; canonical route names; "user accounts / automation" instead of "humans / bots"; review amendments A01–A15 (for example, no "accepted" label for persistence, directory inclusion for observed work, and bounded pagination).
 
-**Deferred:** Instrument Serif page titles (licence, subset and layout-shift checks); ASCII decoration (website #32/#33 remain unmerged); department names and lead metrics (registry decision); export, share cards and embeds (LB 12.04, LB 15.04); signed-in preferences and the admin console.
+**Deferred:** Instrument Serif page titles (licence, subset and layout-shift checks); ASCII decoration (website #32/#33 remain unmerged); department names and lead metrics (registry decision); export, share cards and embeds (LB 12.04, LB 15.04); signed-in preferences and the admin console within the synthetic prototype. Separate authenticated screens now exist at `/account` and `/admin`; these always use the controls service even when prototype mode is selected (see [protected controls UI](protected-controls-ui.md)).
 
 ## Verification
 

@@ -958,3 +958,43 @@ tbody th {
     border-width: 3px;
   }
 }
+
+.controls-page {
+  max-width: 70rem;
+  margin: auto;
+  padding: 2rem 1rem;
+}
+.controls-page section,
+.control-receipt {
+  margin-block: 2rem;
+}
+.controls-page form {
+  display: grid;
+  gap: 1rem;
+  margin-block: 1.5rem;
+  max-width: 48rem;
+}
+.control-field {
+  display: grid;
+  gap: 0.3rem;
+}
+.controls-page textarea {
+  min-height: 6rem;
+}
+.controls-page input:not([type="checkbox"]),
+.controls-page textarea,
+.controls-page select {
+  width: 100%;
+}
+.controls-page pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.controls-page fieldset {
+  min-width: 0;
+}
+.controls-page p,
+.controls-page label,
+.controls-page h3 {
+  overflow-wrap: anywhere;
+}
