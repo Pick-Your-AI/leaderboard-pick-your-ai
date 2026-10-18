@@ -6,6 +6,8 @@ import {
   displayPolicyLabels,
   families,
   getMetric,
+  getMetricUi,
+  getMetricGroupingPolicy,
   metricsInFamily,
   registry,
   releaseEligibilityLabels,
@@ -84,6 +86,8 @@ export function MethodSheetPage({ metricId }: { metricId: string }) {
   const metric = getMetric(metricId);
   if (!metric) return <NotFoundPage />;
   const definition = metric.definition;
+  const ui = getMetricUi(metric.id);
+  const grouping = getMetricGroupingPolicy(metric.id);
   const extra = Object.entries(definition).filter(
     ([key]) =>
       ![
@@ -108,6 +112,42 @@ export function MethodSheetPage({ metricId }: { metricId: string }) {
         </p>
       </PageHeader>
       <dl className="receipt">
+        <dt>UI metadata version</dt>
+        <dd>
+          {registry.ui_metadata.decision_state === "candidate"
+            ? registry.ui_metadata.version
+            : "Unresolved legacy metadata"}
+        </dd>
+        <dt>Department</dt>
+        <dd>{families.find((department) => department.id === ui?.department)?.label ?? "Unassigned"}</dd>
+        <dt>Search synonyms</dt>
+        <dd>{ui?.synonyms.join(", ") ?? "None"}</dd>
+        <dt>Implementation maturity</dt>
+        <dd>{ui?.maturity ?? "definition_only"}</dd>
+        <dt>Source capability class</dt>
+        <dd>{ui?.source_class ?? "unknown"}; actual source coverage must be verified separately.</dd>
+        <dt>Supported evidence and date pairs</dt>
+        <dd>
+          {ui?.supported_combinations.map((pair) => `${pair.state} / ${pair.date_basis}`).join(", ") ||
+            "No selectable view; not measured"}
+        </dd>
+        <dt>Navigation default</dt>
+        <dd>
+          {ui?.lead_view.overview ? "Overview lead" : "Catalog entry"}
+          {ui?.lead_view.wall ? "; wall choice" : ""}
+        </dd>
+        <dt>Implementation limitations</dt>
+        <dd>{ui?.limitations.join(" ")}</dd>
+        {grouping && (
+          <>
+            <dt>Raw triage grouping policy</dt>
+            <dd>
+              {grouping.version}: one actor, artifact and exact raw source state per {grouping.grouping_seconds}-second
+              UTC interval anchored at {grouping.interval_origin}. Repeated state in that interval counts once. Missing
+              state or time is excluded as unknown. No semantic classifier.
+            </dd>
+          </>
+        )}
         <dt>What counts</dt>
         <dd>{metric.counting_rule}</dd>
         <dt>Unit</dt>
