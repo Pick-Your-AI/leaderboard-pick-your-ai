@@ -6,6 +6,7 @@ import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
+import { readCurrentSourceHealth } from "./source-health.mjs";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -36,21 +37,65 @@ const previewActor = ({ id, login, kind, publicState, executionMode }) => ({
   publicState,
   ...(executionMode === undefined ? {} : { executionMode }),
 });
-// Execution evidence accumulates across observations of the same account. Join
-// only that evidence; every provider binding, label and reviewed classification
-// must still agree. Publication and frozen replay use the identical rule.
-const joinActorExecutionEvidence = (previous, actor, serialize) => {
+// Provider identity and reviewed classification must agree across observations.
+// A newer verified label can replace an older login; execution evidence still
+// accumulates. Publication and frozen replay use the identical source bindings.
+const joinActorExecutionEvidence = (previous, actor, serialize, previousSource, source, allowRenames) => {
   const modes = [previous?.executionMode, actor.executionMode];
   if (modes.some((mode) => mode !== undefined && mode !== "unknown" && mode !== "automated")) return null;
   if (!previous) return copy(actor);
-  const { executionMode: previousMode, ...previousMetadata } = previous;
-  const { executionMode: actorMode, ...actorMetadata } = actor;
+  const { executionMode: previousMode, login: previousLogin, ...previousMetadata } = previous;
+  const { executionMode: actorMode, login, ...actorMetadata } = actor;
   if (serialize(previousMetadata) !== serialize(actorMetadata)) return null;
-  const joined = copy(previous);
+  let joined = copy(previous);
+  if (previousLogin !== login) {
+    if (
+      !allowRenames ||
+      previous.publicState !== "visible" ||
+      actor.publicState !== "visible" ||
+      typeof previousLogin !== "string" ||
+      typeof login !== "string" ||
+      !Number.isSafeInteger(actor.githubDatabaseId) ||
+      actor.githubDatabaseId < 1 ||
+      String(actor.githubDatabaseId) !== actor.id ||
+      typeof actor.githubNodeId !== "string" ||
+      !actor.githubNodeId ||
+      previousSource.observedAt === source.observedAt
+    )
+      return null;
+    if (source.observedAt > previousSource.observedAt) joined = copy(actor);
+  }
   if (previousMode === "automated" || actorMode === "automated") joined.executionMode = "automated";
   else if (previousMode === "unknown" || actorMode === "unknown") joined.executionMode = "unknown";
   return joined;
 };
+const sourceActorEvidence = (allowRenames = true) => ({
+  actors: new Map(),
+  latest: new Map(),
+  logins: new Map(),
+  allowRenames,
+  hasRenames: false,
+});
+function retainSourceActor(evidence, actor, source, serialize) {
+  // Conflicting aliases within one run or at one observation time are ambiguous,
+  // regardless of row order or an intervening observation from a later run.
+  const keys = [JSON.stringify([actor.id, "run", source.runId]), JSON.stringify([actor.id, "time", source.observedAt])];
+  if (keys.some((key) => evidence.logins.has(key) && evidence.logins.get(key) !== actor.login)) return false;
+  const previousSource = evidence.latest.get(actor.id);
+  const previous = evidence.actors.get(actor.id);
+  const joined = joinActorExecutionEvidence(previous, actor, serialize, previousSource, source, evidence.allowRenames);
+  if (!joined) return false;
+  if (previous && previous.login !== actor.login) evidence.hasRenames = true;
+  for (const key of keys) evidence.logins.set(key, actor.login);
+  evidence.actors.set(actor.id, joined);
+  if (!previousSource || source.observedAt > previousSource.observedAt) evidence.latest.set(actor.id, source);
+  return true;
+}
+const sourceBinding = (row) => ({
+  factKey: row.fact_key,
+  observedAt: new Date(row.observed_at).toISOString(),
+  runId: row.first_run_id,
+});
 const utc = (value) => {
   if (
     typeof value !== "string" ||
@@ -225,28 +270,63 @@ export async function createPipeline(options) {
           409,
           "Frozen identity evidence binding unavailable",
         );
+        const normalizationSources = binding.normalizationSources;
+        const hashes = new Set(binding.normalizationHashes);
+        requireThat(
+          normalizationSources === undefined ||
+            (Array.isArray(normalizationSources) &&
+              normalizationSources.length <= 10000 &&
+              normalizationSources.every(
+                (entry) =>
+                  entry !== null &&
+                  typeof entry === "object" &&
+                  typeof entry.factKey === "string" &&
+                  /^[a-f0-9]{64}$/.test(entry.factKey) &&
+                  hashes.has(entry.documentHash),
+              ) &&
+              new Set(normalizationSources.map((entry) => entry.factKey)).size === normalizationSources.length &&
+              new Set(normalizationSources.map((entry) => entry.documentHash)).size === hashes.size),
+          409,
+          "Frozen identity source binding unavailable",
+        );
         const rows = (
           await tx.query(
-            `SELECT n.document,n.document_hash FROM leaderboard_pipeline.normalizations AS n
+            `SELECT n.document,n.document_hash,f.fact_key,f.observed_at,f.first_run_id FROM leaderboard_pipeline.normalizations AS n
            JOIN leaderboard_ingestion.source_facts AS f ON f.fact_key=n.fact_key
            WHERE n.document_hash=ANY($1::text[]) AND n.policy_signature=ANY($2::text[])
-             AND f.repository_id=ANY($3::bigint[]) LIMIT 10001 FOR SHARE OF n`,
+             AND f.repository_id=ANY($3::bigint[])
+             AND ($4::jsonb IS NULL OR EXISTS (
+               SELECT 1 FROM jsonb_to_recordset($4::jsonb) AS bound(fact_key text,document_hash text)
+               WHERE bound.fact_key=f.fact_key AND bound.document_hash=n.document_hash
+             )) LIMIT 10001 FOR SHARE OF n`,
             [
               binding.normalizationHashes,
               // Legacy documents still bind historical frozen actor evidence;
               // only fresh runs require the new private-attribution projection.
               [normalizationSignature, normalizationPolicySignature],
               authorization.sources.map((source) => source.repositoryId),
+              normalizationSources === undefined
+                ? null
+                : JSON.stringify(
+                    normalizationSources.map((entry) => ({
+                      fact_key: entry.factKey,
+                      document_hash: entry.documentHash,
+                    })),
+                  ),
             ],
           )
         ).rows;
         requireThat(
           rows.length <= 10000 &&
-            new Set(rows.map((row) => row.document_hash)).size === binding.normalizationHashes.length,
+            new Set(rows.map((row) => row.document_hash)).size === binding.normalizationHashes.length &&
+            (normalizationSources === undefined ||
+              new Set(rows.map((row) => row.fact_key)).size === normalizationSources.length),
           409,
           "Frozen identity evidence unavailable",
         );
-        const actors = new Map();
+        // Hash-only legacy captures did not bind source ordering. They retain
+        // their identical-label rule rather than gaining unproven rename history.
+        const identity = sourceActorEvidence(normalizationSources !== undefined);
         for (const row of rows) {
           requireThat(
             digest(row.document) === row.document_hash &&
@@ -257,12 +337,14 @@ export async function createPipeline(options) {
           );
           assertDataMode(row.document);
           for (const actor of row.document.actors) {
-            const joined = joinActorExecutionEvidence(actors.get(actor.id), actor, canonical);
-            requireThat(joined, 409, "Frozen identity evidence conflict");
-            actors.set(actor.id, joined);
+            requireThat(
+              retainSourceActor(identity, actor, sourceBinding(row), canonical),
+              409,
+              "Frozen identity evidence conflict",
+            );
           }
         }
-        restoredActors.set(digest(authorization), actors);
+        restoredActors.set(digest(authorization), identity.actors);
       }
       const removed = await sourceSuppressions(tx, ids);
       const corrections = (
@@ -709,7 +791,7 @@ export async function createPipeline(options) {
         assertDataMode(cached.document);
         if (hasDispatchEvidence(cached.document, dispatch, row)) {
           await retainSourceArtifacts(db, row.fact_key, cached.document);
-          outputs.push(cached.document);
+          outputs.push({ document: cached.document, source: sourceBinding(row) });
           continue;
         }
       }
@@ -821,7 +903,7 @@ export async function createPipeline(options) {
         );
         await retainSourceArtifacts(tx, row.fact_key, document);
       });
-      outputs.push(document);
+      outputs.push({ document, source: sourceBinding(row) });
     }
     return outputs;
   }
@@ -968,13 +1050,18 @@ export async function createPipeline(options) {
         // manufacture a marker or move the SQL head to a historical operation.
       }
     }
-    let outputs = await normalizeStored(
+    const normalized = await normalizeStored(
       repos.map((repo) => repo.id),
       observationCutoff,
       dispatch,
     );
+    let outputs = normalized.map((entry) => entry.document);
+    const actorSources = new Map(normalized.map((entry) => [entry.document, entry.source]));
     // Only persisted provider normalizations can restore identity; recognition overlays are transient.
-    const normalizationHashes = [...new Set(outputs.map(digest))].sort();
+    const normalizationSources = normalized
+      .map((entry) => ({ factKey: entry.source.factKey, documentHash: digest(entry.document) }))
+      .sort((left, right) => left.factKey.localeCompare(right.factKey));
+    const normalizationHashes = [...new Set(normalizationSources.map((entry) => entry.documentHash))].sort();
     const suppressedArtifactIds = new Set([
       ...outputs.flatMap((output) => output.suppressArtifactIds ?? []),
       ...(await sourceSuppressions(
@@ -1023,13 +1110,13 @@ export async function createPipeline(options) {
       if (!previous || fact.observedAt < previous.observedAt) uniqueFacts.set(fact.id, fact);
     }
     const facts = [...uniqueFacts.values()].sort((a, b) => a.id.localeCompare(b.id));
-    const actors = new Map(),
+    const identity = sourceActorEvidence();
+    const actors = identity.actors,
       evidence = new Map();
     for (const output of outputs) {
       for (const actor of output.actors) {
-        const joined = joinActorExecutionEvidence(actors.get(actor.id), actor, c.metrics.stableJSON);
-        if (!joined) fail("conflicting_actor_metadata");
-        actors.set(actor.id, joined);
+        if (!retainSourceActor(identity, actor, actorSources.get(output), c.metrics.stableJSON))
+          fail("conflicting_actor_metadata");
       }
       for (const entry of output.evidence) {
         const id = entry.contribution.contributionId,
@@ -1247,6 +1334,9 @@ export async function createPipeline(options) {
         identityEvidence: {
           schemaVersion: "pipeline-identity-evidence/v1",
           normalizationHashes,
+          // Identical-label captures keep their existing authorization bytes.
+          // Source ordering is required only when this input reconciles aliases.
+          ...(identity.hasRenames ? { normalizationSources } : {}),
         },
         sources: generations.map((row) => ({
           repositoryId: String(row.repository_id),
@@ -1407,7 +1497,10 @@ export async function createPipeline(options) {
     }
   }
   const source = {
-    async read(scope, pin, signal, transaction) {
+    async readHealth(scope, pin, signal) {
+      return source.read(scope, pin, signal, undefined, true);
+    },
+    async read(scope, pin, signal, transaction, health = false) {
       if (signal.aborted || !(await approved(transaction ?? db)) || !configuredScope(scope)) return null;
       // The SQL head allocates revisions, not visibility. Only this private
       // authority advances after confirmation. Bound retries if another runtime
@@ -1458,14 +1551,21 @@ export async function createPipeline(options) {
             return null;
           const access = (
             await tx.query(
-              "SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE",
+              "SELECT repository_id,installation_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE",
               [selected.repository_ids],
             )
           ).rows;
           if (
             signal.aborted ||
             access.length !== selected.repository_ids.length ||
-            access.some((row) => row.state !== "public")
+            access.some(
+              (row) =>
+                row.state !== "public" ||
+                String(row.installation_id) !==
+                  String(
+                    config.repositories.find((repo) => String(repo.id) === String(row.repository_id))?.installationId,
+                  ),
+            )
           )
             return null;
           const removed = (
@@ -1475,6 +1575,17 @@ export async function createPipeline(options) {
               [selected.repository_ids],
             )
           ).rows.map((row) => row.subject_id);
+          const currentSourceHealth = health
+            ? await readCurrentSourceHealth(
+                tx,
+                repositoriesFor(scope).filter((repo) =>
+                  selected.document.snapshot.coverage.some(
+                    (coverage) => coverage.scopeId === String(repo.id) && coverage.source.startsWith("github_"),
+                  ),
+                ),
+                utc(now()),
+              )
+            : undefined;
           if (!(await approved(tx)) || signal.aborted) return null;
           // Read current private controls after all awaited I/O, even for pinned historical snapshots.
           const controls = controlsStore.read();
@@ -1527,6 +1638,7 @@ export async function createPipeline(options) {
           const evidenceIds = new Set(document.rows.flatMap((row) => row.evidenceIds));
           document.evidence = document.evidence.filter((entry) => evidenceIds.has(entry.contribution.contributionId));
           return {
+            ...(currentSourceHealth === undefined ? {} : { currentSourceHealth }),
             head: {
               snapshotId: selected.head_id,
               revision: Number(selected.revision),
