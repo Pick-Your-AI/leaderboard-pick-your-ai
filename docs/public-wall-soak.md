@@ -71,6 +71,23 @@ retains at most the current six contributor rows. Every nonempty sample binds
 each contributor link to the visible snapshot and its actual retained source
 timestamp. A healthy automatic page must advance within two minutes, and the
 initial full-run cycle must visit all five pages within three real minutes.
+The source error counter reads the actual public API's string `error` field, so
+the natural 410 `cursor_expired_refetch` result is distinguishable from other
+failures. The opt-in command first runs a short actual-handler cursor-expiry
+regression and deterministic cycle-guard tests; their simulated inputs do not
+advance the real soak clock or supply long-duration evidence.
+
+A separate bounded tracker requires a whole observed, single-publication cycle
+at least once every four minutes of continuous healthy automatic display. It
+starts at board page one and observes both board pages and all three contributor
+pages. Every view's successive pages must contain disjoint actor IDs; refreshing
+one page and appearing in both the board and contributor roll remain valid.
+Planned pauses and actual interruption states clear a partial observation before
+recovery. Changing snapshots or repeatedly alternating between only two pages
+cannot reset the healthy-window deadline or reuse an earlier successful cycle.
+Missed sampled pages cannot certify a full cycle. Samples and the final receipt
+retain the completed-cycle count, automatic-window count and observed deadline
+measurements; memory retains at most one cycle's five page sets.
 
 After ten minutes of warmup, then hourly and at completion, explicit renderer garbage collection
 allows comparison of retained JavaScript heap and DOM counts. Limits relative to
@@ -84,3 +101,16 @@ The harness is reproducible implementation, not a completed result. Only an actu
 successful full-duration run supplies its stated matrix evidence. Real provider
 authorization, deployed hosting, operating-system/GPU resource acceptance and
 human assistive-technology journeys remain separate receiving gates.
+
+## Retained local visibility limitation
+
+An independent rehearsal of integrated source
+`3c9265b229e627c8ba86ae51f48b92ff6470ca90` used an explicitly selected
+Chromium `153.0.8010.0` headless executable. Build and soak TypeScript checks
+passed. The actual run started at `2026-10-18T06:18:42.812Z` and ended at
+`2026-10-18T06:20:32.976Z` after `110164.312403` real milliseconds with a failure:
+the owned background tab did not make the wall's actual visibility state hidden.
+Network clearing and recovery passed; both owned cleanup receipts had empty
+failure lists. No eight-hour run was started on that environment, and neither
+the visibility requirement nor the browser executable pin was relaxed to turn
+this limitation into a pass. A visibility-capable environment is still required.
