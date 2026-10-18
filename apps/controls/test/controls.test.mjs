@@ -1117,6 +1117,80 @@ test("configuration rejects untested permissions, private scope, wrong fields, u
   );
 });
 
+test("enabled metrics cannot preview or activate without explicit source tests and metric evidence", async (t) => {
+  const cases = [
+    [
+      "sourceTested false",
+      (metric) => {
+        metric.sourceTested = false;
+      },
+      409,
+      /Metric source\/policy receipt missing/,
+    ],
+    [
+      "sourceTested missing",
+      (metric) => {
+        delete metric.sourceTested;
+      },
+      409,
+      /Metric source\/policy receipt missing/,
+    ],
+    [
+      "metric evidence missing",
+      (metric) => {
+        delete metric.evidenceId;
+      },
+      400,
+      /Invalid request/,
+    ],
+  ];
+  for (const [name, mutate, status, error] of cases) {
+    await t.test(name, async (t) => {
+      let invalid = true;
+      const h = await harness(t, {
+        sourceVerifier(input, now) {
+          const report = sourceReceipt(input, now);
+          if (invalid) mutate(report.metrics[0]);
+          return report;
+        },
+      });
+      const owner = await h.login("7");
+      const approver = await h.login("8");
+      const proposal = await configurationProposal(
+        h,
+        owner,
+        "synthetic-missing-metric-evidence",
+        configurationFixture(),
+      );
+      const previewUrl = `/controls/configuration/proposals/${proposal.id}/preview`;
+      const rejected = await h.call(previewUrl, { user: owner, method: "POST", input: { version: 1 } });
+      assert.equal(rejected.status, status);
+      assert.match(rejected.data.error, error);
+      assert.equal(configurationOverlay(h.store.read()).revision, 0);
+      // A previously valid preview and independent approval cannot substitute
+      // for the fresh source receipt required at activation.
+      invalid = false;
+      const preview = await h.call(previewUrl, { user: owner, method: "POST", input: { version: 1 } });
+      assert.equal(preview.status, 200);
+      const approval = await h.call(`/controls/configuration/proposals/${proposal.id}/approve`, {
+        user: approver,
+        method: "POST",
+        input: { version: preview.data.versionNumber, previewDigest: preview.data.preview.digest, conflict: false },
+      });
+      assert.equal(approval.status, 200);
+      invalid = true;
+      const activation = await h.call(`/controls/configuration/proposals/${proposal.id}/activate`, {
+        user: owner,
+        method: "POST",
+        input: { version: approval.data.versionNumber, approvalId: approval.data.approval.id },
+      });
+      assert.equal(activation.status, status);
+      assert.match(activation.data.error, error);
+      assert.equal(configurationOverlay(h.store.read()).revision, 0);
+    });
+  }
+});
+
 test("metric disable is independent and retains reason/history while source outage cannot expand scope", async (t) => {
   let offline = false;
   const h = await harness(t, {

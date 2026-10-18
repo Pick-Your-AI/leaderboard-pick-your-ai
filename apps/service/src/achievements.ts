@@ -14,7 +14,12 @@ function compareInstants(left: string, right: string): number {
 }
 /** Candidate rules are activated only by an explicit reviewed service policy. */
 export function acceptedAchievements(read: PublicRead, actorId: string) {
-  if (!read.selected.actors.some((entry) => entry.actorId === actorId && entry.actor.kind === "user")) return [];
+  if (
+    !read.selected.actors.some(
+      (entry) => entry.actorId === actorId && entry.actor.kind === "user" && entry.actor.executionMode !== "automated",
+    )
+  )
+    return [];
   const { scope, snapshot } = read.selected;
   const through = scope.end ?? snapshot.generatedAt;
   if (

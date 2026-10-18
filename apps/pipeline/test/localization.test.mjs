@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createPipeline } from "../src/index.mjs";
 import { components, harness, publicScope } from "./harness.mjs";
 
-test("localization keeps raw portfolio separate from exact independently accepted locale units and current suppression", async (t) => {
+async function localizationHarness(t) {
   const now = Math.floor(Date.now() / 1000) * 1000;
   const ago = (days) => new Date(now - days * 86_400_000).toISOString();
   const before = "b".repeat(40),
@@ -100,6 +101,12 @@ test("localization keeps raw portfolio separate from exact independently accepte
       });
     },
   });
+  return { ...h, ago, after, mergedAt, mergeWindow, reviewWindow, payload };
+}
+
+test("localization keeps raw portfolio separate from exact independently accepted locale units and current suppression", async (t) => {
+  const h = await localizationHarness(t);
+  const { ago, after, mergedAt, mergeWindow, reviewWindow, payload } = h;
   const publication = await h.runtime.runOnce();
   assert.equal(publication.state, "published");
   const snapshotId = publication.publications[0].snapshotId;
@@ -196,4 +203,56 @@ test("localization keeps raw portfolio separate from exact independently accepte
   );
   assert.equal((await h.runtime.app.inject("/api/v1/boards?metric=localization")).statusCode, 503);
   assert.equal(await h.runtime.source.read(publicScope, snapshotId, new AbortController().signal), null);
+});
+
+test("restarted normalization reclassifies changed and removed documentation policies while unchanged rules reuse cache", async (t) => {
+  const h = await localizationHarness(t);
+  const localeEvidence = (read) =>
+    read.selected.portfolioEvidence.filter((entry) => entry.contribution.metricIds.includes("localization"));
+  const locales = (read) =>
+    localeEvidence(read)
+      .flatMap((entry) => entry.contribution.reasonCodes.filter((reason) => reason.startsWith("locale:")))
+      .sort();
+  const first = (await h.runtime.runOnce()).publications[0];
+  const initial = await h.runtime.source.read(publicScope, first.snapshotId, new AbortController().signal);
+  assert.deepEqual(locales(initial), ["locale:de", "locale:fr"]);
+  const original = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows[0];
+  await h.runtime.stop();
+  await h.reopenDatabase();
+  const revised = structuredClone(h.options.config);
+  revised.recognitionBindings = [];
+  for (const step of ["new_version", "same_version_rules", "removed_policy", "unchanged_policy"]) {
+    revised.version = `synthetic-configuration-${step}`;
+    if (step === "new_version") {
+      revised.documentationPolicies[0].version = "synthetic-locales-v2";
+      revised.documentationPolicies[0].localizationPaths = revised.documentationPolicies[0].localizationPaths.filter(
+        (entry) => entry.locale === "de",
+      );
+    } else if (step === "same_version_rules") {
+      revised.documentationPolicies[0].generatedPaths.push("docs/de/");
+    } else if (step === "removed_policy") {
+      revised.documentationPolicies = [];
+    }
+    const restarted = await createPipeline({ ...h.options, config: revised });
+    try {
+      const publication = (await restarted.runOnce()).publications[0];
+      const read = await restarted.source.read(publicScope, publication.snapshotId, new AbortController().signal);
+      assert.deepEqual(locales(read), step === "new_version" ? ["locale:de"] : [], step);
+      for (const entry of localeEvidence(read))
+        assert.ok(entry.contribution.reasonCodes.includes("documentation_path_policy:synthetic-locales-v2"));
+      if (["removed_policy", "unchanged_policy"].includes(step))
+        assert.ok(
+          read.selected.portfolioEvidence.every((entry) => !entry.contribution.metricIds.includes("documentation")),
+        );
+      const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
+      const expectedRows = { new_version: 2, same_version_rules: 3, removed_policy: 4, unchanged_policy: 4 };
+      assert.equal(rows.length, expectedRows[step], step);
+      assert.deepEqual(
+        rows.find((row) => row.policy_signature === original.policy_signature),
+        original,
+      );
+    } finally {
+      await restarted.stop();
+    }
+  }
 });
