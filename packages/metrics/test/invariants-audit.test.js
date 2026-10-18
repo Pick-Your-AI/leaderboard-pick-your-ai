@@ -137,6 +137,13 @@ for (const metric of metricDefinitionsV1.filter((metric) => aggregations[metric.
   test(`${metric.id}: candidate inclusion, exclusion, actor conservation and deterministic correction`, () => {
     assert.deepEqual(board(metric, []).rows, [], "empty observations cannot invent a contributor");
     const included = fact(metric, "included");
+    const grouping = getMetricGroupingPolicy(metric.id);
+    const invalidEligibility = grouping?.group_by === "actor_artifact_state_interval"
+      ? { rawState: undefined }
+      : grouping ? { occurredAt: null } : { acceptedBy: "a" };
+    const eligibilityReason = grouping?.group_by === "actor_artifact_state_interval"
+      ? "unknown_raw_state_or_time"
+      : grouping ? "unknown_effective_time" : "missing_independent_acceptance";
     const facts = [
       included,
       { ...included, id: "duplicate-adapter" },
@@ -144,7 +151,7 @@ for (const metric of metricDefinitionsV1.filter((metric) => aggregations[metric.
       fact(
         metric,
         "invalid-eligibility",
-        getMetricGroupingPolicy(metric.id) ? { rawState: undefined } : { acceptedBy: "a" },
+        invalidEligibility,
       ),
       fact(metric, "excluded", { state: "excluded" }),
       fact(metric, "outside", { occurredAt: to, acceptedAt: to, readyAt: to }),
@@ -171,7 +178,7 @@ for (const metric of metricDefinitionsV1.filter((metric) => aggregations[metric.
       result.audit.some(
         (entry) =>
           entry.reason ===
-          (getMetricGroupingPolicy(metric.id) ? "unknown_raw_state_or_time" : "missing_independent_acceptance"),
+          eligibilityReason,
       ),
     );
     assert.equal(result.coverage, "incomplete", "unverified eligibility must prevent complete coverage");
