@@ -235,7 +235,9 @@ export function startLiveUpdates(options: LiveOptions): () => void {
     generation++;
     if (timer) clearTimeout(timer);
     controller?.abort();
-    stream?.close();
+    const connection = stream;
+    stream = null;
+    connection?.close();
     document?.removeEventListener("visibilitychange", visibility);
   };
 }
