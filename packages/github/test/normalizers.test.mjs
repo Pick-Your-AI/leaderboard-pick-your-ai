@@ -1229,6 +1229,9 @@ test("documentation counts one merged PR/category with pinned evidence, never li
 test("documentation excludes generated/imported/research/formatting and incomplete or mismatched integrations", () => {
   for (const file of [
     { path: "docs/auto.md", generated: true },
+    { path: "docs/renamed.md", previousPath: "generated/guide.md" },
+    { path: "docs/renamed.md", previousPath: "vendor/guide.md" },
+    { path: "docs/renamed.md", previousPath: "package-lock.json" },
     { path: "docs/copy.md", imported: true },
     { path: "docs/research/note.md" },
     { path: "docs/reference/api.md" },
@@ -1244,6 +1247,12 @@ test("documentation excludes generated/imported/research/formatting and incomple
     assert.ok(out.reasons.some((reason) => reason.startsWith("documentation_excluded_")));
   }
   for (const mutate of [
+    (v) => {
+      delete v.integration.defaultBranch;
+      delete v.integration.targetBranch;
+      delete v.repository.defaultBranch;
+      delete v.payload.pull_request.base.ref;
+    },
     (v) => (v.integration.diff.complete = false),
     (v) => (v.payload.pull_request.merged = false),
     (v) => (v.payload.pull_request.merge_commit_sha = before),

@@ -899,6 +899,10 @@ export function normalizeGithubObservation(
       !mergedAt ||
       resource.merge_commit_sha !== integration.after ||
       !object(resource.base) ||
+      !text(resource.base.ref) ||
+      !text(integration.targetBranch) ||
+      !text(integration.defaultBranch) ||
+      !text(repository.defaultBranch) ||
       resource.base.ref !== integration.targetBranch ||
       integration.targetBranch !== integration.defaultBranch ||
       repository.defaultBranch !== integration.defaultBranch ||

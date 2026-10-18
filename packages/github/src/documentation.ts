@@ -1,4 +1,4 @@
-import { classifyPhysicalDiff, type PinnedPhysicalDiff } from "./physical-diff.js";
+import { classifyFile, classifyPhysicalDiff, type PinnedPhysicalDiff } from "./physical-diff.js";
 
 /** Explicit repository policy; no inference from PR titles, labels, line count or file extension. */
 export interface DocumentationPathPolicy {
@@ -48,13 +48,16 @@ export function classifyDocumentation(diff: PinnedPhysicalDiff, policy: Document
   for (const file of physical.files) {
     if (!matches(file.path, policy.documentationPaths)) continue;
     const paths = [file.path, ...(file.previousPath ? [file.previousPath] : [])];
+    const previousClass = file.previousPath ? classifyFile({ ...file, path: file.previousPath }) : null;
+    const previousExclusion =
+      previousClass && !["source", "tests", "docs"].includes(previousClass) ? previousClass : null;
     const exclusion = paths.some((path) => matches(path, policy.researchPaths))
       ? "research_path"
       : paths.some((path) => matches(path, policy.generatedPaths))
         ? "generated"
         : paths.some((path) => matches(path, policy.importedPaths))
           ? "imported"
-          : file.reason;
+          : (file.reason ?? previousExclusion);
     if (exclusion) reasons.add(`documentation_excluded_${exclusion}`);
     else if (file.additions > 0 || file.deletions > 0) eligible = true; // Substantive deletion is participation too; zero-change moves are not new content.
   }
