@@ -8,13 +8,13 @@ const at = "2026-10-18T21:00:00.000Z";
 const pin = "overview-served-snapshot";
 
 // Empty synthetic projections exercise discovery without inventing ranked work.
-async function service(page: Page, unresolved = false, additionalDepartments = 0) {
+async function service(page: Page, unresolved = false, additionalDepartments = 0, futureDepartment = "future") {
   const registry: MetricRegistry = JSON.parse(
     await readFile(new URL("../../../packages/metrics/src/v1/registry.json", import.meta.url), "utf8"),
   );
   if (registry.ui_metadata.decision_state !== "candidate") throw new Error("Expected candidate fixture metadata");
   registry.ui_metadata.departments.find((entry) => entry.id === "review")!.label = "Review from the served registry";
-  registry.ui_metadata.departments.push({ id: "future", label: "Future department", order: 10 });
+  registry.ui_metadata.departments.push({ id: futureDepartment, label: "Future department", order: 10 });
   for (let index = 0; index < additionalDepartments; index++)
     registry.ui_metadata.departments.push({
       id: `additional-${index + 1}`,
@@ -163,6 +163,60 @@ test("keyboard department discovery preserves the displayed pin and complete sco
     expect(new URL(page.url()).searchParams.has("department")).toBe(false);
   } finally {
     await api.close();
+  }
+});
+
+test("overview department identities survive copied URLs and catalog form submission with spaces and Unicode", async ({
+  page,
+}) => {
+  const scope = {
+    ui: "api",
+    repository: "overview-repository",
+    workstream: "T6",
+    context: "current",
+    project: "PVT_A,PVT_B=",
+    role: "author,reviewer",
+    actors: "user",
+    start: "2026-10-01T00:00:00.000Z",
+    end: "2026-10-18T00:00:00.000Z",
+    tz: "America/New_York",
+  };
+  for (const department of ["Future Department", "résearch"]) {
+    const api = await service(page, false, 0, department);
+    try {
+      await page.goto(`/?${new URLSearchParams(scope)}`);
+      const link = overview(page).getByRole("link", { name: "Future department", exact: true });
+      await expect(link).toBeVisible();
+      const href = new URL((await link.getAttribute("href"))!, page.url());
+      expect(href.searchParams.get("department")).toBe(department);
+      expect(href.searchParams.get("snapshot")).toBe(pin);
+      for (const [key, value] of Object.entries(scope)) expect(href.searchParams.get(key)).toBe(value);
+      await link.focus();
+      await page.keyboard.press("Enter");
+      const catalog = page.getByRole("region", { name: "Metric discovery", exact: true });
+      const filter = catalog.getByRole("combobox", { name: "Department", exact: true });
+      await expect(filter).toHaveValue(department);
+      await expect(catalog.getByRole("status")).toHaveText("0 of 98 defined measures");
+      const copied = page.url();
+      await page.reload();
+      await expect(filter).toHaveValue(department);
+      expect(page.url()).toBe(copied);
+      await filter.selectOption("research");
+      await catalog.getByRole("button", { name: "Search measures", exact: true }).click();
+      await expect(page).toHaveURL(/department=research(?:&|$)/);
+      await filter.selectOption(department);
+      await catalog.getByRole("button", { name: "Search measures", exact: true }).click();
+      await expect(filter).toHaveValue(department);
+      await expect(catalog.getByRole("status")).toHaveText("0 of 98 defined measures");
+      const submitted = new URL(page.url());
+      expect(submitted.searchParams.get("department")).toBe(department);
+      expect(submitted.searchParams.get("snapshot")).toBe(pin);
+      for (const [key, value] of Object.entries(scope)) expect(submitted.searchParams.get(key)).toBe(value);
+      expect(api.calls.every((url) => !url.searchParams.has("department"))).toBe(true);
+      await expect(page.getByRole("alert")).toHaveCount(0);
+    } finally {
+      await api.close();
+    }
   }
 });
 
