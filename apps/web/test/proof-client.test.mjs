@@ -32,3 +32,74 @@ test("drawer-only Back/Forward retains background DOM only for identical pinned 
   assert.equal(isProofTransition(drawer, { ...board, search: "?snapshot=s1&cursor=z.y&repository=r1" }), false);
   assert.equal(isProofTransition(board, board), false);
 });
+
+test("proof parser retains strict versioned public metadata and rejects contradictory acceptance or private history fields", async () => {
+  const { evidence } = await import("../src/remote/client.ts");
+  const at = "2026-10-01T00:00:00.000Z";
+  const value = {
+    artifact: {
+      schemaVersion: "leaderboard/v1",
+      source: "github",
+      kind: "issue",
+      stableId: "i1",
+      repositoryId: "r1",
+      visibility: "public",
+      publicUrl: "https://github.com/synthetic/example/issues/1",
+    },
+    contribution: {
+      schemaVersion: "leaderboard/v1",
+      contributionId: "e1",
+      canonicalEventId: "event1",
+      artifactId: "i1",
+      actorId: "a1",
+      roles: ["reporter"],
+      qualification: "eligible",
+      metricIds: ["issues_opened"],
+      reasonCodes: [],
+    },
+    occurredAt: at,
+    sourceRevision: null,
+    sourceRevisionUrl: null,
+    evidenceMetadata: {
+      schemaVersion: "leaderboard-evidence/v1",
+      artifactTitle: { value: "Literal <script> title", basis: "as_collected", collectedAt: at },
+      sourceAction: "artifact_created",
+      sourceOccurredAt: at,
+      observedAt: at,
+      activityState: "observed",
+      acceptedAt: null,
+      history: { coverage: "not_supplied", records: [] },
+    },
+  };
+  const parsed = evidence(value);
+  assert.deepEqual(parsed.evidenceMetadata, value.evidenceMetadata);
+  assert.equal(parsed.activityState, "observed");
+  assert.equal(parsed.observedAt, at);
+  assert.throws(() => evidence({ ...value, activityState: "accepted" }));
+  assert.throws(() => evidence({ ...value, evidenceMetadata: { ...value.evidenceMetadata, acceptedAt: at } }));
+  assert.throws(() =>
+    evidence({
+      ...value,
+      evidenceMetadata: {
+        ...value.evidenceMetadata,
+        history: {
+          coverage: "partial",
+          records: [
+            { kind: "correction", occurredAt: null, publicUrl: value.artifact.publicUrl, privateBody: "secret" },
+          ],
+        },
+      },
+    }),
+  );
+  const accepted = {
+    ...value,
+    evidenceMetadata: {
+      ...value.evidenceMetadata,
+      activityState: "accepted",
+      sourceAction: "recognition_accepted",
+      acceptedAt: at,
+    },
+  };
+  assert.equal(evidence(accepted).evidenceMetadata.acceptedAt, at);
+  assert.throws(() => evidence({ ...accepted, contribution: { ...value.contribution, qualification: "ineligible" } }));
+});

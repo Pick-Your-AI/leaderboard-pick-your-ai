@@ -4,6 +4,8 @@ import {
   executionModeSchema,
   matchesActorFilter,
   type ActorFilter,
+  publicEvidenceMetadataSchema,
+  type PublicEvidenceMetadata,
   actorSchema,
   artifactSchema,
   contributionSchema,
@@ -538,6 +540,7 @@ export function board(value: unknown, selected: Selection): Board {
   };
 }
 export interface Evidence {
+  evidenceMetadata?: PublicEvidenceMetadata;
   artifact: Artifact;
   contribution: Contribution;
   occurredAt: string | null;
@@ -548,15 +551,27 @@ export interface Evidence {
 }
 export function evidence(value: unknown): Evidence {
   const data = object(value);
-  const activityState = data.activityState ?? "unknown";
+  const metadata =
+    data.evidenceMetadata === undefined ? undefined : publicEvidenceMetadataSchema.parse(data.evidenceMetadata);
+  const contribution = contributionSchema.parse(data.contribution);
+  if (metadata?.acceptedAt && contribution.qualification !== "eligible")
+    throw new ReadFailure(502, "invalid_api_response");
+  const activityState = data.activityState ?? metadata?.activityState ?? "unknown";
+  if (
+    metadata &&
+    ((data.activityState !== undefined && data.activityState !== metadata.activityState) ||
+      (data.observedAt !== undefined && data.observedAt !== metadata.observedAt))
+  )
+    throw new ReadFailure(502, "invalid_api_response");
   if (!["observed", "pending", "accepted", "unknown"].includes(String(activityState)))
     throw new ReadFailure(502, "invalid_api_response");
   return {
+    ...(metadata === undefined ? {} : { evidenceMetadata: metadata }),
     activityState: activityState as Evidence["activityState"],
-    observedAt: data.observedAt == null ? null : string(data.observedAt),
+    observedAt: activityTime(data.observedAt === undefined ? (metadata?.observedAt ?? null) : data.observedAt),
     artifact: artifactSchema.parse(data.artifact),
-    contribution: contributionSchema.parse(data.contribution),
-    occurredAt: data.occurredAt === null ? null : string(data.occurredAt),
+    contribution,
+    occurredAt: activityTime(data.occurredAt),
     sourceRevision: data.sourceRevision === null ? null : string(data.sourceRevision),
     sourceRevisionUrl: publicLink(data.sourceRevisionUrl as string | null),
   };
@@ -731,7 +746,7 @@ function activityContract(value: unknown, selected: Selection) {
   if (
     data.groupingVersion !== "actor-repository-state-utc-hour-v1" ||
     data.previewLimit !== 5 ||
-    data.correctionHistory !== "not_supplied"
+    !["not_supplied", "per_proof"].includes(String(data.correctionHistory))
   )
     throw new ReadFailure(502, "invalid_activity_response");
   return data;

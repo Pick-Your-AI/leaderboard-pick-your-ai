@@ -1,6 +1,8 @@
 import {
   matchesActorFilter,
   type ActorFilter,
+  publicEvidenceMetadataSchema,
+  type PublicEvidenceMetadata,
   actorSchema,
   artifactSchema,
   contributionSchema,
@@ -25,6 +27,7 @@ export interface PublicScope {
   end: string | null;
 }
 export interface PublicEvidence {
+  evidenceMetadata?: PublicEvidenceMetadata;
   artifact: Artifact;
   contribution: Contribution;
   occurredAt: string | null;
@@ -269,6 +272,7 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
     );
   if (new Set(actors.map((actor) => actor.actorId)).size !== actors.length) return reject();
   const actorIds = new Set(actors.map((actor) => actor.actorId));
+  const metadataByContribution = new Map<string, string | null>();
   const projectEvidence = (entries: PublicEvidence[]) =>
     entries
       .map((entry) => {
@@ -281,7 +285,27 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
           ),
         };
         if (!date(entry.occurredAt) || (entry.sourceRevision !== null && !id(entry.sourceRevision))) return reject();
+        const metadata =
+          entry.evidenceMetadata === undefined ? undefined : publicEvidenceMetadataSchema.parse(entry.evidenceMetadata);
+        // Absence is part of the projection too: route preference must not choose
+        // a legacy copy over a richer copy of the same contribution (or vice versa).
+        const serialized = metadata === undefined ? null : JSON.stringify(metadata);
+        if (
+          metadataByContribution.has(contribution.contributionId) &&
+          metadataByContribution.get(contribution.contributionId) !== serialized
+        )
+          return reject();
+        metadataByContribution.set(contribution.contributionId, serialized);
+        const portfolio = entry as Partial<PortfolioEvidence>;
+        if (
+          metadata &&
+          ((portfolio.activityState !== undefined && portfolio.activityState !== metadata.activityState) ||
+            (portfolio.observedAt !== undefined && portfolio.observedAt !== metadata.observedAt) ||
+            (metadata.acceptedAt !== null && contribution.qualification !== "eligible"))
+        )
+          return reject();
         return {
+          ...(metadata === undefined ? {} : { evidenceMetadata: metadata }),
           artifact,
           contribution,
           occurredAt: entry.occurredAt,

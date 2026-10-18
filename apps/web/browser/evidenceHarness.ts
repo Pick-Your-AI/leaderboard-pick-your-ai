@@ -164,6 +164,42 @@ export async function evidenceService(page: Page) {
       current.controls.version = "artifact-privacy-2";
       (current.controls.suppressedArtifactIds as string[]) = ["api-pr-0"];
     },
+    withMetadata(accepted = false) {
+      for (const list of [current.selected.evidence, current.selected.portfolioEvidence]) {
+        Object.assign(list[0]!, {
+          evidenceMetadata: {
+            schemaVersion: "leaderboard-evidence/v1",
+            artifactTitle: {
+              value: '<img src=x onerror="window.proofInjected=true"> Collected title',
+              basis: "as_collected",
+              collectedAt: at,
+            },
+            sourceAction: accepted ? "recognition_accepted" : "artifact_created",
+            sourceOccurredAt: "2026-10-01T12:00:00.000Z",
+            observedAt: at,
+            activityState: accepted ? "accepted" : "observed",
+            acceptedAt: accepted ? "2026-10-15T12:00:00.000Z" : null,
+            history: {
+              coverage: "partial",
+              records: [
+                {
+                  kind: "source_revision",
+                  revision: "abcdef",
+                  occurredAt: null,
+                  publicUrl: "https://github.com/synthetic-api/example/commit/abcdef",
+                },
+                {
+                  kind: "correction",
+                  occurredAt: "2026-10-16T12:00:00.000Z",
+                  publicUrl: "https://github.com/synthetic-api/example/issues/1#issuecomment-2",
+                },
+              ],
+            },
+          },
+        });
+      }
+      current.selected.portfolioEvidence[0]!.activityState = accepted ? "accepted" : "observed";
+    },
     unknownAndHostile() {
       current.selected.portfolioEvidence = [];
       current.selected.evidence[0]!.contribution.reasonCodes = [

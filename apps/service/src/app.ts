@@ -479,7 +479,7 @@ export function createService(options: ServiceOptions = {}) {
       category: q.category,
       groupingVersion: activityGroupingVersion,
       previewLimit: activityPreviewLimit,
-      correctionHistory: "not_supplied",
+      correctionHistory: "per_proof",
     };
     let body: unknown;
     if (groupId === null) {
