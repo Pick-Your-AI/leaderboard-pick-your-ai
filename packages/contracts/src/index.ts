@@ -1,4 +1,13 @@
 export { actorFilterSchema, actorFilterLabels, matchesActorFilter, type ActorFilter } from "./actor-filter.js";
+export {
+  canonicalPublicScope,
+  publicScopeKey,
+  publicScopeFilterKey,
+  publicScopeParameters,
+  publicScopeSchemaVersion,
+  publicScopeProjectLimit,
+  type PublicScope,
+} from "./public-scope.js";
 export { compareSourceInstants } from "./v1/source-time.js";
 export {
   publicParticipationSchema,
