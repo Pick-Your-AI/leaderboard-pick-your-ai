@@ -485,7 +485,7 @@ export async function createPipeline(options) {
         assertRunConfiguration();
         monitorSuccess(monitorSource(repository.id), "normalization", normalizationStarted);
       } catch (error) {
-        if (isProjectSourceScopeFailure(error))
+        if (isProjectSourceScopeFailure(error, row.family))
           await denyRepository(repository, "project_scope_unavailable", utc(now()));
         monitorFailure(monitorSource(repository.id), "normalization", "schema_changed");
         if (dispatch) {
