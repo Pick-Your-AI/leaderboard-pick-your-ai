@@ -1,0 +1,30 @@
+# Repository review routing only. This file grants no access or production role.
+# CompleteDotTech's repository admin permission was verified on 2026-10-18.
+# The same verified maintainer currently routes each specialty; no staffing or
+# independent approval is implied. See docs/review-routing.md before changing it.
+* @CompleteDotTech
+
+# Metrics and versioned policy/contracts
+/packages/metrics/ @CompleteDotTech
+/packages/contracts/ @CompleteDotTech
+/planning/metrics-and-ingestion.json @CompleteDotTech
+/planning/metric-backlog-coverage.json @CompleteDotTech
+
+# Ingestion, source adapters and publication
+/packages/github/ @CompleteDotTech
+/packages/ingestion/ @CompleteDotTech
+/apps/pipeline/ @CompleteDotTech
+/apps/worker/ @CompleteDotTech
+
+# Public UI and API
+/apps/web/ @CompleteDotTech
+/apps/service/ @CompleteDotTech
+
+# Security and contributor controls
+/apps/controls/ @CompleteDotTech
+/SECURITY.md @CompleteDotTech
+
+# Operations and repository review configuration
+/infra/ @CompleteDotTech
+/.github/ @CompleteDotTech
+/.github/CODEOWNERS @CompleteDotTech

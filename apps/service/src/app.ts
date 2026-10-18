@@ -15,6 +15,7 @@ import {
   activityIndex,
   activityPageByteLimit,
   activityPreviewLimit,
+  newest,
   publicPortfolio as portfolio,
 } from "./activity.js";
 import {
@@ -150,14 +151,23 @@ export function createService(options: ServiceOptions = {}) {
       format,
     };
   }
-  async function load(scope: PublicScope, pin: string | null, actors: ActorFilter): Promise<PublicRead> {
+  async function load(
+    scope: PublicScope,
+    pin: string | null,
+    actors: ActorFilter,
+    health = false,
+  ): Promise<PublicRead> {
     if (reads >= maxReads) fail(429, "read_budget_exceeded");
     reads++;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Keep a slot occupied until the provider actually settles, even if it ignores cancellation.
     const pending = Promise.resolve()
-      .then(() => source.read(scope, pin, controller.signal))
+      .then(() =>
+        health && source.readHealth
+          ? source.readHealth(scope, pin, controller.signal)
+          : source.read(scope, pin, controller.signal),
+      )
       .finally(() => {
         reads--;
       });
@@ -565,8 +575,7 @@ export function createService(options: ServiceOptions = {}) {
       .filter((entry) => entry.contribution.actorId === actor.actorId)
       .sort(
         (a, b) =>
-          (b.occurredAt === null ? -Infinity : Date.parse(b.occurredAt)) -
-            (a.occurredAt === null ? -Infinity : Date.parse(a.occurredAt)) ||
+          newest(a.occurredAt, b.occurredAt) ||
           (a.contribution.contributionId < b.contribution.contributionId
             ? -1
             : a.contribution.contributionId > b.contribution.contributionId
@@ -659,21 +668,30 @@ export function createService(options: ServiceOptions = {}) {
   });
   app.get("/api/v1/health", async (request, reply) => {
     const q = query(request);
-    const read = await load(q.scope, q.snapshot, q.actors);
-    const sources = read.selected.snapshot.coverage.map((coverage) => ({
-      source: coverage.source,
-      scopeId: coverage.scopeId,
-      state: coverage.state,
-      lastSuccessfulSync: coverage.lastSuccessfulSync,
-      reconciledThrough: coverage.sourceWatermark,
-      webhookLagSeconds: null,
-      degradedCapabilities: coverage.permissionsMissing,
-      collectionState: coverage.sourceErrors.length
-        ? "degraded"
-        : coverage.state === "complete"
-          ? "covered"
-          : "unknown",
-    }));
+    const read = await load(q.scope, q.snapshot, q.actors, true);
+    const sources = read.selected.snapshot.coverage.map((coverage) => {
+      const current = coverage.source.startsWith("github_")
+        ? (read.currentSourceHealth?.find((entry) => entry.scopeId === coverage.scopeId) ?? null)
+        : null;
+      return {
+        source: coverage.source,
+        scopeId: coverage.scopeId,
+        state: coverage.state,
+        lastSuccessfulSync: coverage.lastSuccessfulSync,
+        reconciledThrough: coverage.sourceWatermark,
+        webhookLagSeconds: current?.webhookLagSeconds ?? null,
+        currentCollection:
+          current === null
+            ? null
+            : { scope: "repository", webhookLagBasis: "oldest_unfinished_retained_receipt", ...current },
+        degradedCapabilities: coverage.permissionsMissing,
+        collectionState: coverage.sourceErrors.length
+          ? "degraded"
+          : coverage.state === "complete"
+            ? "covered"
+            : "unknown",
+      };
+    });
     const stale =
       sources.length === 0 ||
       sources.some(
@@ -683,7 +701,14 @@ export function createService(options: ServiceOptions = {}) {
           entry.reconciledThrough === null ||
           now() < Date.parse(entry.lastSuccessfulSync) ||
           now() - Date.parse(entry.lastSuccessfulSync) > 300000 ||
-          entry.collectionState === "degraded",
+          entry.collectionState === "degraded" ||
+          (entry.currentCollection !== null &&
+            (!["reconciled", "no_activity_in_window"].includes(entry.currentCollection.state) ||
+              entry.currentCollection.webhookState === "degraded" ||
+              (entry.currentCollection.webhookLagSeconds !== null && entry.currentCollection.webhookLagSeconds > 300) ||
+              [entry.currentCollection.lastSuccessfulSync, entry.currentCollection.reconciledThrough].some(
+                (value) => value === null || now() < Date.parse(value) || now() - Date.parse(value) > 300000,
+              ))),
       );
     return send(request, reply, {
       ...meta(read),

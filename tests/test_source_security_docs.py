@@ -17,7 +17,10 @@ class SourceSecurityCandidateTests(unittest.TestCase):
             "SSRF",
             "unknown",
             "test and owner role",
-            "no receiver exists",
+            "local receiver verifies signatures",
+            "escaped plain text only",
+            "meta CSP cannot enforce",
+            "does not deploy a host",
             "No app installation or permission grant is authorized",
         ):
             self.assertIn(required.lower(), text.lower())
