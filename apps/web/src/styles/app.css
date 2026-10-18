@@ -1007,6 +1007,22 @@ tbody th {
   overflow-wrap: anywhere;
 }
 
+.policy-comparison {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.policy-comparison select {
+  min-width: 0;
+}
+.policy-difference-table {
+  overflow-x: auto;
+}
+.policy-difference-table table {
+  width: 100%;
+  min-width: 34rem;
+  table-layout: fixed;
+}
+
 /* Remote proof is rendered outside the inert background on narrow screens. */
 .remote-proof-drawer {
   overflow-wrap: anywhere;
