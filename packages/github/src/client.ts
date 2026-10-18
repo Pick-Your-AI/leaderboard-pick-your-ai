@@ -408,6 +408,7 @@ export class GithubReadClient {
             ? Math.max(this.options.now() + backoff, Date.parse(outcome.retryAt))
             : this.options.now() + backoff;
         await this.pause(source, retryAt + jitter);
+        authorize();
       }
       if (!retryable || attempt >= this.options.maxRetries) throw new GithubClientError(outcome, source);
     }
@@ -480,6 +481,7 @@ export class GithubReadClient {
         await this.options.checkpoints.save(storageKey, state);
       }
       while (state.next !== null) {
+        checkAuthorization(source, assertAuthorized);
         if (state.visited.length >= maxPages)
           throw new Error("Source pagination exceeded maxPages; checkpoint retained");
         if (state.visited.includes(state.next))
