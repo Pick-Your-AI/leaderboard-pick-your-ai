@@ -4,6 +4,13 @@ import { metricRegistrySchema, type MetricRegistry } from "@pick-your-ai/contrac
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { renderPublicExport } from "./exports.js";
 import {
+  activityGroupingVersion,
+  activityIndex,
+  activityPageByteLimit,
+  activityPreviewLimit,
+  publicPortfolio as portfolio,
+} from "./activity.js";
+import {
   projectRead,
   PublicReadError,
   unavailableSource,
@@ -279,10 +286,21 @@ export function createService(options: ServiceOptions = {}) {
     read: PublicRead,
     cursor: ReturnType<typeof decodeCursor> | null,
     binding: string,
+    byteLimit = Infinity,
   ) {
     if (cursor && cursor.policy !== read.controls.version) fail(410, "cursor_policy_changed_refetch");
     const offset = cursor?.offset ?? 0;
-    const entries = items.slice(offset, offset + q.limit);
+    const entries: T[] = [];
+    let bytes = 0;
+    for (const item of items.slice(offset, offset + q.limit)) {
+      const size = byteLimit === Infinity ? 0 : Buffer.byteLength(JSON.stringify(item));
+      if (bytes + size > byteLimit) {
+        if (!entries.length) fail(503, "activity_item_too_large");
+        break;
+      }
+      entries.push(item);
+      bytes += size;
+    }
     const nextOffset = offset + entries.length;
     let nextCursor: string | null = null;
     if (nextOffset < items.length) {
@@ -304,21 +322,6 @@ export function createService(options: ServiceOptions = {}) {
     if (cursor && (cursor.binding !== binding || (q.snapshot !== null && q.snapshot !== cursor.pin)))
       fail(400, "cursor_scope_mismatch");
     return cursor;
-  }
-  function portfolio(read: PublicRead, category: string | null): PortfolioEvidence[] {
-    // Legacy ranked-only snapshots remain readable without inventing acceptance states.
-    const entries =
-      read.selected.portfolioEvidence ??
-      read.selected.evidence.map((entry) => ({
-        ...entry,
-        activityState: "unknown" as const,
-        observedAt: null,
-      }));
-    return entries.filter(
-      (entry) =>
-        !entry.contribution.roles.includes("unknown") &&
-        (category === null || entry.contribution.metricIds.includes(category)),
-    );
   }
   function categories(entries: PortfolioEvidence[]) {
     return [...new Set(entries.flatMap((entry) => entry.contribution.metricIds))].sort().map((metricId) => {
@@ -412,6 +415,8 @@ export function createService(options: ServiceOptions = {}) {
         "boards",
         "contributors",
         "contributors/:actorId",
+        "activity",
+        "activity/:groupId",
         "evidence/:contributionId",
         "health",
         "updates",
@@ -425,6 +430,54 @@ export function createService(options: ServiceOptions = {}) {
   });
   app.get("/api/v1/boards", (request, reply) => board(request, reply, false));
   app.get("/api/v1/exports", (request, reply) => board(request, reply, true));
+  async function activity(request: FastifyRequest, reply: FastifyReply, groupId: string | null) {
+    const q = query(request);
+    if (q.metric) fail(400, "use_category_filter");
+    if (q.search || q.format !== "json") fail(400, "unsupported_filter");
+    if (groupId !== null && !/^[a-f0-9]{64}$/.test(groupId)) fail(400, "invalid_activity_group");
+    const binding = JSON.stringify(["activity", activityGroupingVersion, groupId, q.scope, q.category, q.limit]);
+    const cursor = boundCursor(q, binding);
+    const read = await load(q.scope, cursor?.pin ?? q.snapshot);
+    if (cursor && cursor.policy !== read.controls.version) fail(410, "cursor_policy_changed_refetch");
+    const disabled = read.selected.disabledMetrics?.find((entry) => entry.id === q.category);
+    if (disabled)
+      return reply
+        .code(503)
+        .header("Cache-Control", "no-store")
+        .send({ ...meta(read), error: "metric_disabled", metric: disabled });
+    const index = activityIndex(read, q.category);
+    const common = {
+      ...meta(read),
+      category: q.category,
+      groupingVersion: activityGroupingVersion,
+      previewLimit: activityPreviewLimit,
+      correctionHistory: "not_supplied",
+    };
+    let body: unknown;
+    if (groupId === null) {
+      const { entries: groups, nextCursor } = page(index.groups, q, read, cursor, binding, activityPageByteLimit);
+      body = { ...common, groups, totalGroups: index.groups.length, nextCursor };
+    } else {
+      const group = index.groups.find((entry) => entry.groupId === groupId);
+      if (!group) fail(404, "activity_group_unavailable");
+      const { entries: proofs, nextCursor } = page(
+        index.proofs.get(groupId)!,
+        q,
+        read,
+        cursor,
+        binding,
+        activityPageByteLimit,
+      );
+      body = { ...common, group, proofs, nextCursor };
+    }
+    // Metadata is bounded separately by the source contract. Never exceed the public client byte ceiling.
+    if (Buffer.byteLength(JSON.stringify(body)) > 1_500_000) fail(503, "activity_response_too_large");
+    return send(request, reply, body);
+  }
+  app.get("/api/v1/activity", (request, reply) => activity(request, reply, null));
+  app.get<{ Params: { groupId: string } }>("/api/v1/activity/:groupId", (request, reply) =>
+    activity(request, reply, request.params.groupId),
+  );
   app.get("/api/v1/contributors", async (request, reply) => {
     const q = query(request);
     if (q.metric) fail(400, "use_category_filter");

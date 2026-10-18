@@ -6,6 +6,7 @@ import {
   metricDefinitionSchema,
   metricRegistrySchema,
   metricResultSchema,
+  sourceEventSchema,
   type Actor,
   type Artifact,
   type Contribution,
@@ -113,7 +114,8 @@ export function uiHref(
   params.set("metric", extra.metric ?? value.metric);
   params.set("limit", value.limit);
   params.set("ui", "api");
-  if (path.startsWith("/contributors") && value.category) params.set("category", value.category);
+  if ((path.startsWith("/contributors") || path === "/activity" || path.startsWith("/activity/")) && value.category)
+    params.set("category", value.category);
   if (path === "/contributors" && value.search) params.set("search", value.search);
   if (extra.cursor) params.set("cursor", extra.cursor);
   return `${path}?${params}`;
@@ -587,3 +589,181 @@ export function health(value: unknown, selected: Selection): Health {
   };
 }
 export const catalog = (value: unknown): MetricRegistry => metricRegistrySchema.parse(value);
+
+export interface ActivityGroup {
+  groupId: string;
+  actorId: string;
+  actor: Actor;
+  repositoryId: string | null;
+  activityState: Evidence["activityState"];
+  latestOccurredAt: string | null;
+  earliestOccurredAt: string | null;
+  firstCollectedAt: string | null;
+  lastCollectedAt: string | null;
+  unknownCollectionCount: number;
+  artifactCount: number;
+  factCount: number;
+  proofCount: number;
+  categoryIds: string[];
+  artifactPreview: { artifactId: string; kind: Artifact["kind"]; publicUrl: string }[];
+}
+export interface Activity extends Metadata {
+  groups: ActivityGroup[];
+  totalGroups: number;
+  nextCursor: string | null;
+}
+export interface ActivityDetail extends Metadata {
+  group: ActivityGroup;
+  proofs: (Evidence & { canonicalFactId: string })[];
+  nextCursor: string | null;
+}
+const activityDigest = (value: unknown) => {
+  const result = string(value);
+  if (!/^[a-f0-9]{64}$/.test(result)) throw new ReadFailure(502, "invalid_activity_response");
+  return result;
+};
+const activityTime = (value: unknown): string | null => {
+  const result = sourceEventSchema.shape.occurredAt.safeParse(value);
+  if (!result.success) throw new ReadFailure(502, "invalid_activity_response");
+  return result.data;
+};
+function activityContract(value: unknown, selected: Selection) {
+  const data = object(value);
+  if (data.category !== selected.category) throw new ReadFailure(502, "api_filter_mismatch");
+  if (
+    data.groupingVersion !== "actor-repository-state-utc-hour-v1" ||
+    data.previewLimit !== 5 ||
+    data.correctionHistory !== "not_supplied"
+  )
+    throw new ReadFailure(502, "invalid_activity_response");
+  return data;
+}
+function activityGroup(value: unknown, selected: Selection): ActivityGroup {
+  const data = object(value);
+  const state = data.activityState;
+  if (!["observed", "pending", "accepted", "unknown"].includes(String(state)))
+    throw new ReadFailure(502, "invalid_activity_response");
+  const result: ActivityGroup = {
+    groupId: activityDigest(data.groupId),
+    actorId: identity(data.actorId),
+    actor: actorSchema.parse(data.actor),
+    repositoryId: data.repositoryId === null ? null : identity(data.repositoryId),
+    activityState: state as Evidence["activityState"],
+    latestOccurredAt: activityTime(data.latestOccurredAt),
+    earliestOccurredAt: activityTime(data.earliestOccurredAt),
+    firstCollectedAt: activityTime(data.firstCollectedAt),
+    lastCollectedAt: activityTime(data.lastCollectedAt),
+    unknownCollectionCount: integer(data.unknownCollectionCount),
+    artifactCount: integer(data.artifactCount),
+    factCount: integer(data.factCount),
+    proofCount: integer(data.proofCount),
+    categoryIds: array(data.categoryIds, 98).map(identity),
+    artifactPreview: array(data.artifactPreview, 5).map((value) => {
+      const item = object(value),
+        artifactId = identity(item.artifactId);
+      const artifact = artifactSchema.parse({
+        schemaVersion: "leaderboard/v1",
+        source: "github",
+        visibility: "public",
+        kind: item.kind,
+        stableId: artifactId,
+        publicUrl: item.publicUrl,
+      });
+      const publicUrl = publicLink(artifact.publicUrl);
+      if (!publicUrl) throw new ReadFailure(502, "invalid_activity_response");
+      return { artifactId, kind: artifact.kind, publicUrl };
+    }),
+  };
+  if (
+    result.actor.identityState !== "resolved" ||
+    result.artifactCount < 1 ||
+    result.factCount < result.artifactCount ||
+    result.proofCount < result.factCount ||
+    result.proofCount > 20000 ||
+    result.unknownCollectionCount > result.proofCount ||
+    result.artifactPreview.length !== Math.min(5, result.artifactCount) ||
+    new Set(result.artifactPreview.map((item) => item.artifactId)).size !== result.artifactPreview.length ||
+    !result.categoryIds.length ||
+    new Set(result.categoryIds).size !== result.categoryIds.length ||
+    (selected.category !== null && !result.categoryIds.includes(selected.category)) ||
+    (selected.repository !== null && result.repositoryId !== selected.repository) ||
+    (result.latestOccurredAt === null) !== (result.earliestOccurredAt === null) ||
+    (result.firstCollectedAt === null) !== (result.lastCollectedAt === null) ||
+    (result.latestOccurredAt !== null &&
+      result.earliestOccurredAt !== null &&
+      (Date.parse(result.earliestOccurredAt) > Date.parse(result.latestOccurredAt) ||
+        Math.floor(Date.parse(result.earliestOccurredAt) / 3600000) !==
+          Math.floor(Date.parse(result.latestOccurredAt) / 3600000))) ||
+    (result.firstCollectedAt !== null &&
+      result.lastCollectedAt !== null &&
+      Date.parse(result.firstCollectedAt) > Date.parse(result.lastCollectedAt)) ||
+    (selected.start !== null &&
+      (result.earliestOccurredAt === null || Date.parse(result.earliestOccurredAt) < Date.parse(selected.start))) ||
+    (selected.end !== null &&
+      (result.latestOccurredAt === null || Date.parse(result.latestOccurredAt) >= Date.parse(selected.end)))
+  )
+    throw new ReadFailure(502, "invalid_activity_response");
+  return result;
+}
+export function activity(value: unknown, selected: Selection): Activity {
+  const data = activityContract(value, selected);
+  const groups = array(data.groups, Number(selected.limit)).map((value) => activityGroup(value, selected));
+  const totalGroups = integer(data.totalGroups);
+  if (
+    new Set(groups.map((group) => group.groupId)).size !== groups.length ||
+    totalGroups < groups.length ||
+    totalGroups > 20000
+  )
+    throw new ReadFailure(502, "invalid_activity_response");
+  return {
+    ...metadata(value, selected),
+    groups,
+    totalGroups,
+    nextCursor: data.nextCursor === null ? null : string(data.nextCursor),
+  };
+}
+export function activityDetail(value: unknown, selected: Selection): ActivityDetail {
+  const data = activityContract(value, selected),
+    group = activityGroup(data.group, selected);
+  const proofs = array(data.proofs, Number(selected.limit)).map((value) => {
+    const item = object(value),
+      result = evidence(value);
+    if (
+      result.contribution.actorId !== group.actorId ||
+      result.activityState !== group.activityState ||
+      result.artifact.visibility !== "public" ||
+      !publicLink(result.artifact.publicUrl) ||
+      result.contribution.artifactId !== result.artifact.stableId ||
+      (result.artifact.repositoryId ?? null) !== group.repositoryId ||
+      result.contribution.qualification !== "eligible" ||
+      result.contribution.roles.includes("unknown") ||
+      !result.contribution.metricIds.length ||
+      result.contribution.metricIds.some((id) => !group.categoryIds.includes(id)) ||
+      (selected.category !== null && !result.contribution.metricIds.includes(selected.category)) ||
+      (result.occurredAt === null) !== (group.latestOccurredAt === null) ||
+      (result.occurredAt !== null &&
+        group.latestOccurredAt !== null &&
+        group.earliestOccurredAt !== null &&
+        (Date.parse(result.occurredAt) > Date.parse(group.latestOccurredAt) ||
+          Date.parse(result.occurredAt) < Date.parse(group.earliestOccurredAt)))
+    )
+      throw new ReadFailure(502, "invalid_activity_response");
+    return {
+      ...result,
+      occurredAt: activityTime(result.occurredAt),
+      observedAt: activityTime(result.observedAt),
+      canonicalFactId: activityDigest(item.canonicalFactId),
+    };
+  });
+  if (
+    proofs.length > group.proofCount ||
+    new Set(proofs.map((proof) => proof.contribution.contributionId)).size !== proofs.length
+  )
+    throw new ReadFailure(502, "invalid_activity_response");
+  return {
+    ...metadata(value, selected),
+    group,
+    proofs,
+    nextCursor: data.nextCursor === null ? null : string(data.nextCursor),
+  };
+}

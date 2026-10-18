@@ -1,7 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MetricDefinition, MetricRegistry } from "@pick-your-ai/contracts";
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
+import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
 import {
+  activity,
+  activityDetail,
+  type Activity,
+  type ActivityDetail,
   apiBase,
   board,
   directory,
@@ -33,6 +38,8 @@ type Data =
   | { kind: "catalog" }
   | { kind: "health"; value: Health }
   | { kind: "board"; value: Board }
+  | { kind: "activity"; value: Activity }
+  | { kind: "activity-detail"; value: ActivityDetail }
   | { kind: "directory"; value: Directory }
   | { kind: "profile"; value: Profile }
   | { kind: "evidence"; value: Evidence & Metadata }
@@ -75,8 +82,8 @@ const title = (path: string) =>
             ? "Measures"
             : path === "/contributors"
               ? "Contributor directory"
-              : path === "/activity"
-                ? "Published evidence"
+              : path === "/activity" || path.startsWith("/activity/")
+                ? "Public activity"
                 : path === "/coverage" || path === "/health"
                   ? "Source coverage and health"
                   : path === "/live"
@@ -214,7 +221,7 @@ function Filters({
             </label>
           ),
         )}
-        {path.startsWith("/contributors") && (
+        {(path.startsWith("/contributors") || path === "/activity" || path.startsWith("/activity/")) && (
           <>
             <input type="hidden" name="category" value={selected.category ?? ""} />
             {path === "/contributors" && <input type="hidden" name="search" value={selected.search ?? ""} />}
@@ -490,9 +497,22 @@ export function RemoteApp() {
         if (value.contribution.contributionId !== id) throw new ReadFailure(502, "api_evidence_mismatch");
         return { kind: "evidence", value: { ...metadata(raw, exact), ...value } };
       }
+      if (path === "/activity")
+        return {
+          kind: "activity",
+          value: activity(await request(parsed.base, "activity", portfolioParameters(exact), controller.signal), exact),
+        };
+      const activityGroup = /^\/activity\/([a-f0-9]{64})$/.exec(path);
+      if (activityGroup) {
+        const value = activityDetail(
+          await request(parsed.base, `activity/${activityGroup[1]}`, portfolioParameters(exact), controller.signal),
+          exact,
+        );
+        if (value.group.groupId !== activityGroup[1]) throw new ReadFailure(502, "api_activity_group_mismatch");
+        return { kind: "activity-detail", value };
+      }
       if (
         /^\/leaderboards\/[^/]+$/.test(path) ||
-        path === "/activity" ||
         path === "/live" ||
         /^\/projects\/[^/]+$/.test(path) ||
         /^\/methodology\/[^/]+$/.test(path)
@@ -509,7 +529,12 @@ export function RemoteApp() {
         if ("value" in data && registry.policy_version !== data.value.metricDefinitionVersion)
           throw new ReadFailure(409, "metric_definition_unavailable");
         setChecking(false);
-        if (data.kind === "directory" || data.kind === "profile")
+        if (
+          data.kind === "directory" ||
+          data.kind === "profile" ||
+          data.kind === "activity" ||
+          data.kind === "activity-detail"
+        )
           displayedPortfolio.current = {
             location: `${url.pathname}${url.search}`,
             href: uiHref(url.pathname, selected, { snapshot: data.value.snapshotId, cursor: selected.cursor }),
@@ -625,7 +650,7 @@ export function RemoteApp() {
                 ["/", "Overview"],
                 ["/leaderboards", "Measures"],
                 ["/contributors", "Contributors"],
-                ["/activity", "Evidence"],
+                ["/activity", "Activity"],
                 ["/methodology", "Methodology"],
                 ["/coverage", "Coverage"],
                 ["/live", "Live"],
@@ -784,89 +809,63 @@ export function RemoteApp() {
                         ? `Approved ${data.value.ranking.direction} ordering. Ties retain the API’s dense ranks.`
                         : "No ranking policy is supplied."}
                   </p>
-                  {url.pathname === "/activity" ? (
-                    <>
-                      <p>
-                        Published evidence for this measure and page. This is not an unfiltered source event stream.
-                      </p>
-                      <ul className="receipt-list">
-                        {data.value.rows.flatMap((row) =>
-                          row.evidenceIds.map((id) => (
-                            <li key={`${row.actorId}-${id}`}>
-                              <a data-api-nav href={uiHref(`/contributions/${encodeURIComponent(id)}`, pinned)}>
-                                {id}
-                              </a>{" "}
-                              · {name(row.actor, row.actorId)}
-                            </li>
-                          )),
-                        )}
-                      </ul>
-                    </>
-                  ) : (
-                    <div className="table-region" role="region" aria-label="Published contributions" tabIndex={0}>
-                      <table className="board-table" role="table">
-                        <caption>
-                          {data.value.metric.name} · {data.value.metric.definition.unit} · {data.value.totalRows}{" "}
-                          published rows; this page has {data.value.rows.length}
-                        </caption>
-                        <thead role="rowgroup">
-                          <tr role="row">
-                            <th scope="col" role="columnheader">
-                              Rank
+                  <div className="table-region" role="region" aria-label="Published contributions" tabIndex={0}>
+                    <table className="board-table" role="table">
+                      <caption>
+                        {data.value.metric.name} · {data.value.metric.definition.unit} · {data.value.totalRows}{" "}
+                        published rows; this page has {data.value.rows.length}
+                      </caption>
+                      <thead role="rowgroup">
+                        <tr role="row">
+                          <th scope="col" role="columnheader">
+                            Rank
+                          </th>
+                          <th scope="col" role="columnheader">
+                            Contributor
+                          </th>
+                          <th scope="col" role="columnheader">
+                            Value and state
+                          </th>
+                          <th scope="col" role="columnheader">
+                            Evidence
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody role="rowgroup">
+                        {data.value.rows.map((row) => (
+                          <tr key={row.actorId} role="row">
+                            <td role="cell" data-label="Rank">
+                              {row.rank === null ? "Unranked" : row.rank}
+                            </td>
+                            <th role="rowheader" scope="row">
+                              <a data-api-nav href={uiHref(`/contributors/${encodeURIComponent(row.actorId)}`, pinned)}>
+                                {name(row.actor, row.actorId)}
+                              </a>
                             </th>
-                            <th scope="col" role="columnheader">
-                              Contributor
-                            </th>
-                            <th scope="col" role="columnheader">
-                              Value and state
-                            </th>
-                            <th scope="col" role="columnheader">
-                              Evidence
-                            </th>
+                            <td role="cell" data-label="Value">
+                              <Value
+                                result={row.result}
+                                diagnostic={data.value.diagnostics.find(
+                                  (item) => item.actorId === row.actorId && item.metricId === row.result.metricId,
+                                )}
+                              />
+                            </td>
+                            <td role="cell" data-label="Evidence">
+                              {row.evidenceIds.length
+                                ? row.evidenceIds.map((id) => (
+                                    <p key={id}>
+                                      <a data-api-nav href={uiHref(`/contributions/${encodeURIComponent(id)}`, pinned)}>
+                                        {id}
+                                      </a>
+                                    </p>
+                                  ))
+                                : "No evidence IDs supplied"}
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody role="rowgroup">
-                          {data.value.rows.map((row) => (
-                            <tr key={row.actorId} role="row">
-                              <td role="cell" data-label="Rank">
-                                {row.rank === null ? "Unranked" : row.rank}
-                              </td>
-                              <th role="rowheader" scope="row">
-                                <a
-                                  data-api-nav
-                                  href={uiHref(`/contributors/${encodeURIComponent(row.actorId)}`, pinned)}
-                                >
-                                  {name(row.actor, row.actorId)}
-                                </a>
-                              </th>
-                              <td role="cell" data-label="Value">
-                                <Value
-                                  result={row.result}
-                                  diagnostic={data.value.diagnostics.find(
-                                    (item) => item.actorId === row.actorId && item.metricId === row.result.metricId,
-                                  )}
-                                />
-                              </td>
-                              <td role="cell" data-label="Evidence">
-                                {row.evidenceIds.length
-                                  ? row.evidenceIds.map((id) => (
-                                      <p key={id}>
-                                        <a
-                                          data-api-nav
-                                          href={uiHref(`/contributions/${encodeURIComponent(id)}`, pinned)}
-                                        >
-                                          {id}
-                                        </a>
-                                      </p>
-                                    ))
-                                  : "No evidence IDs supplied"}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                   {data.value.rows.length === 0 && (
                     <p>
                       No public rows are available in this selection. An empty page does not establish zero activity.
@@ -884,7 +883,7 @@ export function RemoteApp() {
               )}
             </>
           )}
-          {(data?.kind === "directory" || data?.kind === "profile") && (
+          {(data?.kind === "directory" || data?.kind === "profile" || data?.kind === "activity") && (
             <>
               <form
                 className="remote-filters"
@@ -928,6 +927,8 @@ export function RemoteApp() {
               </p>
             </>
           )}
+          {data?.kind === "activity" && <ActivityFeed value={data.value} selected={pinned} />}
+          {data?.kind === "activity-detail" && <ActivityProofs value={data.value} selected={pinned} />}
           {data?.kind === "directory" && (
             <>
               <p>
