@@ -36,7 +36,7 @@ export class ControlsFailure extends Error {
 /** Same-origin controls only. Never reuse the public API base URL or persist CSRF tokens. */
 export async function control<T>(path: string, session?: Session, input?: unknown): Promise<T> {
   if (
-    !/^\/controls\/(policy-comparisons(?:\/(?:inputs|[a-f0-9]{64}))?|operations\/[1-9][0-9]{0,15}(?:\/(?:replay|replay-window(?:\/preview)?))?|spotlights(?:\/(?:queue|[a-f0-9-]{36}))?|session|logout|sessions\/revoke|profile(?:\/suppression)?|requests(?:\/[a-f0-9-]{36}(?:\/(review|appeal|withdraw|consent|amend))?)?|invitations|configuration(?:\/(?:proposals(?:\/[a-f0-9-]{36}(?:\/(?:preview|approve|activate))?)?|rollback))?)$/.test(
+    !/^\/controls\/(policy-comparisons(?:\/(?:inputs|[a-f0-9]{64}))?|operations\/[1-9][0-9]{0,15}(?:\/(?:replay|replay-window(?:\/preview)?|health|replays\/[A-Za-z0-9_-]{1,128}))?|spotlights(?:\/(?:queue|[a-f0-9-]{36}))?|session|logout|sessions\/revoke|profile(?:\/suppression)?|requests(?:\/[a-f0-9-]{36}(?:\/(review|appeal|withdraw|consent|amend))?)?|invitations|configuration(?:\/(?:proposals(?:\/[a-f0-9-]{36}(?:\/(?:preview|approve|activate))?)?|rollback))?)$/.test(
       path,
     )
   )

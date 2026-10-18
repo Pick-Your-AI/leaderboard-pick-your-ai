@@ -1,3 +1,9 @@
+import {
+  validatePublicationPeriods,
+  resolvePublicationWindows,
+  approvedPublicationScope,
+  publicScopeFromTemplate,
+} from "./publication-windows.mjs";
 import { retainedRankHistory } from "./rank-history.mjs";
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
 import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
@@ -13,6 +19,8 @@ import {
   applyCurrentProjectContexts,
 } from "./project-context.mjs";
 import { readCurrentSourceHealth } from "./source-health.mjs";
+import { readOperatorHealth } from "./operator-health.mjs";
+import { createOperatorPublicationVerifier } from "./operator-publication.mjs";
 import { ScanContinuationStore, ScanSupersededError, scanContinuationSchema } from "./scan-continuation.mjs";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
@@ -185,6 +193,21 @@ export async function createPipeline(options) {
   const scopeKey = c.contracts.publicScopeKey;
   const dataMode = options.dataMode ?? "public";
   if (!["public", "synthetic"].includes(dataMode)) fail("invalid_pipeline_data_mode");
+  const diagnosticOptions = options.operatorDiagnostics;
+  if (
+    diagnosticOptions !== undefined &&
+    (!diagnosticOptions ||
+      typeof diagnosticOptions !== "object" ||
+      Array.isArray(diagnosticOptions) ||
+      Object.keys(diagnosticOptions).some((key) => !["freshnessBudgetSeconds", "configurationCurrent"].includes(key)) ||
+      !Number.isSafeInteger(diagnosticOptions.freshnessBudgetSeconds) ||
+      diagnosticOptions.freshnessBudgetSeconds < 1 ||
+      diagnosticOptions.freshnessBudgetSeconds > 86400 ||
+      typeof diagnosticOptions.configurationCurrent !== "function" ||
+      typeof c.ingestion.OperatorInbox !== "function" ||
+      typeof c.ingestion.parseDispatchOperation !== "function")
+  )
+    fail("invalid_operator_diagnostics_options");
   const assertDataMode = (value) => {
     if (dataMode === "synthetic") return;
     const serialized = JSON.stringify(value);
@@ -282,7 +305,7 @@ export async function createPipeline(options) {
   });
   // Source read locks span the final reviewer reauthentication and synchronous
   // private result transaction. No source/network permission is granted here.
-  async function withAuthorizedComparisonInputs(authorizations, work) {
+  async function withAuthorizedComparisonInputs(authorizations, work, transaction) {
     requireThat(
       authorizations.every(
         (authorization) => authorization.configurationHash === digest(config) && authorization.dataMode === dataMode,
@@ -290,7 +313,7 @@ export async function createPipeline(options) {
       409,
       "Frozen input configuration changed",
     );
-    return db.transaction(async (tx) => {
+    const read = async (tx) => {
       requireThat(await approved(tx), 409, "Frozen input authorization unavailable");
       const sources = authorizations.flatMap((authorization) => authorization.sources);
       const ids = [...new Set(sources.map((source) => source.repositoryId))];
@@ -466,7 +489,8 @@ export async function createPipeline(options) {
         },
         tx,
       );
-    });
+    };
+    return transaction ? read(transaction) : db.transaction(read);
   }
   const defaultSource = options.githubClient
     ? createGithubCollectionSource({
@@ -670,8 +694,8 @@ export async function createPipeline(options) {
       if (item.policy.definitionVersion !== c.metrics.metricRegistryV1.policy_version)
         fail("registry_definition_version_mismatch");
     }
-    for (const scope of config.scopes) {
-      const canonicalScope = c.contracts.canonicalPublicScope(scope);
+    for (const template of config.scopes) {
+      const scope = publicScopeFromTemplate(template);
       if (
         scope.organization !== config.organization ||
         !["repository", "workstream", "start", "end"].every((key) => key in scope)
@@ -687,13 +711,17 @@ export async function createPipeline(options) {
           .filter((repo) => scope.repository === null || String(repo.id) === scope.repository)
           .flatMap((repo) => repo.allowedProjectIds ?? []),
       );
-      if ((canonicalScope.projects ?? []).some((id) => !approvedProjects.has(id))) fail("unapproved_scope_project");
+      if ((scope.projects ?? []).some((id) => !approvedProjects.has(id))) fail("unapproved_scope_project");
     }
-    if (new Set(config.scopes.map(scopeKey)).size !== config.scopes.length)
-      fail("duplicate_public_scope_configuration");
+    try {
+      validatePublicationPeriods(config.scopes);
+    } catch (error) {
+      if (error?.message === "duplicate_public_scope") fail("duplicate_public_scope_configuration");
+      throw error;
+    }
     return true;
   }
-  const configuredScope = (scope) => config.scopes.some((item) => scopeKey(item) === scopeKey(scope));
+  const configuredScope = (scope) => approvedPublicationScope(config.scopes, scope, c.metrics.resolveMetricWindow);
   const repositoriesFor = (scope) =>
     config.repositories.filter((repo) => scope.repository === null || String(repo.id) === scope.repository);
   async function receipt(tx, operationKey, kind, document) {
@@ -1132,7 +1160,7 @@ export async function createPipeline(options) {
       if (!head || head.revision <= publication.revision) state.pipelineHeads[scopeKey(scope)] = confirmation;
     });
   }
-  async function publish(scope, cutoff, observationCutoff, dispatch, scan = null) {
+  async function publish({ scope, window }, cutoff, observationCutoff, dispatch, scan = null) {
     assertRunConfiguration();
     scope = c.contracts.canonicalPublicScope(scope);
     if (!configuredScope(scope)) fail("scope_not_approved");
@@ -1327,10 +1355,6 @@ export async function createPipeline(options) {
           )
         ).rows.map((row) => [row.first_run_id, row.fact_key]);
     if (importedHistory.length > 10_000) fail("reconciliation_history_budget_exceeded");
-    const window =
-      scope.start === null
-        ? c.metrics.resolveMetricWindow("all", cutoff)
-        : c.metrics.resolveMetricWindow("custom", cutoff, { from: scope.start, to: scope.end });
     const engineScope = {
       ...window,
       repos: repos.map((repo) => String(repo.id)),
@@ -1985,13 +2009,17 @@ export async function createPipeline(options) {
           ]),
           cutoff,
           sources,
-          scopeKeys: config.scopes.map(scopeKey),
         },
         assertRunConfiguration,
         () => utc(now()),
+        (savedCutoff) =>
+          resolvePublicationWindows(config.scopes, savedCutoff, c.metrics.resolveMetricWindow).map(({ scope }) =>
+            scopeKey(scope),
+          ),
       );
       cutoff = scan.cutoff;
     }
+    const publicationWindows = resolvePublicationWindows(config.scopes, cutoff, c.metrics.resolveMetricWindow);
     const progress = [];
     for (const repo of config.repositories) {
       await verifyRepository(repo, cutoff);
@@ -2068,8 +2096,8 @@ export async function createPipeline(options) {
         dispatch.generations = frozen.generations;
       }
       if (observationCutoff < cutoff) fail("observation_clock_precedes_event_cutoff");
-      for (const scope of config.scopes)
-        publications.push(await publish(scope, cutoff, observationCutoff, dispatch, scan));
+      for (const selected of publicationWindows)
+        publications.push(await publish(selected, cutoff, observationCutoff, dispatch, scan));
       // SQL publication and synchronous private confirmation must both succeed.
       // A failed/partial batch keeps its original event and observation cutoffs.
       if (scan) await scanContinuations.retire(scan, assertRunConfiguration);
@@ -2095,8 +2123,9 @@ export async function createPipeline(options) {
     execute: async (lease) => {
       const result = await runOnceInternal({ cutoff: lease.operation.cutoff, dispatch: { lease } });
       if (result.state !== "published") fail("dispatch_collection_incomplete");
+      const windows = resolvePublicationWindows(config.scopes, lease.operation.cutoff, c.metrics.resolveMetricWindow);
       return result.publications.map((publication, index) => ({
-        scopeKey: scopeKey(config.scopes[index]),
+        scopeKey: scopeKey(windows[index].scope),
         snapshotId: publication.snapshotId,
         revision: publication.revision,
       }));
@@ -2126,7 +2155,9 @@ export async function createPipeline(options) {
         )
       )
         fail("dispatch_source_generation_changed");
+      const windows = resolvePublicationWindows(config.scopes, lease.operation.cutoff, c.metrics.resolveMetricWindow);
       for (const publication of publications) {
+        const selectedScope = windows.find(({ scope }) => scopeKey(scope) === publication.scopeKey)?.scope;
         const receipt = (
           await tx.query(
             `SELECT snapshot_id FROM leaderboard_pipeline.dispatch_publications WHERE operation_key=$1 AND scope_key=$2 AND snapshot_id=$3`,
@@ -2136,12 +2167,8 @@ export async function createPipeline(options) {
         const confirmation = controlsStore.read().pipelinePublications?.[publication.snapshotId];
         if (
           !receipt ||
-          !confirmationMatches(
-            confirmation,
-            config.scopes.find((scope) => scopeKey(scope) === publication.scopeKey),
-            publication.snapshotId,
-            publication.revision,
-          ) ||
+          !selectedScope ||
+          !confirmationMatches(confirmation, selectedScope, publication.snapshotId, publication.revision) ||
           confirmation?.controlsConfigurationRevision !== runConfigurationRevision
         )
           fail("dispatch_publication_unconfirmed");
@@ -2160,6 +2187,81 @@ export async function createPipeline(options) {
   function dispatchOnce() {
     return serialize(() => (stopped || !options.webhookDispatch ? "blocked" : dispatch()));
   }
+  const diagnosticConfigurationCurrent = (scope) => {
+    if (!diagnosticOptions || stopped) return false;
+    const current = diagnosticOptions.configurationCurrent({
+      configurationHash: digest(config),
+      configurationVersion: config.version,
+      dataMode,
+      repositoryId: scope.repositoryId,
+      installationId: scope.installationId,
+      sourceGeneration: scope.sourceGeneration ?? scope.generation,
+    });
+    if (current && typeof current.then === "function") void Promise.resolve(current).catch(() => undefined);
+    return current === true;
+  };
+  const verifyReplayPublications = createOperatorPublicationVerifier({
+    config,
+    dataMode,
+    policyVersion: c.metrics.metricRegistryV1.policy_version,
+    computationVersion,
+    scopeKey,
+    publicationScopesAt: (cutoff) =>
+      resolvePublicationWindows(config.scopes, cutoff, c.metrics.resolveMetricWindow).map(({ scope }) => scope),
+    digest,
+    approved,
+    controlsStore,
+    restrictConfiguration,
+    confirmationMatches,
+    aggregateExplanations,
+    recognitionCurrent: (state, confirmation) =>
+      !recognitionBindings.length ||
+      confirmation.recognitionFingerprint === recognitionFingerprint(state, recognitionBindings),
+    configurationCurrent: diagnosticConfigurationCurrent,
+    withAuthorizedInputs: withAuthorizedComparisonInputs,
+  });
+  const operatorOperations = diagnosticOptions
+    ? new c.ingestion.OperatorInbox(db, {
+        now: () => utc(now()),
+        verifyPublications: verifyReplayPublications,
+        readHealth: async (tx, scope) => {
+          const repository = config.repositories.find(
+            (repo) => repo.id === scope.repositoryId && String(repo.installationId) === scope.installationId,
+          );
+          if (!repository || !(await approved(tx))) fail("operation_health_unavailable");
+          const revision = restrictConfiguration(controlsStore.read()).revision;
+          const current = () => {
+            try {
+              return (
+                diagnosticConfigurationCurrent(scope) &&
+                restrictConfiguration(controlsStore.read()).revision === revision
+              );
+            } catch {
+              return false;
+            }
+          };
+          if (!current()) fail("operation_health_unavailable");
+          const read = await readOperatorHealth(tx, {
+            scope,
+            repository,
+            asOf: utc(now()),
+            freshnessBudgetSeconds: diagnosticOptions.freshnessBudgetSeconds,
+            protocol: c.ingestion,
+            verifyPublications: verifyReplayPublications,
+            readQuota: async () => {
+              if (!options.githubClient?.forRepository || typeof options.sourceId !== "string") return null;
+              const client = options.githubClient.forRepository(scope.repositoryId);
+              if (typeof client.readQuota !== "function") return null;
+              return client.readQuota(options.sourceId, () => {
+                if (!current()) fail("operation_health_changed");
+              });
+            },
+          });
+          if (!(await approved(tx))) fail("operation_health_changed");
+          return { health: read.health, confirmCurrent: () => current() && read.confirmCurrent() === true };
+        },
+      })
+    : null;
   async function policyInputGuard(snapshotId, input, transaction) {
     if (!input.scope) fail("policy_input_scope_unavailable");
     const read = await source.read(input.scope, snapshotId, new AbortController().signal, transaction);
@@ -2395,6 +2497,7 @@ export async function createPipeline(options) {
         controlsServer = c.controls.createControlsServer({
           ...options.controlsAuthentication,
           store: controlsStore,
+          operations: options.controlsAuthentication.operations ?? operatorOperations,
           policyComparisons: { comparisons: policyComparisons, withAuthorizedInputs: withAuthorizedComparisonInputs },
         });
         await new Promise((resolve, reject) => {
@@ -2460,6 +2563,7 @@ export async function createPipeline(options) {
     collection,
     inbox,
     outbox,
+    operations: operatorOperations,
     dispatchOnce,
     runOnce,
     applyCorrection,

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createPipeline } from "../src/index.mjs";
 import { runWorker } from "../../worker/dist/runner.js";
-import { harness, clock, ago, components } from "./harness.mjs";
+import { harness, clock, ago, components, publicScope } from "./harness.mjs";
 
 const normalizerFor = (options) =>
   components.github.createGithubEvidenceNormalizer({
@@ -477,5 +477,185 @@ test("invalid bounds and explicit invalid cutoffs cannot start a durable implici
   await assert.rejects(h.runtime.runOnce({ cutoff: null }), /invalid_pipeline_time/);
   await assert.rejects(h.runtime.runOnce({ mode: "unknown" }), /invalid_scan_scope/);
   assert.deepEqual(fixture.requests, []);
+  assert.deepEqual(await pendingScans(h), []);
+});
+
+const namedClock = () => {
+  const today = new Date();
+  const boundary = Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1);
+  let instant = new Date(boundary - 1000).toISOString();
+  return {
+    first: instant,
+    next: new Date(boundary + 10000).toISOString(),
+    fractional: new Date(boundary + 10123).toISOString(),
+    following: new Date(boundary + 11000).toISOString(),
+    now: () => instant,
+    set: (value) => {
+      instant = value;
+    },
+    probeRepository: async (repo) => ({
+      repositoryId: repo.id,
+      installationId: repo.installationId,
+      visibility: "public",
+      checkedAt: instant,
+    }),
+  };
+};
+const namedScopesAt = (templates, cutoff) =>
+  templates.map(({ period, ...scope }) => {
+    if (period === "month") {
+      const window = components.metrics.resolveMetricWindow(period, cutoff);
+      scope.start = window.from;
+      scope.end = window.to;
+    }
+    return components.contracts.canonicalPublicScope(scope);
+  });
+
+test("implicit named scan retains mixed month and role scopes across a database reopen and fractional later clock", async (t) => {
+  const fixture = paginatedSource();
+  const time = namedClock();
+  const templates = [
+    { ...publicScope, period: "month" },
+    { ...publicScope, repository: "2", roles: ["reporter"], period: "month" },
+    { ...publicScope },
+    {
+      ...publicScope,
+      repository: "2",
+      start: new Date(Date.parse(time.first) - 7 * 86400000).toISOString(),
+      end: new Date(Date.parse(time.first) - 86400000).toISOString(),
+      period: "custom",
+    },
+  ];
+  const h = await harness(t, {
+    ...fixture,
+    ...time,
+    configure(config) {
+      config.scopes = structuredClone(templates);
+    },
+  });
+  assert.equal((await h.runtime.runOnce({ maxPages: 1 })).state, "collecting");
+  const retained = (await pendingScans(h))[0];
+  assert.equal(new Date(retained.event_cutoff).toISOString(), time.first);
+  await h.runtime.stop();
+  await h.reopenDatabase();
+  time.set(time.fractional);
+  const resumed = await createPipeline(h.options);
+  try {
+    const result = await resumed.runOnce({ maxPages: 1 });
+    assert.equal(result.state, "published");
+    assert.equal(result.publications.length, templates.length);
+    assert.deepEqual(
+      fixture.requests.map((request) => request.cursor),
+      [null, "page-2"],
+    );
+    assert.equal(new Set(fixture.requests.map((request) => request.runId)).size, 1);
+    assert.ok(fixture.requests.every((request) => request.cutoff === time.first));
+    const expected = namedScopesAt(templates, time.first);
+    assert.deepEqual(
+      Object.keys(retained.scope_heads).sort(),
+      expected.map(components.contracts.publicScopeKey).sort(),
+    );
+    assert.ok(Object.values(retained.scope_heads).every((head) => head === null));
+    const originalHeads = (
+      await h.db.query("SELECT scope_key,snapshot_id FROM leaderboard_pipeline.heads ORDER BY scope_key")
+    ).rows;
+    assert.deepEqual(
+      originalHeads.map((head) => head.scope_key),
+      expected.map(components.contracts.publicScopeKey).sort(),
+    );
+    const frozen = (await h.db.query("SELECT document FROM leaderboard_pipeline.frozen_inputs")).rows;
+    assert.equal(frozen.length, templates.length);
+    assert.ok(frozen.every(({ document }) => document.frozen.cutoff === time.fractional));
+    assert.ok(
+      frozen.every(({ document }) => document.frozen.coverage.every((row) => row.sourceWatermark === time.first)),
+    );
+    assert.deepEqual(await pendingScans(h), []);
+    assert.deepEqual(h.config.scopes, templates, "neither retry nor resolution may mutate the approved templates");
+
+    await assert.rejects(resumed.runOnce({ maxPages: 1 }), /named_period_requires_whole_second_cutoff/);
+    assert.equal(fixture.requests.length, 2, "an invalid new cutoff cannot collect a replacement page");
+    assert.deepEqual(await pendingScans(h), [], "an invalid new window must not leave a permanently invalid cycle");
+    time.set(time.following);
+    assert.equal((await resumed.runOnce({ maxPages: 1 })).state, "collecting");
+    assert.equal((await resumed.runOnce({ maxPages: 1 })).state, "published");
+    assert.deepEqual(
+      fixture.requests.map((request) => request.cursor),
+      [null, "page-2", null, "page-2"],
+    );
+    assert.equal(new Set(fixture.requests.map((request) => request.runId)).size, 2);
+    assert.ok(fixture.requests.slice(2).every((request) => request.cutoff === time.following));
+    const nextHeads = (await h.db.query("SELECT scope_key,snapshot_id FROM leaderboard_pipeline.heads")).rows;
+    const oldMonthKeys = expected.slice(0, 2).map(components.contracts.publicScopeKey);
+    for (const key of oldMonthKeys)
+      assert.equal(
+        nextHeads.find((head) => head.scope_key === key)?.snapshot_id,
+        originalHeads.find((head) => head.scope_key === key)?.snapshot_id,
+      );
+    const nextKeys = namedScopesAt(templates, time.following).map(components.contracts.publicScopeKey);
+    assert.equal(nextHeads.length, 6, "two new named heads coexist with the prior month and the two exact scopes");
+    assert.ok(nextKeys.every((key) => nextHeads.some((head) => head.scope_key === key)));
+    assert.deepEqual(await pendingScans(h), []);
+  } finally {
+    await resumed.stop();
+  }
+});
+
+test("a new fractional implicit named cutoff rolls back its pending row before any collection", async (t) => {
+  const fixture = paginatedSource();
+  const time = namedClock();
+  time.set(time.fractional);
+  const h = await harness(t, {
+    ...fixture,
+    ...time,
+    configure(config) {
+      config.scopes = [{ ...publicScope, period: "month" }];
+    },
+  });
+  await assert.rejects(h.runtime.runOnce({ maxPages: 1 }), /named_period_requires_whole_second_cutoff/);
+  assert.deepEqual(fixture.requests, []);
+  assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_ingestion.collection_runs")).rows[0].n, 0);
+  assert.deepEqual(await pendingScans(h), []);
+});
+
+test("a new named cycle resolves its head keys from the event cutoff selected under its row lock", async (t) => {
+  const fixture = paginatedSource();
+  const time = namedClock();
+  const templates = [{ ...publicScope, repository: "2", roles: ["reporter"], period: "month" }];
+  const h = await harness(t, {
+    ...fixture,
+    ...time,
+    configure(config) {
+      config.scopes = structuredClone(templates);
+    },
+  });
+  const transaction = h.db.transaction;
+  let advance = true;
+  h.db.transaction = (work) =>
+    transaction((tx) =>
+      work({
+        query: async (sql, parameters) => {
+          const result = await tx.query(sql, parameters);
+          if (
+            advance &&
+            sql === "SELECT * FROM leaderboard_pipeline.scan_continuations WHERE configuration_key=$1 FOR UPDATE"
+          ) {
+            advance = false;
+            time.set(time.next);
+          }
+          return result;
+        },
+      }),
+    );
+  assert.equal((await h.runtime.runOnce({ maxPages: 1 })).state, "collecting");
+  assert.equal(advance, false, "the actual new-cycle transaction must hold its row before selecting the window");
+  const retained = (await pendingScans(h))[0];
+  assert.equal(new Date(retained.event_cutoff).toISOString(), time.next);
+  assert.deepEqual(
+    Object.keys(retained.scope_heads),
+    namedScopesAt(templates, time.next).map(components.contracts.publicScopeKey),
+  );
+  time.set(time.fractional);
+  assert.equal((await h.runtime.runOnce({ maxPages: 1 })).state, "published");
+  assert.ok(fixture.requests.every((request) => request.cutoff === time.next));
   assert.deepEqual(await pendingScans(h), []);
 });

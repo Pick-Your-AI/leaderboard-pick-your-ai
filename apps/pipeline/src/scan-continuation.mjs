@@ -54,7 +54,7 @@ export class ScanContinuationStore {
       fail("pipeline_scan_source_changed");
   }
 
-  async claim(requested, assertAuthorized, currentCutoff) {
+  async claim(requested, assertAuthorized, currentCutoff, scopeKeysAt) {
     return this.db.transaction(async (tx) => {
       assertAuthorized();
       const token = randomUUID();
@@ -71,23 +71,25 @@ export class ScanContinuationStore {
       ).rows[0];
       await this.assertSources(tx, requested);
       if (inserted.rows.length || row.context_hash !== requested.contextHash) {
+        // Select and validate a new window while holding this context's row.
+        // Retried cycles use their saved cutoff without resolving today's window.
+        const cutoff = currentCutoff();
+        const scopeKeys = scopeKeysAt(cutoff);
         const heads = (
           await tx.query(
             "SELECT scope_key,snapshot_id FROM leaderboard_pipeline.heads WHERE scope_key=ANY($1::text[])",
-            [requested.scopeKeys],
+            [scopeKeys],
           )
         ).rows;
         const scopeHeads = Object.fromEntries(
-          requested.scopeKeys.map((key) => [key, heads.find((head) => head.scope_key === key)?.snapshot_id ?? null]),
+          scopeKeys.map((key) => [key, heads.find((head) => head.scope_key === key)?.snapshot_id ?? null]),
         );
-        // Choose a new window after acquiring the context and observing its
-        // starting heads; time spent awaiting probes/locks is not a new cycle.
         row = (
           await tx.query(
             `UPDATE leaderboard_pipeline.scan_continuations
            SET context_hash=$2,cycle_token=$3,event_cutoff=$4,observation_cutoff=NULL,scope_heads=$5::jsonb
            WHERE configuration_key=$1 RETURNING *`,
-            [requested.key, requested.contextHash, token, currentCutoff(), JSON.stringify(scopeHeads)],
+            [requested.key, requested.contextHash, token, cutoff, JSON.stringify(scopeHeads)],
           )
         ).rows[0];
       }

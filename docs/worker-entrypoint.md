@@ -50,6 +50,15 @@ recognition or source-generation change replaces that row's cycle; unrelated
 controls audit/current-state revisions do not restart collection. Explicit
 `runOnce({ cutoff })` callers retain their fixed-window contract.
 
+Approved named-period templates resolve inside a new continuation's transaction
+from its selected event cutoff, including the complete role and Project scope keys
+whose heads are retained. A resumed cycle keeps those exact windows when the clock
+crosses into another month. New cycles still require a valid, unambiguous named
+window with a whole-second event cutoff; the host must supply that compatible
+clock or explicit cutoff. An already valid pending cycle can finish at a later
+fractional observation time. These rules do not round the clock or choose the
+host's period scheduling policy.
+
 The event cutoff bounds the requested collection window. Once every family is
 complete, a separate observation cutoff is frozen for normalization and publication.
 A failure after the last page, or after the SQL publication but before its private
@@ -80,6 +89,9 @@ publication mechanics independently. `apps/pipeline/test/worker-continuation.tes
 additionally runs the actual compiled continuous worker against a two-page source,
 reopens its SQL database/runtime, and verifies last-page/confirmation recovery,
 authorization changes, bounds and delayed implicit/explicit publication races.
+It also exercises mixed named, role-filtered, custom and all-time scopes through
+a month-boundary database reopen, new-window validation before collection, and
+selection of concrete scope heads under the continuation row lock.
 These synthetic tests do not claim a deployed
 end-to-end installation. Build with `npm run build --workspace @pick-your-ai/worker`
 and run `node --test apps/worker/test/*.test.mjs`.
