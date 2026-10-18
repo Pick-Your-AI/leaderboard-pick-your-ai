@@ -68,6 +68,13 @@ request. `eraseBatch` performs admission itself before planning work.
 | Pipeline corrections | Use the explicit repository column and exact request key. General controls requests and audit are outside this component. |
 | Dispatch-linked snapshot bundle | Retain the snapshot, frozen input, confirmations, private captures, source-derived support and immutable causal/publication proof. Return an explicit incomplete disposition. |
 
+Private results are examined when either the result or its referenced input names
+the selected snapshot. Both references must agree with the retained source binding,
+including the input's content identity, source IDs, revision and input/scope hashes.
+A missing input or contradictory reference blocks selection. The same checks run
+again inside the SQLite deletion transaction, so a changed or missing input after
+manifest creation cannot authorize removal or a successful store acknowledgement.
+
 No free-text search, inferred actor identity, broad table truncation or cascading
 foreign-key deletion is used. Before planning or resuming deletion, a paged
 metadata scan resolves every remaining SQL snapshot and frozen source list.
