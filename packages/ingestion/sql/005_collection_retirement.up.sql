@@ -11,7 +11,8 @@ CREATE TABLE leaderboard_ingestion.repository_retirements (
   retired_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 
-CREATE FUNCTION leaderboard_ingestion.reject_retirement_change() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION leaderboard_ingestion.reject_retirement_change() RETURNS trigger LANGUAGE plpgsql
+SECURITY INVOKER SET search_path=pg_catalog AS $$
 BEGIN
   RAISE EXCEPTION 'immutable_repository_retirement';
 END;
@@ -20,7 +21,8 @@ CREATE TRIGGER immutable_repository_retirement BEFORE UPDATE OR DELETE
   ON leaderboard_ingestion.repository_retirements FOR EACH ROW
   EXECUTE FUNCTION leaderboard_ingestion.reject_retirement_change();
 
-CREATE FUNCTION leaderboard_ingestion.guard_retired_access() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION leaderboard_ingestion.guard_retired_access() RETURNS trigger LANGUAGE plpgsql
+SECURITY INVOKER SET search_path=pg_catalog AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
     IF EXISTS (SELECT 1 FROM leaderboard_ingestion.repository_retirements WHERE repository_id=OLD.repository_id) THEN
@@ -42,7 +44,8 @@ CREATE TRIGGER retired_repository_access BEFORE INSERT OR UPDATE OR DELETE
 
 -- Share the existing repository row lock with readers, collectors and retirement.
 -- A write already underway finishes before the fence; a later write is rejected.
-CREATE FUNCTION leaderboard_ingestion.guard_retired_payload() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION leaderboard_ingestion.guard_retired_payload() RETURNS trigger LANGUAGE plpgsql
+SECURITY INVOKER SET search_path=pg_catalog AS $$
 DECLARE scope_id bigint;
 BEGIN
   IF TG_TABLE_NAME='inbox' THEN scope_id=(NEW.envelope->>'repositoryId')::bigint;
@@ -85,8 +88,22 @@ CREATE TABLE leaderboard_ingestion.collection_erasure_batches (
 -- The deletion exception exists only for the exact bounded keys selected by the
 -- erasure function in this transaction. Completed/blocked receipts grant no write.
 CREATE INDEX source_facts_retirement_scope ON leaderboard_ingestion.source_facts(repository_id,fact_key);
-CREATE FUNCTION leaderboard_ingestion.guard_erasure_receipt() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE INDEX collection_items_erasure_fact ON leaderboard_ingestion.collection_items(fact_key);
+CREATE INDEX unfinished_erasure_receipts ON leaderboard_ingestion.collection_erasure_batches(operation_id)
+  WHERE status<>'erased';
+CREATE INDEX completed_source_erasure ON leaderboard_ingestion.collection_erasure_batches(operation_id)
+  WHERE status='erased' AND NOT source_facts_remaining;
+CREATE FUNCTION leaderboard_ingestion.guard_erasure_receipt() RETURNS trigger LANGUAGE plpgsql
+SECURITY INVOKER SET search_path=pg_catalog AS $$
 BEGIN
+  -- Only the trusted table owner may create or advance the temporary exception.
+  -- The erasure function runs as that owner; direct grants to another role do
+  -- not authorize forging an active receipt in an arbitrary transaction.
+  IF current_user<>(SELECT pg_catalog.pg_get_userbyid(relowner)
+    FROM pg_catalog.pg_class WHERE oid=TG_RELID) THEN
+    RAISE EXCEPTION 'erasure_receipt_write_forbidden';
+  END IF;
+  IF TG_OP='INSERT' THEN RETURN NEW; END IF;
   IF TG_OP='DELETE' OR OLD.status='erased' THEN RAISE EXCEPTION 'immutable_erasure_receipt'; END IF;
   IF NEW.operation_id<>OLD.operation_id OR NEW.batch_id<>OLD.batch_id OR NEW.batch_limit<>OLD.batch_limit THEN
     RAISE EXCEPTION 'erasure_batch_conflict';
@@ -101,11 +118,12 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-CREATE TRIGGER retained_erasure_receipt BEFORE UPDATE OR DELETE
+CREATE TRIGGER retained_erasure_receipt BEFORE INSERT OR UPDATE OR DELETE
   ON leaderboard_ingestion.collection_erasure_batches FOR EACH ROW
   EXECUTE FUNCTION leaderboard_ingestion.guard_erasure_receipt();
 
-CREATE OR REPLACE FUNCTION leaderboard_ingestion.reject_source_fact_change() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION leaderboard_ingestion.reject_source_fact_change() RETURNS trigger LANGUAGE plpgsql
+SECURITY INVOKER SET search_path=pg_catalog AS $$
 BEGIN
   IF TG_OP='DELETE' AND EXISTS (
     SELECT 1 FROM leaderboard_ingestion.collection_erasure_batches AS batch
@@ -120,7 +138,8 @@ $$;
 
 CREATE FUNCTION leaderboard_ingestion.erase_collected_source_batch(
   p_operation_id text, p_batch_id text, p_limit integer
-) RETURNS SETOF leaderboard_ingestion.collection_erasure_batches LANGUAGE plpgsql AS $$
+) RETURNS SETOF leaderboard_ingestion.collection_erasure_batches LANGUAGE plpgsql
+SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE
   retirement leaderboard_ingestion.repository_retirements%ROWTYPE;
   prior leaderboard_ingestion.collection_erasure_batches%ROWTYPE;
@@ -142,13 +161,22 @@ BEGIN
     IF prior.batch_limit<>p_limit THEN RAISE EXCEPTION 'erasure_batch_conflict'; END IF;
     IF prior.status='erased' THEN RETURN NEXT prior; RETURN; END IF;
     IF prior.status<>'blocked' THEN RAISE EXCEPTION 'erasure_batch_incomplete'; END IF;
-  ELSIF (SELECT count(*) FROM leaderboard_ingestion.collection_erasure_batches WHERE operation_id=p_operation_id)>=10000 THEN
+  ELSIF (SELECT count(*) FROM leaderboard_ingestion.collection_erasure_batches
+    WHERE operation_id=p_operation_id AND status<>'erased')>=10000 THEN
     RAISE EXCEPTION 'erasure_receipt_limit_exceeded';
   END IF;
   SELECT COALESCE(array_agg(fact_key),ARRAY[]::text[]) INTO keys FROM (
     SELECT fact_key FROM leaderboard_ingestion.source_facts WHERE repository_id=retirement.repository_id
     ORDER BY fact_key LIMIT p_limit FOR UPDATE
   ) AS selected;
+  -- Completed audit history cannot cap how much retained source can be erased.
+  -- Once the empty scope has a receipt, new IDs must not grow empty audit rows.
+  -- An existing blocked batch can still finish, and exact successful retries
+  -- already returned their original receipt above.
+  IF cardinality(keys)=0 AND prior.batch_id IS NULL AND EXISTS (
+    SELECT 1 FROM leaderboard_ingestion.collection_erasure_batches
+    WHERE operation_id=p_operation_id AND status='erased' AND NOT source_facts_remaining
+  ) THEN RAISE EXCEPTION 'source_scope_already_erased'; END IF;
   INSERT INTO leaderboard_ingestion.collection_erasure_batches
     (operation_id,batch_id,batch_limit,attempt,status,active_transaction,active_fact_keys)
   VALUES(p_operation_id,p_batch_id,p_limit,1,'erasing',txid_current(),keys)
@@ -182,3 +210,4 @@ BEGIN
 END;
 $$;
 REVOKE ALL ON FUNCTION leaderboard_ingestion.erase_collected_source_batch(text,text,integer) FROM PUBLIC;
+REVOKE ALL ON leaderboard_ingestion.collection_erasure_batches FROM PUBLIC;

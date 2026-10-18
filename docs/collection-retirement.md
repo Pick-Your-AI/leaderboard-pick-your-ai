@@ -13,10 +13,31 @@ Apply `packages/ingestion/sql/005_collection_retirement.up.sql` in a transaction
 after migrations 001–004. Hosts opt into this migration; importing the package
 does not migrate or retire anything. Existing migration files are unchanged.
 The new deletion function is not executable by the PostgreSQL `PUBLIC` role.
-The deployment must grant its designated protected retention role the required
-function and table permissions. Database owners remain trusted migration
-administrators; this is not a defense against an administrator rewriting tables
-or disabling database protections.
+It is `SECURITY DEFINER` with a fixed `pg_catalog` search path; every application
+relation is schema-qualified. Its trusted owner must also own the erasure-receipt
+table. The receipt trigger remains `SECURITY INVOKER` and permits writes only as
+that table owner. Direct table grants to another role cannot forge the temporary
+delete exception. Ownership drift therefore fails closed on receipt mutation.
+All new and replaced guards also fix their search path to `pg_catalog`, so a
+caller's schema or overloaded operators cannot alter their authorization checks.
+
+Configure privileges explicitly when applying this optional migration:
+
+- Ordinary ingestion writers retain their existing repository row-lock/table
+  privileges and need `SELECT(repository_id)` on `repository_retirements` for
+  the new invoker visibility guards. An active repository's payload writes must
+  remain usable with these grants.
+- A protected erasure caller needs schema `USAGE` and `EXECUTE` on
+  `erase_collected_source_batch(text,text,integer)`. The TypeScript wrapper also
+  needs `SELECT` on `repository_retirements` to verify all retained request
+  identity fields. Do not grant it direct batch writes or source `DELETE`.
+- The host that creates permanent retirement decisions requires the existing
+  repository update privileges plus retirement-table `SELECT`/`INSERT`. Treat
+  that role as a trusted retirement authority, separate from an ordinary source
+  writer, and enforce the current authorization callback at its protected entry.
+
+Migration/table owners remain trusted administrators; this is not a defense
+against an owner rewriting tables, changing ownership or disabling protections.
 
 Both API methods require the same exact request: `operationId`, `repositoryId`,
 `expectedGeneration`, `policyVersion`, `authorizationReceipt` and `operatorId`.
@@ -75,6 +96,10 @@ adds a narrow delete exception while the bounded function holds an active batch
 for the same transaction, repository and selected keys. The active keys and
 transaction ID are cleared before the function returns. Completed receipts do
 not grant later deletion access, and successful batch receipts are immutable.
+The source-fact and collection-item indexes bound selected-key lookups, while
+partial receipt indexes keep capacity/completion checks independent of the size
+of successful audit history. The limit counts source facts; it does not claim a
+fixed latency or cap every downstream row associated with those facts.
 
 Foreign-key references from other stores block the entire batch. PostgreSQL
 rolls back the attempted deletions of facts, links and enrichment together;
@@ -86,9 +111,14 @@ truncated or downstream relation cascaded by either API.
 After the concrete owning store removes its authorized dependency, the same
 blocked batch ID can retry. Its attempt count advances. An already successful
 batch returns its original counts and completion clock without deleting another
-batch; changing its limit rejects. Each operation has a 10,000-batch receipt
-capacity guard. Exhaustion rejects and requires a separately reviewed archive
-procedure; it does not delete audit history or silently change the operation ID.
+batch; changing its limit rejects. Each operation permits at most 10,000
+unfinished batch receipts. At that limit an existing blocked batch can still
+retry and finish; successful audit history does not impose a lifetime deletion
+ceiling. An initially empty scope can record one successful empty batch. After
+completion is recorded, another new empty batch ID rejects with
+`source_scope_already_erased` without growing audit history. Retrying the exact
+successful ID still returns its original result. Stop requesting new batches
+when `sourceFactsRemaining` is false.
 
 The result reports deleted source-fact count, whether any source facts remain,
 attempt, completion time and a blocked reason. A successful batch is not complete

@@ -181,6 +181,11 @@ test("bounded erasure removes exact collected facts and dependent ingestion payl
   const final = await retirement.eraseBatch(request(), "synthetic-batch-2", 2, approved);
   assert.equal(final.deletedSourceFacts, 1);
   assert.equal(final.sourceFactsRemaining, false);
+  await assert.rejects(
+    retirement.eraseBatch(request(), "synthetic-unneeded-empty", 2, approved),
+    /source_scope_already_erased/,
+  );
+  assert.equal((await rows("collection_erasure_batches")).length, 2);
   assert.deepEqual(
     await db.query("SELECT * FROM leaderboard_ingestion.source_facts WHERE repository_id=3 ORDER BY fact_key"),
     preserved,
@@ -201,6 +206,170 @@ test("bounded erasure removes exact collected facts and dependent ingestion payl
     db.query("UPDATE leaderboard_ingestion.source_facts SET document='{}'::jsonb"),
     /immutable_source_fact/,
   );
+});
+
+test("completed audit history cannot cap remaining source erasure or grow on empty retries", async () => {
+  await seed(2, 1);
+  await retirement.retire(request(), approved);
+  // A synthetic retained receipt history isolates the capacity boundary without
+  // claiming that this fixture performed 10,000 earlier erasure transactions.
+  await db.query(
+    `INSERT INTO leaderboard_ingestion.collection_erasure_batches
+    (operation_id,batch_id,batch_limit,attempt,status,deleted_count,source_facts_remaining,completed_at)
+    SELECT $1,'synthetic-history-'||n,1,1,'erased',1,true,clock_timestamp()
+    FROM generate_series(1,10000) AS n`,
+    [request().operationId],
+  );
+  const result = await retirement.eraseBatch(request(), "synthetic-after-history", 1, approved);
+  assert.equal(result.deletedSourceFacts, 1);
+  assert.equal(result.sourceFactsRemaining, false);
+  assert.equal((await rows("source_facts")).length, 0);
+  for (const id of ["synthetic-empty-1", "synthetic-empty-2"])
+    await assert.rejects(retirement.eraseBatch(request(), id, 1, approved), /source_scope_already_erased/);
+  assert.equal((await rows("collection_erasure_batches")).length, 10001);
+  assert.deepEqual(await retirement.eraseBatch(request(), "synthetic-after-history", 1, approved), result);
+});
+
+test("unfinished receipt capacity permits the same blocked batch to complete and an empty scope records once", async () => {
+  await seed(2, 1);
+  await retirement.retire(request(), approved);
+  await db.query(
+    `INSERT INTO leaderboard_ingestion.collection_erasure_batches
+    (operation_id,batch_id,batch_limit,attempt,status,deleted_count,source_facts_remaining,completed_at)
+    SELECT $1,'synthetic-blocked-'||n,1,1,'blocked',0,true,clock_timestamp()
+    FROM generate_series(1,10000) AS n`,
+    [request().operationId],
+  );
+  await assert.rejects(
+    retirement.eraseBatch(request(), "synthetic-new-over-capacity", 1, approved),
+    /erasure_receipt_limit_exceeded/,
+  );
+  const retried = await retirement.eraseBatch(request(), "synthetic-blocked-1", 1, approved);
+  assert.equal(retried.deletedSourceFacts, 1);
+  assert.equal(retried.attempt, 2);
+  assert.equal(retried.sourceFactsRemaining, false);
+
+  const empty = request({ repositoryId: 3, operationId: "synthetic-empty-repository" });
+  await retirement.retire(empty, approved);
+  const first = await retirement.eraseBatch(empty, "synthetic-empty-first", 1, approved);
+  assert.equal(first.deletedSourceFacts, 0);
+  assert.equal(first.sourceFactsRemaining, false);
+  assert.deepEqual(await retirement.eraseBatch(empty, "synthetic-empty-first", 1, approved), first);
+  await assert.rejects(
+    retirement.eraseBatch(empty, "synthetic-empty-again", 1, approved),
+    /source_scope_already_erased/,
+  );
+});
+
+test("a protected non-owner caller erases through the function with only its documented privileges", async () => {
+  await seed(2, 2);
+  await retirement.retire(request(), approved);
+  const role = `synthetic_retention_caller_${process.pid}`;
+  await db.query(`CREATE ROLE ${role} NOLOGIN`);
+  const asRole = (work) =>
+    db.transaction(async (tx) => {
+      await tx.query(`SET LOCAL ROLE ${role}`);
+      return work(tx);
+    });
+  try {
+    await db.query(`GRANT USAGE ON SCHEMA leaderboard_ingestion TO ${role}`);
+    await db.query(`GRANT SELECT ON leaderboard_ingestion.repository_retirements TO ${role}`);
+    const privileges = (
+      await db.query(
+        `SELECT has_function_privilege($1,
+      'leaderboard_ingestion.erase_collected_source_batch(text,text,integer)','EXECUTE') AS can_execute,
+      has_table_privilege($1,'leaderboard_ingestion.collection_erasure_batches','INSERT') AS can_insert,
+      has_table_privilege($1,'leaderboard_ingestion.source_facts','DELETE') AS can_delete`,
+        [role],
+      )
+    ).rows[0];
+    assert.deepEqual(privileges, { can_execute: false, can_insert: false, can_delete: false });
+    await db.query(
+      `GRANT EXECUTE ON FUNCTION leaderboard_ingestion.erase_collected_source_batch(text,text,integer) TO ${role}`,
+    );
+    const caller = new RepositoryRetirementStore({
+      query: (sql, params) => asRole((tx) => tx.query(sql, params)),
+      transaction: asRole,
+    });
+    const result = await caller.eraseBatch(request(), "synthetic-function-only", 1, approved);
+    assert.equal(result.deletedSourceFacts, 1);
+    assert.equal(result.sourceFactsRemaining, true);
+    assert.deepEqual(await caller.eraseBatch(request(), "synthetic-function-only", 1, approved), result);
+    assert.equal((await rows("source_facts")).length, 1);
+    await assert.rejects(
+      asRole((tx) => tx.query("DELETE FROM leaderboard_ingestion.source_facts")),
+      /permission denied/,
+    );
+
+    // A reporting role's accidental table-update grant must not authorize edits
+    // to the function's retained receipt or its transaction-bound state.
+    await db.query(`GRANT SELECT,UPDATE ON leaderboard_ingestion.collection_erasure_batches TO ${role}`);
+    await assert.rejects(
+      asRole((tx) => tx.query("UPDATE leaderboard_ingestion.collection_erasure_batches SET attempt=attempt+1")),
+      /erasure_receipt_write_forbidden/,
+    );
+    assert.equal((await rows("collection_erasure_batches"))[0].attempt, 1);
+  } finally {
+    await db.query(`DROP OWNED BY ${role}`);
+    await db.query(`DROP ROLE ${role}`);
+  }
+});
+
+test("ordinary active-source inserts retain their minimal guard-reader permissions", async () => {
+  await seed(2, 1);
+  await seed(3, 1);
+  await retirement.retire(request(), approved);
+  const role = `synthetic_retention_collector_${process.pid}`;
+  await db.query(`CREATE ROLE ${role} NOLOGIN`);
+  const insert = (repositoryId) =>
+    db.transaction(async (tx) => {
+      await tx.query(`SET LOCAL ROLE ${role}`);
+      return tx.query(
+        `INSERT INTO leaderboard_ingestion.source_facts
+      (fact_key,repository_id,family,subject_id,source_revision,document,first_run_id)
+      VALUES($1,$2,'issues','synthetic-role-source','r1','{}'::jsonb,$3)`,
+        [`synthetic-role-source-${repositoryId}`, repositoryId, `synthetic-run-${repositoryId}`],
+      );
+    });
+  try {
+    await db.query(`GRANT USAGE ON SCHEMA leaderboard_ingestion TO ${role}`);
+    await db.query(`GRANT SELECT(repository_id) ON leaderboard_ingestion.repository_retirements TO ${role}`);
+    await db.query(`GRANT SELECT,UPDATE ON leaderboard_ingestion.repository_access TO ${role}`);
+    await db.query(`GRANT INSERT ON leaderboard_ingestion.source_facts TO ${role}`);
+    await insert(3);
+    await assert.rejects(insert(2), /repository_retired/);
+    assert.equal(
+      (await rows("source_facts")).filter((row) => row.fact_key.startsWith("synthetic-role-source-")).length,
+      1,
+    );
+  } finally {
+    await db.query(`DROP OWNED BY ${role}`);
+    await db.query(`DROP ROLE ${role}`);
+  }
+});
+
+test("database guards keep fixed catalog lookup and only source erasure elevates privileges", async () => {
+  const names = [
+    "reject_retirement_change",
+    "guard_retired_access",
+    "guard_retired_payload",
+    "guard_erasure_receipt",
+    "reject_source_fact_change",
+    "erase_collected_source_batch",
+  ];
+  const functions = (
+    await db.query(
+      `SELECT proname,prosecdef,proconfig FROM pg_catalog.pg_proc AS routine
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid=routine.pronamespace
+    WHERE namespace.nspname='leaderboard_ingestion' AND proname=ANY($1::text[])`,
+      [names],
+    )
+  ).rows;
+  assert.equal(functions.length, names.length);
+  for (const routine of functions) {
+    assert.equal(routine.prosecdef, routine.proname === "erase_collected_source_batch");
+    assert.ok(routine.proconfig.includes("search_path=pg_catalog"));
+  }
 });
 
 test("downstream foreign keys block the entire batch, preserve the fence and yield a retryable minimized receipt", async () => {

@@ -14,6 +14,7 @@ $$;
 DROP TABLE leaderboard_ingestion.collection_erasure_batches;
 DROP FUNCTION leaderboard_ingestion.guard_erasure_receipt();
 DROP INDEX leaderboard_ingestion.source_facts_retirement_scope;
+DROP INDEX leaderboard_ingestion.collection_items_erasure_fact;
 DROP TRIGGER retired_observation_payload ON leaderboard_ingestion.observations;
 DROP TRIGGER retired_delivery_payload ON leaderboard_ingestion.inbox;
 DROP TRIGGER retired_source_fact ON leaderboard_ingestion.source_facts;
