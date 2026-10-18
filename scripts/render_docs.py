@@ -228,6 +228,8 @@ Discover every attributable contributor through the searchable directory, includ
 
 ## Public journeys
 
+The [audience and product-success decision](product-journeys.md) defines measurable acceptance scenarios for all five audiences, evaluates discovery and evidence understanding, and reviews examples from every current repository and Project. Its targets are an evaluation protocol, not a claim of measured usability or public-service acceptance.
+
 1. A visitor selects a contribution category, period and source scope, then opens a contributor's evidence.
 2. A contributor shares a portfolio with contribution roles, source links, accepted outcomes and coverage caveats.
 3. A newcomer finds a way to help through source issues and their existing owners.
@@ -375,6 +377,8 @@ All {ui_map['counts']['ui_children']} UI source items map into the existing LB w
 
 Recognition exists to make work discoverable and attributable. It is not a measure of a person's worth or a performance-management system. Activity volume, accepted outcomes and editorial recognition require different labels and evidence.
 
+The [evidence and contributor-rights policy](evidence-contributor-rights.md) defines source admission, voluntary consent, corrections, opt-out, appeals, retention and attributable decisions. Its adoption is separate from source activation, actual deletion and operating acceptance.
+
 ## Ownership and policy changes
 
 GitHub Assignees own delivery work. The plan's owner roles describe required expertise; they do not assign a person. Accept an owner before work is Ready. Source repository owners retain authority over research, code and release acceptance. Leaderboard moderators cannot declare upstream deliverables complete.
@@ -385,11 +389,11 @@ Version metric definitions, identity rules, line classification and eligibility 
 
 Observe raw activity without inferring its quality. Review receipts when recognition requires acceptance, mentoring, design contribution, source verification or other qualitative judgment. Document the artifact, participants, roles, occurrence date, submitter, independent reviewer, policy version and public summary. Reviewers declare conflicts and do not approve their own disputed recognition.
 
-Provide a functioning correction and appeal route with a submission receipt. Preserve an auditable decision trail while minimizing personal data. Withdrawal, duplicate evidence and upheld corrections invalidate derived counts across every affected snapshot, export and cache. Do not promise response times until an operator accepts the commitment.
+Provide a functioning correction and appeal route with a submission receipt. Preserve an auditable decision trail while minimizing personal data. Withdrawal, duplicate evidence and upheld corrections invalidate derived counts across affected service-controlled snapshots, exports and caches. Explain that independently downloaded copies are outside the service's deletion control. Do not promise response times until an operator accepts the commitment.
 
 ## Privacy and consent
 
-Use approved public repositories and Project fields. Never publish commit emails, private issue content, security findings or inferred identities. Verified opt-out and deletion propagate to directory, rankings, profiles, live displays, embeds, caches and exports. Separate authenticated controls from public data. A source becoming private triggers suppression before later enrichment.
+Use approved public repositories and Project fields. Never publish commit emails, private issue content, security findings or inferred identities. Verified opt-out and suppression apply across all enabled service-controlled public surfaces, including historical views. Report actual payload deletion, backup expiry and remaining cleanup separately. Separate authenticated controls from public data. A source becoming private triggers suppression before later enrichment.
 
 ## Counting safeguards
 
