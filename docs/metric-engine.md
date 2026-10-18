@@ -70,6 +70,27 @@ Ranks are dense, with equal values sharing rank. Codepoint login/ID order resolv
 
 `participationView` returns first qualifying evidence in organization history, observed/effective times, active UTC Monday-based weeks and the explicit number of weeks intersecting a bounded window. All-time has no invented denominator. Incomplete organization history, including unknown/ambiguous/conflicting normalization or unreviewed historic revisions, returns `newcomer: null`. A complete-known-history answer requires an explicitly reviewed origin and enclosing coverage for every allowed repository/source. Historical effective time, rather than a recent ingestion timestamp, determines newcomer inclusion. The result always states that first observed qualifying work is neither employment start nor proof of no earlier work. These descriptive views never normalize or change raw-count ranks.
 
+Participation groups the prepared organization history and selected-window facts
+by actor once, then reads each actor's own facts. This avoids scanning both entire
+collections for every participant. The indexes retain references proportional to
+the supplied facts; existing preparation, chronological sorting and week ordering
+retain their own costs. Organization-wide first evidence remains independent of
+the selected repository lens, and actor order, UTC weeks, stable evidence-ID ties
+and unknown-history behavior remain unchanged.
+
+The synthetic [participation scale cases](../packages/metrics/test/participation-scale.test.mjs)
+check every result for 10,000 contributors and bound source actor-identity reads
+independently of host speed. The same case required **200,150,000 identity reads**
+before grouping and **160,000** after grouping. A second case checks cross-repository
+history, equivalent timestamp spellings, repeated weeks, stable actor ordering,
+permuted immutable input, missing history and all-time denominators. These are
+algorithmic and semantic regression checks, not production latency measurements.
+Reproduce them after building the workspace:
+
+```sh
+node --test --test-isolation=none packages/metrics/test/participation-scale.test.mjs
+```
+
 ## Policy comparison and release boundary
 
 `comparePolicies` runs both versions on the same frozen input/scope and returns value, rank and included/excluded evidence differences, along with both complete audit trails and policy identifiers. Supplying the prior policy again deterministically reconstructs its prior candidate output; rollback does not overwrite historical identifiers.

@@ -1044,14 +1044,26 @@ export function participationView(
   if (scope.from !== null)
     for (let at = instant(monday(scope.from)); at < instant(scope.to); at += 604800000)
       weeks.add(new Date(at).toISOString());
-  return unique(current.map((fact) => fact.actorId!)).map((actorId) => {
-    const historyFacts = all
-      .filter((fact) => fact.actorId === actorId)
-      .sort((a, b) => compareInstants(a[policy.dateBasis], b[policy.dateBasis]) || compare(a.id, b.id));
+  const indexByActor = (facts: MetricFact[]) => {
+    const indexed = new Map<string, MetricFact[]>();
+    for (const fact of facts) {
+      const actorId = fact.actorId!;
+      const bucket = indexed.get(actorId) ?? [];
+      bucket.push(fact);
+      indexed.set(actorId, bucket);
+    }
+    return indexed;
+  };
+  const historyByActor = indexByActor(all);
+  const currentByActor = indexByActor(current);
+  return unique([...currentByActor.keys()]).map((actorId) => {
+    const historyFacts = (historyByActor.get(actorId) ?? []).sort(
+      (a, b) => compareInstants(a[policy.dateBasis], b[policy.dateBasis]) || compare(a.id, b.id),
+    );
     const first = historyFacts[0];
     const activeWeeks = unique(
-      current
-        .filter((fact) => fact.actorId === actorId)
+      currentByActor
+        .get(actorId)!
         .flatMap((fact) => (fact[policy.dateBasis] === null ? [] : [monday(fact[policy.dateBasis]!)])),
     );
     return {
