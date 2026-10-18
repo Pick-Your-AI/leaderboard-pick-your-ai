@@ -44,7 +44,18 @@ export function materializeRecognition(input, state, bindings, policies, applyRe
       !state.audit?.some((h) => h.id === decision.id && JSON.stringify(h) === JSON.stringify(decision))
     )
       throw new Error("recognition_decision_unverified");
-    if (decision.at > cutoff) continue;
+    // Controls records epoch milliseconds; normalizers require canonical UTC strings.
+    const acceptedAt =
+      typeof decision.at === "number" && Number.isSafeInteger(decision.at) && decision.at >= 0
+        ? new Date(decision.at).toISOString()
+        : decision.at;
+    if (
+      typeof acceptedAt !== "string" ||
+      !Number.isFinite(Date.parse(acceptedAt)) ||
+      new Date(acceptedAt).toISOString() !== acceptedAt
+    )
+      throw new Error("recognition_decision_time_invalid");
+    if (acceptedAt > cutoff) continue;
     const candidates = input.facts.filter(
       (f) =>
         f.actorId === request.owner &&
@@ -68,7 +79,7 @@ export function materializeRecognition(input, state, bindings, policies, applyRe
         metricId: binding.metricId,
         actorId: request.owner,
         reviewerId: decision.actor,
-        acceptedAt: decision.at,
+        acceptedAt,
         decision: "accepted",
         evidenceIds: [candidates[0].id],
       },

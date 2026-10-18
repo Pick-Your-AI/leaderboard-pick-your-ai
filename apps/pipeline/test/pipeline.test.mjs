@@ -956,7 +956,7 @@ test("accepted controls receipt materializes a separate lens and withdrawal fenc
     id: "synthetic-receipt",
     actor: "202",
     action: "accepted",
-    at: ago(1),
+    at: Date.parse(ago(1)),
     policyVersion: policy.version,
   };
   h.controlsStore.transaction((s) => {
@@ -1062,4 +1062,105 @@ test("policy approval rejects a frozen comparison after contributor suppression"
     }),
     /policy_input_revoked|policy_input_changed/,
   );
+});
+
+test("real controls HTTP acceptance and withdrawal feed pipeline recognition without handcrafted receipts", async (t) => {
+  const h = await harness(t);
+  const config = structuredClone(h.options.config);
+  const policy = {
+    ...config.policies[0].policy,
+    version: "synthetic-controls-v1",
+    dateBasis: "acceptedAt",
+    rankedStates: ["qualified"],
+  };
+  config.policies = [
+    { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-reviewed-policy" },
+  ];
+  config.recognitionBindings = [
+    {
+      category: "governance",
+      scope: "repository:2",
+      policyVersion: policy.version,
+      metricId: "issues_opened",
+      sourceMetricId: "issues_opened",
+      repositoryId: "2",
+      reviewerIds: ["202"],
+    },
+  ];
+  const origin = "https://controls.example.test";
+  const server = components.controls.createControlsServer({
+    store: h.controlsStore,
+    origin,
+    approvedPolicyVersions: [policy.version],
+    rolesForActor: (actorId) => ({ roles: actorId === "202" ? ["reviewer"] : [], version: "v1" }),
+    provider: {
+      authorizationURL: ({ state }) => `https://github.com/login/oauth/authorize?state=${state}`,
+      exchange: async ({ code }) => ({ actorId: code }),
+    },
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  async function call(path, user, body) {
+    const response = await fetch(base + path, {
+      method: body ? "POST" : "GET",
+      redirect: "manual",
+      headers: {
+        ...(user ? { cookie: user.cookie, origin, "x-csrf-token": user.csrf } : {}),
+        ...(body ? { "content-type": "application/json" } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    return {
+      response,
+      data: response.headers.get("content-type")?.includes("application/json") ? await response.json() : null,
+    };
+  }
+  async function login(actorId) {
+    const start = await call("/controls/auth/login");
+    const state = new URL(start.response.headers.get("location")).searchParams.get("state");
+    const result = await call(`/controls/auth/callback?state=${state}&code=${actorId}`, {
+      cookie: start.response.headers.getSetCookie()[0].split(";")[0],
+    });
+    assert.equal(result.response.status, 303);
+    const cookie = result.response.headers
+      .getSetCookie()
+      .find((value) => value.startsWith("__Host-controls_session="))
+      .split(";")[0];
+    const session = await call("/controls/session", { cookie });
+    assert.equal(session.response.status, 200);
+    return { cookie, csrf: session.data.csrf };
+  }
+  const owner = await login("101"),
+    reviewer = await login("202");
+  const submitted = await call("/controls/requests", owner, {
+    kind: "evidence",
+    locator: "https://github.com/synthetic-org/synthetic-repo/issues/1",
+    category: "governance",
+    collaborators: [],
+    consent: true,
+    detail: "Private synthetic review detail",
+    scope: "repository:2",
+  });
+  assert.equal(submitted.response.status, 201);
+  const reviewed = await call(`/controls/requests/${submitted.data.id}/review`, reviewer, {
+    version: submitted.data.version,
+    decision: "accept",
+    reason: "Private synthetic decision",
+    conflict: false,
+    policyVersion: policy.version,
+    sourceReviewedPublic: true,
+  });
+  assert.equal(reviewed.response.status, 200);
+  const runtime = await createPipeline({ ...h.options, config });
+  t.after(() => runtime.stop());
+  const publication = (await runtime.runOnce()).publications[0];
+  const read = await runtime.source.read(publicScope, publication.snapshotId, new AbortController().signal);
+  assert.equal(read.selected.rows.find((row) => row.actorId === "101").result.value, 1);
+  assert.equal(JSON.stringify(read).includes("Private synthetic"), false);
+  const withdrawn = await call(`/controls/requests/${submitted.data.id}/withdraw`, owner, {
+    version: reviewed.data.version,
+  });
+  assert.equal(withdrawn.response.status, 200);
+  assert.equal(await runtime.source.read(publicScope, publication.snapshotId, new AbortController().signal), null);
 });

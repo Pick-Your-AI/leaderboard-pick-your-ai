@@ -6,7 +6,7 @@ const decision = {
   id: "receipt",
   action: "accepted",
   actor: "202",
-  at: "2026-10-01T00:00:00.000Z",
+  at: Date.parse("2026-10-01T00:00:00.000Z"),
   policyVersion: "v1",
 };
 const request = {
@@ -54,6 +54,7 @@ const apply = (s) =>
   );
 test("private audited decision binds exact owner, source metric, scope and approved policy", () => {
   assert.equal(apply(state()).receipt.targetFactId, "fact");
+  assert.equal(apply(state()).receipt.acceptedAt, "2026-10-01T00:00:00.000Z");
   const invalid = state();
   invalid.audit = [];
   assert.throws(() => apply(invalid), /unverified/);
