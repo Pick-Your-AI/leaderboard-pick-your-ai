@@ -44,6 +44,10 @@ not establish issue acceptance or launch readiness.
 - **Domain recognition (#80/#88/#89/#81/#82/#90):** generic accepted-receipt wiring
   does not implement every research, catalog/pricing, market-source, documentation,
   localization, test/performance, design or security-specific evidence adapter.
+  The [research record adapter](research-record-adapter.md) now supplies pinned
+  pending decision-record versions and exact-locator independent acceptance,
+  with replay, withdrawal and classification-cache verification. This does not
+  complete research findings, issue relationships or domain-owner acceptance.
   Required source/revision/comparable-measurement semantics still need their own
   implementation and meaningful inclusion/exclusion tests.
 - **Recognition and operator breadth (#69/#70/#93/#94/#115/#122/#124):** richer
@@ -72,7 +76,7 @@ contributor review, approved recognition/achievement/grouping policies and autho
 reviewer/operator rosters remain required. OAuth registration and private storage,
 cache/backup/retention architecture, accepted operating commitments, hosting/cost
 approval, DNS/TLS, real-device/screen-reader journeys and staged recovery/public
-readback are not supplied by these engineering changes. The selected domain remains
+readback are not supplied by these engineering changes. The configured target domain remains
 `leaderboard.pickyour.ai`; that choice does not approve hosting or launch.
 
 Use the final PR's exact-head build/typecheck/test/browser and independent-review
