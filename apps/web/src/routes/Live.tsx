@@ -3,12 +3,14 @@ import { RankCell } from "../components/BoardTable.tsx";
 import { PageHeader, SyntheticDataBanner } from "../components/Layout.tsx";
 import { ErrorState, FreshnessIndicator, SnapshotNotices } from "../components/status.tsx";
 import { getMetric } from "../data/registry.ts";
-import { buildBoard, fixtureMetricIds, listContributors, SourceError } from "../data/source.ts";
+import { listContributors, SourceError } from "../data/source.ts";
 import { formatNumber } from "../lib/format.ts";
 import { useLatestSnapshotId, useScope } from "../lib/hooks.ts";
 import { cutWithTies } from "../lib/ranking.ts";
 import { Link, ScopedLink } from "../lib/router.tsx";
 import { serializeScope, type Scope } from "../lib/scope.ts";
+
+import { buildSelectedBoard, resolveWallBoards, wallMetricIds } from "../data/metric-selection.ts";
 
 type WallMode = "frozen" | "single" | "cycle";
 type WallFormat = "landscape" | "portrait" | "standard";
@@ -19,24 +21,27 @@ const WALL_ROWS = 8;
 function readWallParams(params: Record<string, string>) {
   const mode: WallMode | null =
     params.mode === "frozen" || params.mode === "single" || params.mode === "cycle" ? params.mode : null;
-  const known = fixtureMetricIds();
-  const boards = (params.boards ?? "").split(",").filter((id) => known.includes(id));
+  const boards = resolveWallBoards(params.boards);
   const interval = Math.max(MIN_INTERVAL, Number.parseInt(params.interval ?? "", 10) || 30);
   const format: WallFormat = params.format === "portrait" || params.format === "standard" ? params.format : "landscape";
-  return { mode, boards: boards.length ? boards : [known[0]!], interval, format };
+  return { mode, boards, interval, format };
 }
 
 export function LivePage() {
   const { params } = useScope();
-  const wall = readWallParams(params);
-  return wall.mode ? <WallPage {...wall} mode={wall.mode} /> : <WallConfigurator />;
+  try {
+    const wall = readWallParams(params);
+    return wall.mode ? <WallPage {...wall} mode={wall.mode} /> : <WallConfigurator />;
+  } catch (error) {
+    return <ErrorState error={error instanceof Error ? error : new Error("Invalid wall selection")} />;
+  }
 }
 
 function WallConfigurator() {
   const { scope } = useScope();
   const latest = useLatestSnapshotId();
   const [mode, setMode] = useState<WallMode>("cycle");
-  const [boards, setBoards] = useState<string[]>(fixtureMetricIds().slice(0, 3));
+  const [boards, setBoards] = useState<string[]>(wallMetricIds().slice(0, 3));
   const [interval, setIntervalSeconds] = useState(30);
   const [format, setFormat] = useState<WallFormat>("landscape");
   const [copied, setCopied] = useState("");
@@ -78,7 +83,7 @@ function WallConfigurator() {
         </fieldset>
         <fieldset>
           <legend>Boards</legend>
-          {fixtureMetricIds().map((metricId) => (
+          {wallMetricIds().map((metricId) => (
             <label key={metricId} className="checkbox">
               <input
                 type="checkbox"
@@ -152,7 +157,7 @@ function WallPage({
   interval: number;
   format: WallFormat;
 }) {
-  const { scope } = useScope();
+  const { scope, params } = useScope();
   const latest = useLatestSnapshotId();
   const [appliedLatest, setAppliedLatest] = useState(latest);
   const [index, setIndex] = useState(0);
@@ -179,11 +184,11 @@ function WallPage({
   const content = useMemo(() => {
     try {
       if (page === "__credits") return { kind: "credits" as const, data: listContributors(wallScope, appliedLatest) };
-      return { kind: "board" as const, data: buildBoard(page, wallScope, appliedLatest)! };
+      return { kind: "board" as const, data: buildSelectedBoard(page, wallScope, appliedLatest, params)! };
     } catch (error) {
       return { kind: "error" as const, error: error instanceof SourceError ? error : new Error(String(error)) };
     }
-  }, [page, serializeScope(wallScope), appliedLatest]);
+  }, [page, serializeScope(wallScope), appliedLatest, params.state, params.date_basis]);
 
   const snapshotView = content.kind === "error" ? null : content.data.snapshot;
 

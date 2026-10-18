@@ -210,6 +210,10 @@ conditional health polling, bounded exponential backoff (up to 30 seconds), a
 five-second request deadline, duplicate/out-of-order notice rejection, visibility
 pause/resume and explicit stop cleanup. It accepts only same-origin API base paths
 and omits credentials. Polling continues to verify freshness while streaming.
+Health and conditional validators are bound to the exact snapshot, revision and
+policy identity. A changed stream notice clears that health cache; polling
+responses overtaken by the notice are discarded even if JSON parsing finishes
+later. A controls-only policy update cannot be undone by an older in-flight poll.
 Transport status never implies live data: `onState` reports the observed health
 state, unknown during outages/new notices, and paused when hidden. `onSnapshot`
 requests a complete refetch; the consumer decides when to replace the visible board.
