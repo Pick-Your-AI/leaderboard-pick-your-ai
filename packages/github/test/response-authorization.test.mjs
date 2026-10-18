@@ -212,3 +212,68 @@ test("REST does not expose a cached 304 body after revocation while persisting q
   assert.equal(context.checkpoints.writes.filter(({ key }) => key.startsWith("http:")).length, 1);
   assert.equal(context.checkpoints.writes.filter(({ key }) => key.startsWith("pause:")).length, 1);
 });
+
+for (const concurrency of [1, 2]) {
+  test(
+    `nested GraphQL rechecks completed children before aggregate delivery (concurrency ${concurrency})`,
+    { timeout: 5000 },
+    async () => {
+      const aSaved = deferred();
+      const authorized = new Map([
+        ["scope:a", true],
+        ["scope:b", true],
+      ]);
+      const factoryCalls = new Map();
+      const context = setup(
+        async (_url, init) => {
+          const parent = JSON.parse(init.body).variables.parent;
+          if (parent === "scope:b") {
+            await aSaved.promise;
+            // Drain child A's checkpoint/scan continuations so its result is already
+            // retained while the independent child B request remains pending.
+            await new Promise((resolve) => setImmediate(resolve));
+            authorized.set("scope:a", false);
+          }
+          return json({
+            data: { items: { nodes: [{ id: parent }], pageInfo: { hasNextPage: false, endCursor: null } } },
+          });
+        },
+        { concurrency },
+      );
+      context.checkpoints.onSave = async (key) => {
+        if (key.startsWith("scan:") && context.checkpoints.values.get(key).items[0]?.id === "scope:a") {
+          aSaved.resolve();
+        }
+      };
+      await assert.rejects(
+        context.client.scanNestedGraphql(["scope:a", "scope:b"], (parent) => {
+          factoryCalls.set(parent, (factoryCalls.get(parent) ?? 0) + 1);
+          return {
+            source: parent,
+            key: "nested-authorization/v1",
+            query:
+              "query Items($parent: ID!) { items(parent: $parent) { nodes { id } pageInfo { hasNextPage endCursor } } }",
+            variables: { parent },
+            maxPages: 1,
+            select: (data) => data.items,
+            assertAuthorized: () => {
+              if (!authorized.get(parent)) throw new Error("private revoked child policy");
+            },
+          };
+        }),
+        denied,
+      );
+      assert.deepEqual(
+        [...factoryCalls],
+        [
+          ["scope:a", 1],
+          ["scope:b", 1],
+        ],
+        "child factories are not re-invoked to authorize delivery",
+      );
+      const saves = context.checkpoints.writes.filter(({ key }) => key.startsWith("scan:"));
+      assert.equal(saves.length, 2, "already authorized child checkpoints are retained");
+      assert.ok(saves.every(({ value }) => value.complete));
+    },
+  );
+}

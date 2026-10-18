@@ -580,12 +580,15 @@ export class GithubReadClient {
     child: (parent: P) => GraphqlScan<T>,
   ): Promise<Array<{ parent: P; items: T[] }>> {
     const result: Array<{ parent: P; items: T[] }> = new Array(parents.length);
+    const authorizations: Array<{ source: string; assertAuthorized: (() => void) | undefined }> = [];
     let index = 0;
     const worker = async () => {
       while (index < parents.length) {
         const current = index++;
         const parent = parents[current]!;
-        result[current] = { parent, items: await this.scanGraphql(child(parent)) };
+        const options = child(parent);
+        authorizations.push({ source: options.source, assertAuthorized: options.assertAuthorized });
+        result[current] = { parent, items: await this.scanGraphql(options) };
       }
     };
     const settled = await Promise.allSettled(
@@ -593,6 +596,9 @@ export class GithubReadClient {
     );
     const failure = settled.find((outcome) => outcome.status === "rejected");
     if (failure?.status === "rejected") throw failure.reason;
+    // An earlier child can lose access while a later child is still pending.
+    for (const authorization of authorizations)
+      checkAuthorization(authorization.source, authorization.assertAuthorized);
     return result;
   }
 }
