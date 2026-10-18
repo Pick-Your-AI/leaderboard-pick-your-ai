@@ -76,11 +76,31 @@ fence. The separate controls public projection and external caches still need
 their own coordinated retirement mechanisms; this collection fence alone does
 not claim those copies are withdrawn.
 
-Rollback 005 is allowed only while no retirement record exists. Once a permanent
-retirement is recorded, rollback refuses to discard that history. Restoring an
-older backup still requires loading the current retirement/suppression authority
-before serving, collection or replay, as described in [recovery](RECOVERY.md).
-This migration does not supply that cross-store recovery composition.
+Rollback 005 is allowed only while both the retirement and erasure-receipt tables
+are empty. Its isolation check, locks, history check and every removal run inside
+one atomic `DO` statement. It supports a standalone statement or an existing
+`READ COMMITTED` transaction. An inherited `READ UNCOMMITTED`, `REPEATABLE READ`
+or `SERIALIZABLE` transaction rejects with
+`retirement_rollback_requires_read_committed` before changing any guard. In
+particular, a repeatable snapshot could otherwise hide a retirement that committed
+after the caller's earlier read, even after acquiring the required table locks.
+
+Before reading history, rollback takes `ACCESS EXCLUSIVE` locks on repository
+access, retirement history, erasure receipts and every other table touched by its
+DDL. It requests repository access first, matching retirement's write order.
+Every lock uses `NOWAIT`: conflicting traffic rejects immediately with SQLSTATE
+`55P03`, so quiesce the active work before retrying. This also avoids waiting in a
+cycle with an eraser or payload writer that already holds a dependent-table lock
+before requesting repository access. The locks remain held through the end of
+the containing transaction, covering both the fresh history check and the final
+removal. See PostgreSQL's [table-lock and snapshot rules](https://www.postgresql.org/docs/16/sql-lock.html).
+
+Once a permanent retirement or receipt is recorded, rollback rejects with
+`retirement_history_prevents_rollback`. A failure in a later DDL operation also
+restores all earlier guard changes in the statement. Restoring an older backup
+still requires loading the current retirement/suppression authority before
+serving, collection or replay, as described in [recovery](RECOVERY.md). This
+migration does not supply that cross-store recovery composition.
 
 ## Bounded deletion and honest receipts
 
@@ -143,7 +163,15 @@ failure/rollback, authority loss before commit, delayed collection, immutable
 source/audit guards, migration rollback/reapply and current/pinned API readback
 after reopening the database. The hosted ingestion workflow also uses a fresh
 dedicated PostgreSQL test database to exercise real independent-connection row
-locking. The embedded lane explicitly skips that multi-connection case.
+locking. The rollback race test pauses an actual retirement before commit,
+observes either rollback rejection or a real PostgreSQL lock wait, then lets the
+retirement commit. It requires rejection before that commit; an old script that
+waits at a later `DROP` cannot pass merely because it eventually times out.
+Separate PostgreSQL tests establish genuinely stale `REPEATABLE READ` and
+`SERIALIZABLE` snapshots before another connection commits a retirement. Rejected
+attempts preserve the guard schema and permanent fence. The embedded lane
+explicitly skips these independent-connection cases; its isolation-configuration
+and late-DDL-failure tests do not claim real concurrent execution.
 
 The existing [cross-store investigation](source-retention-boundary.md) identifies
 the remaining pipeline, controls, checkpoint and recovery work. This change

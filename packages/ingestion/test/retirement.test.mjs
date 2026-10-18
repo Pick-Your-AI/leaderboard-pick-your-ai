@@ -1,6 +1,7 @@
 import { before, after, beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { Pool } from "pg";
 import {
@@ -19,6 +20,7 @@ const migrations = await Promise.all(
 const retirementDown = await readFile(new URL("../sql/005_collection_retirement.down.sql", import.meta.url), "utf8");
 let engine, db, collection, retirement, administration;
 const external = process.env.INGESTION_TEST_DATABASE_URL;
+const independentConnections = external ? false : "PGlite cannot open independent PostgreSQL connections";
 before(async () => {
   if (external) {
     const url = new URL(external);
@@ -98,6 +100,23 @@ async function seed(repositoryId = 2, count = 3) {
 }
 async function rows(table) {
   return (await db.query(`SELECT * FROM leaderboard_ingestion.${table}`)).rows;
+}
+async function retirementSchema() {
+  return (
+    await db.query(`
+      SELECT 'relation' AS kind,relname::text AS name,oid::text AS definition
+      FROM pg_catalog.pg_class WHERE relnamespace='leaderboard_ingestion'::regnamespace
+      UNION ALL
+      SELECT 'function',proname::text,pg_catalog.pg_get_functiondef(oid)
+      FROM pg_catalog.pg_proc WHERE pronamespace='leaderboard_ingestion'::regnamespace
+      UNION ALL
+      SELECT 'trigger',trigger.tgname::text,pg_catalog.pg_get_triggerdef(trigger.oid)
+      FROM pg_catalog.pg_trigger AS trigger
+      JOIN pg_catalog.pg_class AS relation ON relation.oid=trigger.tgrelid
+      WHERE relation.relnamespace='leaderboard_ingestion'::regnamespace
+      ORDER BY kind,name,definition
+    `)
+  ).rows;
 }
 const delivery = (n = 1, repositoryId = 2) => {
   const id = `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -482,17 +501,167 @@ test("operation identities, current generations and bounded batch inputs cannot 
 test("a rollback preserves permanent retirement history and an empty migration can reapply", async () => {
   const migrate = (sql) =>
     external ? db.transaction((tx) => tx.query(sql)) : engine.transaction((tx) => tx.exec(sql));
+  // A single-statement runner must also retain the locks through every DROP.
+  await (external ? engine.query(retirementDown) : engine.exec(retirementDown));
+  await migrate(migrations.at(-1));
   await migrate(retirementDown);
   await migrate(migrations.at(-1));
   await retirement.retire(request(), approved);
+  const schema = await retirementSchema();
   await assert.rejects(migrate(retirementDown), /retirement_history_prevents_rollback/);
+  assert.deepEqual(await retirementSchema(), schema);
   await assert.rejects(collection.verifyPublic(2, 1, "2"), /repository_retired/);
   assert.equal((await rows("repository_retirements")).length, 1);
 });
 
+test("rollback rejects inherited non-read-committed isolation before changing any guard", async () => {
+  const schema = await retirementSchema();
+  for (const isolation of ["READ UNCOMMITTED", "REPEATABLE READ", "SERIALIZABLE"]) {
+    const migrate = external
+      ? db.transaction(async (tx) => {
+          await tx.query(`SET TRANSACTION ISOLATION LEVEL ${isolation}`);
+          await tx.query("SELECT count(*) FROM leaderboard_ingestion.repository_retirements");
+          await tx.query(retirementDown);
+        })
+      : engine.transaction(async (tx) => {
+          await tx.exec(`SET TRANSACTION ISOLATION LEVEL ${isolation}`);
+          await tx.query("SELECT count(*) FROM leaderboard_ingestion.repository_retirements");
+          await tx.exec(retirementDown);
+        });
+    await assert.rejects(migrate, /retirement_rollback_requires_read_committed/);
+    assert.deepEqual(await retirementSchema(), schema);
+  }
+  await retirement.retire(request(), approved);
+  await assert.rejects(collection.verifyPublic(2, 1, "2"), /repository_retired/);
+});
+
+test("a late rollback DDL failure restores every preceding guard change even without an outer transaction", async () => {
+  await seed(2, 1);
+  await db.query(
+    "CREATE TABLE synthetic_retirement_dependency(operation_id text REFERENCES leaderboard_ingestion.repository_retirements(operation_id))",
+  );
+  const schema = await retirementSchema();
+  try {
+    await assert.rejects(
+      external ? engine.query(retirementDown) : engine.exec(retirementDown),
+      /other objects depend on it/,
+    );
+    assert.deepEqual(await retirementSchema(), schema);
+    await retirement.retire(request(), approved);
+    const erased = await retirement.eraseBatch(request(), "synthetic-after-failed-rollback", 1, approved);
+    assert.equal(erased.deletedSourceFacts, 1);
+    assert.equal(erased.sourceFactsRemaining, false);
+    await assert.rejects(collection.verifyPublic(2, 1, "2"), /repository_retired/);
+  } finally {
+    await db.query("DROP TABLE synthetic_retirement_dependency");
+  }
+});
+
+test(
+  "rollback fails before an in-flight PostgreSQL retirement commits and preserves its permanent fence",
+  { skip: independentConnections, timeout: 15_000 },
+  async () => {
+    const schema = await retirementSchema();
+    let reachedCommit, releaseCommit;
+    const atCommit = new Promise((resolve) => (reachedCommit = resolve));
+    const mayCommit = new Promise((resolve) => (releaseCommit = resolve));
+    const paused = new RepositoryRetirementStore({
+      query: db.query,
+      transaction: (work) =>
+        db.transaction(async (tx) => {
+          const result = await work(tx);
+          reachedCommit();
+          await mayCommit;
+          return result;
+        }),
+    });
+    const migration = await engine.connect();
+    const retiring = paused.retire(request(), approved);
+    let pendingRollback, rollbackResult, beforeCommit;
+    try {
+      await Promise.race([atCommit, retiring.then(() => assert.fail("retirement returned before its commit barrier"))]);
+      await migration.query("BEGIN ISOLATION LEVEL READ COMMITTED");
+      // This statement timeout is only a cleanup bound (57014). A lock-timeout
+      // oracle (55P03) could also accept an old script blocked at a later DROP.
+      // Observe actual blocking before allowing the retirement to commit instead.
+      await migration.query("SET LOCAL statement_timeout='5s'");
+      const pid = (await migration.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      pendingRollback = migration.query(retirementDown).then(
+        () => (rollbackResult = { error: null }),
+        (error) => (rollbackResult = { error }),
+      );
+      const deadline = performance.now() + 3_000;
+      let blocked = false;
+      while (!rollbackResult && !blocked && performance.now() < deadline) {
+        blocked =
+          (await engine.query("SELECT 1 FROM pg_catalog.pg_locks WHERE pid=$1 AND NOT granted", [pid])).rows.length > 0;
+        if (!rollbackResult && !blocked) await delay(10);
+      }
+      assert.ok(
+        rollbackResult || blocked,
+        "observe rejection or a real PostgreSQL lock wait before releasing retirement",
+      );
+      beforeCommit = rollbackResult;
+      releaseCommit();
+      assert.equal((await retiring).status, "collection_fenced");
+      await pendingRollback;
+    } finally {
+      releaseCommit();
+      await retiring.catch(() => {});
+      await pendingRollback;
+      // Never commit the test's attempted rollback. An old implementation can
+      // otherwise discard the freshly committed tombstone when its DROP resumes.
+      await migration.query("ROLLBACK");
+      migration.release();
+    }
+    assert.equal(beforeCommit?.error?.code, "55P03", "rollback must reject before the retirement commits");
+    assert.equal(rollbackResult.error.code, "55P03");
+    assert.deepEqual(await retirementSchema(), schema);
+    assert.equal((await rows("repository_retirements")).length, 1);
+    await assert.rejects(
+      db.transaction((tx) => tx.query(retirementDown)),
+      /retirement_history_prevents_rollback/,
+    );
+    await assert.rejects(collection.verifyPublic(2, 1, "2"), /repository_retired/);
+  },
+);
+
+for (const isolation of ["REPEATABLE READ", "SERIALIZABLE"])
+  test(
+    `a stale PostgreSQL ${isolation} rollback snapshot cannot hide a newly committed retirement`,
+    { skip: independentConnections, timeout: 15_000 },
+    async () => {
+      const schema = await retirementSchema();
+      const migration = await engine.connect();
+      try {
+        await migration.query(`BEGIN ISOLATION LEVEL ${isolation}`);
+        await migration.query("SET LOCAL statement_timeout='5s'");
+        assert.equal(
+          (await migration.query("SELECT count(*)::integer AS count FROM leaderboard_ingestion.repository_retirements"))
+            .rows[0].count,
+          0,
+        );
+        await retirement.retire(request(), approved);
+        assert.equal(
+          (await migration.query("SELECT count(*)::integer AS count FROM leaderboard_ingestion.repository_retirements"))
+            .rows[0].count,
+          0,
+          "the inherited snapshot demonstrably predates the committed retirement",
+        );
+        await assert.rejects(migration.query(retirementDown), /retirement_rollback_requires_read_committed/);
+      } finally {
+        await migration.query("ROLLBACK");
+        migration.release();
+      }
+      assert.deepEqual(await retirementSchema(), schema);
+      assert.equal((await rows("repository_retirements")).length, 1);
+      await assert.rejects(collection.verifyPublic(2, 1, "2"), /repository_retired/);
+    },
+  );
+
 test(
   "concurrent source insertion and retirement serialize through the same PostgreSQL repository row",
-  { skip: !external },
+  { skip: independentConnections },
   async () => {
     const s = scan();
     await collection.start(s);
