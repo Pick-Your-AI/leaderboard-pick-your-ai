@@ -172,3 +172,29 @@ test("zero is measured only with complete bounded coverage, and pending dates ob
   input.selected.pendingEvidence[0].occurredAt = end;
   assert.equal(alice((await app.inject(bounded)).json()).pending.count, null);
 });
+
+test("a sub-millisecond coverage start gap cannot certify measured pending zero", async (t) => {
+  for (const field of ["knownStart", "windowStart"]) {
+    const { input, app } = harness(t);
+    const start = "2026-10-16T00:00:00.000Z",
+      end = "2026-10-18T00:00:00.000Z";
+    input.selected.scope.start = start;
+    input.selected.scope.end = end;
+    const row = input.selected.rows.find((row) => row.actorId === "101");
+    Object.assign(row.result.coverage, { state: "complete", windowStart: start, windowEnd: end, knownStart: start });
+    row.pending = {
+      schemaVersion: "leaderboard-pending/v1",
+      state: "measured",
+      valueClass: "qualified",
+      count: 0,
+      evidenceIds: [],
+    };
+    const bounded = `${url}&start=${start}&end=${end}`;
+    assert.equal(alice((await app.inject(bounded)).json()).pending.count, 0);
+    row.result.coverage[field] = "2026-10-15T20:00:00.0001-04:00";
+    const response = await app.inject(bounded);
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(alice(response.json()).pending.state, "unknown", field);
+    assert.equal(alice(response.json()).pending.count, null, field);
+  }
+});

@@ -122,8 +122,14 @@ source/publication adapter; do not report invented zeros.
 Protected operator replay may supply a `ReplayAudit` with an actual operator ID,
 fixed reason, policy version and resulting revision (null until proven). Each
 individual delivery replay remains bounded, preserves prior attempt history and
-records its opaque authorization receipt. No public replay endpoint or time-window
-bulk replay is enabled. The host must authenticate/authorize this operation.
+records its opaque authorization receipt. The protected `OperatorInbox` now also
+supports [explicit bounded source/time-window preview and replay](operator-operations.md#bounded-sourcetime-window-host-primitive):
+up to 50 quarantined deliveries within 31 days, exact selection/policy/source
+revision checks, atomic per-delivery batch receipts and current authorization
+rechecks. No public replay endpoint, automatic replay or time-window HTTP/UI
+control is enabled. The host must authenticate/authorize each operation; a preview
+is not permission, and a queued batch is not proof of publication or complete
+window coverage.
 
 ## Acceptance evidence and remaining prerequisites
 
@@ -142,7 +148,7 @@ Real App capability receipts, complete family/nested GitHub adapters, enabled
 source inventory and real paginated counts remain necessary for #49/#59/#63/#64.
 Label/milestone source adapters and opt-in live canaries in #84 remain separate
 source-verification work. #73 also needs source quota/publication-delay telemetry,
-authorized bulk replay and an actual operational drill. #74 needs reviewed retention,
+approved integration of the bounded replay host primitive and an actual operational drill. #74 needs reviewed retention,
 object restoration and public projection/CDN correction receipts; #75 needs matching
 metric/definition-window comparison and public presentation; #85 needs a real
 published source snapshot and reviewed retention/rebuild evidence. Enrichment
