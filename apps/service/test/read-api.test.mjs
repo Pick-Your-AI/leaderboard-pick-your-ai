@@ -836,3 +836,80 @@ test("legacy portfolio and detail routes also restrict categories to published p
   assert.deepEqual((await h.app.inject("/api/v1/contributors/alice?category=documentation")).json().timeline, []);
   assert.deepEqual((await h.app.inject("/api/v1/evidence/e-alice")).json().contribution.metricIds, ["pr_opened"]);
 });
+
+test("share cards are scoped, dated, source-linked and deny external framing", async (t) => {
+  const value = fixture();
+  const app = createService({ source: { read: async () => structuredClone(value) } });
+  t.after(() => app.close());
+  const current = await app.inject({ url: "/api/v1/cards/alice?metric=pr_opened" });
+  assert.equal(current.statusCode, 200);
+  assert.match(current.headers["content-type"], /text\/html/);
+  assert.equal(current.headers["cache-control"], "no-store");
+  assert.match(current.headers["content-security-policy"], /frame-ancestors 'self'/);
+  assert.match(current.body, /Current snapshot card/);
+  assert.match(current.body, /2026-10-17T12:00:00.000Z/);
+  assert.match(current.body, /https:\/\/github.com\/synthetic\/example\/pull\/1/);
+  assert.match(current.body, /snapshot=public-1&amp;metric=pr_opened/);
+  const pinned = await app.inject({ url: "/api/v1/cards/alice?metric=pr_opened&snapshot=public-1" });
+  assert.equal(pinned.statusCode, 200);
+  assert.match(pinned.body, /Archived snapshot card/);
+  assert.equal((await app.inject({ url: "/api/v1/cards/alice" })).statusCode, 400);
+  value.controls.suppressedActorIds.push("alice");
+  const hidden = await app.inject({
+    url: "/api/v1/cards/alice?metric=pr_opened&snapshot=public-1",
+    headers: { "if-none-match": pinned.headers.etag },
+  });
+  assert.equal(hidden.statusCode, 404);
+  assert.doesNotMatch(hidden.body, /alice|synthetic\/example/);
+});
+
+test("card output escapes publisher text and does not include suppressed source evidence", async (t) => {
+  const value = fixture();
+  value.selected.actors[0].actor.login = '<script>alert("x")</script>';
+  const app = createService({ source: { read: async () => structuredClone(value) } });
+  t.after(() => app.close());
+  const response = await app.inject({ url: "/api/v1/cards/alice?metric=pr_opened" });
+  assert.equal(response.statusCode, 200);
+  assert.doesNotMatch(response.body, /<script>/);
+  assert.match(response.body, /&lt;script&gt;/);
+  value.controls.suppressedArtifactIds.push("pr-0");
+  const hidden = await app.inject({ url: "/api/v1/cards/alice?metric=pr_opened&snapshot=public-1" });
+  assert.equal(hidden.statusCode, 404);
+  assert.doesNotMatch(hidden.body, /synthetic\/example\/pull\/1/);
+});
+
+test("achievement rules require approval and use only dated accepted evidence within the visible scope", async (t) => {
+  const value = fixture();
+  value.selected.portfolioEvidence = value.selected.evidence.map((entry) => ({
+    ...entry,
+    activityState: "accepted",
+    observedAt: at,
+  }));
+  value.selected.portfolioEvidence[0].contribution.roles = ["reviewer", "coauthor"];
+  const source = { read: async () => structuredClone(value) };
+  const blocked = createService({ source });
+  const app = createService({ source, approvedAchievementRuleVersion: "accepted-evidence/v1" });
+  t.after(() => Promise.all([blocked.close(), app.close()]));
+  const url = "/api/v1/contributors/alice/achievements?snapshot=public-1";
+  assert.equal((await blocked.inject({ url })).statusCode, 503);
+  const response = await app.inject({ url });
+  assert.equal(response.statusCode, 200);
+  const awards = response.json().achievements;
+  assert.equal(awards.length, 2);
+  assert.deepEqual(awards[0].evidenceIds, ["e-alice"]);
+  assert.equal(awards[0].sharedCredit, true);
+  assert.equal(awards[0].ruleVersion, "accepted-evidence/v1");
+  assert.match(awards[0].scopeMeaning, /not a claim of first-ever/);
+  for (const state of ["observed", "pending", "unknown"]) {
+    value.selected.portfolioEvidence[0].activityState = state;
+    assert.deepEqual((await app.inject({ url })).json().achievements, []);
+  }
+  value.selected.portfolioEvidence[0].activityState = "accepted";
+  value.selected.portfolioEvidence[0].occurredAt = null;
+  assert.equal((await app.inject({ url })).statusCode, 503);
+  value.selected.portfolioEvidence[0].occurredAt = at;
+  value.controls.suppressedArtifactIds.push("pr-0");
+  assert.deepEqual((await app.inject({ url })).json().achievements, []);
+  value.controls.suppressedActorIds.push("alice");
+  assert.equal((await app.inject({ url })).statusCode, 404);
+});

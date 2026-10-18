@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { actorId, ControlError, exactKeys, locator, record, requireThat, text } from "./store.mjs";
+import { nominateSpotlight, decideSpotlight, projectSpotlights } from "./editorial.mjs";
 import { createConfigurationManager } from "./configuration.mjs";
 
 const random = () => randomBytes(32).toString("base64url");
@@ -68,7 +69,10 @@ export function createControlsServer({
   sourceVerifier,
   now = Date.now,
   sessionSeconds = 900,
+  loginSuccessPath = "/controls/session",
+  spotlightEligibility = () => false,
 }) {
+  requireThat(["/controls/session", "/account"].includes(loginSuccessPath), 500, "Unsupported login landing path");
   const base = new URL(origin);
   requireThat(
     base.protocol === "https:" && base.origin === origin && !base.username && !base.password,
@@ -168,6 +172,10 @@ export function createControlsServer({
       requireThat(url.origin === origin);
       const path = url.pathname;
       const parsed = cookies(req);
+      if (req.method === "GET" && path === "/controls/spotlights") {
+        send(200, projectSpotlights(store.read(), spotlightEligibility));
+        return;
+      }
       if (req.method === "GET" && path === "/controls/public") {
         send(200, store.publicSnapshot());
         return;
@@ -234,7 +242,7 @@ export function createControlsServer({
           };
         });
         res.setHeader("set-cookie", [cookie(sessionCookie, token, sessionSeconds), cookie(loginCookie, "", 0)]);
-        res.writeHead(303, { location: `${origin}/controls/session` });
+        res.writeHead(303, { location: `${origin}${loginSuccessPath}` });
         res.end();
         return;
       }
@@ -255,6 +263,33 @@ export function createControlsServer({
           refreshSession: () => authenticate(req, parsed),
         });
         send(result.status, result.data);
+        return;
+      }
+      if (req.method === "GET" && path === "/controls/spotlights/queue") {
+        send(200, {
+          nominations: Object.values(store.read().spotlights || {}).filter(
+            (entry) => entry.owner === session.actorId || session.roles.includes("reviewer"),
+          ),
+        });
+        return;
+      }
+      if (req.method === "POST" && path === "/controls/spotlights") {
+        const input = await inputBody();
+        let nomination;
+        store.transaction((state) => {
+          nomination = nominateSpotlight(state, session, input, now());
+        });
+        send(201, { nomination });
+        return;
+      }
+      const spotlightAction = path.match(/^\/controls\/spotlights\/([a-f0-9-]{36})$/);
+      if (req.method === "POST" && spotlightAction) {
+        const input = await inputBody();
+        let nomination;
+        store.transaction((state) => {
+          nomination = decideSpotlight(state, session, spotlightAction[1], input, now());
+        });
+        send(200, { nomination });
         return;
       }
       if (req.method === "GET" && path === "/controls/session") {
@@ -278,6 +313,16 @@ export function createControlsServer({
         });
         res.setHeader("set-cookie", cookie(sessionCookie, "", 0));
         send(200, { revoked: true });
+        return;
+      }
+      if (req.method === "GET" && path === "/controls/profile") {
+        const profile = store.read().profiles[session.actorId] || {};
+        send(200, {
+          public: profile.public === true,
+          bio: profile.bio || "",
+          highlights: profile.highlights || [],
+          suppressed: profile.suppressed === true,
+        });
         return;
       }
       if (req.method === "POST" && path === "/controls/profile") {
