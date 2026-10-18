@@ -589,3 +589,30 @@ test("rank movement indexes large prior cohorts and preserves first-match duplic
     }]);
   }
 });
+
+test("named movement uses event-window end separately from a later observation cutoff", () => {
+  const firstEnd = "2026-11-01T00:00:00.000Z", nextEnd = "2026-11-02T00:00:00.000Z";
+  const oldFacts = [fact("a"), fact("b", { actorId: "b" })];
+  const before = board(oldFacts, {}, resolveMetricWindow("30d", firstEnd), { cutoff: "2026-11-01T00:10:00.123Z" });
+  const fresh = fact("fresh", { actorId: "b", acceptedAt: "2026-11-01T00:05:00.000Z", observedAt: "2026-11-02T00:00:00.001Z" });
+  const later = { cutoff: "2026-11-02T00:10:00.456Z", coverage: [coverage({ windowEnd: nextEnd })] };
+  const after = board([...oldFacts, fresh], {}, resolveMetricWindow("30d", nextEnd), later);
+  assert.deepEqual(compareRankMovement(before, after).map(row => [row.actorId, row.state, row.delta]), [["b", "comparable", 0], ["a", "comparable", -1]]);
+  const late = board([...oldFacts, { ...fresh, acceptedAt: "2026-10-31T23:59:59.999Z" }], {}, resolveMetricWindow("30d", nextEnd), later);
+  assert.ok(compareRankMovement(before, late).every(row => row.reason === "late_history"));
+  assert.ok(compareRankMovement(before, { ...after, cutoff: "2026-11-01T23:59:59.999Z" }).every(row => row.reason === "different_scope_or_window"));
+  assert.ok(compareRankMovement({ ...after, cutoff: before.cutoff }, { ...before, cutoff: after.cutoff }).every(row => row.state === "unavailable"));
+  assert.ok(compareRankMovement(before, { ...after, coverage: "incomplete" }).every(row => row.reason === "insufficient_history"));
+});
+
+test("named UTC publication windows keep DST boundary events half-open", () => {
+  const end = "2026-11-02T06:00:00.000Z", window = resolveMetricWindow("7d", end);
+  const facts = [
+    fact("before", { acceptedAt: "2026-10-26T05:59:59.999Z", observedAt: "2026-11-02T06:00:00.001Z" }),
+    fact("start", { acceptedAt: window.from, observedAt: "2026-11-02T06:00:00.001Z" }),
+    fact("inside", { acceptedAt: "2026-11-02T05:59:59.999Z", observedAt: "2026-11-02T06:00:00.001Z" }),
+    fact("end", { acceptedAt: end, observedAt: "2026-11-02T06:00:00.001Z" }),
+  ];
+  const result = board(facts, {}, window, { cutoff: "2026-11-02T06:00:00.123Z", coverage: [coverage({ windowEnd: end })] });
+  assert.deepEqual(result.rows[0].evidenceIds, ["inside", "start"]);
+});

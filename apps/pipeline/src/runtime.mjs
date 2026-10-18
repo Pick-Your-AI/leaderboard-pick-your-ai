@@ -1,3 +1,8 @@
+import {
+  validatePublicationPeriods,
+  resolvePublicationWindows,
+  approvedPublicationScope,
+} from "./publication-windows.mjs";
 import { retainedRankHistory } from "./rank-history.mjs";
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
 import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
@@ -622,9 +627,10 @@ export async function createPipeline(options) {
       if ((scope.start === null) !== (scope.end === null)) fail("incomplete_public_window");
       if (scope.start !== null && utc(scope.start) >= utc(scope.end)) fail("invalid_public_window");
     }
+    validatePublicationPeriods(config.scopes);
     return true;
   }
-  const configuredScope = (scope) => config.scopes.some((item) => scopeKey(item) === scopeKey(scope));
+  const configuredScope = (scope) => approvedPublicationScope(config.scopes, scope, c.metrics.resolveMetricWindow);
   const repositoriesFor = (scope) =>
     config.repositories.filter((repo) => scope.repository === null || String(repo.id) === scope.repository);
   async function receipt(tx, operationKey, kind, document) {
@@ -980,7 +986,7 @@ export async function createPipeline(options) {
       if (!head || head.revision <= publication.revision) state.pipelineHeads[scopeKey(scope)] = confirmation;
     });
   }
-  async function publish(scope, cutoff, observationCutoff, dispatch) {
+  async function publish({ scope, window }, cutoff, observationCutoff, dispatch) {
     assertRunConfiguration();
     if (!configuredScope(scope)) fail("scope_not_approved");
     const repos = repositoriesFor(scope);
@@ -1136,10 +1142,6 @@ export async function createPipeline(options) {
         repos.map((repo) => repo.id),
       ])
     ).rows.map((row) => row.document.fact);
-    const window =
-      scope.start === null
-        ? c.metrics.resolveMetricWindow("all", cutoff)
-        : c.metrics.resolveMetricWindow("custom", cutoff, { from: scope.start, to: scope.end });
     const engineScope = {
       ...window,
       repos: repos.map((repo) => String(repo.id)),
@@ -1744,6 +1746,7 @@ export async function createPipeline(options) {
     if (dispatch && runConfigurationRevision !== dispatch.lease.operation.configurationRevision)
       fail("dispatch_configuration_changed");
     if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 10000) fail("invalid_pipeline_page_budget");
+    const publicationWindows = resolvePublicationWindows(config.scopes, cutoff, c.metrics.resolveMetricWindow);
     const progress = [];
     for (const repo of config.repositories) {
       await verifyRepository(repo, cutoff);
@@ -1814,7 +1817,8 @@ export async function createPipeline(options) {
       dispatch.generations = frozen.generations;
     }
     if (observationCutoff < cutoff) fail("observation_clock_precedes_event_cutoff");
-    for (const scope of config.scopes) publications.push(await publish(scope, cutoff, observationCutoff, dispatch));
+    for (const selected of publicationWindows)
+      publications.push(await publish(selected, cutoff, observationCutoff, dispatch));
     return { state: "published", progress, publications };
   }
   function runOnce(options) {
@@ -1831,8 +1835,9 @@ export async function createPipeline(options) {
     execute: async (lease) => {
       const result = await runOnceInternal({ cutoff: lease.operation.cutoff, dispatch: { lease } });
       if (result.state !== "published") fail("dispatch_collection_incomplete");
+      const windows = resolvePublicationWindows(config.scopes, lease.operation.cutoff, c.metrics.resolveMetricWindow);
       return result.publications.map((publication, index) => ({
-        scopeKey: scopeKey(config.scopes[index]),
+        scopeKey: scopeKey(windows[index].scope),
         snapshotId: publication.snapshotId,
         revision: publication.revision,
       }));
@@ -1862,7 +1867,9 @@ export async function createPipeline(options) {
         )
       )
         fail("dispatch_source_generation_changed");
+      const windows = resolvePublicationWindows(config.scopes, lease.operation.cutoff, c.metrics.resolveMetricWindow);
       for (const publication of publications) {
+        const selectedScope = windows.find(({ scope }) => scopeKey(scope) === publication.scopeKey)?.scope;
         const receipt = (
           await tx.query(
             `SELECT snapshot_id FROM leaderboard_pipeline.dispatch_publications WHERE operation_key=$1 AND scope_key=$2 AND snapshot_id=$3`,
@@ -1872,12 +1879,8 @@ export async function createPipeline(options) {
         const confirmation = controlsStore.read().pipelinePublications?.[publication.snapshotId];
         if (
           !receipt ||
-          !confirmationMatches(
-            confirmation,
-            config.scopes.find((scope) => scopeKey(scope) === publication.scopeKey),
-            publication.snapshotId,
-            publication.revision,
-          ) ||
+          !selectedScope ||
+          !confirmationMatches(confirmation, selectedScope, publication.snapshotId, publication.revision) ||
           confirmation?.controlsConfigurationRevision !== runConfigurationRevision
         )
           fail("dispatch_publication_unconfirmed");
