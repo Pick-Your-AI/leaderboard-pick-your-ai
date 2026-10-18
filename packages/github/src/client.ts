@@ -230,7 +230,8 @@ export class GithubReadClient {
         bytes.set(chunk, offset);
         offset += chunk.length;
       }
-      return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+      // Damaged source bytes must not become replacement characters in stored identities.
+      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
     } catch (error) {
       if (error instanceof GithubClientError) throw error;
       if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) {
