@@ -72,7 +72,9 @@ Rank movement requires matching membership basis, Project set, workstream and re
 
 The export `schemaVersion` continues to identify the nested snapshot contract; `exportSchemaVersion` identifies the export envelope. In CSV v2, `projects` is a quoted JSON array and every metadata/data record repeats all scope fields. Formula protection, byte limits, public-proof minimization, policy metadata, pending proofs and comparison metadata remain enforced. HTML/SVG contributor cards name the frozen membership basis and selected Projects and preserve that selection in their portfolio links. The API routes remain under `/api/v1`; unsupported selectors were previously rejected, and the new opt-in payloads carry their own explicit versions.
 
-Browser integration is a separate coordinated delivery after [the canonical comparison UI](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/270). Before exposing these selectors, a consumer must validate the complete `public-read/v2` envelope and `public-scope/v2` identity, support both v2 export formats, and preserve context/Projects through every navigation, pin, cursor and comparison action. Comparing only the original five scope fields is insufficient. Existing strict v1 export consumers must continue rejecting v2 until that support is implemented.
+The API-backed browser exposes membership basis and native GitHub Project IDs alongside the existing organization, repository, workstream and actor controls. It accepts the canonical v2/v3 query contract, checks exact retained response scope and envelope versions, and validates both export formats. Project selectors remain separate from the existing `/projects/:id` workstream route. The complete selection travels through board, portfolio, activity, proof, card, cursor, permalink, history and frozen/live wall navigation.
+
+Changing a source filter starts a fresh page and removes an unchanged old snapshot pin. An explicitly edited pin remains explicit and must satisfy the new scope. Display timezone changes preserve the displayed snapshot, cursor and proof while leaving source requests and exact UTC bounds unchanged. Unapproved or revoked scopes remain unavailable; the browser cannot broaden a selection or create a publication.
 
 ## Automated evidence and remaining #91 work
 
@@ -83,4 +85,10 @@ npm run build
 node --test --test-concurrency=1 packages/contracts/test/public-scope.test.js apps/service/test/public-scope.test.mjs apps/pipeline/test/public-scope.test.mjs
 ```
 
-These tests do not certify live GitHub source capability or complete historical coverage. Calendar/named-period controls, user-selected timezone presentation, browser membership/role selector integration, and the remaining full #91 acceptance evidence retain their existing owners and gates. The [role backend extension](public-role-scopes.md) has its own versioned boundary. These slices alone do not close #91 or alter the 98-metric plan.
+These tests do not certify live GitHub source capability or complete historical coverage. Named-period controls, the initial 30-day experience and the remaining full #91 acceptance evidence retain their existing owners and gates. The browser selector and timezone changes remain bounded implementation evidence, with real source and release acceptance separate. The [role backend extension](public-role-scopes.md) has its own versioned boundary. These slices alone do not close #91 or alter the 98-metric plan.
+
+
+The API wall keeps long Project or role selections within its display layout using a
+keyboard-operable scope disclosure. Its summary states the selected membership
+mode and Project/role counts; opening it shows every exact Project ID and role.
+This presentation does not narrow or broaden the full scope sent to the service.

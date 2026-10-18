@@ -23,6 +23,24 @@ const date = (value: unknown) => {
 const list = (value: unknown, maximum: number): unknown[] =>
   Array.isArray(value) && value.length <= maximum ? value : fail();
 
+/** Editorial controls have only an unfiltered organization-level protocol. */
+export function supportsEditorialScope(selected: Selection, organization: string): boolean {
+  return (
+    (selected.actors ?? "all") === "all" &&
+    selected.organization === organization &&
+    !selected.repository &&
+    !selected.workstream &&
+    (selected.context ?? "event") === "event" &&
+    !selected.projects?.length &&
+    !selected.roles?.length &&
+    !selected.start &&
+    !selected.end &&
+    !selected.snapshot &&
+    !selected.category &&
+    !selected.search
+  );
+}
+
 export function recognitionParameters(selected: Selection, snapshotId: string) {
   identity(snapshotId);
   if (selected.snapshot && selected.snapshot !== snapshotId) throw new ReadFailure(502, "api_snapshot_mismatch");

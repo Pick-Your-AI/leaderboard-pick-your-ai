@@ -20,7 +20,7 @@ export async function readProof(
   signal: AbortSignal,
 ): Promise<PublicProof> {
   const raw = await request(base, `evidence/${encodeURIComponent(id)}`, parameters(selected), signal);
-  const value = evidence(raw);
+  const value = evidence(raw, selected);
   if (value.contribution.contributionId !== id) throw new ReadFailure(502, "api_evidence_mismatch");
   return { ...metadata(raw, selected), ...value };
 }
