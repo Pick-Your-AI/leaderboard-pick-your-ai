@@ -1,5 +1,14 @@
 export { actorFilterSchema, actorFilterLabels, matchesActorFilter, type ActorFilter } from "./actor-filter.js";
 export {
+  verifiedIdentityCorrectionVersion,
+  verifiedGithubIdentitySchema,
+  verifiedIdentityCorrectionProposalSchema,
+  verifiedIdentityCorrectionDecisionSchema,
+  type VerifiedGithubIdentity,
+  type VerifiedIdentityCorrectionProposal,
+  type VerifiedIdentityCorrectionDecision,
+} from "./identity-corrections.js";
+export {
   canonicalPublicScope,
   publicScopeKey,
   publicScopeFilterKey,
