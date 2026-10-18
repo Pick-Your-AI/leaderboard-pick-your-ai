@@ -140,14 +140,14 @@ test("pinned scoped cursor proof survives timezone changes, history and copied r
     expect(before.searchParams.get("cursor")).toBeTruthy();
     expect(before.searchParams.get("snapshot")).toBeTruthy();
     const proof = await dialog.locator("[data-proof-projection]").innerText();
-    await page.getByRole("combobox", { name: "Display timezone", exact: true }).selectOption("Asia/Kathmandu");
+    await page.getByRole("combobox", { name: "Display timezone", exact: true }).selectOption("America/New_York");
     await expect(dialog.locator("[data-proof-projection]")).toHaveText(proof, { useInnerText: true });
     for (const key of ["snapshot", "cursor", "proof", "context", "project", "role"])
       expect(new URL(page.url()).searchParams.get(key)).toBe(before.searchParams.get(key));
     await page.goBack();
     await expect(page.getByRole("combobox", { name: "Display timezone", exact: true })).toHaveValue("UTC");
     await page.goForward();
-    await expect(page.getByRole("combobox", { name: "Display timezone", exact: true })).toHaveValue("Asia/Kathmandu");
+    await expect(page.getByRole("combobox", { name: "Display timezone", exact: true })).toHaveValue("America/New_York");
     await page.goto(page.url());
     await expect(dialog.locator("[data-proof-projection]")).toHaveText(proof, { useInnerText: true });
     await expectScoped(page);
@@ -225,7 +225,7 @@ test("wrong response scopes and unapproved Projects stay unavailable without wid
     await expect(page.getByRole("alert")).toContainText("api_scope_mismatch");
     await expect(page.getByRole("link", { name: "synthetic-pending-102", exact: true })).toHaveCount(0);
     await page.goto(boardPath({ project: "PVT_UNAPPROVED" }));
-    await expect(page.getByRole("alert")).toContainText("public_projection_unavailable");
+    await expect(page.getByRole("alert")).toContainText("public_snapshot_unavailable");
     const last = api.calls.filter((url) => url.pathname.endsWith("/boards")).at(-1)!;
     expect(last.searchParams.get("project")).toBe("PVT_UNAPPROVED");
     expect(last.searchParams.get("role")).toBe(selected.role);
