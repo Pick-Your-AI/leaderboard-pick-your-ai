@@ -130,6 +130,9 @@ const details = {
   usability: {
     studyId: "study:1",
     studyVersion: "v1",
+    findingId: "finding:1",
+    findingVersion: "v1",
+    findingAccepted: true,
     method: "user_study",
     participantData: "approved_sanitized_aggregate",
     sourceIds: ["source:1"],
@@ -422,6 +425,33 @@ test("pricebook currency requires an actual uppercase three-letter string", () =
     s.record.details.currency = currency;
     assert.throws(() => run(s), /domain_recognition_evidence_unverified/, JSON.stringify(currency));
   }
+});
+
+test("usability rejects study-only evidence and requires the specific sanitized finding to be accepted", () => {
+  const studyOnly = scenario("usability");
+  delete studyOnly.record.details.findingId;
+  delete studyOnly.record.details.findingVersion;
+  delete studyOnly.record.details.findingAccepted;
+  assert.throws(() => run(studyOnly), /domain_recognition_evidence_unverified/);
+  for (const patch of [
+    { findingId: "" },
+    { findingVersion: "" },
+    { findingAccepted: false },
+    { findingAccepted: "true" },
+    { participantData: "recordings" },
+  ]) {
+    const s = scenario("usability");
+    Object.assign(s.record.details, patch);
+    assert.throws(() => run(s), /domain_recognition_evidence_unverified/);
+  }
+  const s = scenario("usability");
+  const initial = qualified(s)[0].canonicalKey;
+  s.record.details.studyId = "study:2";
+  assert.notEqual(qualified(s)[0].canonicalKey, initial, "finding identity retains its study context");
+  assert.doesNotMatch(
+    JSON.stringify(run(s).evidence.slice(s.input.evidence.length)),
+    /findingId|findingVersion|findingAccepted|finding:1|studyId|studyVersion|sourceIds/,
+  );
 });
 
 test("malformed accepted decision clocks remain closed before canonical deduplication", () => {
@@ -732,62 +762,66 @@ test("new proof for an existing canonical unit cannot create extra credit", () =
   );
 });
 
-test("the metric engine counts separately reviewed documentation categories while conserving duplicate requests", () => {
-  const s = scenario("documentation");
-  for (const [suffix, category] of [
-    ["duplicate", "guide"],
-    ["distinct", "example"],
-  ]) {
-    const request = structuredClone(s.request);
-    request.id += ":" + suffix;
-    request.history[0].id += ":" + suffix;
-    request.history[0].at += 1000;
-    s.state.requests[request.id] = request;
-    s.state.audit.push(request.history[0]);
-    s.binding.domainEvidence.records.push({
-      ...structuredClone(s.record),
-      requestId: request.id,
-      decisionId: request.history[0].id,
-      details: { ...s.record.details, category },
-    });
-  }
-  const normalized = run(s);
-  const policy = {
-    ...s.policies[0].policy,
-    definitionVersion: metricRegistryV1.policy_version,
-    unit: getMetricDefinition("documentation").definition.unit,
-    aggregation: "count",
-    roles: ["author"],
-    sources: ["github_rest"],
-    minimumSamples: 1,
-    rank: false,
-  };
-  const result = aggregateMetric(
-    {
-      datasetId: "synthetic-domain",
-      cutoff,
-      backfillRevision: "1",
-      repositoryIds: ["2"],
-      actors: normalized.actors,
-      facts: normalized.facts,
-      coverage: [],
-    },
-    policy,
-    {
-      timezone: "UTC",
-      from: null,
-      to: cutoff,
-      repos: [],
-      projects: [],
-      workstreams: [],
-      roles: [],
-      actors: "all",
-      context: "event",
-    },
-  );
-  assert.equal(result.rows.find((row) => row.actorId === "101").value, 2);
-  assert.equal(normalized.facts.filter((fact) => fact.metricId === "pr_merged").length, 1);
-});
+for (const metric of ["documentation", "usability"])
+  test(`the metric engine counts separately accepted ${metric === "usability" ? "findings in one study" : "documentation categories"} while conserving duplicate proof`, () => {
+    const s = scenario(metric);
+    for (const [suffix, detail] of [
+      [
+        "duplicate",
+        metric === "usability" ? { findingVersion: "v2", sourceIds: ["source:1", "source:2"] } : { category: "guide" },
+      ],
+      ["distinct", metric === "usability" ? { findingId: "finding:2" } : { category: "example" }],
+    ]) {
+      const request = structuredClone(s.request);
+      request.id += ":" + suffix;
+      request.history[0].id += ":" + suffix;
+      request.history[0].at += 1000;
+      s.state.requests[request.id] = request;
+      s.state.audit.push(request.history[0]);
+      s.binding.domainEvidence.records.push({
+        ...structuredClone(s.record),
+        requestId: request.id,
+        decisionId: request.history[0].id,
+        details: { ...s.record.details, ...detail },
+      });
+    }
+    const normalized = run(s);
+    const policy = {
+      ...s.policies[0].policy,
+      definitionVersion: metricRegistryV1.policy_version,
+      unit: getMetricDefinition(metric).definition.unit,
+      aggregation: "count",
+      roles: ["author"],
+      sources: ["github_rest"],
+      minimumSamples: 1,
+      rank: false,
+    };
+    const result = aggregateMetric(
+      {
+        datasetId: "synthetic-domain",
+        cutoff,
+        backfillRevision: "1",
+        repositoryIds: ["2"],
+        actors: normalized.actors,
+        facts: normalized.facts,
+        coverage: [],
+      },
+      policy,
+      {
+        timezone: "UTC",
+        from: null,
+        to: cutoff,
+        repos: [],
+        projects: [],
+        workstreams: [],
+        roles: [],
+        actors: "all",
+        context: "event",
+      },
+    );
+    assert.equal(result.rows.find((row) => row.actorId === "101").value, 2);
+    assert.equal(normalized.facts.filter((fact) => fact.metricId === "pr_merged").length, 1);
+  });
 
 test("withdrawal, suppression, renewed review and future event times cannot retain obsolete recognition", () => {
   for (const status of ["withdrawn", "pending", "appealed", "rejected"]) {

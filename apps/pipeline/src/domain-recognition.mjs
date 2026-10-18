@@ -277,7 +277,6 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
       unit = [id(detail.decisionId)];
       break;
     case "market_research":
-    case "usability":
       object(detail, ["studyId", "studyVersion", "method", "participantData", "sourceIds"]);
       choice(detail.method, ["desk_research", "publisher_statement", "independent_measurement", "user_study"]);
       choice(detail.participantData, ["none", "approved_sanitized_aggregate"]);
@@ -285,6 +284,26 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
       ids(detail.sourceIds);
       id(detail.studyVersion);
       unit = [id(detail.studyId)];
+      break;
+    case "usability":
+      object(detail, [
+        "studyId",
+        "studyVersion",
+        "findingId",
+        "findingVersion",
+        "findingAccepted",
+        "method",
+        "participantData",
+        "sourceIds",
+      ]);
+      require(detail.findingAccepted === true);
+      choice(detail.method, ["desk_research", "publisher_statement", "independent_measurement", "user_study"]);
+      choice(detail.participantData, ["none", "approved_sanitized_aggregate"]);
+      require(detail.method !== "user_study" || detail.participantData === "approved_sanitized_aggregate");
+      ids(detail.sourceIds);
+      id(detail.studyVersion);
+      id(detail.findingVersion);
+      unit = [id(detail.studyId), id(detail.findingId)];
       break;
     case "evidence_manifests":
       object(detail, ["artifactIdentity", "artifactHash", "sourceUse", "sourceIds"]);

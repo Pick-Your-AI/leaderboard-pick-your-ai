@@ -94,7 +94,7 @@ executable schemas are in `apps/pipeline/src/domain-recognition.mjs`.
 | `regressions_prevented` | Scenario and fixture hash, distinct before/after revisions, fails-before and passes-after evidence | Failure scenario | Acceptance |
 | `accessibility` | Artifact/version, validated criteria, explicit audit/discovery/delivered-fix phase and review method | Artifact/version/phase | Acceptance |
 | `design` | Reviewed flow/component/version, actual author/coauthor/reviewer role and public attribution | Flow/component/version | Acceptance |
-| `usability` | Study/version, explicit method and sources; user studies require approved sanitized aggregates | Accepted study identity | Acceptance |
+| `usability` | Study/version and individually accepted finding/version, explicit method and sources; user studies require approved sanitized aggregates | Study/finding identity | Acceptance |
 | `performance` | Scoped result/run, independent comparison of the same conditions, metric and units across distinct revisions, actual improvement | Result/scope | Acceptance |
 | `security` | Disclosure/version/time, public-disclosure approval, contributor consent and enrolled disclosure reviewer | Disclosure identity | Public disclosure |
 
@@ -104,8 +104,12 @@ regardless of input order. New review receipts, terms versions, test runs,
 criteria lists, currency/conditions or revised study/disclosure prose cannot
 split the same unit into extra credit. Separately accepted record versions,
 documentation categories and configured freshness intervals can be distinct
-where the registry says so. The initial usability mapping conservatively counts
-one accepted study identity; it does not infer individual findings from a study.
+where the registry says so. Usability requires an explicit finding identity,
+revision and acceptance within its study context; study-only evidence does not
+qualify. Separately accepted findings within one study are distinct units.
+Revisions, additional sources and repeated acceptance of the same study/finding
+retain one unit. Finding and study identifiers, revisions and acceptance details
+remain private; public method reasons do not expose them.
 
 The target metric policy must use canonical grouping and the qualified evidence
 class, keeping observed participation separate. Its time basis must match the
