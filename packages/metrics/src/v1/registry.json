@@ -1,6 +1,6 @@
 {
   "contract_version": "leaderboard-metrics/v1",
-  "policy_version": "candidate-0.1.0",
+  "policy_version": "candidate-0.1.1",
   "source_plan": "planning/metrics-and-ingestion.json",
   "metrics": [
     {
@@ -1396,7 +1396,7 @@
       "name": "Items with triage activity",
       "attribution": "event actor",
       "source": "label/assignment/relation/project/edit events",
-      "counting_rule": "distinct actor/item/day qualifying change; group related actions; explicit policy version",
+      "counting_rule": "one observed group per stable actor/item/exact raw state in each fixed 3,600-second UTC bucket anchored at the Unix epoch; repeated identical states within a bucket count once (triage-raw-state/v1)",
       "event_clock": "event_at",
       "coverage_class": "history_partial",
       "display": "leaderboard",
@@ -1410,9 +1410,9 @@
         "eligibility"
       ],
       "definition": {
-        "unit": "distinct actor-item-day triage groups",
+        "unit": "distinct actor-item-raw-state UTC-hour triage groups",
         "aggregation": "count_distinct_eligible_units",
-        "numerator": "distinct actor/item/day qualifying change; group related actions; explicit policy version",
+        "numerator": "one observed group per stable actor/item/exact raw state in each fixed 3,600-second UTC bucket anchored at the Unix epoch; repeated identical states within a bucket count once (triage-raw-state/v1)",
         "denominator": {
           "kind": "not_applicable",
           "definition": "Count/sum measure; no mathematical denominator. Show source coverage and eligible population separately."
@@ -4967,7 +4967,9 @@
           "order": null
         },
         "verification_cases": [
-          "packages/metrics/test/registry-ui.test.js"
+          "packages/metrics/test/registry-ui.test.js",
+          "packages/github/test/normalizers.test.mjs",
+          "packages/metrics/test/triage-normalizer.test.js"
         ],
         "limitations": [
           "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",

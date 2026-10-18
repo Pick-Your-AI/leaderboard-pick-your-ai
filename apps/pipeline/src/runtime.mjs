@@ -5,6 +5,7 @@ import { requireThat } from "../../controls/src/store.mjs";
 import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-metadata.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
+import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -157,11 +158,13 @@ export async function createPipeline(options) {
   };
   // A changed path/provenance policy must not reuse a normalization produced
   // under the previous classification, even when metric arithmetic is unchanged.
-  const normalizationSignature = digest(
+  const policySignatures = Array.isArray(config.policies) ? config.policies.map((item) => item?.signature) : [];
+  const normalizationPolicySignature = digest(
     classificationPolicies.documentation.length || classificationPolicies.research.length
-      ? ["current-state-selection-v2", dataMode, config.policies.map((item) => item.signature), classificationPolicies]
-      : ["current-state-selection-v1", dataMode, config.policies.map((item) => item.signature)],
+      ? ["current-state-selection-v2", dataMode, policySignatures, classificationPolicies]
+      : ["current-state-selection-v1", dataMode, policySignatures],
   );
+  const normalizationSignature = digest([normalizationDocumentVersion, normalizationPolicySignature]);
   const verifyConfig = options.verifyConfiguration ?? (async () => false);
   const authorizeCorrection = options.authorizeCorrection ?? (async () => false);
   const now = options.now ?? (() => new Date().toISOString());
@@ -226,11 +229,13 @@ export async function createPipeline(options) {
           await tx.query(
             `SELECT n.document,n.document_hash FROM leaderboard_pipeline.normalizations AS n
            JOIN leaderboard_ingestion.source_facts AS f ON f.fact_key=n.fact_key
-           WHERE n.document_hash=ANY($1::text[]) AND n.policy_signature=$2
+           WHERE n.document_hash=ANY($1::text[]) AND n.policy_signature=ANY($2::text[])
              AND f.repository_id=ANY($3::bigint[]) LIMIT 10001 FOR SHARE OF n`,
             [
               binding.normalizationHashes,
-              normalizationSignature,
+              // Legacy documents still bind historical frozen actor evidence;
+              // only fresh runs require the new private-attribution projection.
+              [normalizationSignature, normalizationPolicySignature],
               authorization.sources.map((source) => source.repositoryId),
             ],
           )
@@ -799,6 +804,7 @@ export async function createPipeline(options) {
         facts: output.facts,
         actors: output.actors,
         evidence: output.evidence,
+        ...privateAttribution(output, row),
         reasons: Array.isArray(output.reasons)
           ? output.reasons.map((reason) =>
               typeof reason === "string" && /^[a-z0-9_:-]{1,100}$/.test(reason) ? reason : "normalization_unavailable",

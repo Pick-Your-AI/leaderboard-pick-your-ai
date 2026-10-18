@@ -274,6 +274,35 @@ test("agent execution under a User preserves account kind without certifying man
   assert.equal(metrics(unknownTarget, "labels_applied")[0].state, "unknown");
 });
 
+test("label and milestone definition transitions require their own target identity", () => {
+  for (const action of [
+    "label_created",
+    "label_edited",
+    "label_deleted",
+    "label_archived",
+    "label_unarchived",
+    "milestone_created",
+    "milestone_edited",
+    "milestone_closed",
+    "milestone_reopened",
+    "milestone_deleted",
+  ]) {
+    const targetField = action.startsWith("label_") ? "label" : "milestone";
+    const otherField = targetField === "label" ? "milestone" : "label";
+    const out = normalizeGithubObservation(
+      envelope({
+        family: "triage",
+        action,
+        payload: { issue: issue(), sender: fixture.merger, [otherField]: { id: 90 } },
+      }),
+    );
+    assert.equal(out.facts.length, 1, action);
+    assert.equal(out.facts[0].state, "unknown", action);
+    assert.equal(out.facts[0].rawState, undefined, action);
+    assert.ok(out.reasons.includes("unknown_metadata_target_identity"), action);
+  }
+});
+
 test("one User occupying author, automated sender and merger roles retains positive execution evidence", () => {
   const out = normalizeGithubObservation(
     envelope({
