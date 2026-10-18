@@ -5,7 +5,12 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { loadPipelineComponents, createPipeline, migratePipeline } from "../src/index.mjs";
+import {
+  loadPipelineComponents,
+  createPipeline,
+  migratePipeline,
+  createGithubCollectionSource,
+} from "../src/index.mjs";
 
 const checkout = resolve(fileURLToPath(new URL("../../../", import.meta.url)));
 const roots = process.env.PIPELINE_COMPONENT_ROOTS ? JSON.parse(process.env.PIPELINE_COMPONENT_ROOTS) : {};
@@ -520,4 +525,309 @@ test("public recovery cannot label facts from an interrupted synthetic run as pu
     0,
   );
   assert.equal((await publicRuntime.app.inject(boardUrl)).statusCode, 503);
+});
+
+test("stored public snapshot mutation fails closed before current overlays", async (t) => {
+  const h = await harness(t);
+  await h.runtime.runOnce();
+  const before = await getBoard(h.runtime);
+  await h.db.query(
+    "UPDATE leaderboard_pipeline.snapshots SET document=jsonb_set(document, '{rows,0,result,value}', '99'::jsonb) WHERE snapshot_id=$1",
+    [before.snapshotId],
+  );
+  for (const path of [
+    boardUrl,
+    `${boardUrl}&snapshot=${before.snapshotId}`,
+    `/api/v1/exports?metric=issues_opened&snapshot=${before.snapshotId}`,
+  ]) {
+    const response = await h.runtime.app.inject(path);
+    assert.equal(response.statusCode, 503);
+    assert.doesNotMatch(response.body, /"value":99/);
+  }
+});
+
+test("historical content replay cannot install an inconsistent current snapshot head", async (t) => {
+  const h = await harness(t);
+  const cutoff = clock();
+  await h.runtime.runOnce({ cutoff });
+  const first = await getBoard(h.runtime);
+  h.controlsStore.transaction(
+    (state) => {
+      state.profiles["101"] = { suppressed: true, public: false, bio: "", highlights: [] };
+    },
+    { publish: true },
+  );
+  await h.runtime.runOnce({ cutoff });
+  const second = await getBoard(h.runtime);
+  assert.notEqual(first.snapshotId, second.snapshotId);
+  h.controlsStore.transaction(
+    (state) => {
+      state.profiles["101"].suppressed = false;
+    },
+    { publish: true },
+  );
+  const prior = (
+    await h.db.query(
+      "SELECT revision,document,document_hash FROM leaderboard_pipeline.snapshots WHERE snapshot_id=$1",
+      [first.snapshotId],
+    )
+  ).rows[0];
+  const receiptCount = (await h.runtime.receipts()).length;
+  await assert.rejects(h.runtime.runOnce({ cutoff }), /pipeline_snapshot_identity_conflict/);
+  const retained = await getBoard(h.runtime);
+  assert.equal(retained.snapshotId, second.snapshotId);
+  assert.equal(retained.revision, second.revision);
+  assert.equal((await h.runtime.receipts()).length, receiptCount);
+  assert.deepEqual(
+    (
+      await h.db.query(
+        "SELECT revision,document,document_hash FROM leaderboard_pipeline.snapshots WHERE snapshot_id=$1",
+        [first.snapshotId],
+      )
+    ).rows[0],
+    prior,
+  );
+  const historical = await getBoard(h.runtime, `&snapshot=${first.snapshotId}`);
+  assert.equal(historical.revision, first.revision);
+  assert.deepEqual(historical.rows, first.rows);
+  const freshCutoff = clock();
+  assert.notEqual(freshCutoff, cutoff);
+  await h.runtime.runOnce({ cutoff: freshCutoff });
+  const third = await getBoard(h.runtime);
+  assert.notEqual(third.snapshotId, first.snapshotId);
+  assert.equal(third.revision, second.revision + 1);
+  assert.deepEqual(
+    third.rows.map((row) => row.result.value),
+    first.rows.map((row) => row.result.value),
+  );
+});
+for (const boundary of [
+  "probe",
+  "page",
+  "restored page",
+  "source write",
+  "normalization",
+  "publication",
+  "publication commit",
+  "restored publication commit",
+])
+  test(`repository overlay revocation while ${boundary} is pending stops the running pipeline`, async (t) => {
+    let enteredBoundary, releaseBoundary;
+    const entered = new Promise((resolve) => (enteredBoundary = resolve));
+    const release = new Promise((resolve) => (releaseBoundary = resolve));
+    const pause = async () => {
+      enteredBoundary();
+      await release;
+    };
+    let h;
+    const extra = {};
+    if (boundary === "probe")
+      extra.probeRepository = async (repo) => {
+        await pause();
+        return { repositoryId: repo.id, installationId: repo.installationId, visibility: "public", checkedAt: clock() };
+      };
+    if (boundary === "normalization")
+      extra.normalizer = async (request) => {
+        await pause();
+        return components.github.createGithubEvidenceNormalizer({
+          client: h.options.githubClient,
+          source: "installation:1",
+          allowedRepositoryIds: [2],
+          isSynthetic: true,
+        })(request);
+      };
+    h = await harness(t, extra);
+    let sourceReads = 0;
+    const readPage = h.options.source.readPage;
+    h.options.source.readPage = async (request) => {
+      sourceReads++;
+      const result = await readPage(request);
+      if (["page", "restored page"].includes(boundary)) await pause();
+      return result;
+    };
+    if (["source write", "publication", "publication commit", "restored publication commit"].includes(boundary)) {
+      const transaction = h.db.transaction;
+      h.db.transaction = (work) =>
+        transaction(async (tx) => {
+          let publishing = false;
+          const result = await work({
+            query: async (sql, params) => {
+              const result = await tx.query(sql, params);
+              if (boundary === "publication" && sql.includes("pg_advisory_xact_lock")) await pause();
+              if (boundary === "source write" && sql.includes("INSERT INTO leaderboard_ingestion.source_facts"))
+                await pause();
+              if (sql.includes("INSERT INTO leaderboard_pipeline.snapshots")) publishing = true;
+              return result;
+            },
+          });
+          if (["publication commit", "restored publication commit"].includes(boundary) && publishing) await pause();
+          return result;
+        });
+    }
+    const pending = h.runtime.runOnce();
+    const rejected = assert.rejects(pending, /active_configuration_(revoked_source|changed)/);
+    await entered;
+    h.controlsStore.transaction(
+      (state) => {
+        state.configuration = {
+          revision: 1,
+          proposals: {},
+          history: [],
+          active: {
+            version: "synthetic-revoked-v1",
+            digest: "a".repeat(64),
+            approval: { id: "synthetic-revocation-approval" },
+            document: { repositories: [], projects: [], metrics: [] },
+          },
+        };
+      },
+      { publish: true },
+    );
+    if (["restored page", "restored publication commit"].includes(boundary))
+      h.controlsStore.transaction(
+        (state) => {
+          state.configuration.revision++;
+          state.configuration.active.document.repositories = [{ id: "2" }];
+        },
+        { publish: true },
+      );
+    releaseBoundary();
+    await rejected;
+    const count = async (table) => (await h.db.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n;
+    if (boundary === "probe") assert.equal(sourceReads, 0);
+    if (["probe", "page", "restored page", "source write"].includes(boundary))
+      assert.equal(await count("leaderboard_ingestion.source_facts"), 0);
+    if (!["publication", "publication commit", "restored publication commit"].includes(boundary))
+      assert.equal(await count("leaderboard_pipeline.normalizations"), 0);
+    // Separate SQLite/Postgres stores cannot roll back a COMMIT already in flight.
+    // The current read overlay must still hide it, and runOnce must reject.
+    const committed = ["publication commit", "restored publication commit"].includes(boundary) ? 1 : 0;
+    assert.equal(await count("leaderboard_pipeline.snapshots"), committed);
+    assert.equal(await count("leaderboard_pipeline.heads"), committed);
+    if (committed) {
+      assert.equal((await h.runtime.app.inject(boardUrl)).statusCode, 503);
+      assert.deepEqual(h.controlsStore.read().pipelinePublications ?? {}, {});
+    }
+  });
+
+test("default collection adapter rejects a revoked response before following its next cursor", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "leaderboard-source-revocation-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  let authorized = true;
+  const calls = [];
+  const client = new components.github.GithubReadClient({
+    apiOrigin: "https://api.synthetic.invalid",
+    token: async () => "synthetic-test-token",
+    checkpoints: new components.github.FileCheckpointStore(join(directory, "checkpoints")),
+    maxRetries: 0,
+    fetch: async (value) => {
+      const url = new URL(value);
+      calls.push(url.href);
+      if (url.pathname === "/repos/synthetic-org/synthetic-repo")
+        return new Response(JSON.stringify({ id: 2, private: false }));
+      authorized = false;
+      return new Response(JSON.stringify([{}]), {
+        headers: {
+          link: '<https://api.synthetic.invalid/repos/synthetic-org/synthetic-repo/issues?page=2>; rel="next"',
+        },
+      });
+    },
+  });
+  const source = createGithubCollectionSource({
+    client,
+    sourceId: "installation:1",
+    repositories: [{ id: 2, installationId: 1, slug: "synthetic-org/synthetic-repo", families: ["issues"] }],
+    isSynthetic: true,
+    assertAuthorized() {
+      if (!authorized) throw Error("synthetic_source_revoked");
+    },
+  });
+  await assert.rejects(
+    source.readPage({
+      runId: "synthetic-scan",
+      repositoryId: 2,
+      family: "issues",
+      mode: "reconcile",
+      since: null,
+      until: clock(),
+      cursor: null,
+      limit: 100,
+    }),
+    /synthetic_source_revoked/,
+  );
+  assert.equal(calls.length, 2);
+  assert.equal(
+    calls.some((url) => url.includes("page=2")),
+    false,
+  );
+});
+
+test("publication confirmation is private and durable; legacy unconfirmed snapshots require an authorized rerun", async (t) => {
+  const h = await harness(t);
+  const cutoff = clock();
+  const initial = await h.runtime.runOnce({ cutoff });
+  const snapshotId = initial.publications[0].snapshotId;
+  assert.equal(h.controlsStore.read().pipelinePublications[snapshotId].configurationVersion, h.config.version);
+  assert.equal(JSON.stringify(h.controlsStore.publicSnapshot()).includes("pipelinePublications"), false);
+  const reopened = new components.controls.ControlStore(join(h.directory, "controls.sqlite"));
+  const restarted = await createPipeline({ ...h.options, controlsStore: reopened });
+  try {
+    assert.equal((await getBoard(restarted, `&snapshot=${snapshotId}`)).snapshotId, snapshotId);
+  } finally {
+    await restarted.stop();
+    reopened.close();
+  }
+  h.controlsStore.transaction((state) => {
+    delete state.pipelinePublications;
+  });
+  assert.equal((await h.runtime.app.inject(`${boardUrl}&snapshot=${snapshotId}`)).statusCode, 410);
+  const retry = await h.runtime.runOnce({ cutoff });
+  assert.equal(retry.publications[0].snapshotId, snapshotId);
+  assert.equal(retry.publications[0].changed, false);
+  assert.equal((await getBoard(h.runtime, `&snapshot=${snapshotId}`)).snapshotId, snapshotId);
+});
+
+test("failed controls confirmation hides the SQL snapshot and an authorized exact rerun recovers", async (t) => {
+  const h = await harness(t);
+  const cutoff = clock();
+  const transaction = h.controlsStore.transaction.bind(h.controlsStore);
+  h.controlsStore.transaction = (change, options) =>
+    transaction((state) => {
+      const result = change(state);
+      if (state.pipelinePublications) throw Error("synthetic_confirmation_failure");
+      return result;
+    }, options);
+  await assert.rejects(h.runtime.runOnce({ cutoff }), /synthetic_confirmation_failure/);
+  assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 1);
+  assert.deepEqual(h.controlsStore.read().pipelinePublications ?? {}, {});
+  assert.equal((await h.runtime.app.inject(boardUrl)).statusCode, 503);
+  h.controlsStore.transaction = transaction;
+  const retry = await h.runtime.runOnce({ cutoff });
+  assert.equal(retry.state, "published");
+  assert.equal(retry.publications[0].changed, false);
+  assert.equal((await h.runtime.app.inject(boardUrl)).statusCode, 200);
+});
+
+test("a confirmed historical pin cannot advertise an unconfirmed newer publication head", async (t) => {
+  const h = await harness(t);
+  const first = await h.runtime.runOnce();
+  const pin = first.publications[0].snapshotId;
+  const cutoff = clock();
+  const transaction = h.controlsStore.transaction.bind(h.controlsStore);
+  h.controlsStore.transaction = (change, options) =>
+    transaction((state) => {
+      change(state);
+      throw Error("synthetic_confirmation_failure");
+    }, options);
+  await assert.rejects(h.runtime.runOnce({ cutoff }), /synthetic_confirmation_failure/);
+  h.controlsStore.transaction = transaction;
+  assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 2);
+  assert.equal((await h.runtime.app.inject(`${boardUrl}&snapshot=${pin}`)).statusCode, 410);
+  assert.equal((await h.runtime.app.inject(boardUrl)).statusCode, 503);
+  const retry = await h.runtime.runOnce({ cutoff });
+  assert.equal(retry.publications[0].changed, false);
+  const pinned = await getBoard(h.runtime, `&snapshot=${pin}`);
+  assert.equal(pinned.snapshotId, pin);
+  assert.equal(pinned.head.snapshotId, retry.publications[0].snapshotId);
+  assert.equal(pinned.head.revision, 2);
 });

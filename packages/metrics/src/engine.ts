@@ -1,4 +1,11 @@
-import type { Actor, Contribution, Coverage } from "@pick-your-ai/contracts";
+import {
+  actorKindSchema,
+  contributionRoleSchema,
+  executionModeSchema,
+  type Actor,
+  type Contribution,
+  type Coverage,
+} from "@pick-your-ai/contracts";
 import { getMetricDefinition } from "./v1/index.js";
 
 export type EvidenceState = "observed" | "qualified" | "reviewed" | "pending" | "excluded" | "unknown";
@@ -35,6 +42,8 @@ export interface EngineActor {
   id: string;
   login: string | null;
   kind: Actor["kind"];
+  /** Literal source evidence only; omission means unknown, never manual work. */
+  executionMode?: Actor["executionMode"];
   publicState: "visible" | "deleted" | "suppressed";
 }
 export interface MetricPolicy {
@@ -121,19 +130,8 @@ export interface MetricAggregate {
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const unique = (values: readonly string[]) => [...new Set(values)].sort(compare);
 const key = (...parts: unknown[]) => JSON.stringify(parts);
-const knownRoles = [
-  "author",
-  "coauthor",
-  "reviewer",
-  "merger",
-  "triager",
-  "reporter",
-  "resolver",
-  "nominator",
-  "automation",
-  "unknown",
-];
-const knownKinds = ["user", "bot", "github_app", "organization", "system", "unknown"];
+const knownRoles: readonly string[] = contributionRoleSchema.options;
+const knownKinds: readonly string[] = actorKindSchema.options;
 const knownSources = ["github_webhook", "github_rest", "github_graphql", "reviewed_receipt"];
 function required(value: string, name: string): void {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${name} is required`);
@@ -288,6 +286,24 @@ interface Prepared {
   facts: MetricFact[];
   audit: AuditEntry[];
 }
+// Qualification uncertainty is not source completeness. Keep this explicit:
+// matching words such as "unknown" missed missing independent acceptance.
+const uncertaintyReasons = new Set([
+  "unreviewed_revision",
+  "conflicting_revision",
+  "ambiguous_canonical_action",
+  "unknown_canonical_identity",
+  "unknown_actor",
+  "unknown_membership_context",
+  "missing_independent_acceptance",
+  "unknown_acceptance_time",
+  "unknown_effective_time",
+  "unknown_artifact_identity",
+  "unknown_raw_state_or_time",
+  "unknown_qualification",
+  "conflicting_policy_unit",
+]);
+const hasUncertainty = (prepared: Prepared) => prepared.audit.some((entry) => uncertaintyReasons.has(entry.reason));
 function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): Prepared {
   const cutoff = instant(input.cutoff);
   if (instant(scope.to) > cutoff) throw new Error("Scope cannot exceed the frozen cutoff");
@@ -299,6 +315,7 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
     required(actor.id, "Actor ID");
     if (!knownKinds.includes(actor.kind) || !["visible", "deleted", "suppressed"].includes(actor.publicState))
       throw new Error("Unknown actor semantics");
+    if (actor.executionMode !== undefined) executionModeSchema.parse(actor.executionMode);
   }
   for (const repo of input.repositoryIds) required(repo, "Allowed repository ID");
   const actors = new Map(input.actors.map((actor) => [actor.id, actor]));
@@ -324,6 +341,8 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
     }
     for (const at of [fact.occurredAt, fact.acceptedAt, fact.readyAt, fact.firstReviewAt]) if (at != null) instant(at);
     if (fact.quantity !== undefined) number(fact.quantity, "Quantity");
+    if (policy.aggregation === "sum" && fact.quantity !== undefined && !Number.isSafeInteger(fact.quantity))
+      throw new Error("Line quantities require exact safe integers");
     if (!fact.canonicalKey?.trim()) {
       reject([fact], "unknown_canonical_identity");
       continue;
@@ -371,10 +390,17 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
     else if (actor.publicState === "suppressed") reason = "suppressed";
     else if (!input.repositoryIds.includes(fact.repoId)) reason = "repository_not_allowed";
     else if (scope.repos.length && !scope.repos.includes(fact.repoId)) reason = "repository_filter";
-    else if (scope.actors !== "all" && (scope.actors === "user") !== (actor.kind === "user")) reason = "actor_filter";
+    else if (scope.actors === "user" && actor.kind !== "user") reason = "actor_filter";
+    else if (
+      scope.actors === "automation" &&
+      !["bot", "github_app", "service_account", "system"].includes(actor.kind) &&
+      actor.executionMode !== "automated"
+    )
+      reason = "actor_filter";
     else if (!policy.roles.includes(fact.role) || (scope.roles.length && !scope.roles.includes(fact.role)))
       reason = "role_filter";
     else if (fact.state === "excluded") reason = "excluded_by_policy_or_correction";
+    else if (fact.state === "unknown") reason = "unknown_qualification";
     const context = scope.context === "event" ? fact.eventContext : fact.currentContext;
     if (!reason && (scope.projects.length || scope.workstreams.length)) {
       if (!context) reason = "unknown_membership_context";
@@ -387,7 +413,7 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
       !reason &&
       ["qualified", "reviewed"].includes(fact.state) &&
       (!fact.acceptanceReceipt?.trim() ||
-        !fact.acceptedBy ||
+        !fact.acceptedBy?.trim() ||
         fact.acceptedBy === fact.actorId ||
         (fact.subjectActorId === fact.actorId && fact.role === "reviewer"))
     )
@@ -448,6 +474,22 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
   }
   const retained: MetricFact[] = [];
   for (const bucket of grouped.values()) {
+    // Repeated observations can share a policy unit; they cannot supply
+    // contradictory arithmetic evidence and silently win by ID ordering.
+    const eligible = bucket.filter((fact) => policy.rankedStates.includes(fact.state as never));
+    const measurement = (fact: MetricFact) =>
+      policy.aggregation === "sum"
+        ? [fact.quantity]
+        : policy.aggregation === "ratio"
+          ? [fact.outcome]
+          : [
+              fact.readyAt == null ? fact.readyAt : instant(fact.readyAt),
+              fact.firstReviewAt == null ? fact.firstReviewAt : instant(fact.firstReviewAt),
+            ];
+    if (policy.aggregation !== "count" && new Set(eligible.map((fact) => stableJSON(measurement(fact)))).size > 1) {
+      reject(bucket, "conflicting_policy_unit");
+      continue;
+    }
     // Qualified evidence takes precedence over pending work for the same unit.
     const ordered = bucket.sort(
       (a, b) =>
@@ -473,9 +515,7 @@ export function aggregateMetric(
   validateMetricPolicy(policy);
   const scope = canonicalScope(requestedScope);
   const prepared = prepare(input, policy, scope);
-  const complete =
-    coverageComplete(input, policy, scope) &&
-    !prepared.audit.some((entry) => /unknown|ambiguous|conflicting|unreviewed/.test(entry.reason));
+  const complete = coverageComplete(input, policy, scope) && !hasUncertainty(prepared);
   const byActor = new Map<string, MetricFact[]>();
   for (const fact of prepared.facts) {
     const bucket = byActor.get(fact.actorId!) ?? [];
@@ -522,6 +562,8 @@ export function aggregateMetric(
           policy.aggregation === "count" ? eligible.length : eligible.reduce((sum, fact) => sum + fact.quantity!, 0),
           "Aggregate",
         );
+      if (policy.aggregation === "sum" && row.value !== null && !Number.isSafeInteger(row.value))
+        throw new Error("Line aggregates require exact safe integers");
     } else if (policy.aggregation === "ratio") {
       const decided = eligible.filter((fact) => fact.outcome === "merged" || fact.outcome === "closed_unmerged");
       row.numerator = decided.filter((fact) => fact.outcome === "merged").length;
@@ -765,14 +807,14 @@ export function participationView(
   validateMetricPolicy(policy);
   const scope = canonicalScope(requestedScope);
   // Newcomer discovery uses organization history, independent of the selected repository lens.
-  const historyScope: MetricScope = {
+  const historyScope = canonicalScope({
     ...scope,
     period: "custom",
     from: history?.originAt ?? null,
     repos: [],
     projects: [],
     workstreams: [],
-  };
+  });
   if (history) {
     instant(history.originAt);
     required(history.reviewReceipt, "History origin review receipt");
@@ -784,8 +826,9 @@ export function participationView(
   );
   const complete =
     Boolean(history) &&
+    (scope.from === null || instant(history!.originAt) <= instant(scope.from)) &&
     coverageComplete(input, policy, historyScope) &&
-    !historical.audit.some((entry) => /unknown|ambiguous|conflicting|unreviewed/.test(entry.reason));
+    !hasUncertainty(historical);
   const monday = (at: string) => {
     const date = new Date(instant(at));
     date.setUTCHours(0, 0, 0, 0);

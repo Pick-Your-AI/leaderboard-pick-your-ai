@@ -499,3 +499,116 @@ test("conditional 304 quota exhaustion pauses the next request before reusing ca
   assert.deepEqual(await client.rest("a", "/a"), { ok: true });
   assert.deepEqual(waits, [10_000]);
 });
+
+test("operation authorization is rechecked after token resolution before REST and GraphQL fetches", async () => {
+  for (const kind of ["rest", "graphql"]) {
+    let authorized = true;
+    let calls = 0;
+    const client = create(
+      async () => {
+        calls++;
+        return json({ data: { viewer: { id: "synthetic" } } });
+      },
+      {
+        token: async () => {
+          await Promise.resolve();
+          authorized = false;
+          return "synthetic-token";
+        },
+        maxRetries: 3,
+      },
+    );
+    const guard = () => {
+      if (!authorized) throw Error("private synthetic authorization detail");
+    };
+    await assert.rejects(
+      kind === "rest" ? client.rest("a", "/a", guard) : client.graphql("a", "query { viewer { id } }", {}, guard),
+      (error) =>
+        error instanceof GithubClientError &&
+        error.outcome.kind === "unsafe_request" &&
+        !error.message.includes("private"),
+    );
+    assert.equal(calls, 0);
+  }
+});
+
+test("operation authorization stops the next REST page after an awaited checkpoint save", async () => {
+  let authorized = true;
+  let calls = 0;
+  const checkpoints = new MemoryStore();
+  const save = checkpoints.save.bind(checkpoints);
+  checkpoints.save = async (key, value) => {
+    await save(key, value);
+    if (key.startsWith("scan:")) authorized = false;
+  };
+  const client = create(
+    async () => {
+      calls++;
+      return json([1], 200, { link: `<${ORIGIN}/issues?page=2>; rel="next"` });
+    },
+    { checkpoints },
+  );
+  await assert.rejects(
+    client.scanRest({
+      ...scan,
+      assertAuthorized() {
+        if (!authorized) throw Error("revoked");
+      },
+    }),
+    (error) => error instanceof GithubClientError && error.outcome.kind === "unsafe_request",
+  );
+  assert.equal(calls, 1);
+});
+
+test("operation authorization is rechecked after retry backoff and does not retry denial", async () => {
+  let authorized = true;
+  let calls = 0;
+  let clock = 100000;
+  const client = create(
+    async () => {
+      calls++;
+      return json({}, 503);
+    },
+    {
+      now: () => clock,
+      sleep: async (ms) => {
+        await Promise.resolve();
+        clock += ms;
+        authorized = false;
+      },
+      maxRetries: 3,
+    },
+  );
+  await assert.rejects(
+    client.rest("a", "/a", () => {
+      if (!authorized) throw Error("revoked");
+    }),
+    (error) => error instanceof GithubClientError && error.outcome.kind === "unsafe_request",
+  );
+  assert.equal(calls, 1);
+});
+
+test("completed scan cache still checks operation authorization and sanitizes denial", async () => {
+  let calls = 0;
+  let authorized = true;
+  const client = create(async () => {
+    calls++;
+    return json([1]);
+  });
+  const guarded = {
+    ...scan,
+    assertAuthorized() {
+      if (!authorized) throw Error("private synthetic detail");
+    },
+  };
+  assert.deepEqual(await client.scanRest(guarded), [1]);
+  authorized = false;
+  await assert.rejects(
+    client.scanRest(guarded),
+    (error) =>
+      error instanceof GithubClientError &&
+      error.outcome.kind === "unsafe_request" &&
+      !error.message.includes("private"),
+  );
+  assert.equal(calls, 1);
+});

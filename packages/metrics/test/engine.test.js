@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { actorKindSchema, contributionRoleSchema } from "@pick-your-ai/contracts";
 import {
   aggregateMetric, comparePolicies, compareRankMovement, getMetricDefinition,
   participationView, planPolicyRelease, resolveMetricWindow, stableJSON, validateMetricPolicy,
@@ -267,4 +268,107 @@ test("uncertain older normalization cannot certify complete newcomer history", (
 test("policy aggregation cannot silently reinterpret count units or signed net changes", () => {
   assert.throws(() => board([fact("count", { quantity: 999 })], { aggregation: "sum" }), /registry semantics/);
   assert.throws(() => board([], { metricId: "net_lines", aggregation: "sum", rank: false }), /signed net changes/);
+});
+
+test("unknown or unverified historic qualification cannot certify a newcomer", () => {
+  const history = { originAt: "2026-01-01T00:00:00Z", reviewReceipt: "synthetic-history-review" };
+  for (const patch of [{ state: "unknown" }, { acceptanceReceipt: null }, { acceptedBy: null }, { acceptedBy: "   " }, { acceptedBy: "a" }]) {
+    const old = fact("historic", { occurredAt: "2026-02-01T00:00:00Z", acceptedAt: "2026-02-02T00:00:00Z", observedAt: "2026-02-03T00:00:00Z", ...patch });
+    const rows = participationView(input([old, fact("current")]), policy(), scope(), history);
+    assert.equal(rows[0].newcomer, null, JSON.stringify(patch));
+    assert.equal(rows[0].historyCoverage, "incomplete");
+  }
+});
+
+test("unknown qualification cannot disappear behind a repeated eligible unit", () => {
+  const unknown = fact("unknown", { state: "unknown", artifactId: "same" });
+  const eligible = fact("eligible", { artifactId: "same" });
+  const result = board([unknown, eligible]);
+  assert.equal(result.coverage, "incomplete");
+  assert.equal(result.rows[0].state, "partial");
+  assert.ok(result.audit.some(entry => entry.reason === "unknown_qualification"));
+});
+
+test("history origin must form a valid interval and cover the selected period", () => {
+  const history = { originAt: "2026-12-01T00:00:00Z", reviewReceipt: "synthetic-review" };
+  assert.throws(() => participationView(input([fact("current")]), policy(), scope(), history), /Window/);
+  const rows = participationView(input([fact("current", { acceptedAt: "2026-10-20T00:00:00Z" })]), policy(), scope(), { ...history, originAt: "2026-10-10T00:00:00Z" });
+  assert.equal(rows[0].newcomer, null);
+  assert.equal(rows[0].historyCoverage, "incomplete");
+});
+
+test("automation is positive source evidence rather than any non-user account", () => {
+  for (const kind of ["organization", "unknown"]) {
+    const result = board([fact("a")], {}, { actors: "automation" }, { actors: [actor("a", { kind })] });
+    assert.equal(result.rows.length, 0, kind);
+  }
+  for (const kind of ["bot", "github_app", "system"]) {
+    assert.equal(board([fact("a")], {}, { actors: "automation" }, { actors: [actor("a", { kind })] }).rows[0].value, 1);
+  }
+  const automatedUser = { actors: [actor("a", { executionMode: "automated" })] };
+  assert.equal(board([fact("a")], {}, { actors: "automation" }, automatedUser).rows[0].value, 1);
+  assert.equal(board([fact("a")], {}, { actors: "user" }, automatedUser).rows[0].value, 1);
+  assert.throws(() => board([fact("a")], {}, {}, { actors: [actor("a", { executionMode: "manual" })] }));
+});
+
+test("line measurements and their total require exact safe integers", () => {
+  const metricId = "pr_lines_changed", p = { metricId, aggregation: "sum" };
+  for (const quantity of [0.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => board([fact("a", { metricId, quantity })], p), /safe integer/);
+  }
+  assert.throws(() => board([fact("a", { metricId, quantity: Number.MAX_SAFE_INTEGER }), fact("b", { metricId, quantity: 1 })], p), /safe integer/);
+  assert.equal(board([fact("a", { metricId, quantity: Number.MAX_SAFE_INTEGER })], p).rows[0].value, Number.MAX_SAFE_INTEGER);
+});
+
+test("same policy unit cannot select a convenient conflicting sum, outcome or duration", () => {
+  for (const [metricId, aggregation, first, second] of [
+    ["pr_lines_changed", "sum", { quantity: 2 }, { quantity: 700 }],
+    ["pr_lines_changed", "sum", { quantity: 2 }, {}],
+    ["pr_accepted_rate", "ratio", { outcome: "merged" }, { outcome: "closed_unmerged" }],
+    ["review_wait", "duration", { readyAt: "2026-10-04T00:00:00Z", firstReviewAt: "2026-10-05T00:00:00Z" }, { readyAt: "2026-10-04T00:00:00Z", firstReviewAt: "2026-10-06T00:00:00Z" }],
+  ]) {
+    const facts = [fact("a", { metricId, artifactId: "same", ...first }), fact("b", { metricId, artifactId: "same", ...second })];
+    const p = { metricId, aggregation, rank: false };
+    const result = board(facts, p);
+    assert.equal(result.rows.length, 0, metricId);
+    assert.equal(result.coverage, "incomplete");
+    assert.ok(result.audit.some(entry => entry.reason === "conflicting_policy_unit"));
+    assert.deepEqual(board([...facts].reverse(), p), result);
+    const identical = [facts[0], { ...facts[0], id: "duplicate", canonicalKey: "duplicate" }];
+    assert.equal(board(identical, p).rows[0].sampleCount, 1);
+  }
+});
+
+test("adjacent UTC windows around the DST fallback count each boundary action once", () => {
+  const cutoff = "2026-11-02T00:00:00Z", boundary = "2026-11-01T06:00:00Z";
+  const facts = [fact("before", { acceptedAt: "2026-11-01T05:59:59.999Z", observedAt: "2026-11-01T06:01:00Z" }), fact("boundary", { acceptedAt: boundary, observedAt: "2026-11-01T06:01:00Z" })];
+  const frozen = { cutoff, coverage: [coverage({ windowEnd: cutoff })] };
+  const before = board(facts, {}, { from: "2026-11-01T05:00:00Z", to: boundary }, frozen);
+  const after = board(facts, {}, { from: boundary, to: "2026-11-01T07:00:00Z" }, frozen);
+  assert.deepEqual(before.rows[0].evidenceIds, ["before"]);
+  assert.deepEqual(after.rows[0].evidenceIds, ["boundary"]);
+});
+
+
+test("engine actor and role enums follow the versioned contracts", () => {
+  for (const kind of actorKindSchema.options.filter(kind => kind !== "unknown")) {
+    assert.equal(board([fact("a")], {}, { actors: "all" }, { actors: [actor("a", { kind })] }).rows.length, 1, kind);
+  }
+  for (const role of contributionRoleSchema.options.filter(role => role !== "unknown")) {
+    assert.equal(board([fact("a", { role, subjectActorId: "synthetic-other" })], { roles: [role] }).rows.length, 1, role);
+  }
+});
+
+
+test("equivalent timestamp encodings do not create conflicting duration evidence", () => {
+  const metricId = "review_wait";
+  const facts = [
+    fact("a", { metricId, artifactId: "same", readyAt: "2026-10-04T00:00:00Z", firstReviewAt: "2026-10-05T00:00:00Z" }),
+    fact("b", { metricId, artifactId: "same", readyAt: "2026-10-04T00:00:00.000Z", firstReviewAt: "2026-10-05T00:00:00.000Z" }),
+  ];
+  const result = board(facts, { metricId, aggregation: "duration", rank: false });
+  assert.equal(result.rows[0].value, 24);
+  assert.equal(result.coverage, "complete");
+  assert.equal(result.rows[0].sampleCount, 1);
+  assert.ok(!result.audit.some(entry => entry.reason === "conflicting_policy_unit"));
 });

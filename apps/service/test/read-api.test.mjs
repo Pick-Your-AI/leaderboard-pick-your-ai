@@ -194,7 +194,12 @@ test("canonical query order supports conditional responses, exports preserve exa
   });
   assert.equal(repeated.statusCode, 304);
   const exported = await app.inject("/api/v1/exports?metric=pr_opened&limit=100");
-  assert.deepEqual(exported.json(), first.json());
+  assert.equal(exported.json().snapshotId, first.json().snapshotId);
+  assert.deepEqual(exported.json().scope, first.json().scope);
+  assert.deepEqual(
+    exported.json().rows.map(({ actorId, rank, result, evidenceIds }) => ({ actorId, rank, result, evidenceIds })),
+    first.json().rows.map(({ actorId, rank, result, evidenceIds }) => ({ actorId, rank, result, evidenceIds })),
+  );
   const shared = await app.inject(first.json().shareUrl);
   assert.deepEqual(shared.json().rows, first.json().rows);
 });

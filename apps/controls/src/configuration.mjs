@@ -403,6 +403,9 @@ export function createConfigurationManager({
     const result = store.transaction(
       (state) => {
         const { config, proposal } = proposalFor(state, id, input.version);
+        // Authority/session rechecks await external providers after verification.
+        // The source receipt must still be current at the synchronous commit boundary.
+        if (source) requireThat(source.validUntil > now(), 409, "Source receipt expired");
         if (action === "preview") {
           const preview = {
             configurationDigest: proposal.digest,

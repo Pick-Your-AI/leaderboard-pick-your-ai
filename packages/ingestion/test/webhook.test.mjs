@@ -151,3 +151,107 @@ test("configuration is snapshotted and duplicate/conflict acknowledgements diffe
   assert.equal((await receive(request(payload({ repository: { ...payload().repository, id: 999 } })))).status, 403);
   assert.equal((await handler({ insert: async () => "conflict" })(request())).status, 409);
 });
+
+test("unsigned event header cannot broaden a signed repository deletion to installation revocation", async () => {
+  const calls = [];
+  const receive = handler(
+    { insert: async () => "accepted" },
+    {
+      scope: new Map([[1, new Set([2, 3])]]),
+      lifecycle: {
+        suppress: async (...args) => {
+          calls.push(args);
+          return "accepted";
+        },
+      },
+    },
+  );
+  const deletion = { action: "deleted", installation: { id: 1 }, repository: { id: 2 } };
+  assert.equal((await receive(request(deletion, { "x-github-event": "installation" }))).status, 400);
+  assert.equal(calls.length, 0);
+  assert.equal((await receive(request(deletion, { "x-github-event": "repository" }))).status, 202);
+  assert.deepEqual(calls[0].slice(2), [1, [2], "removed"]);
+});
+
+test("installation-wide restriction requires installation-specific signed payload evidence", async () => {
+  const calls = [];
+  const receive = handler(
+    { insert: async () => "accepted" },
+    {
+      scope: new Map([[1, new Set([2, 3])]]),
+      lifecycle: {
+        suppress: async (...args) => {
+          calls.push(args);
+          return "accepted";
+        },
+      },
+    },
+  );
+  for (const action of ["deleted", "suspend"]) {
+    const installation = {
+      id: 1,
+      app_id: 20,
+      target_id: 42,
+      target_type: "Enterprise",
+      repository_selection: "selected",
+      account: null,
+    };
+    assert.equal(
+      (await receive(request({ action, installation, repository: { id: 2 } }, { "x-github-event": "installation" })))
+        .status,
+      202,
+    );
+    for (const incomplete of [{ id: 1 }, { ...installation, app_id: null }, { ...installation, target_type: "" }]) {
+      assert.equal(
+        (await receive(request({ action, installation: incomplete }, { "x-github-event": "installation" }))).status,
+        400,
+      );
+    }
+  }
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].slice(2), [1, [2, 3], "revoked"]);
+});
+
+test("repository transfer suppresses only the previously approved repository pending a fresh scope review", async () => {
+  const calls = [];
+  const receive = handler(
+    { insert: async () => "accepted" },
+    {
+      scope: new Map([[1, new Set([2, 3])]]),
+      lifecycle: {
+        suppress: async (...args) => {
+          calls.push(args);
+          return "accepted";
+        },
+      },
+    },
+  );
+  const transfer = { action: "transferred", installation: { id: 1 }, repository: { id: 2 }, enterprise: { id: 42 } };
+  assert.equal((await receive(request(transfer, { "x-github-event": "repository" }))).status, 202);
+  assert.deepEqual(calls[0].slice(2), [1, [2], "removed"]);
+  assert.equal(
+    (await receive(request({ ...transfer, repository: { id: 99 } }, { "x-github-event": "repository" }))).status,
+    403,
+  );
+  assert.equal(calls.length, 1);
+});
+
+test("signed child-object deletions cannot become whole-repository restrictions through the event header", async () => {
+  let calls = 0;
+  const receive = handler(
+    { insert: async () => "accepted" },
+    {
+      lifecycle: {
+        suppress: async () => {
+          calls++;
+          return "accepted";
+        },
+      },
+    },
+  );
+  for (const subject of ["issue", "pull_request", "comment", "release", "discussion", "label", "milestone"]) {
+    const child = { action: "deleted", installation: { id: 1 }, repository: { id: 2 }, [subject]: { id: 5 } };
+    assert.equal((await receive(request(child, { "x-github-event": "repository" }))).status, 400, subject);
+  }
+  assert.equal(calls, 0);
+});

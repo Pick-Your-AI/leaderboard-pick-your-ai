@@ -193,6 +193,17 @@ export function createWebhookHandler(options: WebhookOptions): (request: Request
         let ids: number[];
         let reason: "private" | "removed" | "revoked";
         if (event === "installation" && ["deleted", "suspend"].includes(String(data.action))) {
+          // HMAC authenticates bytes, not the event header. Require the signed
+          // full-installation shape before applying an installation-wide change.
+          const installation = object(data.installation);
+          if (
+            !["all", "selected"].includes(String(installation.repository_selection)) ||
+            typeof installation.target_type !== "string" ||
+            installation.target_type.length === 0
+          )
+            throw new IntakeError(400, "invalid_payload");
+          integer(installation.app_id);
+          integer(installation.target_id);
           ids = [...scope.get(installationId)!];
           reason = "revoked";
         } else if (event === "installation_repositories" && data.action === "removed") {
@@ -202,7 +213,18 @@ export function createWebhookHandler(options: WebhookOptions): (request: Request
             .map((value) => integer(object(value).id))
             .filter((value) => scope.get(installationId)!.has(value));
           reason = "removed";
-        } else if (event === "repository" && ["privatized", "deleted"].includes(String(data.action))) {
+        } else if (event === "repository" && ["privatized", "deleted", "transferred"].includes(String(data.action))) {
+          // Signed child-object deletions cannot become repository-wide changes.
+          const keys = new Set([
+            "action",
+            "repository",
+            "sender",
+            "installation",
+            "organization",
+            "enterprise",
+            "changes",
+          ]);
+          if (Object.keys(data).some((key) => !keys.has(key))) throw new IntakeError(400, "invalid_payload");
           ids = [integer(object(data.repository).id)];
           reason = data.action === "privatized" ? "private" : "removed";
           if (!scope.get(installationId)!.has(ids[0]!)) throw new IntakeError(403, "outside_scope");

@@ -54,6 +54,8 @@ export interface RestScan<T> {
   select: (body: unknown) => readonly T[];
   /** A deliberate refresh replaces a finished scan; interrupted scans resume by default. */
   refresh?: boolean;
+  /** Optional synchronous host authorization check, also run immediately before each HTTP attempt. */
+  assertAuthorized?: () => void;
 }
 
 export interface GraphqlScan<T> {
@@ -66,6 +68,8 @@ export interface GraphqlScan<T> {
   /** Select one connection, including connections nested under repository/node. */
   select: (data: unknown) => GraphqlPage<T>;
   refresh?: boolean;
+  /** Optional synchronous host authorization check, also run immediately before each HTTP attempt. */
+  assertAuthorized?: () => void;
 }
 
 function hash(value: unknown): string {
@@ -80,6 +84,14 @@ function readOnlyQuery(query: string): boolean {
   // Remove GraphQL strings and comments before examining operation tokens.
   const tokens = query.replace(/"""(?:\\[\s\S]|(?!""")[\s\S])*"""|"(?:\\.|[^"\\])*"|#[^\r\n]*/g, " ");
   return /^\s*(?:query\b|\{)/.test(tokens) && !/\b(?:mutation|subscription)\b/.test(tokens);
+}
+
+function checkAuthorization(source: string, check?: () => void): void {
+  try {
+    check?.();
+  } catch {
+    throw new GithubClientError({ kind: "unsafe_request" }, source);
+  }
 }
 
 /** Read-only, credential-scoped transport. No upstream mutation entry points. */
@@ -213,7 +225,10 @@ export class GithubReadClient {
     source: string,
     rawUrl: string,
     query?: { query: string; variables: Record<string, unknown> },
+    assertAuthorized?: () => void,
   ): Promise<{ body: unknown; link: string | null }> {
+    const authorize = () => checkAuthorization(source, assertAuthorized);
+    authorize();
     const url = this.trustedUrl(rawUrl, source);
     const persistedPause = await this.options.checkpoints.load(`pause:${hash(source)}`);
     if (persistedPause !== undefined) {
@@ -259,6 +274,8 @@ export class GithubReadClient {
         if (token) headers.set("Authorization", `Bearer ${token}`);
         if (cache) headers.set("If-None-Match", cache.etag);
         if (query) headers.set("Content-Type", "application/json");
+        // Recheck after checkpoint, quota, concurrency and token awaits, on every retry.
+        authorize();
         const response = await this.options.fetch(url, {
           method: query ? "POST" : "GET",
           headers,
@@ -358,13 +375,18 @@ export class GithubReadClient {
     }
   }
 
-  async rest<T = unknown>(source: string, url: string): Promise<T> {
-    return (await this.request(source, url)).body as T;
+  async rest<T = unknown>(source: string, url: string, assertAuthorized?: () => void): Promise<T> {
+    return (await this.request(source, url, undefined, assertAuthorized)).body as T;
   }
 
-  async graphql<T = unknown>(source: string, query: string, variables: Record<string, unknown> = {}): Promise<T> {
+  async graphql<T = unknown>(
+    source: string,
+    query: string,
+    variables: Record<string, unknown> = {},
+    assertAuthorized?: () => void,
+  ): Promise<T> {
     if (!readOnlyQuery(query)) throw new GithubClientError({ kind: "unsafe_request" }, source);
-    const { body } = await this.request(source, this.options.graphqlPath, { query, variables });
+    const { body } = await this.request(source, this.options.graphqlPath, { query, variables }, assertAuthorized);
     if (!object(body) || !("data" in body) || body.data === null)
       throw new GithubClientError({ kind: "invalid_response" }, source);
     return body.data as T;
@@ -378,6 +400,7 @@ export class GithubReadClient {
     maxPages: number,
     refresh: boolean | undefined,
     fetchPage: (next: string) => Promise<{ items: readonly T[]; next: string | null }>,
+    assertAuthorized?: () => void,
   ): Promise<T[]> {
     if (!Number.isSafeInteger(maxPages) || maxPages < 1)
       throw new RangeError("maxPages must be a positive safe integer");
@@ -386,6 +409,7 @@ export class GithubReadClient {
     this.scans.add(storageKey);
     try {
       const loaded = refresh ? undefined : await this.options.checkpoints.load(storageKey);
+      checkAuthorization(source, assertAuthorized);
       if (
         loaded !== undefined &&
         (!object(loaded) ||
@@ -424,6 +448,7 @@ export class GithubReadClient {
         // callers receive results only after the durable checkpoint succeeds.
         await this.options.checkpoints.save(storageKey, state);
       }
+      checkAuthorization(source, assertAuthorized);
       return state.items as T[];
     } finally {
       this.scans.delete(storageKey);
@@ -441,10 +466,11 @@ export class GithubReadClient {
       options.maxPages,
       options.refresh,
       async (url) => {
-        const page = await this.request(options.source, url);
+        const page = await this.request(options.source, url, undefined, options.assertAuthorized);
         const link = nextRestLink(page.link);
         return { items: options.select(page.body), next: link ? this.trustedUrl(link, options.source) : null };
       },
+      options.assertAuthorized,
     );
   }
 
@@ -472,11 +498,16 @@ export class GithubReadClient {
       options.maxPages,
       options.refresh,
       async (cursor) => {
-        const data = await this.graphql(options.source, options.query, {
-          ...options.variables,
-          first,
-          after: cursor || null,
-        });
+        const data = await this.graphql(
+          options.source,
+          options.query,
+          {
+            ...options.variables,
+            first,
+            after: cursor || null,
+          },
+          options.assertAuthorized,
+        );
         const page = options.select(data);
         if (
           !object(page) ||
@@ -489,6 +520,7 @@ export class GithubReadClient {
           throw new GithubClientError({ kind: "invalid_response" }, options.source);
         return { items: page.nodes, next: page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null };
       },
+      options.assertAuthorized,
     );
   }
 

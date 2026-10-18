@@ -2,6 +2,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { metricRegistrySchema, type MetricRegistry } from "@pick-your-ai/contracts";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
+import { renderPublicExport } from "./exports.js";
 import {
   projectRead,
   PublicReadError,
@@ -37,10 +38,6 @@ const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
 function fail(status: number, code: string): never {
   throw new PublicReadError(status, code);
 }
-const csv = (value: unknown) => {
-  const text = String(value ?? "");
-  return `"${(/^[\s\u0000-\u001f]*[=+@-]/u.test(text) ? "'" : "") + text.replaceAll('"', '""')}"`;
-};
 export function createService(options: ServiceOptions = {}) {
   const app = Fastify({ logger: false, bodyLimit: 1024, routerOptions: { maxParamLength: 200 } });
   const source = options.source ?? unavailableSource;
@@ -163,12 +160,13 @@ export function createService(options: ServiceOptions = {}) {
     reply: FastifyReply,
     body: unknown,
     contentType = "application/json; charset=utf-8",
+    cacheControl = "public, max-age=0, must-revalidate",
   ) {
     const serialized = typeof body === "string" ? body : JSON.stringify(body);
     const etag = `"${createHash("sha256").update(serialized).digest("hex")}"`;
     reply
       .header("ETag", etag)
-      .header("Cache-Control", "public, max-age=0, must-revalidate")
+      .header("Cache-Control", cacheControl)
       .header("X-Content-Type-Options", "nosniff")
       .type(contentType);
     const matches = request.headers["if-none-match"]?.split(",").map((value) => value.trim().replace(/^W\//, ""));
@@ -314,70 +312,13 @@ export function createService(options: ServiceOptions = {}) {
       nextCursor,
       shareUrl: `/api/v1/boards?${share.toString()}`,
     };
-    if (exporting && q.format === "csv") {
-      const evidence = new Map(read.selected.evidence.map((entry) => [entry.contribution.contributionId, entry]));
-      const lines: unknown[][] = [
-        [
-          "snapshot",
-          "revision",
-          "policy",
-          "metric",
-          "definition",
-          "unit",
-          "start",
-          "end",
-          "repository",
-          "workstream",
-          "actor",
-          "rank",
-          "state",
-          "value",
-          "sources",
-          "generated_at",
-          "next_cursor",
-          "numerator",
-          "denominator",
-          "sample_count",
-          "censored",
-          "missing_readiness",
-          "p75",
-        ],
-      ];
-      for (const row of page) {
-        const diagnostic = body.diagnostics.find((entry) => entry.actorId === row.actorId);
-        lines.push([
-          body.snapshotId,
-          body.revision,
-          body.policyVersion,
-          q.metric,
-          body.metric.counting_rule,
-          body.metric.definition.unit,
-          q.scope.start,
-          q.scope.end,
-          q.scope.repository,
-          q.scope.workstream,
-          row.actor?.login ?? row.actorId,
-          row.rank,
-          row.result.state,
-          row.result.value,
-          row.evidenceIds.map((id) => evidence.get(id)!.artifact.publicUrl).join(" "),
-          body.generatedAt,
-          nextCursor,
-          diagnostic?.numerator,
-          diagnostic?.denominator,
-          diagnostic?.sampleCount,
-          diagnostic?.censored,
-          diagnostic?.missingReadiness,
-          diagnostic?.p75,
-        ]);
-      }
-      reply.header("Content-Disposition", 'attachment; filename="leaderboard.csv"');
-      return send(
-        request,
-        reply,
-        lines.map((line) => line.map(csv).join(",")).join("\r\n") + "\r\n",
-        "text/csv; charset=utf-8",
-      );
+    if (exporting) {
+      const exported = renderPublicExport(read, body, q.format as "json" | "csv");
+      // Downloads cannot be cached past a current-source authorization decision.
+      reply
+        .header("Content-Disposition", `attachment; filename="leaderboard.${q.format}"`)
+        .header("Content-Security-Policy", "sandbox; default-src 'none'");
+      return send(request, reply, exported.body, exported.contentType, "no-store");
     }
     return send(request, reply, body);
   }

@@ -1,0 +1,70 @@
+name: Isolated encrypted PostgreSQL recovery
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  recovery:
+    name: Isolated encrypted PostgreSQL recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      RECOVERY_TEST_CONTAINER: leaderboard-task-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the proposed change
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Start a dedicated synthetic PostgreSQL container
+        timeout-minutes: 3
+        run: |
+          docker run --detach --name "$RECOVERY_TEST_CONTAINER" \
+            --network none --memory 512m --cpus 1 \
+            --tmpfs /var/lib/postgresql/data:rw,size=256m \
+            --env POSTGRES_USER=leaderboard \
+            --env POSTGRES_PASSWORD=synthetic-test-only \
+            --env POSTGRES_DB=leaderboard_recovery_test \
+            postgres:17-alpine
+          for attempt in {1..30}; do
+            if docker exec "$RECOVERY_TEST_CONTAINER" pg_isready -h 127.0.0.1 -U leaderboard -d leaderboard_recovery_test -t 2; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Synthetic PostgreSQL did not become ready within the startup bound" >&2
+          exit 1
+      - name: Verify encrypted dump and restore without skipped integration coverage
+        timeout-minutes: 3
+        run: |
+          mkdir -p test-results/recovery
+          node --test --test-reporter=tap infra/recovery/test/*.test.mjs | tee test-results/recovery/synthetic-postgres.tap
+          grep -qx '# skipped 0' test-results/recovery/synthetic-postgres.tap
+      - name: Remove only the dedicated synthetic container and its volumes
+        if: always()
+        timeout-minutes: 1
+        run: |
+          if docker container inspect "$RECOVERY_TEST_CONTAINER" >/dev/null 2>&1; then
+            docker rm --force --volumes "$RECOVERY_TEST_CONTAINER"
+          fi
+      - name: Retain synthetic recovery evidence
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: synthetic-recovery-evidence
+          path: test-results/recovery/synthetic-postgres.tap
+          if-no-files-found: warn
+          retention-days: 7
+          include-hidden-files: false

@@ -16,6 +16,7 @@ export function createGithubCollectionSource({
   isSynthetic = false,
   maxPages = 100,
   onUnavailable,
+  assertAuthorized = () => {},
 }) {
   if (
     !client?.scanRest ||
@@ -32,7 +33,7 @@ export function createGithubCollectionSource({
     const scope = approved.get(repository.id);
     if (!scope || scope.slug !== repository.slug || scope.installationId !== repository.installationId)
       throw new Error("repository_not_authorized");
-    const value = await client.rest(sourceId, `/repos/${scope.slug}`);
+    const value = await client.rest(sourceId, `/repos/${scope.slug}`, assertAuthorized);
     if (value?.id !== repository.id || typeof value.private !== "boolean")
       throw new Error("repository_identity_unverified");
     return {
@@ -50,6 +51,7 @@ export function createGithubCollectionSource({
         route = routes[request.family];
       if (!repository || !repository.families.includes(request.family) || !route)
         throw new Error("source_family_adapter_unavailable");
+      assertAuthorized();
       let verification;
       try {
         verification = await probeRepository(repository);
@@ -57,6 +59,7 @@ export function createGithubCollectionSource({
         await onUnavailable?.(repository, "visibility_probe_unavailable");
         throw new Error("repository_probe_unavailable");
       }
+      assertAuthorized();
       if (verification.visibility !== "public") {
         await onUnavailable?.(repository, "visibility_or_scope_not_public");
         throw new Error("public_repository_required");
@@ -68,11 +71,17 @@ export function createGithubCollectionSource({
         key: `pipeline:${request.runId}:${request.family}`,
         url: `/repos/${repository.slug}/${route}`,
         maxPages,
+        assertAuthorized,
         select(body) {
+          // scanRest may fetch many HTTP pages inside one collection read.
+          // Reject a response when the current authorization has changed.
+          // Transport/checkpoint work already in flight is not cancelled here.
+          assertAuthorized();
           if (!Array.isArray(body)) throw new Error("source_array_required");
           return request.family === "issues" ? body.filter((item) => !item.pull_request) : body;
         },
       });
+      assertAuthorized();
       if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
       const offset = request.cursor === null ? 0 : Number(request.cursor);
       if (offset > values.length) throw new Error("invalid_source_cursor");

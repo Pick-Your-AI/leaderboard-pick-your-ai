@@ -46,6 +46,14 @@ A policy's definition version must match the retained metric registry, and its a
 
 The server-side `configurationOverlay` is read from current private controls state for every run/read, including pinned snapshots. It can restrict approved repository IDs and disable metrics; it cannot expand the protected static scope. Disabled metrics retain a public machine-readable explanation and policy reference and cannot render as zero. Free-form reviewed control explanations remain in the controls publication; the pipeline maps them to `metric_disabled_by_approved_configuration` for the API's bounded machine-code contract. Repository removal invalidates affected projections entirely rather than subtracting overlapping totals.
 
+Each serialized run pins the controls configuration revision. Collection rechecks it before and after page reads, after repository probes and normalization, inside the fact-write transaction, and inside snapshot publication. Remove/reapprove cycles require a new run instead of accepting stale in-flight results. The default collection adapter and GitHub normalizer pass a per-operation synchronous authorization callback into the read client. It is checked immediately before each HTTP attempt, after checkpoint, quota, concurrency and token awaits, including retries; denial is sanitized and non-retryable. No global mutable credential/client setting is changed. Already issued network work cannot be recalled, and previously authorized retained data is not erased.
+
+After PostgreSQL commits, publication requires a second **private controls confirmation**. One synchronous SQLite transaction rechecks the pinned configuration revision and records `pipelinePublications[snapshotId]` with the static configuration version and controls revision. Public reads require durable confirmation for both the selected snapshot and the advertised current head. An unconfirmed newer SQL head therefore temporarily makes even older confirmed pins unavailable, rather than advertising a failed publication; an authorized rerun restores read availability. The marker is not part of `/controls/public`, the API document or an externally writable route. A rejected SQL publication cannot become public merely because an operator later restores repository membership. Already-confirmed historical snapshots remain available under the latest legitimate metric, repository and contributor-privacy overlays; reads do not impose blanket equality with the current controls revision.
+
+For upgrades and recovery, legacy snapshots without confirmation fail closed. An authorized collection/recomputation run can reconfirm an identical existing snapshot after current source checks; do not blindly backfill markers from stored SQL rows. A controls confirmation failure leaves the SQL snapshot unavailable and the run reports failure; an authorized exact rerun can recover. Confirmations survive reopening the controls store. Back up both stores under the approved recovery policy: a missing snapshot or marker is unavailable, never assumed approved.
+
+SQLite controls and PostgreSQL commits are not one atomic transaction. Revocation during a final SQL commit can leave retained source facts or an unconfirmed snapshot; the in-transaction fence cannot undo a COMMIT already in flight. The confirmation boundary prevents public exposure and false run success in this case, without claiming atomic source retention/deletion. Production shared-storage, retention and recovery decisions remain separate release gates.
+
 ## Actual data path
 
 The default `createGithubCollectionSource` performs read-only requests through `GithubReadClient.rest` and resumable `scanRest`. It supports repository issues, pull requests, commits, issue comments and releases. It verifies current public repository identity and uses stable API object IDs, revision timestamps/SHAs and public source URLs. Repository issue lists exclude embedded PR objects. Scan cursors and expected counts are fixed to one bounded operation; completed scans remain durable. Each collection run persists accepted facts/pages and progress through the actual `CollectionStore`.
@@ -87,3 +95,25 @@ An optional host-injected `OperationalMonitor` records actual collection, normal
 Run `node --test apps/pipeline/test/*.test.mjs` after building all integrated components. During isolated review only, `PIPELINE_COMPONENT_ROOTS` may explicitly map component names to already-built sibling checkouts; production defaults use this checkout exclusively. The test checkout root and default loader paths are the same repository boundary.
 
 These integration checks establish actual connected execution, not an installed App, approved source families, production capability/retention evidence, finalized policies/sample thresholds, a public deployment, operational drills, real touch/screen-reader usability or owner acceptance. Those issue-specific external gates remain open until their actual evidence is supplied. The app adds no closing keywords or fabricated approvals for them.
+
+
+## Historical publication identity conflicts
+
+A repeated materialization of the current content is unchanged. A historical
+snapshot ID continues to own its original document and revision, even if current
+privacy or configuration controls change its effective public view. Returning to
+that historical content at the same explicit cutoff must not attach a newer head
+revision to the old stored document. If the snapshot insert finds such an existing
+ID, publication fails with `pipeline_snapshot_identity_conflict` and the transaction
+leaves the current head and receipts unchanged. Re-materialize at a fresh cutoff
+to create a new publication; never update the historical document in place.
+
+The supported SQL provider checks the stored document digest, ID and revision
+before applying live controls. A corrupted stored total is unavailable on current,
+pinned and export reads. Current contributor suppression, configuration disabling,
+correction and source-access overlays remain independent of that integrity check;
+no private contributor payload is retained in an API hash cache. This covers the
+supported pipeline producer/provider, not an arbitrary third-party provider that
+violates the public-source contract. Synthetic PGlite tests exercise corruption
+rejection, A-to-B-to-A publication conflict, unchanged historical records and
+recovery at a fresh cutoff; they are not PostgreSQL concurrency or production proof.

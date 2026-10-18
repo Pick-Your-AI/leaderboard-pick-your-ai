@@ -904,6 +904,8 @@ export interface CollectionNormalizerInput {
 }
 export interface GithubEvidenceNormalizerOptions {
   client: GithubReadClient;
+  /** Synchronous host authorization rechecked by the transport before every HTTP attempt. */
+  assertAuthorized?: () => void;
   source: string;
   allowedRepositoryIds: readonly number[];
   isSynthetic?: boolean;
@@ -955,7 +957,11 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       if (input.family === "reviews" && pull && /^pullrequestreview-\d+$/.test(fragment ?? "")) {
         family = "review";
         endpoint = `/repos/${input.repository.slug}/pulls/${pull[1]}/reviews/${fragment!.slice("pullrequestreview-".length)}`;
-        pullResource = await options.client.rest(options.source, `/repos/${input.repository.slug}/pulls/${pull[1]}`);
+        pullResource = await options.client.rest(
+          options.source,
+          `/repos/${input.repository.slug}/pulls/${pull[1]}`,
+          options.assertAuthorized,
+        );
       } else if (input.family === "comments" && issue && /^issuecomment-\d+$/.test(fragment ?? "")) {
         family = "comment";
         endpoint = `/repos/${input.repository.slug}/issues/comments/${fragment!.slice("issuecomment-".length)}`;
@@ -973,8 +979,8 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         endpoint = `/repos/${input.repository.slug}/releases/tags/${release[1]}`;
       } else return none("source_family_requires_exact_event_enrichment");
       const [repositoryPayload, payload] = await Promise.all([
-        options.client.rest(options.source, `/repos/${input.repository.slug}`),
-        options.client.rest(options.source, endpoint),
+        options.client.rest(options.source, `/repos/${input.repository.slug}`, options.assertAuthorized),
+        options.client.rest(options.source, endpoint, options.assertAuthorized),
       ]);
       if (
         !object(repositoryPayload) ||
