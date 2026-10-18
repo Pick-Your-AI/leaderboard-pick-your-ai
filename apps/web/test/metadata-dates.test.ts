@@ -4,6 +4,7 @@ import { metadata, ReadFailure, selection } from "../src/remote/client.ts";
 
 const at = "2026-10-18T00:00:00.000Z";
 const original = {
+  schemaVersion: "leaderboard/v1",
   scope: { organization: "Pick-Your-AI", repository: null, workstream: null, start: null, end: null },
   head: { snapshotId: "public-1", revision: 1, publishedAt: at },
   snapshotId: "public-1",

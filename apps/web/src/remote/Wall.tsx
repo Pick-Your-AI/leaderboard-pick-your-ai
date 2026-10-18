@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import "../styles/wall.css";
 import { actorFilterLabels, type Actor, type MetricRegistry } from "@pick-your-ai/contracts";
 import { getLeadMetrics } from "@pick-your-ai/metrics";
+import { PublicScopeProvenance } from "./PublicScope.tsx";
 import { WindowBounds } from "../components/DisplayTimeZone.tsx";
 import { LastVerifiedSnapshot, type SnapshotReference } from "./LastVerifiedSnapshot.tsx";
 import {
@@ -49,6 +50,7 @@ function Scope({ selected }: { selected: Selection }) {
         <br />
         {selected.start ? `${selected.start} to ${selected.end} (end exclusive)` : "All-time materialized scope"}
       </p>
+      <PublicScopeProvenance scope={selected} compact />
       <WindowBounds start={selected.start} end={selected.end} timeZone={selected.timeZone ?? "UTC"} />
     </div>
   );

@@ -100,7 +100,8 @@ export class EnrichmentStore {
     if (!job) return "idle";
     try {
       const details = metadata(
-        await source.readMetadata({ repositoryId: job.repositoryId, fact: job.fact }),
+        // Adapter-local edits cannot replace the retained revision checked after the await.
+        await source.readMetadata({ repositoryId: job.repositoryId, fact: structuredClone(job.fact) }),
         job.fact.sourceRevision,
       );
       return await this.db.transaction(async (tx) => {
