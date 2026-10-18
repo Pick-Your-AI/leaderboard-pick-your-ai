@@ -6,6 +6,7 @@ import { canReview, control, ControlsFailure, verifiedSession, type Receipt, typ
 import { Amendment } from "./Amendment.tsx";
 import { Configuration, type ConfigurationState } from "./Configuration.tsx";
 import { Spotlights, type Nomination } from "./Spotlights.tsx";
+import { LocaleReviewFields, localizationReviewInput } from "./LocaleReviewFields.tsx";
 
 type Run = (path: string, input: unknown) => Promise<boolean>;
 const categories = [
@@ -254,7 +255,11 @@ function ReceiptCard({
               reason: d.get("reason"),
               conflict: false,
               ...(decision === "accept"
-                ? { policyVersion: d.get("policy"), sourceReviewedPublic: d.get("source") === "on" }
+                ? {
+                    policyVersion: d.get("policy"),
+                    sourceReviewedPublic: d.get("source") === "on",
+                    ...localizationReviewInput(d),
+                  }
                 : {}),
               ...(decision === "merge" ? { duplicateOf: d.get("duplicate") } : {}),
             });
@@ -273,6 +278,7 @@ function ReceiptCard({
           </Field>
           {decision === "accept" && (
             <>
+              <LocaleReviewFields />
               <Field label="Approved policy version">
                 <input name="policy" required maxLength={100} />
               </Field>
