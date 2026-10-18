@@ -1,0 +1,5955 @@
+{
+  "schema_version": "project-configuration-readback-1",
+  "work_package": "LB-02.03",
+  "issue_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/33",
+  "observed_on": "2026-10-18",
+  "scope": "Dated public Project configuration, complete actual membership, native issue hierarchy and delivery prerequisites, and preservation of baseline contextual source links.",
+  "source_revision": "00d9278a58701560ade3332c175668c7214ff1f5",
+  "source_files": [
+    {
+      "path": "planning/project-backlog.json",
+      "blob_sha": "bced21e1f9a80db117443cb37bf9a4108efe56b4",
+      "sha256": "dfa6b7d2f34b4e2b654166bc10b26be7dcf23ecd1f5317dab9ef3f24bb8628f6"
+    },
+    {
+      "path": "docs/PUBLICATION.json",
+      "blob_sha": "efcf1c0d9bd7380043fa1c609cf3547374cd95ed",
+      "sha256": "a2c5914ddc35405428a5acbee1effd6be421cc4e3921591dead17a7794f15d52"
+    },
+    {
+      "path": "planning/organization-inventory-2026-10-18.json",
+      "blob_sha": "a4da39316e711ad9f63716db501757ec478c5f10",
+      "sha256": "7bf7879fea7c2b938db42abbe8e6bcaaccedcd71da53f17dc94324b340bf1f34"
+    }
+  ],
+  "project": {
+    "number": 6,
+    "database_id": 27113479,
+    "node_id": "PVT_kwDOFHg4Xc4BnbgH",
+    "title": "Pick Your AI — Contributor Leaderboard Delivery",
+    "url": "https://github.com/orgs/Pick-Your-AI/projects/6",
+    "public": true
+  },
+  "observation_windows": {
+    "native_issues_and_relationships": {
+      "started_at": "2026-10-18 09:59:05 UTC",
+      "relationships_started_at": "2026-10-18 10:01:42 UTC",
+      "relationships_finished_at": "2026-10-18 10:02:14 UTC",
+      "final_issue_read_started_at": "2026-10-18 10:04:00 UTC",
+      "finished_at": "2026-10-18 10:04:04 UTC"
+    },
+    "project_membership": {
+      "started_at": "2026-10-18T10:14:59.014Z",
+      "finished_at": "2026-10-18T10:19:46.427Z"
+    },
+    "contextual_references": {
+      "started_at": "2026-10-18 10:35:18 UTC",
+      "finished_at": "2026-10-18 10:35:20 UTC"
+    }
+  },
+  "collection_coverage": {
+    "native_issue_pages": {
+      "initial": [
+        {
+          "page": 1,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues?state=all&sort=created&direction=asc&per_page=100&page=1",
+          "count": 100,
+          "first_number": 1,
+          "last_number": 100
+        },
+        {
+          "page": 2,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues?state=all&sort=created&direction=asc&per_page=100&page=2",
+          "count": 100,
+          "first_number": 101,
+          "last_number": 200
+        },
+        {
+          "page": 3,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues?state=all&sort=created&direction=asc&per_page=100&page=3",
+          "count": 41,
+          "first_number": 201,
+          "last_number": 241
+        }
+      ],
+      "final": [
+        {
+          "page": 1,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues?state=all&sort=created&direction=asc&per_page=100&page=1",
+          "count": 100,
+          "first_number": 1,
+          "last_number": 100
+        },
+        {
+          "page": 2,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues?state=all&sort=created&direction=asc&per_page=100&page=2",
+          "count": 100,
+          "first_number": 101,
+          "last_number": 200
+        },
+        {
+          "page": 3,
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues?state=all&sort=created&direction=asc&per_page=100&page=3",
+          "count": 42,
+          "first_number": 201,
+          "last_number": 242
+        }
+      ]
+    },
+    "native_relationships": {
+      "issues": 133,
+      "blocked_by_collections": 133,
+      "sub_issue_collections": 133,
+      "pages": 266,
+      "per_page": 100,
+      "all_terminal_page_sizes_below_limit": true,
+      "blocked_by_url_template": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/{issue_number}/dependencies/blocked_by?per_page=100&page={page}",
+      "sub_issues_url_template": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/{issue_number}/sub_issues?per_page=100&page={page}"
+    },
+    "project_membership": {
+      "view_url": "https://github.com/orgs/Pick-Your-AI/projects/6/views/1?hierarchy=false",
+      "filter": "",
+      "method": "Read every actual Project row in the flat, unfiltered view using overlapping rendered DOM windows; do not count expanded nonmember descendants as Project membership.",
+      "windows": [
+        {
+          "observed_at": "2026-10-18T10:14:59.014Z",
+          "first_position": 1,
+          "last_position": 30,
+          "row_count": 30,
+          "scroll_top": 0,
+          "scroll_height": 3988,
+          "viewport_height": 639
+        },
+        {
+          "observed_at": "2026-10-18T10:16:23.309Z",
+          "first_position": 1,
+          "last_position": 50,
+          "row_count": 50,
+          "scroll_top": 650,
+          "scroll_height": 3988,
+          "viewport_height": 639
+        },
+        {
+          "observed_at": "2026-10-18T10:16:48.271Z",
+          "first_position": 21,
+          "last_position": 65,
+          "row_count": 45,
+          "scroll_top": 1300,
+          "scroll_height": 3988,
+          "viewport_height": 639
+        },
+        {
+          "observed_at": "2026-10-18T10:17:14.290Z",
+          "first_position": 36,
+          "last_position": 85,
+          "row_count": 50,
+          "scroll_top": 1950,
+          "scroll_height": 3988,
+          "viewport_height": 639
+        },
+        {
+          "observed_at": "2026-10-18T10:17:19.278Z",
+          "first_position": 56,
+          "last_position": 100,
+          "row_count": 45,
+          "scroll_top": 2600,
+          "scroll_height": 3988,
+          "viewport_height": 639
+        },
+        {
+          "observed_at": "2026-10-18T10:17:24.366Z",
+          "first_position": 76,
+          "last_position": 120,
+          "row_count": 45,
+          "scroll_top": 3250,
+          "scroll_height": 5024,
+          "viewport_height": 639
+        },
+        {
+          "observed_at": "2026-10-18T10:18:00.059Z",
+          "first_position": 91,
+          "last_position": 133,
+          "row_count": 43,
+          "scroll_top": 3900,
+          "scroll_height": 5024,
+          "viewport_height": 639
+        },
+        {
+          "observed_at": "2026-10-18T10:18:45.668Z",
+          "first_position": 106,
+          "last_position": 133,
+          "row_count": 28,
+          "scroll_top": 4385,
+          "scroll_height": 5024,
+          "viewport_height": 639
+        },
+        {
+          "observed_at": "2026-10-18T10:19:46.427Z",
+          "first_position": 106,
+          "last_position": 133,
+          "row_count": 28,
+          "scroll_top": 4385,
+          "scroll_height": 5024,
+          "viewport_height": 639
+        }
+      ],
+      "positions_complete": [
+        1,
+        133
+      ],
+      "final_scroll_reached_bottom": true,
+      "temporary_flat_view_discarded": true
+    },
+    "contextual_reference_issue_pages": [
+      {
+        "page": 1,
+        "count": 100,
+        "first_number": 1,
+        "last_number": 100
+      },
+      {
+        "page": 2,
+        "count": 100,
+        "first_number": 101,
+        "last_number": 200
+      },
+      {
+        "page": 3,
+        "count": 47,
+        "first_number": 201,
+        "last_number": 247
+      }
+    ]
+  },
+  "reconciliation": {
+    "result": "pass",
+    "programs": 1,
+    "epics": 20,
+    "work_packages": 112,
+    "project_items": 133,
+    "unique_native_issue_identities": 133,
+    "single_select_fields": 7,
+    "options": 53,
+    "views": 10,
+    "field_values_resolved_to_live_options": 931,
+    "non_status_field_values_matching_baseline": 798,
+    "native_parent_child_edges": 132,
+    "native_blocked_by_edges": 227,
+    "dependency_graph_acyclic": true,
+    "hierarchy_graph_acyclic": true,
+    "native_children_match_inverse_parents": true,
+    "closed_prerequisites_retained": 83,
+    "preserved_contextual_reference_instances": 640,
+    "unique_contextual_reference_urls": 22,
+    "missing_references": 0,
+    "duplicate_project_items": 0,
+    "unmapped_issues": 0,
+    "unexpected_static_field_changes": 0,
+    "assigned_issues": 0,
+    "status_counts_at_membership_read": {
+      "Backlog": 105,
+      "Done": 26,
+      "In Progress": 2
+    },
+    "native_state_counts_at_membership_read": {
+      "open": 107,
+      "closed": 26
+    }
+  },
+  "fields": [
+    {
+      "name": "Status",
+      "database_id": 427831012,
+      "ui_id": "Status",
+      "options": [
+        {
+          "id": "f75ad846",
+          "name": "Backlog"
+        },
+        {
+          "id": "fd1f1607",
+          "name": "Ready"
+        },
+        {
+          "id": "47fc9ee4",
+          "name": "In Progress"
+        },
+        {
+          "id": "f685fce4",
+          "name": "In Review"
+        },
+        {
+          "id": "b5250deb",
+          "name": "Blocked"
+        },
+        {
+          "id": "98236657",
+          "name": "Done"
+        }
+      ]
+    },
+    {
+      "name": "Priority",
+      "database_id": 427831084,
+      "ui_id": 427831084,
+      "options": [
+        {
+          "id": "507e8f2e",
+          "name": "P0"
+        },
+        {
+          "id": "673b408a",
+          "name": "P1"
+        },
+        {
+          "id": "87a66148",
+          "name": "P2"
+        },
+        {
+          "id": "69e86ace",
+          "name": "P3"
+        }
+      ]
+    },
+    {
+      "name": "Readiness",
+      "database_id": 427831101,
+      "ui_id": 427831101,
+      "options": [
+        {
+          "id": "8c092135",
+          "name": "Needs owner"
+        },
+        {
+          "id": "c74cd84d",
+          "name": "Needs input"
+        },
+        {
+          "id": "fec82a21",
+          "name": "Awaiting decision"
+        },
+        {
+          "id": "8857d7a6",
+          "name": "Ready"
+        },
+        {
+          "id": "65bf5f48",
+          "name": "Blocked"
+        }
+      ]
+    },
+    {
+      "name": "Level",
+      "database_id": 427831110,
+      "ui_id": 427831110,
+      "options": [
+        {
+          "id": "71ae4950",
+          "name": "Program"
+        },
+        {
+          "id": "09b5ab53",
+          "name": "Epic"
+        },
+        {
+          "id": "a5315e0e",
+          "name": "Work package"
+        }
+      ]
+    },
+    {
+      "name": "Phase",
+      "database_id": 427831124,
+      "ui_id": 427831124,
+      "options": [
+        {
+          "id": "b2577dab",
+          "name": "Discovery"
+        },
+        {
+          "id": "03ddabf4",
+          "name": "Foundation"
+        },
+        {
+          "id": "4ee833f6",
+          "name": "Design and prototype"
+        },
+        {
+          "id": "87f26041",
+          "name": "Public-data alpha"
+        },
+        {
+          "id": "74d9f587",
+          "name": "Public beta"
+        },
+        {
+          "id": "621b119c",
+          "name": "Continuous validation"
+        },
+        {
+          "id": "ffaca5a1",
+          "name": "Operations and launch"
+        }
+      ]
+    },
+    {
+      "name": "Workstream",
+      "database_id": 427831140,
+      "ui_id": 427831140,
+      "options": [
+        {
+          "id": "7b1fca32",
+          "name": "Program"
+        },
+        {
+          "id": "e6c2f2ac",
+          "name": "01 Product charter and contribution governance"
+        },
+        {
+          "id": "f605064a",
+          "name": "02 Repository, delivery Project and engineering foundation"
+        },
+        {
+          "id": "b746b0a8",
+          "name": "03 Metric contracts, identity and scope"
+        },
+        {
+          "id": "0d10576b",
+          "name": "04 GitHub App and source capability verification"
+        },
+        {
+          "id": "7ac6590b",
+          "name": "05 Reliable live ingestion and event ledger"
+        },
+        {
+          "id": "faebd465",
+          "name": "06 Historical backfill, reconciliation and coverage"
+        },
+        {
+          "id": "7e07935e",
+          "name": "07 Code, pull request and review recognition"
+        },
+        {
+          "id": "f677032c",
+          "name": "08 Issue, triage and project stewardship recognition"
+        },
+        {
+          "id": "4c8c2b79",
+          "name": "09 Research, documentation and quality contributions"
+        },
+        {
+          "id": "946a7198",
+          "name": "10 Community evidence and editorial recognition"
+        },
+        {
+          "id": "86d65600",
+          "name": "11 Ranking, filters and fair comparison engine"
+        },
+        {
+          "id": "a51f93d4",
+          "name": "12 Read API, snapshots and integration contracts"
+        },
+        {
+          "id": "1956865c",
+          "name": "13 Information architecture and visual system"
+        },
+        {
+          "id": "f4064d01",
+          "name": "14 Public boards, organization overview and evidence"
+        },
+        {
+          "id": "38049ffa",
+          "name": "15 Contributor portfolios and sharing"
+        },
+        {
+          "id": "313399a2",
+          "name": "16 Live activity and public display modes"
+        },
+        {
+          "id": "363b06c8",
+          "name": "17 Administration, moderation and contributor controls"
+        },
+        {
+          "id": "daba0548",
+          "name": "18 Security, privacy and operational safeguards"
+        },
+        {
+          "id": "10301a30",
+          "name": "19 Verification, accessibility and performance"
+        },
+        {
+          "id": "2005f4d0",
+          "name": "20 Hosting, observability and release operations"
+        }
+      ]
+    },
+    {
+      "name": "Acceptance Gate",
+      "database_id": 427831150,
+      "ui_id": 427831150,
+      "options": [
+        {
+          "id": "b0f4cafa",
+          "name": "Approved decision"
+        },
+        {
+          "id": "696d8994",
+          "name": "Verified source capability"
+        },
+        {
+          "id": "24dbe27f",
+          "name": "Automated validation"
+        },
+        {
+          "id": "99568cda",
+          "name": "Evidence review"
+        },
+        {
+          "id": "d2d185e6",
+          "name": "Accessible user journey"
+        },
+        {
+          "id": "5f89e7ae",
+          "name": "Operational drill"
+        },
+        {
+          "id": "bae392ab",
+          "name": "Verified public release"
+        }
+      ]
+    }
+  ],
+  "visible_builtin_fields": [
+    {
+      "database_id": 427831010,
+      "ui_id": "Title",
+      "name": "Title",
+      "data_type": "title"
+    },
+    {
+      "database_id": 427831011,
+      "ui_id": "Assignees",
+      "name": "Assignees",
+      "data_type": "assignees"
+    },
+    {
+      "database_id": 427831019,
+      "ui_id": "Parent issue",
+      "name": "Parent issue",
+      "data_type": "parentIssue"
+    },
+    {
+      "database_id": 427831020,
+      "ui_id": "Sub-issues progress",
+      "name": "Sub-issues progress",
+      "data_type": "subIssuesProgress"
+    }
+  ],
+  "views": [
+    {
+      "number": 1,
+      "database_id": 50761718,
+      "name": "01 Hierarchy and outcomes",
+      "layout": "table",
+      "filter": "",
+      "group_by_field_ids": [],
+      "vertical_group_by_field_ids": [],
+      "sort_by": [],
+      "visible_field_ids": [
+        427831010,
+        427831011,
+        427831012,
+        427831084,
+        427831124,
+        427831140,
+        427831101,
+        427831150,
+        427831110,
+        427831019,
+        427831020
+      ],
+      "table_hierarchy_enabled": true,
+      "configuration_updated_at": "2026-10-17T02:38:07Z"
+    },
+    {
+      "number": 2,
+      "database_id": 50761730,
+      "name": "02 Owner and readiness intake",
+      "layout": "table",
+      "filter": "no:assignee -status:Done",
+      "group_by_field_ids": [
+        427831101
+      ],
+      "vertical_group_by_field_ids": [],
+      "sort_by": [
+        [
+          427831010,
+          "asc"
+        ]
+      ],
+      "visible_field_ids": [
+        427831010,
+        427831011,
+        427831012,
+        427831019,
+        427831020,
+        427831084,
+        427831101,
+        427831110,
+        427831124,
+        427831140,
+        427831150
+      ],
+      "table_hierarchy_enabled": true,
+      "configuration_updated_at": "2026-10-17T02:38:10Z"
+    },
+    {
+      "number": 3,
+      "database_id": 50761734,
+      "name": "03 Delivery board",
+      "layout": "board",
+      "filter": "-status:Done",
+      "group_by_field_ids": [],
+      "vertical_group_by_field_ids": [
+        427831012
+      ],
+      "sort_by": [
+        [
+          427831010,
+          "asc"
+        ]
+      ],
+      "visible_field_ids": [
+        427831010,
+        427831011,
+        427831012,
+        427831019,
+        427831020,
+        427831084,
+        427831101,
+        427831110,
+        427831124,
+        427831140,
+        427831150
+      ],
+      "table_hierarchy_enabled": true,
+      "configuration_updated_at": "2026-10-17T02:38:13Z"
+    },
+    {
+      "number": 4,
+      "database_id": 50761736,
+      "name": "04 Dependencies and decisions",
+      "layout": "table",
+      "filter": "readiness:\"Needs input\",\"Awaiting decision\",Blocked",
+      "group_by_field_ids": [
+        427831140
+      ],
+      "vertical_group_by_field_ids": [],
+      "sort_by": [
+        [
+          427831010,
+          "asc"
+        ]
+      ],
+      "visible_field_ids": [
+        427831010,
+        427831011,
+        427831012,
+        427831019,
+        427831020,
+        427831084,
+        427831101,
+        427831110,
+        427831124,
+        427831140,
+        427831150
+      ],
+      "table_hierarchy_enabled": true,
+      "configuration_updated_at": "2026-10-17T02:38:15Z"
+    },
+    {
+      "number": 5,
+      "database_id": 50761739,
+      "name": "05 Metric sources and coverage",
+      "layout": "table",
+      "filter": "workstream:\"03 Metric contracts, identity and scope\",\"04 GitHub App and source capability verification\",\"05 Reliable live ingestion and event ledger\",\"06 Historical backfill, reconciliation and coverage\",\"07 Code, pull request and review recognition\",\"08 Issue, triage and project stewardship recognition\",\"09 Research, documentation and quality contributions\",\"10 Community evidence and editorial recognition\",\"11 Ranking, filters and fair comparison engine\"",
+      "group_by_field_ids": [
+        427831140
+      ],
+      "vertical_group_by_field_ids": [],
+      "sort_by": [
+        [
+          427831010,
+          "asc"
+        ]
+      ],
+      "visible_field_ids": [
+        427831010,
+        427831011,
+        427831012,
+        427831019,
+        427831020,
+        427831084,
+        427831101,
+        427831110,
+        427831124,
+        427831140,
+        427831150
+      ],
+      "table_hierarchy_enabled": true,
+      "configuration_updated_at": "2026-10-17T02:38:18Z"
+    },
+    {
+      "number": 6,
+      "database_id": 50761741,
+      "name": "06 UI and accessibility",
+      "layout": "table",
+      "filter": "workstream:\"13 Information architecture and visual system\",\"14 Public boards, organization overview and evidence\",\"15 Contributor portfolios and sharing\",\"16 Live activity and public display modes\"",
+      "group_by_field_ids": [
+        427831140
+      ],
+      "vertical_group_by_field_ids": [],
+      "sort_by": [
+        [
+          427831010,
+          "asc"
+        ]
+      ],
+      "visible_field_ids": [
+        427831010,
+        427831011,
+        427831012,
+        427831019,
+        427831020,
+        427831084,
+        427831101,
+        427831110,
+        427831124,
+        427831140,
+        427831150
+      ],
+      "table_hierarchy_enabled": true,
+      "configuration_updated_at": "2026-10-17T02:38:20Z"
+    },
+    {
+      "number": 7,
+      "database_id": 50761742,
+      "name": "07 Security and privacy",
+      "layout": "table",
+      "filter": "workstream:\"17 Administration, moderation and contributor controls\",\"18 Security, privacy and operational safeguards\"",
+      "group_by_field_ids": [
+        427831140
+      ],
+      "vertical_group_by_field_ids": [],
+      "sort_by": [
+        [
+          427831010,
+          "asc"
+        ]
+      ],
+      "visible_field_ids": [
+        427831010,
+        427831011,
+        427831012,
+        427831019,
+        427831020,
+        427831084,
+        427831101,
+        427831110,
+        427831124,
+        427831140,
+        427831150
+      ],
+      "table_hierarchy_enabled": true,
+      "configuration_updated_at": "2026-10-17T02:38:23Z"
+    },
+    {
+      "number": 8,
+      "database_id": 50761744,
+      "name": "08 Verification and launch",
+      "layout": "table",
+      "filter": "workstream:\"19 Verification, accessibility and performance\",\"20 Hosting, observability and release operations\"",
+      "group_by_field_ids": [
+        427831140
+      ],
+      "vertical_group_by_field_ids": [],
+      "sort_by": [
+        [
+          427831010,
+          "asc"
+        ]
+      ],
+      "visible_field_ids": [
+        427831010,
+        427831011,
+        427831012,
+        427831019,
+        427831020,
+        427831084,
+        427831101,
+        427831110,
+        427831124,
+        427831140,
+        427831150
+      ],
+      "table_hierarchy_enabled": true,
+      "configuration_updated_at": "2026-10-17T02:38:26Z"
+    },
+    {
+      "number": 9,
+      "database_id": 50761746,
+      "name": "09 Decisions to resolve",
+      "layout": "table",
+      "filter": "readiness:\"Awaiting decision\"",
+      "group_by_field_ids": [
+        427831140
+      ],
+      "vertical_group_by_field_ids": [],
+      "sort_by": [
+        [
+          427831010,
+          "asc"
+        ]
+      ],
+      "visible_field_ids": [
+        427831010,
+        427831011,
+        427831012,
+        427831019,
+        427831020,
+        427831084,
+        427831101,
+        427831110,
+        427831124,
+        427831140,
+        427831150
+      ],
+      "table_hierarchy_enabled": true,
+      "configuration_updated_at": "2026-10-17T02:38:28Z"
+    },
+    {
+      "number": 10,
+      "database_id": 50761747,
+      "name": "10 Operations and corrections",
+      "layout": "table",
+      "filter": "workstream:\"17 Administration, moderation and contributor controls\",\"20 Hosting, observability and release operations\"",
+      "group_by_field_ids": [
+        427831140
+      ],
+      "vertical_group_by_field_ids": [],
+      "sort_by": [
+        [
+          427831010,
+          "asc"
+        ]
+      ],
+      "visible_field_ids": [
+        427831010,
+        427831011,
+        427831012,
+        427831019,
+        427831020,
+        427831084,
+        427831101,
+        427831110,
+        427831124,
+        427831140,
+        427831150
+      ],
+      "table_hierarchy_enabled": true,
+      "configuration_updated_at": "2026-10-17T02:38:31Z"
+    }
+  ],
+  "contextual_references": [
+    {
+      "id": "R01",
+      "url": "https://docs.github.com/en/apps/creating-github-apps/setting-up-a-github-app/choosing-permissions-for-a-github-app"
+    },
+    {
+      "id": "R02",
+      "url": "https://docs.github.com/en/graphql/reference/objects"
+    },
+    {
+      "id": "R03",
+      "url": "https://docs.github.com/en/rest/issues/timeline"
+    },
+    {
+      "id": "R04",
+      "url": "https://docs.github.com/en/webhooks/webhook-events-and-payloads"
+    },
+    {
+      "id": "R05",
+      "url": "https://github.com/Pick-Your-AI/.github"
+    },
+    {
+      "id": "R06",
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/blob/main/docs/CONTRACT_MAPPING.md"
+    },
+    {
+      "id": "R07",
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/blob/main/docs/RESEARCH_WORKFLOW.md"
+    },
+    {
+      "id": "R08",
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/39"
+    },
+    {
+      "id": "R09",
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/40"
+    },
+    {
+      "id": "R10",
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/41"
+    },
+    {
+      "id": "R11",
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/42"
+    },
+    {
+      "id": "R12",
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/issues/60"
+    },
+    {
+      "id": "R13",
+      "url": "https://github.com/Pick-Your-AI/pickyour.ai/blob/main/docs/ARCHITECTURE.md"
+    },
+    {
+      "id": "R14",
+      "url": "https://github.com/Pick-Your-AI/pickyour.ai/blob/main/docs/DESIGN_SYSTEM.md"
+    },
+    {
+      "id": "R15",
+      "url": "https://github.com/Pick-Your-AI/pickyour.ai/issues/32"
+    },
+    {
+      "id": "R16",
+      "url": "https://github.com/Pick-Your-AI/pickyour.ai/issues/33"
+    },
+    {
+      "id": "R17",
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/1"
+    },
+    {
+      "id": "R18",
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/2"
+    },
+    {
+      "id": "R19",
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/3"
+    },
+    {
+      "id": "R20",
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/4"
+    },
+    {
+      "id": "R21",
+      "url": "https://github.com/orgs/Pick-Your-AI/projects/5"
+    },
+    {
+      "id": "R22",
+      "url": "https://github.com/orgs/Pick-Your-AI/repositories"
+    }
+  ],
+  "items": [
+    {
+      "stable_id": "LB",
+      "issue_number": 1,
+      "issue_database_id": 5894043363,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX0_24w",
+      "project_row_position": 1,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "8c092135",
+        "Level": "71ae4950",
+        "Phase": "b2577dab",
+        "Workstream": "7b1fca32",
+        "Acceptance Gate": "bae392ab"
+      },
+      "parent": null,
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          20
+        ]
+      },
+      "preserved_reference_ids": []
+    },
+    {
+      "stable_id": "LB-01",
+      "issue_number": 2,
+      "issue_database_id": 5894043980,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX0_5TA",
+      "project_row_position": 2,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "b2577dab",
+        "Workstream": "e6c2f2ac",
+        "Acceptance Gate": "b0f4cafa"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          6
+        ]
+      },
+      "preserved_reference_ids": [
+        "R22",
+        "R07",
+        "R13",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-02",
+      "issue_number": 3,
+      "issue_database_id": 5894044507,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX0_7Ww",
+      "project_row_position": 3,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "03ddabf4",
+        "Workstream": "f605064a",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          7
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-03",
+      "issue_number": 4,
+      "issue_database_id": 5894045177,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX0_9-Q",
+      "project_row_position": 4,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "03ddabf4",
+        "Workstream": "b746b0a8",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          6
+        ]
+      },
+      "preserved_reference_ids": [
+        "R06",
+        "R01",
+        "R02",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-04",
+      "issue_number": 5,
+      "issue_database_id": 5894045884,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1AAvA",
+      "project_row_position": 5,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "03ddabf4",
+        "Workstream": "0d10576b",
+        "Acceptance Gate": "696d8994"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          5
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R03",
+        "R02"
+      ]
+    },
+    {
+      "stable_id": "LB-05",
+      "issue_number": 6,
+      "issue_database_id": 5894046589,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1ADfQ",
+      "project_row_position": 6,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "03ddabf4",
+        "Workstream": "7ac6590b",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          6
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R03"
+      ]
+    },
+    {
+      "stable_id": "LB-06",
+      "issue_number": 7,
+      "issue_database_id": 5894047234,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1AGAg",
+      "project_row_position": 7,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "03ddabf4",
+        "Workstream": "faebd465",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          6
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-07",
+      "issue_number": 8,
+      "issue_database_id": 5894047696,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1AH0A",
+      "project_row_position": 8,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "87f26041",
+        "Workstream": "7e07935e",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          6
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R13"
+      ]
+    },
+    {
+      "stable_id": "LB-08",
+      "issue_number": 9,
+      "issue_database_id": 5894048341,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1AKVQ",
+      "project_row_position": 9,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "87f26041",
+        "Workstream": "f677032c",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          6
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-09",
+      "issue_number": 10,
+      "issue_database_id": 5894048843,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1AMSw",
+      "project_row_position": 10,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "87f26041",
+        "Workstream": "4c8c2b79",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          6
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R06",
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12",
+        "R18",
+        "R15",
+        "R16"
+      ]
+    },
+    {
+      "stable_id": "LB-10",
+      "issue_number": 11,
+      "issue_database_id": 5894049443,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1AOow",
+      "project_row_position": 11,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "87a66148",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "74d9f587",
+        "Workstream": "946a7198",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          5
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-11",
+      "issue_number": 12,
+      "issue_database_id": 5894050135,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1ARVw",
+      "project_row_position": 12,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "87f26041",
+        "Workstream": "86d65600",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          6
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-12",
+      "issue_number": 13,
+      "issue_database_id": 5894050887,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1AURw",
+      "project_row_position": 13,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "87f26041",
+        "Workstream": "a51f93d4",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          5
+        ]
+      },
+      "preserved_reference_ids": [
+        "R13",
+        "R01",
+        "R04"
+      ]
+    },
+    {
+      "stable_id": "LB-13",
+      "issue_number": 14,
+      "issue_database_id": 5894051557,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1AW5Q",
+      "project_row_position": 14,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "4ee833f6",
+        "Workstream": "1956865c",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          5
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R13",
+        "R15",
+        "R16"
+      ]
+    },
+    {
+      "stable_id": "LB-14",
+      "issue_number": 15,
+      "issue_database_id": 5894052194,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1AZYg",
+      "project_row_position": 15,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "74d9f587",
+        "Workstream": "f4064d01",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          6
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-15",
+      "issue_number": 16,
+      "issue_database_id": 5894052860,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Ab_A",
+      "project_row_position": 16,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "74d9f587",
+        "Workstream": "38049ffa",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          5
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R14",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-16",
+      "issue_number": 17,
+      "issue_database_id": 5894053618,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Ae8g",
+      "project_row_position": 17,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "74d9f587",
+        "Workstream": "313399a2",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          4
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R04",
+        "R13"
+      ]
+    },
+    {
+      "stable_id": "LB-17",
+      "issue_number": 18,
+      "issue_database_id": 5894054475,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1AiSw",
+      "project_row_position": 18,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "74d9f587",
+        "Workstream": "363b06c8",
+        "Acceptance Gate": "5f89e7ae"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          5
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R05",
+        "R04"
+      ]
+    },
+    {
+      "stable_id": "LB-18",
+      "issue_number": 19,
+      "issue_database_id": 5894055365,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1AlxQ",
+      "project_row_position": 19,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "03ddabf4",
+        "Workstream": "daba0548",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          5
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R07"
+      ]
+    },
+    {
+      "stable_id": "LB-19",
+      "issue_number": 20,
+      "issue_database_id": 5894056264,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1ApSA",
+      "project_row_position": 20,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "621b119c",
+        "Workstream": "10301a30",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          6
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R14",
+        "R03",
+        "R02",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-20",
+      "issue_number": 21,
+      "issue_database_id": 5894057115,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Asmw",
+      "project_row_position": 21,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "8c092135",
+        "Level": "09b5ab53",
+        "Phase": "ffaca5a1",
+        "Workstream": "2005f4d0",
+        "Acceptance Gate": "bae392ab"
+      },
+      "parent": "LB",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          6
+        ]
+      },
+      "preserved_reference_ids": [
+        "R13",
+        "R05",
+        "R01",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-01.01",
+      "issue_number": 22,
+      "issue_database_id": 5894057933,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1AvzQ",
+      "project_row_position": 22,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "b2577dab",
+        "Workstream": "e6c2f2ac",
+        "Acceptance Gate": "b0f4cafa"
+      },
+      "parent": "LB-01",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R22",
+        "R07",
+        "R13",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-01.03",
+      "issue_number": 23,
+      "issue_database_id": 5894058572,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1AyTA",
+      "project_row_position": 23,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "8c092135",
+        "Level": "a5315e0e",
+        "Phase": "b2577dab",
+        "Workstream": "e6c2f2ac",
+        "Acceptance Gate": "b0f4cafa"
+      },
+      "parent": "LB-01",
+      "blocked_by": [],
+      "native_page_counts": {
+        "blocked_by": [
+          0
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R22",
+        "R07",
+        "R13",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-01.02",
+      "issue_number": 24,
+      "issue_database_id": 5894059162,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1A0mg",
+      "project_row_position": 24,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "b2577dab",
+        "Workstream": "e6c2f2ac",
+        "Acceptance Gate": "b0f4cafa"
+      },
+      "parent": "LB-01",
+      "blocked_by": [
+        "LB-01.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R22",
+        "R07",
+        "R13",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-01.04",
+      "issue_number": 25,
+      "issue_database_id": 5894059870,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1A3Xg",
+      "project_row_position": 25,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "b2577dab",
+        "Workstream": "e6c2f2ac",
+        "Acceptance Gate": "b0f4cafa"
+      },
+      "parent": "LB-01",
+      "blocked_by": [
+        "LB-01.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R22",
+        "R07",
+        "R13",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-01.05",
+      "issue_number": 26,
+      "issue_database_id": 5894060536,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1A5-A",
+      "project_row_position": 26,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "b2577dab",
+        "Workstream": "e6c2f2ac",
+        "Acceptance Gate": "b0f4cafa"
+      },
+      "parent": "LB-01",
+      "blocked_by": [
+        "LB-01.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R22",
+        "R07",
+        "R13",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-02.01",
+      "issue_number": 27,
+      "issue_database_id": 5894061118,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1A8Pg",
+      "project_row_position": 27,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "f605064a",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-02",
+      "blocked_by": [
+        "LB-01.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-01.06",
+      "issue_number": 28,
+      "issue_database_id": 5894061824,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1A_AA",
+      "project_row_position": 28,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "b2577dab",
+        "Workstream": "e6c2f2ac",
+        "Acceptance Gate": "b0f4cafa"
+      },
+      "parent": "LB-01",
+      "blocked_by": [
+        "LB-01.02",
+        "LB-01.04",
+        "LB-01.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          3
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R22",
+        "R07",
+        "R13",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-02.02",
+      "issue_number": 29,
+      "issue_database_id": 5894062566,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1BB5g",
+      "project_row_position": 29,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "f605064a",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-02",
+      "blocked_by": [
+        "LB-02.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-02.04",
+      "issue_number": 30,
+      "issue_database_id": 5894063218,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1BEcg",
+      "project_row_position": 30,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "f605064a",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-02",
+      "blocked_by": [
+        "LB-01.02",
+        "LB-02.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-02.07",
+      "issue_number": 31,
+      "issue_database_id": 5894063905,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1BHIQ",
+      "project_row_position": 31,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "f605064a",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-02",
+      "blocked_by": [
+        "LB-01.04",
+        "LB-02.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-03.01",
+      "issue_number": 32,
+      "issue_database_id": 5894064529,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1BJkQ",
+      "project_row_position": 32,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "b746b0a8",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-03",
+      "blocked_by": [
+        "LB-01.02",
+        "LB-02.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R06",
+        "R01",
+        "R02",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-02.03",
+      "issue_number": 33,
+      "issue_database_id": 5894065233,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1BMUQ",
+      "project_row_position": 33,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "f605064a",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-02",
+      "blocked_by": [
+        "LB-02.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-02.05",
+      "issue_number": 34,
+      "issue_database_id": 5894066087,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1BPpw",
+      "project_row_position": 34,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "f605064a",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-02",
+      "blocked_by": [
+        "LB-02.07"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-02.06",
+      "issue_number": 35,
+      "issue_database_id": 5894066870,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1BStg",
+      "project_row_position": 35,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "f605064a",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-02",
+      "blocked_by": [
+        "LB-02.07"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-03.02",
+      "issue_number": 36,
+      "issue_database_id": 5894067902,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1BWvg",
+      "project_row_position": 36,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "b746b0a8",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-03",
+      "blocked_by": [
+        "LB-01.05",
+        "LB-03.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R06",
+        "R01",
+        "R02",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-03.04",
+      "issue_number": 37,
+      "issue_database_id": 5894068744,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1BaCA",
+      "project_row_position": 37,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "b746b0a8",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-03",
+      "blocked_by": [
+        "LB-01.03",
+        "LB-03.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R06",
+        "R01",
+        "R02",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-03.05",
+      "issue_number": 38,
+      "issue_database_id": 5894069547,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1BdKw",
+      "project_row_position": 38,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "b746b0a8",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-03",
+      "blocked_by": [
+        "LB-03.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R06",
+        "R01",
+        "R02",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-18.01",
+      "issue_number": 39,
+      "issue_database_id": 5894070330,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1BgOg",
+      "project_row_position": 39,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "daba0548",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-18",
+      "blocked_by": [
+        "LB-01.05",
+        "LB-03.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R07"
+      ]
+    },
+    {
+      "stable_id": "LB-03.03",
+      "issue_number": 40,
+      "issue_database_id": 5894071372,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1BkTA",
+      "project_row_position": 40,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "b746b0a8",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-03",
+      "blocked_by": [
+        "LB-03.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R06",
+        "R01",
+        "R02",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-04.01",
+      "issue_number": 41,
+      "issue_database_id": 5894072060,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Bm_A",
+      "project_row_position": 41,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "0d10576b",
+        "Acceptance Gate": "696d8994"
+      },
+      "parent": "LB-04",
+      "blocked_by": [
+        "LB-03.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R03",
+        "R02"
+      ]
+    },
+    {
+      "stable_id": "LB-18.04",
+      "issue_number": 42,
+      "issue_database_id": 5894072714,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Bpig",
+      "project_row_position": 42,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "daba0548",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-18",
+      "blocked_by": [
+        "LB-02.05",
+        "LB-18.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R07"
+      ]
+    },
+    {
+      "stable_id": "LB-03.06",
+      "issue_number": 43,
+      "issue_database_id": 5894073564,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Bs3A",
+      "project_row_position": 43,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "b746b0a8",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-03",
+      "blocked_by": [
+        "LB-03.03",
+        "LB-03.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R06",
+        "R01",
+        "R02",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-04.02",
+      "issue_number": 44,
+      "issue_database_id": 5894074341,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Bv5Q",
+      "project_row_position": 44,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "0d10576b",
+        "Acceptance Gate": "696d8994"
+      },
+      "parent": "LB-04",
+      "blocked_by": [
+        "LB-01.05",
+        "LB-04.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R03",
+        "R02"
+      ]
+    },
+    {
+      "stable_id": "LB-04.04",
+      "issue_number": 45,
+      "issue_database_id": 5894075012,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1ByhA",
+      "project_row_position": 45,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "0d10576b",
+        "Acceptance Gate": "696d8994"
+      },
+      "parent": "LB-04",
+      "blocked_by": [
+        "LB-04.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R03",
+        "R02"
+      ]
+    },
+    {
+      "stable_id": "LB-10.01",
+      "issue_number": 46,
+      "issue_database_id": 5894087164,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Ch_A",
+      "project_row_position": 46,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "87a66148",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "946a7198",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-10",
+      "blocked_by": [
+        "LB-03.05",
+        "LB-04.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-13.01",
+      "issue_number": 47,
+      "issue_database_id": 5894088134,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Clxg",
+      "project_row_position": 47,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "4ee833f6",
+        "Workstream": "1956865c",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-13",
+      "blocked_by": [
+        "LB-01.01",
+        "LB-04.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R13",
+        "R15",
+        "R16"
+      ]
+    },
+    {
+      "stable_id": "LB-20.01",
+      "issue_number": 48,
+      "issue_database_id": 5894089131,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Cpqw",
+      "project_row_position": 48,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "ffaca5a1",
+        "Workstream": "2005f4d0",
+        "Acceptance Gate": "bae392ab"
+      },
+      "parent": "LB-20",
+      "blocked_by": [
+        "LB-01.04",
+        "LB-18.04"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R13",
+        "R05",
+        "R01",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-04.03",
+      "issue_number": 49,
+      "issue_database_id": 5894091798,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1C0Fg",
+      "project_row_position": 49,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "0d10576b",
+        "Acceptance Gate": "696d8994"
+      },
+      "parent": "LB-04",
+      "blocked_by": [
+        "LB-03.04",
+        "LB-04.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R03",
+        "R02"
+      ]
+    },
+    {
+      "stable_id": "LB-04.05",
+      "issue_number": 50,
+      "issue_database_id": 5894092773,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1C35Q",
+      "project_row_position": 50,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "0d10576b",
+        "Acceptance Gate": "696d8994"
+      },
+      "parent": "LB-04",
+      "blocked_by": [
+        "LB-01.05",
+        "LB-04.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R03",
+        "R02"
+      ]
+    },
+    {
+      "stable_id": "LB-05.01",
+      "issue_number": 51,
+      "issue_database_id": 5894094685,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1C_XQ",
+      "project_row_position": 51,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "7ac6590b",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-05",
+      "blocked_by": [
+        "LB-03.01",
+        "LB-04.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R03"
+      ]
+    },
+    {
+      "stable_id": "LB-13.02",
+      "issue_number": 52,
+      "issue_database_id": 5894095571,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1DC0w",
+      "project_row_position": 52,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "4ee833f6",
+        "Workstream": "1956865c",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-13",
+      "blocked_by": [
+        "LB-03.05",
+        "LB-13.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R13",
+        "R15",
+        "R16"
+      ]
+    },
+    {
+      "stable_id": "LB-17.02",
+      "issue_number": 53,
+      "issue_database_id": 5894102793,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1DfCQ",
+      "project_row_position": 53,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "363b06c8",
+        "Acceptance Gate": "5f89e7ae"
+      },
+      "parent": "LB-17",
+      "blocked_by": [
+        "LB-04.02",
+        "LB-18.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R05",
+        "R04"
+      ]
+    },
+    {
+      "stable_id": "LB-05.02",
+      "issue_number": 54,
+      "issue_database_id": 5894103169,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1DggQ",
+      "project_row_position": 54,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "7ac6590b",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-05",
+      "blocked_by": [
+        "LB-02.06",
+        "LB-05.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R03"
+      ]
+    },
+    {
+      "stable_id": "LB-10.02",
+      "issue_number": 55,
+      "issue_database_id": 5894104004,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1DjxA",
+      "project_row_position": 55,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "87a66148",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "946a7198",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-10",
+      "blocked_by": [
+        "LB-01.05",
+        "LB-03.02",
+        "LB-17.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          3
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-13.03",
+      "issue_number": 56,
+      "issue_database_id": 5894104953,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1DneQ",
+      "project_row_position": 56,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "4ee833f6",
+        "Workstream": "1956865c",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-13",
+      "blocked_by": [
+        "LB-13.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R13",
+        "R15",
+        "R16"
+      ]
+    },
+    {
+      "stable_id": "LB-05.03",
+      "issue_number": 57,
+      "issue_database_id": 5894106094,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Dr7g",
+      "project_row_position": 57,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "7ac6590b",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-05",
+      "blocked_by": [
+        "LB-03.01",
+        "LB-05.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R03"
+      ]
+    },
+    {
+      "stable_id": "LB-05.04",
+      "issue_number": 58,
+      "issue_database_id": 5894106738,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Ducg",
+      "project_row_position": 58,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "7ac6590b",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-05",
+      "blocked_by": [
+        "LB-04.04",
+        "LB-05.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R03"
+      ]
+    },
+    {
+      "stable_id": "LB-06.01",
+      "issue_number": 59,
+      "issue_database_id": 5894108162,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1D0Ag",
+      "project_row_position": 59,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "faebd465",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-06",
+      "blocked_by": [
+        "LB-03.05",
+        "LB-04.04",
+        "LB-05.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          3
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-10.03",
+      "issue_number": 60,
+      "issue_database_id": 5894109524,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1D5VA",
+      "project_row_position": 60,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "87a66148",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "946a7198",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-10",
+      "blocked_by": [
+        "LB-10.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-13.04",
+      "issue_number": 61,
+      "issue_database_id": 5894110051,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1D7Yw",
+      "project_row_position": 61,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "4ee833f6",
+        "Workstream": "1956865c",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-13",
+      "blocked_by": [
+        "LB-13.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R13",
+        "R15",
+        "R16"
+      ]
+    },
+    {
+      "stable_id": "LB-05.05",
+      "issue_number": 62,
+      "issue_database_id": 5894110716,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1D9_A",
+      "project_row_position": 62,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "7ac6590b",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-05",
+      "blocked_by": [
+        "LB-05.03",
+        "LB-05.04"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R03"
+      ]
+    },
+    {
+      "stable_id": "LB-06.02",
+      "issue_number": 63,
+      "issue_database_id": 5894111228,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1D__A",
+      "project_row_position": 63,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "faebd465",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-06",
+      "blocked_by": [
+        "LB-04.01",
+        "LB-06.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-06.03",
+      "issue_number": 64,
+      "issue_database_id": 5894112518,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1EFBg",
+      "project_row_position": 64,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "faebd465",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-06",
+      "blocked_by": [
+        "LB-05.03",
+        "LB-06.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-07.01",
+      "issue_number": 65,
+      "issue_database_id": 5894113010,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1EG8g",
+      "project_row_position": 65,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "7e07935e",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-07",
+      "blocked_by": [
+        "LB-03.06",
+        "LB-06.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R13"
+      ]
+    },
+    {
+      "stable_id": "LB-07.03",
+      "issue_number": 66,
+      "issue_database_id": 5894114269,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1EL3Q",
+      "project_row_position": 66,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "7e07935e",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-07",
+      "blocked_by": [
+        "LB-03.06",
+        "LB-06.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R13"
+      ]
+    },
+    {
+      "stable_id": "LB-07.04",
+      "issue_number": 67,
+      "issue_database_id": 5894115305,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1EP6Q",
+      "project_row_position": 67,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "7e07935e",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-07",
+      "blocked_by": [
+        "LB-03.05",
+        "LB-06.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R13"
+      ]
+    },
+    {
+      "stable_id": "LB-08.01",
+      "issue_number": 68,
+      "issue_database_id": 5894115720,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1ERiA",
+      "project_row_position": 68,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "f677032c",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-08",
+      "blocked_by": [
+        "LB-01.02",
+        "LB-06.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-10.04",
+      "issue_number": 69,
+      "issue_database_id": 5894116772,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1EVpA",
+      "project_row_position": 69,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "87a66148",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "946a7198",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-10",
+      "blocked_by": [
+        "LB-10.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-10.05",
+      "issue_number": 70,
+      "issue_database_id": 5894117219,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1EXYw",
+      "project_row_position": 70,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "87a66148",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "946a7198",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-10",
+      "blocked_by": [
+        "LB-03.05",
+        "LB-10.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R07",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-13.05",
+      "issue_number": 71,
+      "issue_database_id": 5894117728,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1EZYA",
+      "project_row_position": 71,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "4ee833f6",
+        "Workstream": "1956865c",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-13",
+      "blocked_by": [
+        "LB-13.04"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R13",
+        "R15",
+        "R16"
+      ]
+    },
+    {
+      "stable_id": "LB-19.01",
+      "issue_number": 72,
+      "issue_database_id": 5894118276,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1EbhA",
+      "project_row_position": 72,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "621b119c",
+        "Workstream": "10301a30",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-19",
+      "blocked_by": [
+        "LB-03.05",
+        "LB-05.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R14",
+        "R03",
+        "R02",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-05.06",
+      "issue_number": 73,
+      "issue_database_id": 5894118911,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Ed_w",
+      "project_row_position": 73,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "7ac6590b",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-05",
+      "blocked_by": [
+        "LB-05.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R03"
+      ]
+    },
+    {
+      "stable_id": "LB-06.04",
+      "issue_number": 74,
+      "issue_database_id": 5894119370,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Efyg",
+      "project_row_position": 74,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "faebd465",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-06",
+      "blocked_by": [
+        "LB-01.05",
+        "LB-06.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-06.05",
+      "issue_number": 75,
+      "issue_database_id": 5894119859,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Ehsw",
+      "project_row_position": 75,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "faebd465",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-06",
+      "blocked_by": [
+        "LB-06.02",
+        "LB-06.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-07.02",
+      "issue_number": 76,
+      "issue_database_id": 5894120505,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1EkOQ",
+      "project_row_position": 76,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "7e07935e",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-07",
+      "blocked_by": [
+        "LB-05.04",
+        "LB-07.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R13"
+      ]
+    },
+    {
+      "stable_id": "LB-07.05",
+      "issue_number": 77,
+      "issue_database_id": 5894120993,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1EmIQ",
+      "project_row_position": 77,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "7e07935e",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-07",
+      "blocked_by": [
+        "LB-03.03",
+        "LB-07.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R13"
+      ]
+    },
+    {
+      "stable_id": "LB-08.02",
+      "issue_number": 78,
+      "issue_database_id": 5894122269,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1ErHQ",
+      "project_row_position": 78,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "f677032c",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-08",
+      "blocked_by": [
+        "LB-03.05",
+        "LB-06.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-08.04",
+      "issue_number": 79,
+      "issue_database_id": 5894122728,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Es6A",
+      "project_row_position": 79,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "f677032c",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-08",
+      "blocked_by": [
+        "LB-03.03",
+        "LB-06.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-09.01",
+      "issue_number": 80,
+      "issue_database_id": 5894123179,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Euqw",
+      "project_row_position": 80,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "4c8c2b79",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-09",
+      "blocked_by": [
+        "LB-01.03",
+        "LB-07.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R06",
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12",
+        "R18",
+        "R15",
+        "R16"
+      ]
+    },
+    {
+      "stable_id": "LB-09.04",
+      "issue_number": 81,
+      "issue_database_id": 5894124302,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1EzDg",
+      "project_row_position": 81,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "4c8c2b79",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-09",
+      "blocked_by": [
+        "LB-01.05",
+        "LB-07.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R06",
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12",
+        "R18",
+        "R15",
+        "R16"
+      ]
+    },
+    {
+      "stable_id": "LB-09.05",
+      "issue_number": 82,
+      "issue_database_id": 5894125639,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1E4Rw",
+      "project_row_position": 82,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "4c8c2b79",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-09",
+      "blocked_by": [
+        "LB-07.01",
+        "LB-08.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R06",
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12",
+        "R18",
+        "R15",
+        "R16"
+      ]
+    },
+    {
+      "stable_id": "LB-11.01",
+      "issue_number": 83,
+      "issue_database_id": 5894126820,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1E85A",
+      "project_row_position": 83,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "86d65600",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-11",
+      "blocked_by": [
+        "LB-03.05",
+        "LB-05.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-19.02",
+      "issue_number": 84,
+      "issue_database_id": 5894128215,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1FCVw",
+      "project_row_position": 84,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "621b119c",
+        "Workstream": "10301a30",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-19",
+      "blocked_by": [
+        "LB-04.01",
+        "LB-05.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R14",
+        "R03",
+        "R02",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-06.06",
+      "issue_number": 85,
+      "issue_database_id": 5894129387,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1FG6w",
+      "project_row_position": 85,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "faebd465",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-06",
+      "blocked_by": [
+        "LB-06.04",
+        "LB-06.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-07.06",
+      "issue_number": 86,
+      "issue_database_id": 5894129906,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1FI8g",
+      "project_row_position": 86,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "7e07935e",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-07",
+      "blocked_by": [
+        "LB-07.02",
+        "LB-07.03",
+        "LB-07.04",
+        "LB-07.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          4
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R13"
+      ]
+    },
+    {
+      "stable_id": "LB-08.03",
+      "issue_number": 87,
+      "issue_database_id": 5894130446,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1FLDg",
+      "project_row_position": 87,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "f677032c",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-08",
+      "blocked_by": [
+        "LB-06.02",
+        "LB-08.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-09.02",
+      "issue_number": 88,
+      "issue_database_id": 5894131395,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1FOww",
+      "project_row_position": 88,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "4c8c2b79",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-09",
+      "blocked_by": [
+        "LB-03.05",
+        "LB-09.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R06",
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12",
+        "R18",
+        "R15",
+        "R16"
+      ]
+    },
+    {
+      "stable_id": "LB-09.03",
+      "issue_number": 89,
+      "issue_database_id": 5894131941,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1FQ5Q",
+      "project_row_position": 89,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "4c8c2b79",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-09",
+      "blocked_by": [
+        "LB-09.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R06",
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12",
+        "R18",
+        "R15",
+        "R16"
+      ]
+    },
+    {
+      "stable_id": "LB-09.06",
+      "issue_number": 90,
+      "issue_database_id": 5894132921,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1FUuQ",
+      "project_row_position": 90,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "4c8c2b79",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-09",
+      "blocked_by": [
+        "LB-01.05",
+        "LB-09.04"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R06",
+        "R08",
+        "R09",
+        "R10",
+        "R11",
+        "R12",
+        "R18",
+        "R15",
+        "R16"
+      ]
+    },
+    {
+      "stable_id": "LB-11.02",
+      "issue_number": 91,
+      "issue_database_id": 5894133361,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1FWcQ",
+      "project_row_position": 91,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "86d65600",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-11",
+      "blocked_by": [
+        "LB-03.04",
+        "LB-11.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-12.05",
+      "issue_number": 92,
+      "issue_database_id": 5894134466,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Fawg",
+      "project_row_position": 92,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "a51f93d4",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-12",
+      "blocked_by": [
+        "LB-05.06",
+        "LB-06.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R13",
+        "R01",
+        "R04"
+      ]
+    },
+    {
+      "stable_id": "LB-17.01",
+      "issue_number": 93,
+      "issue_database_id": 5894135027,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Fc8w",
+      "project_row_position": 93,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "363b06c8",
+        "Acceptance Gate": "5f89e7ae"
+      },
+      "parent": "LB-17",
+      "blocked_by": [
+        "LB-05.06",
+        "LB-17.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R05",
+        "R04"
+      ]
+    },
+    {
+      "stable_id": "LB-17.03",
+      "issue_number": 94,
+      "issue_database_id": 5894135462,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Fepg",
+      "project_row_position": 94,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "363b06c8",
+        "Acceptance Gate": "5f89e7ae"
+      },
+      "parent": "LB-17",
+      "blocked_by": [
+        "LB-06.04",
+        "LB-17.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R05",
+        "R04"
+      ]
+    },
+    {
+      "stable_id": "LB-18.03",
+      "issue_number": 95,
+      "issue_database_id": 5894136754,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Fjsg",
+      "project_row_position": 95,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "daba0548",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-18",
+      "blocked_by": [
+        "LB-06.04",
+        "LB-18.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R07"
+      ]
+    },
+    {
+      "stable_id": "LB-08.05",
+      "issue_number": 96,
+      "issue_database_id": 5894137229,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1FljQ",
+      "project_row_position": 96,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "f677032c",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-08",
+      "blocked_by": [
+        "LB-08.01",
+        "LB-08.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-11.03",
+      "issue_number": 97,
+      "issue_database_id": 5894138359,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Fp9w",
+      "project_row_position": 97,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "47fc9ee4",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "86d65600",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-11",
+      "blocked_by": [
+        "LB-06.05",
+        "LB-11.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-11.04",
+      "issue_number": 98,
+      "issue_database_id": 5894139646,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Fu_g",
+      "project_row_position": 98,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "47fc9ee4",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "86d65600",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-11",
+      "blocked_by": [
+        "LB-06.05",
+        "LB-11.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-12.01",
+      "issue_number": 99,
+      "issue_database_id": 5894140819,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Fzkw",
+      "project_row_position": 99,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "a51f93d4",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-12",
+      "blocked_by": [
+        "LB-04.05",
+        "LB-11.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R13",
+        "R01",
+        "R04"
+      ]
+    },
+    {
+      "stable_id": "LB-14.05",
+      "issue_number": 100,
+      "issue_database_id": 5894141383,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1F1xw",
+      "project_row_position": 100,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "f4064d01",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-14",
+      "blocked_by": [
+        "LB-03.05",
+        "LB-12.05",
+        "LB-17.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          3
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-17.05",
+      "issue_number": 101,
+      "issue_database_id": 5894142578,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1F6cg",
+      "project_row_position": 101,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "363b06c8",
+        "Acceptance Gate": "5f89e7ae"
+      },
+      "parent": "LB-17",
+      "blocked_by": [
+        "LB-03.05",
+        "LB-17.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R05",
+        "R04"
+      ]
+    },
+    {
+      "stable_id": "LB-20.02",
+      "issue_number": 102,
+      "issue_database_id": 5894143868,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1F_fA",
+      "project_row_position": 102,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "ffaca5a1",
+        "Workstream": "2005f4d0",
+        "Acceptance Gate": "bae392ab"
+      },
+      "parent": "LB-20",
+      "blocked_by": [
+        "LB-12.05",
+        "LB-20.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R13",
+        "R05",
+        "R01",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-20.03",
+      "issue_number": 103,
+      "issue_database_id": 5894145006,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1GD7g",
+      "project_row_position": 103,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "ffaca5a1",
+        "Workstream": "2005f4d0",
+        "Acceptance Gate": "bae392ab"
+      },
+      "parent": "LB-20",
+      "blocked_by": [
+        "LB-06.06",
+        "LB-20.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R13",
+        "R05",
+        "R01",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-08.06",
+      "issue_number": 104,
+      "issue_database_id": 5894145545,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1GGCQ",
+      "project_row_position": 104,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "f677032c",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-08",
+      "blocked_by": [
+        "LB-08.02",
+        "LB-08.03",
+        "LB-08.04",
+        "LB-08.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          4
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R04",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-12.02",
+      "issue_number": 105,
+      "issue_database_id": 5894146566,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1GKBg",
+      "project_row_position": 105,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "a51f93d4",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-12",
+      "blocked_by": [
+        "LB-03.02",
+        "LB-12.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R13",
+        "R01",
+        "R04"
+      ]
+    },
+    {
+      "stable_id": "LB-12.03",
+      "issue_number": 106,
+      "issue_database_id": 5894147049,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1GL6Q",
+      "project_row_position": 106,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "a51f93d4",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-12",
+      "blocked_by": [
+        "LB-05.05",
+        "LB-12.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R13",
+        "R01",
+        "R04"
+      ]
+    },
+    {
+      "stable_id": "LB-14.01",
+      "issue_number": 107,
+      "issue_database_id": 5894147461,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1GNhQ",
+      "project_row_position": 107,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "f4064d01",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-14",
+      "blocked_by": [
+        "LB-12.01",
+        "LB-13.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-18.02",
+      "issue_number": 108,
+      "issue_database_id": 5894147874,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1GPIg",
+      "project_row_position": 108,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "daba0548",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-18",
+      "blocked_by": [
+        "LB-12.01",
+        "LB-18.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R07"
+      ]
+    },
+    {
+      "stable_id": "LB-11.05",
+      "issue_number": 109,
+      "issue_database_id": 5894148815,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1GSzw",
+      "project_row_position": 109,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "86d65600",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-11",
+      "blocked_by": [
+        "LB-08.06",
+        "LB-11.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-12.04",
+      "issue_number": 110,
+      "issue_database_id": 5894149239,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1GUdw",
+      "project_row_position": 110,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "a51f93d4",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-12",
+      "blocked_by": [
+        "LB-12.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          1
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R13",
+        "R01",
+        "R04"
+      ]
+    },
+    {
+      "stable_id": "LB-14.02",
+      "issue_number": 111,
+      "issue_database_id": 5894150117,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1GX5Q",
+      "project_row_position": 111,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "f4064d01",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-14",
+      "blocked_by": [
+        "LB-11.03",
+        "LB-14.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-15.01",
+      "issue_number": 112,
+      "issue_database_id": 5894151098,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Gbug",
+      "project_row_position": 112,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "38049ffa",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-15",
+      "blocked_by": [
+        "LB-12.02",
+        "LB-13.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R14",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-18.05",
+      "issue_number": 113,
+      "issue_database_id": 5894152005,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1GfRQ",
+      "project_row_position": 113,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "507e8f2e",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "03ddabf4",
+        "Workstream": "daba0548",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-18",
+      "blocked_by": [
+        "LB-17.03",
+        "LB-18.02",
+        "LB-18.03",
+        "LB-18.04"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          4
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R04",
+        "R07"
+      ]
+    },
+    {
+      "stable_id": "LB-19.05",
+      "issue_number": 114,
+      "issue_database_id": 5894153026,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1GjQg",
+      "project_row_position": 114,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "621b119c",
+        "Workstream": "10301a30",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-19",
+      "blocked_by": [
+        "LB-07.06",
+        "LB-08.06",
+        "LB-09.06",
+        "LB-14.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          4
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R14",
+        "R03",
+        "R02",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-11.06",
+      "issue_number": 115,
+      "issue_database_id": 5894153514,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1GlKg",
+      "project_row_position": 115,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "87f26041",
+        "Workstream": "86d65600",
+        "Acceptance Gate": "24dbe27f"
+      },
+      "parent": "LB-11",
+      "blocked_by": [
+        "LB-06.06",
+        "LB-11.05"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R03",
+        "R02",
+        "R07",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-14.03",
+      "issue_number": 116,
+      "issue_database_id": 5894154702,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Gpzg",
+      "project_row_position": 116,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "f4064d01",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-14",
+      "blocked_by": [
+        "LB-12.02",
+        "LB-14.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-14.04",
+      "issue_number": 117,
+      "issue_database_id": 5894155184,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1GrsA",
+      "project_row_position": 117,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "f4064d01",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-14",
+      "blocked_by": [
+        "LB-03.04",
+        "LB-14.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-14.06",
+      "issue_number": 118,
+      "issue_database_id": 5894156254,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Gv3g",
+      "project_row_position": 118,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "f4064d01",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-14",
+      "blocked_by": [
+        "LB-12.05",
+        "LB-14.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R17",
+        "R18",
+        "R19",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-15.03",
+      "issue_number": 119,
+      "issue_database_id": 5894156753,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Gx0Q",
+      "project_row_position": 119,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "87a66148",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "38049ffa",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-15",
+      "blocked_by": [
+        "LB-15.01",
+        "LB-17.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R14",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-15.02",
+      "issue_number": 120,
+      "issue_database_id": 5894157730,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1G1og",
+      "project_row_position": 120,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "38049ffa",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-15",
+      "blocked_by": [
+        "LB-14.03",
+        "LB-15.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R14",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-16.01",
+      "issue_number": 121,
+      "issue_database_id": 5894158427,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1G4Ww",
+      "project_row_position": 121,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "313399a2",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-16",
+      "blocked_by": [
+        "LB-12.03",
+        "LB-14.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R04",
+        "R13"
+      ]
+    },
+    {
+      "stable_id": "LB-17.04",
+      "issue_number": 122,
+      "issue_database_id": 5894158997,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1G6lQ",
+      "project_row_position": 122,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "363b06c8",
+        "Acceptance Gate": "5f89e7ae"
+      },
+      "parent": "LB-17",
+      "blocked_by": [
+        "LB-10.03",
+        "LB-11.06",
+        "LB-17.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          3
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R01",
+        "R05",
+        "R04"
+      ]
+    },
+    {
+      "stable_id": "LB-15.04",
+      "issue_number": 123,
+      "issue_database_id": 5894160269,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1G_jQ",
+      "project_row_position": 123,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "87a66148",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "38049ffa",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-15",
+      "blocked_by": [
+        "LB-12.04",
+        "LB-15.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R14",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-15.05",
+      "issue_number": 124,
+      "issue_database_id": 5894160785,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1HBkQ",
+      "project_row_position": 124,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "87a66148",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "38049ffa",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-15",
+      "blocked_by": [
+        "LB-10.05",
+        "LB-11.04",
+        "LB-15.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          3
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R05",
+        "R14",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-16.02",
+      "issue_number": 125,
+      "issue_database_id": 5894161819,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1HFmw",
+      "project_row_position": 125,
+      "issue_state_at_membership_read": "closed",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "98236657",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "313399a2",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-16",
+      "blocked_by": [
+        "LB-13.03",
+        "LB-16.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R04",
+        "R13"
+      ]
+    },
+    {
+      "stable_id": "LB-16.03",
+      "issue_number": 126,
+      "issue_database_id": 5894162340,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1HHpA",
+      "project_row_position": 126,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "313399a2",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-16",
+      "blocked_by": [
+        "LB-14.02",
+        "LB-16.01"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R04",
+        "R13"
+      ]
+    },
+    {
+      "stable_id": "LB-16.04",
+      "issue_number": 127,
+      "issue_database_id": 5894162824,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1HJiA",
+      "project_row_position": 127,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "74d9f587",
+        "Workstream": "313399a2",
+        "Acceptance Gate": "d2d185e6"
+      },
+      "parent": "LB-16",
+      "blocked_by": [
+        "LB-16.02",
+        "LB-16.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R14",
+        "R04",
+        "R13"
+      ]
+    },
+    {
+      "stable_id": "LB-19.03",
+      "issue_number": 128,
+      "issue_database_id": 5894163323,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1HLew",
+      "project_row_position": 128,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "621b119c",
+        "Workstream": "10301a30",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-19",
+      "blocked_by": [
+        "LB-14.06",
+        "LB-15.02",
+        "LB-16.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          3
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R14",
+        "R03",
+        "R02",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-19.04",
+      "issue_number": 129,
+      "issue_database_id": 5894163822,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1HNbg",
+      "project_row_position": 129,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "621b119c",
+        "Workstream": "10301a30",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-19",
+      "blocked_by": [
+        "LB-12.03",
+        "LB-16.04"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R14",
+        "R03",
+        "R02",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-19.06",
+      "issue_number": 130,
+      "issue_database_id": 5894164308,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1HPVA",
+      "project_row_position": 130,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "621b119c",
+        "Workstream": "10301a30",
+        "Acceptance Gate": "99568cda"
+      },
+      "parent": "LB-19",
+      "blocked_by": [
+        "LB-01.06",
+        "LB-04.03",
+        "LB-09.02",
+        "LB-09.03",
+        "LB-09.05",
+        "LB-11.06",
+        "LB-14.04",
+        "LB-18.05",
+        "LB-19.01",
+        "LB-19.02",
+        "LB-19.03",
+        "LB-19.04",
+        "LB-19.05",
+        "LB-20.03"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          14
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R07",
+        "R14",
+        "R03",
+        "R02",
+        "R20",
+        "R21"
+      ]
+    },
+    {
+      "stable_id": "LB-20.04",
+      "issue_number": 131,
+      "issue_database_id": 5894165291,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1HTKw",
+      "project_row_position": 131,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "ffaca5a1",
+        "Workstream": "2005f4d0",
+        "Acceptance Gate": "bae392ab"
+      },
+      "parent": "LB-20",
+      "blocked_by": [
+        "LB-19.06",
+        "LB-20.02"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R13",
+        "R05",
+        "R01",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-20.05",
+      "issue_number": 132,
+      "issue_database_id": 5894166195,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1HWsw",
+      "project_row_position": 132,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "87a66148",
+        "Readiness": "c74cd84d",
+        "Level": "a5315e0e",
+        "Phase": "ffaca5a1",
+        "Workstream": "2005f4d0",
+        "Acceptance Gate": "bae392ab"
+      },
+      "parent": "LB-20",
+      "blocked_by": [
+        "LB-15.04",
+        "LB-20.04"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R13",
+        "R05",
+        "R01",
+        "R22"
+      ]
+    },
+    {
+      "stable_id": "LB-20.06",
+      "issue_number": 133,
+      "issue_database_id": 5894167190,
+      "issue_node_id": "I_kwDOVM9Xhc8AAAABX1Halg",
+      "project_row_position": 133,
+      "issue_state_at_membership_read": "open",
+      "assignees": [],
+      "field_option_ids": {
+        "Status": "f75ad846",
+        "Priority": "673b408a",
+        "Readiness": "fec82a21",
+        "Level": "a5315e0e",
+        "Phase": "ffaca5a1",
+        "Workstream": "2005f4d0",
+        "Acceptance Gate": "bae392ab"
+      },
+      "parent": "LB-20",
+      "blocked_by": [
+        "LB-17.05",
+        "LB-20.04"
+      ],
+      "native_page_counts": {
+        "blocked_by": [
+          2
+        ],
+        "sub_issues": [
+          0
+        ]
+      },
+      "preserved_reference_ids": [
+        "R13",
+        "R05",
+        "R01",
+        "R22"
+      ]
+    }
+  ],
+  "concurrent_native_state_changes": [
+    {
+      "number": 27,
+      "stable_id": "LB-02.01",
+      "initial_state": "open",
+      "final_state": "closed",
+      "final_state_reason": "completed",
+      "closed_at": "2026-10-18T10:03:49Z"
+    },
+    {
+      "number": 28,
+      "stable_id": "LB-01.06",
+      "initial_state": "open",
+      "final_state": "closed",
+      "final_state_reason": "completed",
+      "closed_at": "2026-10-18T10:03:54Z"
+    }
+  ],
+  "subsequent_native_state_changes": [
+    {
+      "stable_id": "LB-01.03",
+      "issue_number": 23,
+      "state_at_membership_read": "open",
+      "state_at_reference_read": "closed"
+    }
+  ],
+  "limitations": [
+    "These are dated observations across separate read windows, not an atomic transaction or a current status feed.",
+    "The original Backlog/no-assignee initialization remains in docs/PUBLICATION.json. Subsequent completion and active work are preserved; this readback does not reset statuses or infer owners from proposed roles.",
+    "Field database IDs, UI IDs, option IDs, Project node ID and native issue node IDs are distinguished. Project content-item node IDs were not observed and are not claimed.",
+    "Contextual link preservation compares all 640 baseline reference instances with public issue Markdown links. It does not require bodies, comments, timestamps or added evidence links to remain byte-identical.",
+    "The configuration readback made no persistent Project, issue, assignee or relationship changes. The separate LB-01.03 acceptance occurred after the membership capture and is recorded as a subsequent native-state change.",
+    "This verifies configured Project metadata and actual recorded relationships. It does not certify source permissions, hosted runtime operation, native device acceptance, a live public service or completion of other work packages."
+  ]
+}

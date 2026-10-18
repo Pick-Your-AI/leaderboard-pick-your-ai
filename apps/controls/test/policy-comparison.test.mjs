@@ -8,6 +8,7 @@ import { ControlStore } from "../src/store.mjs";
 import { createControlsServer } from "../src/server.mjs";
 import { PolicyComparisonStore, comparisonHash, comparisonLimitsV1 } from "../src/policy-comparison.mjs";
 import * as metrics from "../../../packages/metrics/dist/index.js";
+import { coverageSchema } from "@pick-your-ai/contracts";
 
 // Entirely synthetic, including reviewer identities and source authorizations.
 const prefix = "/controls/policy-comparisons";
@@ -122,7 +123,7 @@ async function harness(t, options = {}) {
   ]);
   const start = async () => {
     store = new ControlStore(filename);
-    comparisons = new PolicyComparisonStore(store, metrics, { now: () => current });
+    comparisons = new PolicyComparisonStore(store, options.metrics ?? metrics, { now: () => current });
     server = createControlsServer({
       store,
       origin,
@@ -138,7 +139,11 @@ async function harness(t, options = {}) {
           assert.ok(authorizations.every((a) => a.configurationHash === "synthetic-config"));
           await hook();
           if (!sourceAllowed) throw Error("synthetic private source detail should never escape");
-          return work(removed, { refreshApproval: async () => true, isCurrent: () => true });
+          return work(removed, {
+            refreshApproval: async () => true,
+            isCurrent: () => true,
+            ...options.authority,
+          });
         },
       },
     });
@@ -244,6 +249,143 @@ test("authenticated preview executes both policies on identical retained input a
   assert.deepEqual(await h.call(prefix + "/" + result.data.comparisonId), result);
   assert.deepEqual(h.store.publicSnapshot(), originalPublic);
   assert.equal(h.store.db.prepare("SELECT count(*) AS n FROM policy_previews").get().n, 1);
+});
+
+for (const side of ["before", "after"])
+  for (const sourceWatermark of [null, "2026-10-17T23:59:59.999999999Z"])
+    test(`cached ${side}-only complete claim with ${sourceWatermark ?? "missing"} watermark is withheld after SQLite restart`, async (t) => {
+      const input = capture();
+      input.input.coverage = [coverageSchema.parse({ ...input.input.coverage[0], sourceWatermark })];
+      const missingSource = ["github_rest", "github_graphql"];
+      input.policies = [policy({ sources: side === "before" ? ["github_rest"] : missingSource })];
+      const candidate = policy({
+        version: "synthetic-policy/v2",
+        groupBy: "canonical",
+        sources: side === "after" ? ["github_rest"] : missingSource,
+      });
+      // Model the former omitted-watermark calculation for this durable fixture.
+      // Only this calculation gets an end watermark; the captured input retains
+      // the actual missing/short value and its own immutable input identity.
+      const formerInput = structuredClone(input.input);
+      formerInput.coverage[0].sourceWatermark = cutoff;
+      const formerResult = metrics.comparePolicies(formerInput, input.policies[0], candidate, input.scope);
+      assert.equal(formerResult[side].coverage, "complete");
+      assert.equal(formerResult[side === "before" ? "after" : "before"].coverage, "incomplete");
+      input.aggregates = [formerResult.before];
+      const h = await harness(t, { input });
+      h.comparisons.metrics = { ...metrics, comparePolicies: () => structuredClone(formerResult) };
+      const saved = await h.preview(candidate);
+      assert.equal(saved.status, 200, JSON.stringify(saved));
+      const stored = () => ({
+        input: h.store.db.prepare("SELECT * FROM policy_preview_inputs WHERE id=?").get(h.retained.inputId),
+        result: h.store.db.prepare("SELECT * FROM policy_previews WHERE id=?").get(saved.data.comparisonId),
+      });
+      const original = stored(),
+        publicSnapshot = h.store.publicSnapshot();
+      assert.equal(h.comparisons.input(h.retained.inputId).input.coverage[0].sourceWatermark, sourceWatermark);
+      assert.equal(saved.data.inputHash, comparisonHash(input.input));
+      await h.restart();
+      let recalculations = 0;
+      h.comparisons.metrics = {
+        ...metrics,
+        comparePolicies(...args) {
+          recalculations++;
+          return metrics.comparePolicies(...args);
+        },
+      };
+      for (const reply of [await h.call(`${prefix}/${saved.data.comparisonId}`), await h.preview(candidate)]) {
+        assert.equal(reply.status, 409, JSON.stringify(reply));
+        assert.deepEqual(reply.data, { error: "Frozen preview source coverage changed" });
+      }
+      assert.equal(recalculations, 0);
+      assert.deepEqual(stored(), original);
+      assert.equal(comparisonHash(JSON.parse(original.result.document)), original.result.digest);
+      assert.deepEqual(h.store.publicSnapshot(), publicSnapshot);
+      assert.equal(h.store.db.prepare("SELECT count(*) AS n FROM policy_previews").get().n, 1);
+    });
+
+for (const [label, sourceWatermark, expected] of [
+  ["missing", null, "incomplete"],
+  ["fractionally short", "2026-10-17T23:59:59.999999999Z", "incomplete"],
+  ["exact end", cutoff, "complete"],
+  ["equivalent offset", "2026-10-17T19:00:00.000000000-05:00", "complete"],
+])
+  test(`valid ${label} watermark preview preserves exact cached values, evidence and ranks across restart`, async (t) => {
+    const input = capture();
+    input.input.coverage = [coverageSchema.parse({ ...input.input.coverage[0], sourceWatermark })];
+    let calculations = 0;
+    const h = await harness(t, {
+      input,
+      metrics: {
+        ...metrics,
+        comparePolicies(...args) {
+          calculations++;
+          return metrics.comparePolicies(...args);
+        },
+      },
+    });
+    const saved = await h.preview();
+    assert.equal(saved.status, 200, JSON.stringify(saved));
+    for (const side of ["before", "after"]) {
+      assert.equal(saved.data[side].coverage, expected);
+      assert.ok(saved.data[side].rows.every((row) => row.state === (expected === "complete" ? "measured" : "partial")));
+    }
+    const row = saved.data.after.rows.find((row) => row.actorId === "101");
+    assert.equal(row.value, 2);
+    assert.equal(row.rank, 1);
+    assert.deepEqual(row.evidenceIds, ["synthetic-fact-a", "synthetic-fact-b"]);
+    const originalPublic = h.store.publicSnapshot();
+    await h.restart();
+    assert.deepEqual(await h.call(`${prefix}/${saved.data.comparisonId}`), saved);
+    assert.deepEqual(await h.preview(), saved);
+    assert.equal(calculations, 1, "valid saved previews must not rerun aggregate calculations");
+    assert.deepEqual(h.store.publicSnapshot(), originalPublic);
+    assert.equal(saved.data.publicEnabled, false);
+    assert.equal(saved.data.activationSupported, false);
+  });
+
+test("cached complete coverage restores identity synchronously inside the current authority fence", async (t) => {
+  const input = capture();
+  input.authorization.identityEvidence = {
+    schemaVersion: "pipeline-identity-evidence/v1",
+    normalizationHashes: ["a".repeat(64)],
+  };
+  let restores = 0,
+    current = true;
+  const options = {
+    input,
+    authority: {
+      isCurrent: () => current,
+      restoreInput(restored, authorization) {
+        restores++;
+        assert.deepEqual(authorization.identityEvidence, input.authorization.identityEvidence);
+        assert.notEqual(restored, input.input);
+        return restored;
+      },
+    },
+  };
+  const h = await harness(t, options);
+  const saved = await h.preview();
+  assert.equal(saved.status, 200, JSON.stringify(saved));
+  await h.restart();
+  assert.deepEqual(await h.call(`${prefix}/${saved.data.comparisonId}`), saved);
+  assert.deepEqual(await h.preview(), saved);
+  assert.equal(restores, 3);
+  const original = h.comparisons.result(saved.data.comparisonId);
+  options.authority.restoreInput = async (restored) => restored;
+  for (const reply of [await h.call(`${prefix}/${saved.data.comparisonId}`), await h.preview()]) {
+    assert.equal(reply.status, 409);
+    assert.deepEqual(reply.data, { error: "Frozen preview source coverage changed" });
+  }
+  options.authority.restoreInput = (restored) => {
+    current = false;
+    return restored;
+  };
+  assert.deepEqual(await h.call(`${prefix}/${saved.data.comparisonId}`), {
+    status: 409,
+    data: { error: "Preview authority changed" },
+  });
+  assert.deepEqual(h.comparisons.result(saved.data.comparisonId), original);
 });
 
 test("preview cannot activate, forge approval, reuse changed version semantics, or mutate public controls", async (t) => {

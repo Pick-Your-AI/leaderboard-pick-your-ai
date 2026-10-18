@@ -42,7 +42,8 @@ async function body(req, maximum = 16_384) {
     chunks.push(chunk);
   }
   try {
-    const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    // Preserve exact submitted text; keep the existing rejection of a leading BOM.
+    const value = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks)));
     exactKeys(value, Object.keys(value));
     return value;
   } catch (error) {
