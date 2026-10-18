@@ -429,7 +429,7 @@ test("new heads remain held until applied; unsupported query is rejected before 
 }) => {
   const api = await service(page);
   try {
-    await page.goto("/live?ui=api");
+    await page.goto("/leaderboards/pr_opened?ui=api");
     await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toBeVisible();
     api.next();
     await page.getByRole("button", { name: "Recheck current publication controls" }).click();
