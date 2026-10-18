@@ -125,7 +125,9 @@
       "LB-19.04",
       "LB-20.04"
     ],
-    "status": "Targets only; unmeasured"
+    "status": "Evaluation targets specified; host-specific measurement and operating acceptance remain required",
+    "decision": "release-gates/v1 retains proposed p95 durable acknowledgement under two seconds and receive-to-publication under sixty seconds within a declared load envelope. Report failures, unpublished/oldest-pending events, upstream lag, quiet successful collection and source disconnection separately. Review and merge adopt the evaluation policy, not measured latency or a live-service promise.",
+    "decision_record": "docs/release-decision.md"
   },
   {
     "id": "DEC-09",
@@ -144,7 +146,7 @@
   {
     "id": "DEC-10",
     "question": "What are retention, recovery and operating commitments?",
-    "recommended": "Choose minimized payload retention, backup deletion bounds, RTO/RPO and accepted operational owner before launch; test rather than claim",
+    "recommended": "Evaluate 99.5% public read availability over thirty days, recovery within four hours and at most twenty-four hours of unrecovered acknowledged public source observations; preserve current privacy state before serving; separately select retention and actual operating commitments",
     "alternatives": [
       "Lean beta service targets",
       "Higher availability after funding/owner decision"
@@ -155,6 +157,25 @@
       "LB-20.03",
       "LB-20.04"
     ],
-    "status": "Unselected numeric retention/RTO/RPO; decision scoped"
+    "status": "Proposed availability/recovery evaluation profile specified; numeric retention, host, budget and operating acceptance remain unresolved",
+    "decision": "release-gates/v1 defines complete observation denominators, recovery start/end and reconciliation evidence in planning/release-manifest.json and docs/release-decision.md. Missing measurements and unknown data loss cannot pass. The source-observation recovery allowance does not permit losing privacy, consent, correction or deletion restrictions. Current authoritative restrictions and independent readback precede public serving even if a time objective is missed. The actual host/cost/operator profile, backup schedule, encrypted storage/key access and retention/deletion bounds remain separate decisions.",
+    "decision_record": "docs/release-decision.md"
+  },
+  {
+    "id": "DEC-11",
+    "question": "What evidence permits each release phase to advance?",
+    "recommended": "Adopt release-gates/v1: distinct concept, synthetic, shadow, beta, production and full-project gates with exact source/scope, actual receiving evidence and explicit unresolved findings",
+    "alternatives": [
+      "Keep an explicitly labeled synthetic prototype until actual source/operating inputs are accepted",
+      "Use an explicitly periodic static preview after its own reviewed source/privacy/release acceptance"
+    ],
+    "decision_role": "Project scope authority, affected source/metric/privacy/accessibility roles and actual operations/release authority",
+    "before": [
+      "LB-19.06",
+      "LB-20.04"
+    ],
+    "status": "Decision specified; review and merge of LB-01.06 record gate-policy adoption",
+    "decision": "Each transition requires the release manifest evidence and attributable receiving review. Existing mandatory and conditional work-package lists remain in force. The local phase decision can use unresolved hosting alternatives as planning input; it cannot certify source activation, appoint a person, authorize spending or substitute rendered/synthetic output for deployment, participant or operational evidence. Full project acceptance retains every in-scope package unless explicitly descoped by reviewed authority.",
+    "decision_record": "docs/release-decision.md"
   }
 ]
