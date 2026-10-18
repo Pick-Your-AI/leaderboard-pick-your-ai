@@ -11,7 +11,12 @@ const labels: Record<string, string> = {
   clock_selection: "Date selection and acceptance",
   source_acceptance_cases: "Counting examples and source checks",
 };
-const label = (key: string) => labels[key] ?? key.replaceAll("_", " ").replace(/^./, (first) => first.toUpperCase());
+const label = (key: string) =>
+  Object.hasOwn(labels, key)
+    ? labels[key]
+    : /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(key)
+      ? key.replaceAll("_", " ").replace(/^./, (first) => first.toUpperCase())
+      : key;
 const overflow = "Additional detail exceeds the display limit; this is not a complete definition display.";
 
 /** Preserve supplied nested definition fields without interpreting them as measurements. */

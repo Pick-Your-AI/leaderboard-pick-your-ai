@@ -6,6 +6,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import { transformWithOxc } from "vite";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { metricDefinitionSchema } from "@pick-your-ai/contracts";
 
 const source = new URL("../src/remote/MethodDefinition.tsx", import.meta.url);
 const require = createRequire(source);
@@ -70,4 +71,16 @@ test("deep or excessive supplied detail stops with a visible incomplete-display 
     assert.match(html, /Additional detail exceeds the display limit; this is not a complete definition display/);
     assert.doesNotMatch(html, /entry 999|too deep/);
   }
+});
+
+test("schema-valid JSON property names cannot inherit labels or break the method render", () => {
+  const served = metric("pr_accepted_rate");
+  served.definition.named_limits = JSON.parse(
+    '{"__proto__":"prototype-named field","constructor":"constructor-named field","toString":"method-named field"}',
+  );
+  const accepted = metricDefinitionSchema.parse(served);
+  const html = render(accepted);
+  assert.match(html, /<dt>__proto__<\/dt><dd>prototype-named field<\/dd>/);
+  assert.match(html, /<dt>Constructor<\/dt><dd>constructor-named field<\/dd>/);
+  assert.match(html, /<dt>toString<\/dt><dd>method-named field<\/dd>/);
 });
