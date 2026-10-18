@@ -41,6 +41,26 @@ it waits that duration after each completed batch, never overlaps batches, and
 rechecks authorization before the next one. Transport/provider deadlines remain
 the protected host's responsibility.
 
+The production pipeline persists an implicit scan's continuation in its private
+SQL store. After applying the additive `migratePipeline` schema, repeated batches
+and process restarts reuse the same event cutoff and per-family cursors until all
+configured pages and publications finish. One pending row is keyed by the full
+approved configuration, data mode and scan mode. A relevant controls configuration,
+recognition or source-generation change replaces that row's cycle; unrelated
+controls audit/current-state revisions do not restart collection. Explicit
+`runOnce({ cutoff })` callers retain their fixed-window contract.
+
+The event cutoff bounds the requested collection window. Once every family is
+complete, a separate observation cutoff is frozen for normalization and publication.
+A failure after the last page, or after the SQL publication but before its private
+confirmation, retains both cutoffs for retry. The pending cycle also binds each
+scope's initial head and records its own head changes in the publication transaction.
+A delayed batch cannot replace an externally advanced head or another cycle's
+result. That conflict fails closed and retires only the superseded implicit token;
+a later authorized invocation can begin a fresh scan. Successfully confirmed cycles
+also retire their pending row. Collection facts, immutable publications and causal
+dispatch receipts are retained under their existing policies.
+
 SIGTERM and SIGINT stop scheduling new work, interrupt idle waits and await the
 in-flight batch before draining the runtime and closing external stores. No forced
 process termination or shortened database lifetime is used. Failed or blocked
@@ -56,13 +76,24 @@ Trusted host code must independently avoid logging secrets.
 `apps/worker/test/runner.test.mjs` tests bounds, authorization denial/revocation,
 sequential lifecycle, signal draining, partial progress and sanitized subprocess
 failure with synthetic hosts. Existing pipeline tests establish collection and
-publication mechanics independently. These host tests do not claim a deployed
+publication mechanics independently. `apps/pipeline/test/worker-continuation.test.mjs`
+additionally runs the actual compiled continuous worker against a two-page source,
+reopens its SQL database/runtime, and verifies last-page/confirmation recovery,
+authorization changes, bounds and delayed implicit/explicit publication races.
+These synthetic tests do not claim a deployed
 end-to-end installation. Build with `npm run build --workspace @pick-your-ai/worker`
 and run `node --test apps/worker/test/*.test.mjs`.
 
 Source/controls retention is still separate work. The worker intentionally does
 not pick a retention duration, purge source facts or delete pending receipts.
+Abandoned configurations' incomplete continuation metadata must participate in the
+same protected host retention/backup/deletion policy as the existing private tables;
+this change does not select an expiry interval or implement generic derived-store erasure.
 `infra/recovery/backup.mjs` already provides authenticated backup expiration with
 receipts, but does not solve coordinated PostgreSQL/SQLite/source/cache deletion.
 Accepted retention policy, protected host composition, actual source permissions,
 operating ownership and deployed shutdown/recovery evidence remain release gates.
+Scheduled recent-window overlap, rotating audit policy and actual omitted-webhook
+reconciliation acceptance remain separate work in #64. A completed page traversal
+still reports partial, historically uncertified coverage and does not manufacture
+actor or occurrence-time evidence.

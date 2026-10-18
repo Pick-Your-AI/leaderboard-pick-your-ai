@@ -13,6 +13,7 @@ import {
   applyCurrentProjectContexts,
 } from "./project-context.mjs";
 import { readCurrentSourceHealth } from "./source-health.mjs";
+import { ScanContinuationStore, ScanSupersededError, scanContinuationSchema } from "./scan-continuation.mjs";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -136,6 +137,7 @@ const statements = [
   `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.policy_comparisons (comparison_id text PRIMARY KEY, document jsonb NOT NULL, document_hash text NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.heads (
     scope_key text PRIMARY KEY, snapshot_id text NOT NULL REFERENCES leaderboard_pipeline.snapshots(snapshot_id), revision bigint NOT NULL)`,
+  scanContinuationSchema,
 ];
 
 // Derived artifacts retain their own immutable identity, while revocation follows
@@ -479,6 +481,7 @@ export async function createPipeline(options) {
   const collectionSource = options.source ?? defaultSource;
   const probeSource = options.probeRepository ?? defaultSource?.probeRepository;
   const collection = new c.ingestion.CollectionStore(db);
+  const scanContinuations = new ScanContinuationStore(db);
   const guardedSource = {
     assertAuthorized() {
       assertRunConfiguration();
@@ -1129,7 +1132,7 @@ export async function createPipeline(options) {
       if (!head || head.revision <= publication.revision) state.pipelineHeads[scopeKey(scope)] = confirmation;
     });
   }
-  async function publish(scope, cutoff, observationCutoff, dispatch) {
+  async function publish(scope, cutoff, observationCutoff, dispatch, scan = null) {
     assertRunConfiguration();
     scope = c.contracts.canonicalPublicScope(scope);
     if (!configuredScope(scope)) fail("scope_not_approved");
@@ -1554,8 +1557,10 @@ export async function createPipeline(options) {
     const publicationStarted = performance.now();
     try {
       const publication = await db.transaction(async (tx) => {
+        const scanHeads = scan ? await scanContinuations.lockForPublication(tx, scan, assertRunConfiguration) : null;
         if (dispatch) await outbox.assertLease(tx, dispatch.lease);
-        const bindDispatch = async (publication) => {
+        const bindPublication = async (publication) => {
+          if (scan) await scanContinuations.rememberPublication(tx, scan, scopeKey(scope), publication.snapshotId);
           if (dispatch) {
             await tx.query(
               `INSERT INTO leaderboard_pipeline.dispatch_publications(operation_key,scope_key,snapshot_id)
@@ -1606,6 +1611,7 @@ export async function createPipeline(options) {
           ])
         ).rows[0];
         assertRunConfiguration();
+        if (scan) scanContinuations.assertHead(scanHeads, scopeKey(scope), current?.snapshot_id ?? null);
         if (priorPublication) {
           const saved = (
             await tx.query(
@@ -1619,10 +1625,10 @@ export async function createPipeline(options) {
             saved.document.comparisonInputHash !== digest(comparisonInputFor(priorPublication))
           )
             fail("dispatch_snapshot_input_changed_or_unbound");
-          return bindDispatch(priorPublication);
+          return bindPublication(priorPublication);
         }
         if (current?.snapshot_id === snapshotId)
-          return bindDispatch({ snapshotId, revision: Number(current.revision), changed: false });
+          return bindPublication({ snapshotId, revision: Number(current.revision), changed: false });
         const revision = Number(current?.revision ?? 0) + 1;
         if (!Number.isSafeInteger(revision)) fail("pipeline_revision_exhausted");
         const document = {
@@ -1691,7 +1697,7 @@ export async function createPipeline(options) {
           controlsRevision: state.revision,
         });
         assertRunConfiguration();
-        return bindDispatch({ snapshotId, revision, changed: true, receiptId });
+        return bindPublication({ snapshotId, revision, changed: true, receiptId });
       });
       // PostgreSQL can commit while controls change. Confirm publication only in
       // the same synchronous SQLite boundary used by configuration activation.
@@ -1944,15 +1950,48 @@ export async function createPipeline(options) {
     cursorSecret: options.cursorSecret,
     now: () => Date.parse(now()),
   });
-  async function runOnceInternal({ cutoff = now(), mode = "reconcile", maxPages = 100, dispatch = null } = {}) {
-    utc(cutoff);
+  async function runOnceInternal({ cutoff, mode = "reconcile", maxPages = 100, dispatch = null } = {}) {
+    const implicitCutoff = cutoff === undefined;
+    cutoff = utc(implicitCutoff ? now() : cutoff);
     if (stopped) fail("pipeline_stopped");
     if (!(await approved())) return { state: "blocked", reason: "approved_configuration_required" };
-    runConfigurationRevision = restrictConfiguration(controlsStore.read()).revision;
-    runRecognitionFingerprint = recognitionFingerprint(controlsStore.read(), recognitionBindings);
+    const runState = controlsStore.read();
+    runConfigurationRevision = restrictConfiguration(runState).revision;
+    runRecognitionFingerprint = recognitionFingerprint(runState, recognitionBindings);
     if (dispatch && runConfigurationRevision !== dispatch.lease.operation.configurationRevision)
       fail("dispatch_configuration_changed");
     if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 10000) fail("invalid_pipeline_page_budget");
+    if (!["backfill", "reconcile", "audit"].includes(mode)) fail("invalid_scan_scope");
+    let scan = null;
+    if (implicitCutoff && !dispatch) {
+      // Verify all configured sources before choosing a durable scan context.
+      // Per-repository probes below still run immediately before collection.
+      for (const repo of config.repositories) await verifyRepository(repo);
+      const sources = (
+        await db.query(
+          `SELECT repository_id,generation FROM leaderboard_ingestion.repository_access
+         WHERE repository_id=ANY($1::bigint[]) AND state='public' ORDER BY repository_id`,
+          [config.repositories.map((repo) => repo.id)],
+        )
+      ).rows.map((row) => ({ repositoryId: Number(row.repository_id), generation: String(row.generation) }));
+      if (sources.length !== config.repositories.length) fail("pipeline_scan_source_changed");
+      scan = await scanContinuations.claim(
+        {
+          key: digest(["bounded-scan/v1", config, dataMode, mode]),
+          contextHash: digest([
+            runConfigurationRevision,
+            recognitionBindings.length ? runRecognitionFingerprint : null,
+            sources,
+          ]),
+          cutoff,
+          sources,
+          scopeKeys: config.scopes.map(scopeKey),
+        },
+        assertRunConfiguration,
+        () => utc(now()),
+      );
+      cutoff = scan.cutoff;
+    }
     const progress = [];
     for (const repo of config.repositories) {
       await verifyRepository(repo, cutoff);
@@ -1964,6 +2003,7 @@ export async function createPipeline(options) {
           cutoff,
           mode,
           dataMode,
+          ...(scan ? [scan.token] : []),
           ...(dispatch ? [dispatch.lease.operation.operationKey, dispatch.lease.collectionRevision] : []),
         ]);
         await collection.start({ runId, repositoryId: repo.id, family, mode, since: null, until: cutoff });
@@ -1987,44 +2027,59 @@ export async function createPipeline(options) {
     }
     const publications = [];
     let observationCutoff = utc(now());
-    if (dispatch) {
-      const lease = dispatch.lease;
-      const keys = (
-        await db.query(
-          `SELECT item.fact_key FROM leaderboard_ingestion.collection_items AS item
+    try {
+      if (scan) {
+        scan = await scanContinuations.freeze(scan, observationCutoff, assertRunConfiguration);
+        observationCutoff = scan.observationCutoff;
+      }
+      if (dispatch) {
+        const lease = dispatch.lease;
+        const keys = (
+          await db.query(
+            `SELECT item.fact_key FROM leaderboard_ingestion.collection_items AS item
           JOIN leaderboard_ingestion.source_facts AS fact USING(fact_key)
           WHERE item.run_id=ANY($1::text[]) AND fact.repository_id=$2 AND fact.family='issues' AND fact.subject_id=$3 AND fact.document->>'sourceUrl'=$4`,
-          [
-            progress.map((item) => item.runId),
-            lease.observation.repositoryId,
-            lease.observation.subjectId,
-            lease.observation.sourceUrl,
-          ],
-        )
-      ).rows;
-      if (!keys.length) {
-        await outbox.refreshCollection(lease);
-        fail("dispatch_source_subject_unavailable");
+            [
+              progress.map((item) => item.runId),
+              lease.observation.repositoryId,
+              lease.observation.subjectId,
+              lease.observation.sourceUrl,
+            ],
+          )
+        ).rows;
+        if (!keys.length) {
+          await outbox.refreshCollection(lease);
+          fail("dispatch_source_subject_unavailable");
+        }
+        dispatch.targetKeys = keys.map((row) => row.fact_key);
+        const generations = (
+          await db.query(
+            `SELECT repository_id,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) AND state='public' ORDER BY repository_id`,
+            [config.repositories.map((repo) => repo.id)],
+          )
+        ).rows;
+        if (generations.length !== config.repositories.length) fail("dispatch_source_unavailable");
+        const frozen = await outbox.freeze(
+          lease,
+          observationCutoff,
+          generations.map((row) => ({ repositoryId: Number(row.repository_id), generation: String(row.generation) })),
+        );
+        observationCutoff = frozen.cutoff;
+        dispatch.generations = frozen.generations;
       }
-      dispatch.targetKeys = keys.map((row) => row.fact_key);
-      const generations = (
-        await db.query(
-          `SELECT repository_id,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) AND state='public' ORDER BY repository_id`,
-          [config.repositories.map((repo) => repo.id)],
-        )
-      ).rows;
-      if (generations.length !== config.repositories.length) fail("dispatch_source_unavailable");
-      const frozen = await outbox.freeze(
-        lease,
-        observationCutoff,
-        generations.map((row) => ({ repositoryId: Number(row.repository_id), generation: String(row.generation) })),
-      );
-      observationCutoff = frozen.cutoff;
-      dispatch.generations = frozen.generations;
+      if (observationCutoff < cutoff) fail("observation_clock_precedes_event_cutoff");
+      for (const scope of config.scopes)
+        publications.push(await publish(scope, cutoff, observationCutoff, dispatch, scan));
+      // SQL publication and synchronous private confirmation must both succeed.
+      // A failed/partial batch keeps its original event and observation cutoffs.
+      if (scan) await scanContinuations.retire(scan, assertRunConfiguration);
+      return { state: "published", progress, publications };
+    } catch (error) {
+      // An authoritative cycle/head conflict cannot become a permanent retry
+      // loop. Remove only this exact implicit token, leaving newer work intact.
+      if (scan && error instanceof ScanSupersededError) await scanContinuations.retire(scan, assertRunConfiguration);
+      throw error;
     }
-    if (observationCutoff < cutoff) fail("observation_clock_precedes_event_cutoff");
-    for (const scope of config.scopes) publications.push(await publish(scope, cutoff, observationCutoff, dispatch));
-    return { state: "published", progress, publications };
   }
   function runOnce(options) {
     return serialize(() => runOnceInternal(options));

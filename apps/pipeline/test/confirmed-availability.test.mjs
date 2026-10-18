@@ -303,7 +303,7 @@ test("delayed older confirmation cannot roll a newer confirmed head back", async
   const newer = await createPipeline(h.options);
   t.after(() => newer.stop());
   try {
-    const second = (await newer.runOnce()).publications[0];
+    const second = (await newer.runOnce({ cutoff: clock() })).publications[0];
     assert.equal(second.revision, 2);
     assert.equal((await getBoard(newer)).snapshotId, second.snapshotId);
     release();
@@ -357,7 +357,7 @@ test("a confirmation advancing during a read retries instead of advertising the 
     }
     return result;
   };
-  pending = h.runtime.runOnce();
+  pending = h.runtime.runOnce({ cutoff: clock() });
   await reached;
   try {
     advanceOnRead = true;
