@@ -1,0 +1,222 @@
+import { createHash } from "node:crypto";
+import { webhookDispatchVersion } from "./webhook-dispatch.mjs";
+
+const unavailable = () => {
+  throw new Error("operator_publication_unavailable");
+};
+/** Bound the combined private material inspected for one diagnostic response. */
+export const operatorPublicationProofBytes = 16 * 1024 * 1024;
+
+/** Verify the actual SQL publication ledger, immutable snapshot and private
+ * arithmetic confirmation. Outbox completion JSON alone cannot supply this proof.
+ * The final closure is synchronous and runs under the caller's source locks. */
+export function createOperatorPublicationVerifier({
+  config,
+  dataMode,
+  policyVersion,
+  computationVersion,
+  scopeKey,
+  digest,
+  approved,
+  controlsStore,
+  restrictConfiguration,
+  confirmationMatches,
+  aggregateExplanations,
+  recognitionCurrent,
+  configurationCurrent,
+  withAuthorizedInputs,
+}) {
+  const configurationHash = digest(config);
+  // The dispatcher intentionally hashes ordered configuration bytes. Its
+  // operation binding and the private canonical hash are distinct contracts.
+  const dispatchConfigurationHash = createHash("sha256").update(JSON.stringify(config)).digest("hex");
+  return async (tx, binding) => {
+    const operation = binding.operation;
+    if (
+      !(await approved(tx)) ||
+      operation.configurationHash !== dispatchConfigurationHash ||
+      operation.configurationVersion !== config.version ||
+      operation.normalizationVersion !== webhookDispatchVersion ||
+      operation.policyVersion !== policyVersion ||
+      operation.dataMode !== dataMode ||
+      binding.publications.length !== config.scopes.length ||
+      binding.sourceGenerations.length !== config.repositories.length
+    )
+      return null;
+    const scopes = new Map(config.scopes.map((scope) => [scopeKey(scope), scope]));
+    if (
+      scopes.size !== binding.publications.length ||
+      new Set(binding.publications.map((item) => item.scopeKey)).size !== scopes.size ||
+      binding.publications.some((item) => !scopes.has(item.scopeKey))
+    )
+      return null;
+    const access = (
+      await tx.query(
+        `SELECT repository_id,installation_id,state,generation FROM leaderboard_ingestion.repository_access
+         WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE`,
+        [config.repositories.map((repo) => repo.id)],
+      )
+    ).rows;
+    if (
+      access.length !== config.repositories.length ||
+      !config.repositories.every((repo) =>
+        access.some(
+          (row) =>
+            Number(row.repository_id) === repo.id &&
+            String(row.installation_id) === String(repo.installationId) &&
+            row.state === "public" &&
+            binding.sourceGenerations.some(
+              (source) => source.repositoryId === repo.id && source.generation === String(row.generation),
+            ),
+        ),
+      ) ||
+      !access.some(
+        (row) =>
+          Number(row.repository_id) === binding.repositoryId &&
+          String(row.installation_id) === binding.installationId &&
+          String(row.generation) === binding.sourceGeneration,
+      )
+    )
+      return null;
+    const publications = (
+      await tx.query(
+        `SELECT publication.scope_key,publication.snapshot_id,snapshot.revision,
+           octet_length(snapshot.document::text) AS document_bytes
+         FROM leaderboard_pipeline.dispatch_publications AS publication
+         JOIN leaderboard_pipeline.snapshots AS snapshot ON snapshot.snapshot_id=publication.snapshot_id
+           AND snapshot.scope_key=publication.scope_key
+         WHERE publication.operation_key=$1 LIMIT 101 FOR SHARE OF publication,snapshot`,
+        [operation.operationKey],
+      )
+    ).rows;
+    if (publications.length !== binding.publications.length) return null;
+    const proofs = [];
+    let bytes = publications.reduce((sum, row) => sum + Number(row.document_bytes), 0);
+    if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > operatorPublicationProofBytes) return null;
+    for (const expected of binding.publications) {
+      const manifest = publications.find(
+        (value) => value.scope_key === expected.scopeKey && value.snapshot_id === expected.snapshotId,
+      );
+      if (!manifest || Number(manifest.revision) !== expected.revision) return null;
+      const row = (
+        await tx.query(
+          "SELECT document,document_hash FROM leaderboard_pipeline.snapshots WHERE snapshot_id=$1 AND scope_key=$2",
+          [expected.snapshotId, expected.scopeKey],
+        )
+      ).rows[0];
+      if (
+        !row ||
+        row.document?.approvedPublic !== true ||
+        row.document.snapshot?.snapshotId !== expected.snapshotId ||
+        row.document.snapshot?.revision !== expected.revision ||
+        row.document.snapshot?.computationVersion !== computationVersion ||
+        row.document.snapshot?.metricDefinitionVersion !== policyVersion ||
+        row.document.dataMode !== dataMode ||
+        scopeKey(row.document.scope) !== expected.scopeKey ||
+        digest(row.document) !== row.document_hash
+      )
+        return null;
+      // The persisted public document omits the event cutoff used to derive
+      // its content ID. Reconstruct that ID with this operation's cutoff;
+      // an authentic snapshot from another window cannot prove this replay.
+      const document = row.document;
+      const content = {
+        approvedPublic: true,
+        scope: document.scope,
+        actors: document.actors,
+        rows: document.rows,
+        evidence: document.evidence,
+        portfolioEvidence: document.portfolioEvidence,
+        pendingEvidence: document.pendingEvidence,
+        ranking: document.ranking,
+        diagnostics: document.diagnostics,
+        methodology: document.methodology,
+        definitionVersion: document.snapshot.metricDefinitionVersion,
+        dataMode,
+        cutoff: operation.cutoff,
+        coverage: document.snapshot.coverage,
+        configVersion: config.version,
+        repositoryIds: config.repositories
+          .filter((repo) => document.scope.repository === null || String(repo.id) === document.scope.repository)
+          .map((repo) => repo.id),
+      };
+      if (digest(content) !== expected.snapshotId) return null;
+      const proof = aggregateExplanations.read(expected.snapshotId);
+      // Identical content may reuse the first immutable arithmetic explanation
+      // after a later observation freeze. A future explanation cannot authorize
+      // an earlier frozen operation, and the current source/cache fence remains.
+      if (
+        typeof proof.document.cutoff !== "string" ||
+        !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(proof.document.cutoff) ||
+        new Date(proof.document.cutoff).toISOString() !== proof.document.cutoff ||
+        proof.document.cutoff > binding.observationCutoff
+      )
+        return null;
+      bytes += Buffer.byteLength(JSON.stringify(proof));
+      if (bytes > operatorPublicationProofBytes) return null;
+      proofs.push({ expected, proof });
+    }
+    const authorizations = [
+      ...new Map(
+        proofs.map(({ proof }) => [digest(proof.document.authorization), proof.document.authorization]),
+      ).values(),
+    ];
+    if (
+      authorizations.reduce((sum, item) => sum + (item.identityEvidence?.normalizationHashes?.length ?? 0), 0) > 10000
+    )
+      return null;
+    return withAuthorizedInputs(
+      authorizations,
+      async (removed, authority) => {
+        if (!(await authority.refreshApproval())) return null;
+        const confirmCurrent = () => {
+          try {
+            const current = configurationCurrent(binding);
+            if (current && typeof current.then === "function") void Promise.resolve(current).catch(() => undefined);
+            if (current !== true) return false;
+            const state = controlsStore.read();
+            const overlay = restrictConfiguration(state);
+            if (overlay.revision !== operation.configurationRevision) return false;
+            for (const { expected, proof } of proofs) {
+              const confirmation = state.pipelinePublications?.[expected.snapshotId];
+              if (
+                !confirmationMatches(
+                  confirmation,
+                  scopes.get(expected.scopeKey),
+                  expected.snapshotId,
+                  expected.revision,
+                ) ||
+                confirmation.controlsConfigurationRevision !== operation.configurationRevision ||
+                confirmation.aggregateExplanationHash !== proof.digest ||
+                !recognitionCurrent(state, confirmation) ||
+                proof.document.authorization.controlsConfigurationRevision !== overlay.revision
+              )
+                return false;
+              const saved = aggregateExplanations.verify(expected.snapshotId, {
+                scopeKey: expected.scopeKey,
+                revision: expected.revision,
+                computationVersion,
+                configurationHash,
+                digest: confirmation.aggregateExplanationHash,
+              });
+              if (
+                saved.document.references.some(
+                  (reference) =>
+                    state.profiles[reference.actorId]?.suppressed || removed.includes(reference.artifactId),
+                ) ||
+                saved.document.metrics.some((metric) => overlay.disabledMetricIds.includes(metric.metricId))
+              )
+                return false;
+            }
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        if (!confirmCurrent()) unavailable();
+        return confirmCurrent;
+      },
+      tx,
+    );
+  };
+}

@@ -14,6 +14,7 @@ before(async () => {
     "003_collection",
     "004_outbox_dispatch",
     "006_delivery_payload_expiry",
+    "007_operator_replay_results",
   ])
     await engine.exec(await readFile(new URL(`../sql/${file}.up.sql`, import.meta.url), "utf8"));
   db = {

@@ -35,6 +35,7 @@ test("mutable review and Discussion snapshots replace current credit while pinne
     "003_collection.up.sql",
     "004_outbox_dispatch.up.sql",
     "006_delivery_payload_expiry.up.sql",
+    "007_operator_replay_results.up.sql",
   ])
     await engine.exec(await readFile(join(ingestionRoot, "packages/ingestion/sql", name), "utf8"));
   await migratePipeline(db);

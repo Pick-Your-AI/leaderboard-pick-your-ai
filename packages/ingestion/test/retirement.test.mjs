@@ -20,6 +20,7 @@ const migrations = await Promise.all(
     "004_outbox_dispatch",
     "005_collection_retirement",
     "006_delivery_payload_expiry",
+    "007_operator_replay_results",
   ].map((name) => readFile(new URL(`../sql/${name}.up.sql`, import.meta.url), "utf8")),
 );
 const retirementUp = await readFile(new URL("../sql/005_collection_retirement.up.sql", import.meta.url), "utf8");

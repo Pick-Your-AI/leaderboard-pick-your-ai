@@ -94,7 +94,10 @@ Deleted, unavailable and reverted state remain facts, never negative merit.
 for an immutable source revision. `processOne(readOnlyMetadataSource)` leases one
 job with `SKIP LOCKED`, performs the bounded external metadata read, and fences
 completion by the current token, lease expiry and access generation. The adapter
-must honor its own request deadline. Failed/unknown evidence stays failed and
+must honor its own request deadline. It receives a detached copy of the retained
+source fact, so adapter-local edits cannot replace the revision against which its
+returned metadata is checked. A different returned revision remains failed and
+retryable without retained metadata or contribution credit. Failed/unknown evidence stays failed and
 retryable with bounded exponential delay and a maximum attempt budget. Expired
 leases can be reclaimed; exhausted leases become visibly failed. Revision drift,
 unknown accepted outcome or invalid file counts cannot become classified.
