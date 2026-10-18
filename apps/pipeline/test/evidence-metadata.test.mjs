@@ -62,7 +62,7 @@ function publication(output) {
         snapshotId: "snapshot-1",
         revision: 1,
         generatedAt: collected,
-        metricDefinitionVersion: "candidate-0.1.0",
+        metricDefinitionVersion: "candidate-0.1.1",
         computationVersion: "synthetic-v1",
         coverage: [coverage],
         results: [],

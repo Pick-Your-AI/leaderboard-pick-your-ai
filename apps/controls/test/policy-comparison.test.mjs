@@ -16,7 +16,7 @@ const cutoff = "2026-10-18T00:00:00.000Z";
 const policy = (patch = {}) => ({
   metricId: "issues_opened",
   version: "synthetic-policy/v1",
-  definitionVersion: "candidate-0.1.0",
+  definitionVersion: "candidate-0.1.1",
   unit: metrics.getMetricDefinition("issues_opened").definition.unit,
   aggregation: "count",
   dateBasis: "occurredAt",

@@ -273,10 +273,10 @@ Every package below retains its exact baseline acceptance criteria, dependency I
 
 - State: OPEN / partial or acceptance unverified. Gate: Automated validation.
 - Dependencies (baseline): LB-03.01.
-- Implementation/test evidence: `packages/contracts/src; packages/contracts/test; packages/metrics/src/v1/registry.json; docs/contract-candidate.md`.
-- Package-specific notes: [OPERATIONS_PLAN.md](OPERATIONS_PLAN.md), [contract-candidate.md](contract-candidate.md), [security-candidate.md](security-candidate.md), [ui-prototype.md](ui-prototype.md).
-- Remaining evidence / limit: Strict contracts and all 98 registry definitions exist with synthetic invariants. Candidate policy metadata and authenticated identity/credit decisions remain separate.
-- Next action: Approve or keep unresolved policy values; test consumers and actual identity correction before enablement.
+- Implementation/test evidence: All 98 definitions and UI mappings; [registry acceptance map](../packages/metrics/UI_REGISTRY.md), normalizer-to-engine triage regressions, source-receipt configuration negatives, registry/API/web consumer suites.
+- Package-specific notes: [contract-candidate.md](contract-candidate.md), [UI_REGISTRY.md](../packages/metrics/UI_REGISTRY.md).
+- Remaining evidence / limit: Final reviewed CI establishes the Automated validation gate. Candidate department/lead defaults are implemented; real installation/source evidence and policy approval remain separate public-enablement gates.
+- Next action: Review the corrected hourly/raw-state definition, unknown-target boundary and receipt negatives; run required CI on the final revision. Preserve the original state snapshot until GitHub records acceptance.
 - Acceptance criteria to verify against evidence:
   - Every enabled metric has a source, actor rule and verification case
   - Unsupported metrics cannot render as measured zero
