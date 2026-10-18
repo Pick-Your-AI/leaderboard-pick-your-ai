@@ -920,9 +920,10 @@ export async function createPipeline(options) {
     }
   }
   const source = {
-    async read(scope, pin, signal) {
+    async read(scope, pin, signal, transaction) {
       if (signal.aborted || !(await approved()) || !configuredScope(scope)) return null;
-      return db.transaction(async (tx) => {
+      const readTransaction = transaction ? (work) => work(transaction) : (work) => db.transaction(work);
+      return readTransaction(async (tx) => {
         const result = await tx.query(
           `SELECT selected.document,selected.document_hash,selected.config_version,selected.repository_ids,selected.revision AS selected_revision,selected.snapshot_id AS selected_id,head.revision,
       latest.snapshot_id AS head_id,latest.document->'snapshot'->>'generatedAt' AS published_at
@@ -1163,9 +1164,9 @@ export async function createPipeline(options) {
   function dispatchOnce() {
     return serialize(() => (stopped || !options.webhookDispatch ? "blocked" : dispatch()));
   }
-  async function policyInputGuard(snapshotId, input) {
+  async function policyInputGuard(snapshotId, input, transaction) {
     if (!input.scope) fail("policy_input_scope_unavailable");
-    const read = await source.read(input.scope, snapshotId, new AbortController().signal);
+    const read = await source.read(input.scope, snapshotId, new AbortController().signal, transaction);
     if (
       !read ||
       input.frozen.actors.some((actor) => read.controls.suppressedActorIds.includes(actor.id)) ||
@@ -1237,9 +1238,12 @@ export async function createPipeline(options) {
       });
       // A reviewed manifest remains non-public until a separately source-tested configuration activates it.
       const document = { comparisonId, manifest };
-      const receiptId = await db.transaction((tx) =>
-        receipt(tx, `policy-release:${digest(document)}`, "policy_release_reviewed", document),
-      );
+      const receiptId = await db.transaction(async (tx) => {
+        const id = await receipt(tx, `policy-release:${digest(document)}`, "policy_release_reviewed", document);
+        if (saved.document.guard !== (await policyInputGuard(saved.document.snapshotId, input.document, tx)))
+          fail("policy_input_changed");
+        return id;
+      });
       if (saved.document.guard !== (await policyInputGuard(saved.document.snapshotId, input.document)))
         fail("policy_input_changed");
       return { receiptId, ...document };

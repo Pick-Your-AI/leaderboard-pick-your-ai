@@ -1164,3 +1164,44 @@ test("real controls HTTP acceptance and withdrawal feed pipeline recognition wit
   assert.equal(withdrawn.response.status, 200);
   assert.equal(await runtime.source.read(publicScope, publication.snapshotId, new AbortController().signal), null);
 });
+
+test("policy approval rolls back its durable receipt when privacy changes during persistence", async (t) => {
+  const h = await harness(t, {
+    authorizePolicyPreview: async () => true,
+    authorizePolicyRelease: async () => true,
+    policyApproverIds: ["202"],
+  });
+  const publication = (await h.runtime.runOnce()).publications[0];
+  const preview = await h.runtime.previewPolicy({
+    snapshotId: publication.snapshotId,
+    policy: { ...h.options.config.policies[0].policy, version: "v2" },
+    operatorId: "201",
+  });
+  const transact = h.db.transaction;
+  h.db.transaction = (work) =>
+    transact((tx) =>
+      work({
+        query: async (sql, params) => {
+          const result = await tx.query(sql, params);
+          if (sql.includes("INSERT INTO leaderboard_pipeline.receipts") && params?.includes("policy_release_reviewed"))
+            h.controlsStore.transaction((s) => {
+              s.profiles["101"] = { suppressed: true };
+            });
+          return result;
+        },
+      }),
+    );
+  await assert.rejects(
+    h.runtime.approvePolicyComparison({
+      comparisonId: preview.comparisonId,
+      operatorId: "202",
+      approvalReceipt: "review",
+      releaseNotes: "Reviewed",
+    }),
+    /policy_input_revoked|policy_input_changed/,
+  );
+  assert.equal(
+    (await h.runtime.receipts()).some((r) => r.kind === "policy_release_reviewed"),
+    false,
+  );
+});
