@@ -650,6 +650,7 @@ export function aggregateMetric(
   const scope = canonicalScope(requestedScope);
   const prepared = prepare(input, policy, scope);
   const complete = coverageComplete(input, policy, scope) && !hasUncertainty(prepared);
+  const actorsById = new Map(input.actors.map((actor) => [actor.id, actor]));
   const byActor = new Map<string, MetricFact[]>();
   for (const fact of prepared.facts) {
     const bucket = byActor.get(fact.actorId!) ?? [];
@@ -658,7 +659,7 @@ export function aggregateMetric(
   }
   const rows: AggregateRow[] = [];
   for (const [actorId, facts] of byActor) {
-    const actor = input.actors.find((candidate) => candidate.id === actorId)!;
+    const actor = actorsById.get(actorId)!;
     const eligible = facts.filter((fact) => policy.rankedStates.includes(fact.state as never));
     const pendingEvidence = facts.filter(
       (fact) =>
@@ -767,14 +768,15 @@ export function aggregateMetric(
   );
   let rank = 0,
     previous: number | null = null;
+  const rankCounts = new Map<number, number>();
   for (const row of rows) {
     if (!policy.rank || row.value === null) continue;
     if (previous !== row.value) rank++;
     row.rank = rank;
     previous = row.value;
+    rankCounts.set(rank, (rankCounts.get(rank) ?? 0) + 1);
   }
-  for (const row of rows)
-    row.tied = row.rank !== null && rows.some((other) => other !== row && other.rank === row.rank);
+  for (const row of rows) row.tied = row.rank !== null && (rankCounts.get(row.rank) ?? 0) > 1;
   const audit = [
     ...prepared.audit,
     ...prepared.facts
