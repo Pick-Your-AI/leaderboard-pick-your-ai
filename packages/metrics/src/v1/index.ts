@@ -22,16 +22,14 @@ export type CanonicalizationResult =
       observations: SourceEvent[];
     };
 
-function stableActorId(event: SourceEvent): string | null {
+function stableActorIdentity(event: SourceEvent): ["node", string] | ["database", number] | null {
   if (event.actor.identityState !== "resolved") return null;
-  return (
-    event.actor.githubNodeId ??
-    (event.actor.githubDatabaseId === undefined ? null : String(event.actor.githubDatabaseId))
-  );
+  if (event.actor.githubNodeId !== undefined) return ["node", event.actor.githubNodeId];
+  return event.actor.githubDatabaseId === undefined ? null : ["database", event.actor.githubDatabaseId];
 }
 
 function semanticSignature(event: SourceEvent): string | null {
-  const actorId = stableActorId(event);
+  const actorId = stableActorIdentity(event);
   const subjectId = event.subject.stableId;
   if (!actorId || !subjectId || event.occurredAt === null) return null;
   return JSON.stringify([event.action, actorId, event.role, subjectId, event.occurredAt]);
@@ -58,7 +56,13 @@ export function canonicalizeObservations(events: readonly SourceEvent[]): Canoni
   for (const [dedupeKey, group] of keyed) {
     const ordered = [...group].sort((a, b) => a.eventId.localeCompare(b.eventId));
     const signatures = ordered.map(semanticSignature);
-    const sameKnownSemantics = signatures.every((signature) => signature !== null) && new Set(signatures).size === 1;
+    // A matching primary node identity cannot override contradictory provider
+    // bindings. An absent optional database ID supplies no competing binding.
+    const databaseIds = new Set(
+      ordered.flatMap((event) => (event.actor.githubDatabaseId === undefined ? [] : [event.actor.githubDatabaseId])),
+    );
+    const sameKnownSemantics =
+      signatures.every((signature) => signature !== null) && new Set(signatures).size === 1 && databaseIds.size <= 1;
     results.push({
       state: sameKnownSemantics ? "canonical" : "ambiguous",
       dedupeKey,
