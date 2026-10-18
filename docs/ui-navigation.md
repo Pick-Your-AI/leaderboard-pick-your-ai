@@ -1,0 +1,40 @@
+# Navigation acceptance evidence
+
+This record supports [LB-13.02 / #52](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/52). It describes the navigation behavior and its executable checks. The prototype is explicitly synthetic; API browser tests pass synthetic provider inputs through the actual built service handler. Neither establishes a deployed source, participant result or permission grant.
+
+## Displayed snapshots survive navigation
+
+A real-handler browser replay against accepted main `90deab1aba84f479d1c1de04789f58db3e2b155d` reproduced two failures:
+
+- A board displayed `api-1`, opened a contributor portfolio and then received a newer publication. Back loaded `api-2` because only portfolio/activity history entries retained the displayed snapshot.
+- The primary Measures link retained the repository, Project/workstream, interval and actor selection but omitted the displayed snapshot. A subsequent catalog journey could select the newer publication.
+
+The API reader now records the displayed pin for every successful page with snapshot metadata. Before leaving an implicitly selected page, it makes that existing history entry reproducible. Primary navigation and the wordmark use the displayed pin, including navigation into the separate wall application. Explicitly pinned URLs, proof parameters and drawer history markers already identify their view and remain intact. History stores the URL, never an API response or contributor record.
+
+Holding a snapshot does not suspend current privacy checks. Existing revalidation, suppression, revocation and failure handling still apply. A user can deliberately clear the snapshot in the exact-scope form to request the current publication; a regression verifies that this advances to `api-2` while ordinary navigation stays on `api-1`.
+
+## Criterion-to-evidence map
+
+| #52 task or criterion | Delivered implementation and executable evidence |
+| --- | --- |
+| Overview, boards, contributors, activity, methodology and status routes | The prototype route table in [App.tsx](../apps/web/src/App.tsx) and the API reader in [remote/App.tsx](../apps/web/src/remote/App.tsx) expose the canonical routes. Status is the Coverage route. Existing public-route browser checks exercise rendered headings, focus, reflow and accessibility scans. |
+| Meaningful metric categories and searchable definitions | The versioned registry supplies departments, synonyms and navigation defaults. [registry-api.spec.ts](../apps/web/browser/registry-api.spec.ts) changes an actual served alias and department label, searches them and opens the method sheet without reading unavailable source data or substituting the prototype. Deferred and unknown definitions remain explicit. |
+| Visible date, repository and Project scope | Shared [ScopeBar.tsx](../apps/web/src/components/ScopeBar.tsx) controls remain visible across the prototype journeys. The new five-journey test asserts their exact period, repository, Program and snapshot values. API pages expose exact scope controls and snapshot provenance, with the supported UTC interval and repository/workstream selection retained in each destination URL. |
+| Curated entry points and independently discoverable PR, LOC, triage, research and review journeys | The prototype catalog provides five ordinary-language journey links. The browser opens every link by keyboard from the overview and verifies its destination, heading focus and scope. A separate actual-API test finds all five definitions through their departments and ordinary-language search terms, then opens each method sheet. Missing materialization does not prevent definition discovery or become a measured zero. |
+| Canonical route/query serialization, immutable selection and shareable filters | [scope.test.ts](../apps/web/test/scope.test.ts), [calendar-scope.test.ts](../apps/web/test/calendar-scope.test.ts) and the rendered [navigation.test.ts](../apps/web/test/navigation.test.ts) verify stable serialization, half-open UTC windows, global scope preservation and removal of route-specific controls. API discovery verifies that catalog-only search parameters do not leak onto a method route. |
+| Back, Forward and copied URLs restore the supported scope and snapshot | [navigation-api.spec.ts](../apps/web/browser/navigation-api.spec.ts) reproduces the two failures above, verifies the corrections with a newer publication, exercises full-page wall navigation and deliberate clearing of a pin, and checks Back/Forward/copied URLs for all five prototype journeys. The existing permanent-proof browser case verifies cursor, drawer state and focus restoration alongside the change. |
+| Invalid parameters have a visible explanation | Registry/API browser checks reject unsupported or duplicate filters before a provider read and display an alert for malformed metadata or an unknown definition. Scope tests and the public-route matrix cover prototype invalid period, repository and snapshot messages. No alternate source view is silently substituted for an unsupported API selection. |
+
+The five new browser cases are in the normal browser test discovery path. The targeted receiving check also includes all four served-registry cases, the permanent-proof history case, exact-scope board/profile/evidence navigation and explicit held-update/invalid-filter behavior. Local execution used Chrome for Testing `155.0.8059.84`; the unchanged hosted configuration uses the Chromium revision pinned by the repository's Playwright package. A local override is not reported as a pinned hosted result.
+
+Build the workspace before browser execution because the harness imports the compiled Fastify service. Run the configured repository browser command to validate a published head; its workflow retains traces, screenshots and the exact test result. The [validation guide](ui-validation.md) documents the production-preview runner and the distinct device, assistive-technology and release evidence boundaries.
+
+## Prerequisite disposition
+
+The actual native prerequisites for #52 are #38 and #47. Registry package [#38](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/38) is closed and its versioned metadata is implemented and exercised above.
+
+[Consultation package #47](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/47) remains open. The repository records the requested and observed `claude-opus-5-5` model identity, retained-artifact hashes and adopted/adapted/deferred choices in the [consultation decision record](ui-prototype.md#lb-1301-consultation-decision-record). The original prompt, complete response and raw receipt were not available in this receiving checkout or the accessible retained scratch files, so their content and hashes could not be independently reverified here. The existing record is not replaced with a newly generated consultation.
+
+The audience/journey input [#22](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/22) has been delivered through the reviewed [product journey decision](product-journeys.md). Source probing [#41](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/41) still requires actual approved-App capability receipts. The [source capability record](source-capability-candidate.md) supplies a usable conservative design constraint: unsupported sources, unknown actors/times and incomplete history must stay explicit, and definitions do not enable publication. The navigation checks exercise that constraint; they do not claim that the full source-probe gate is complete.
+
+This source change supplies a concrete navigation correction and bounded receiving evidence. It does not close #47 or remove either native prerequisite, and it does not mark #52 Done before its complete stated evidence is accepted. An empty assignee by itself is not a technical defect or a substitute for this acceptance review. Separate work packages retain their own stated device, participant, source and operational requirements; they are not added as new native prerequisites here.

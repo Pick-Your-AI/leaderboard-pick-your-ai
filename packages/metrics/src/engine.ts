@@ -259,6 +259,7 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
     policy.rank &&
     (policy.aggregation === "ratio" ||
       policy.aggregation === "duration" ||
+      metric.definition.display_policy === "spotlight" ||
       metric.definition.release_eligibility === "descriptive-only")
   )
     throw new Error("Descriptive metrics cannot rank contributors");

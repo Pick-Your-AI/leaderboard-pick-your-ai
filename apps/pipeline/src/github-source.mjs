@@ -40,8 +40,15 @@ const routes = {
   releases: "releases?per_page=100",
   timelines: "issues/events?per_page=100",
 };
-const at = (value) =>
-  typeof value === "string" && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
+const at = (value) => {
+  // Match the GitHub normalizer's UTC/millisecond profile before conversion.
+  // Date parsing alone rolls invalid dates forward and drops finer precision.
+  if (typeof value !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?Z$/.test(value)) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 19) === value.slice(0, 19)
+    ? date.toISOString()
+    : null;
+};
 
 /** Read-only REST source with complete, bounded review fanout. */
 export function createGithubCollectionSource({
