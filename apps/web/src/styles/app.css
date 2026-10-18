@@ -966,3 +966,24 @@ tbody th {
     border-width: 3px;
   }
 }
+
+/* Remote proof is rendered outside the inert background on narrow screens. */
+.remote-proof-drawer {
+  overflow-wrap: anywhere;
+  max-height: 100dvh;
+}
+.remote-proof-drawer .drawer-body {
+  min-height: 0;
+}
+.remote-proof-drawer .drawer-header h2 {
+  min-width: 0;
+}
+.remote-proof-drawer .drawer-header button {
+  flex-shrink: 0;
+}
+.remote-proof-drawer a {
+  display: inline-block;
+  min-height: 44px;
+  padding-block: 8px;
+  max-width: 100%;
+}
