@@ -4,12 +4,13 @@ Partial implementation for [#80](https://github.com/Pick-Your-AI/pick-your-ai-le
 [#81](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/81),
 [#82](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/82),
 [#88](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/88),
-[#89](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/89) and
-[#90](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/90).
+[#89](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/89),
+[#90](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/90) and
+[#96](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/96).
 
 The private pipeline can materialize reviewed research, catalog and craft
 contributions from an exact collected source revision. These are the existing
-20 registry metrics, with their existing units and event clocks. Decision records
+21 registry metrics, with their existing units and event clocks. Decision records
 and localization retain their separate record/blob and locale/category source
 adapters. No metric,
 source grant, production catalog, reviewer roster or policy is activated by this
@@ -29,7 +30,7 @@ these keys:
 | Key | Meaning |
 | --- | --- |
 | `version` | `domain-evidence/v1` |
-| `ownerIds` | Enrolled affected-owner reviewers for catalog, pricebook, compatibility, evidence-manifest and data-correction acceptance |
+| `ownerIds` | Enrolled affected-owner reviewers for catalog, pricebook, compatibility, evidence-manifest, data-correction and reproduction acceptance |
 | `contractReviewerIds` | Central compatibility reviewers, additionally required for compatibility recognition |
 | `disclosureReviewerIds` | Public-disclosure reviewers, additionally required for security recognition |
 | `freshnessIntervalSeconds` | Reviewed recheck interval, an integer from 1 second through 366 days, used only for freshness units |
@@ -92,6 +93,7 @@ executable schemas are in `apps/pipeline/src/domain-recognition.mjs`.
 | `market_research` | Study/version, explicit method and sources; participant material limited to approved sanitized aggregates | Study identity | Acceptance |
 | `evidence_manifests` | Artifact identity/hash, approved source use, sources and owner review | Artifact identity/hash | Acceptance |
 | `data_quality` | Correction identity/version and target kind/ID; exact changed before/after pins, factual and owner review, supporting sources and complete reviewed origin | Target kind/ID/correction identity | Acceptance |
+| `reproductions` | Actual merged-PR artifact author, independently accepted completed scenario, exact scenario/environment/result pins and explicit observed outcome | Target kind/ID/scenario identity | Acceptance |
 | `documentation` | Actual source authorship, substantive review and documentation/example/guide category | PR/category | Merge |
 | `tests` | Actual source authorship and substantive test-artifact review | PR/test category | Merge |
 | `regressions_prevented` | Scenario and fixture hash, distinct before/after revisions, fails-before and passes-after evidence | Failure scenario | Acceptance |
@@ -138,6 +140,42 @@ not automated judgments of blame. Revisions of one correction's proof, source
 list or receipt retain one canonical correction unit; the host must preserve its
 canonical identity when accepting another version of the same work.
 
+The stock reproduction adapter consumes the pinned `pr_merged` author fact; it
+does not hydrate or pin `pr_coauthored`. The common authorship guard can admit a
+source-proven coauthor in a separately trusted `pr_merged` input, which is a
+different adapter boundary. A generic same-metric receipt, a mutable comment, issue
+authorship or a reviewer role cannot substitute for that source. An independent
+audited reviewer must also belong to the enrolled affected-owner roster. The
+host reviews the relationship to the exact target and scenario; the adapter does
+not infer a defect from a PR title, issue label or target identifier.
+
+Their exact `details` fields are `targetKind`, `targetId`, `scenarioId`,
+`scenarioVersion`, `runId`, `completedAt`, `executionComplete`, `scenarioAccepted`,
+`outcome`, `scenario`, `environment` and `result`. Execution and scenario acceptance
+must both be explicit true values. Completion must be no later than the collected
+merge, which must be no later than acceptance. Each of the three proof roles has
+exactly `revision`, `sourceRevisionUrl` and `contentHash`: a full 40- or
+64-character lowercase Git revision and SHA-256 content hash, with a nonempty
+GitHub blob path at the exact collected source revision and repository. A reviewed
+combined artifact may serve several roles if each repeated immutable URL has the
+same hash. Missing, mutable, unrelated or contradictory proof remains unqualified.
+
+An actually observed `reproduced`, `not_reproduced` or `inconclusive` result can
+support an accepted scenario contribution. Unexecuted work and missing results
+cannot. This does not create a `confirmed_bugs` fact or certify a bug: that separate
+definition requires its own report, confirmation and reporter/contributor
+attribution. Scenario, environment and result pins and completion assertions are
+protected reviewer evidence, not automated execution, fetched-content certification
+or actual measurements supplied by this module. Their contents and the target
+association must be reviewed before the host enrolls the configuration.
+
+Canonical reproduction identity includes only the target kind, target ID and
+scenario ID within the existing metric/repository/actor grouping. New runs,
+environment/result evidence, outcomes, scenario versions or review receipts do
+not mint additional credit for the same scenario. A host must preserve this
+canonical identity when reviewing another revision. Unsupported comment/external
+sources and bug-confirmation attribution remain separate adapters.
+
 The target metric policy must use canonical grouping and the qualified evidence
 class, keeping observed participation separate. Its time basis must match the
 registry. Source occurrence and acceptance remain independently recorded;
@@ -183,6 +221,14 @@ their exact prior fingerprint bytes. A configuration containing both correction
 and other metric bindings retires its whole bound snapshot; the authority fence
 does not preserve individual metrics inside that mixed snapshot.
 
+Bindings for `reproductions` additionally pin `reproduction-recognition/v1`.
+Older generic reproduction publications are withheld until recomputed from the
+current specialist evidence. Every configuration without a reproduction binding
+retains its exact previous fingerprint, including the established data-correction
+marker. A mixed configuration containing reproduction bindings retires its whole
+snapshot; this applies even if its accepted requests currently belong to other
+metrics.
+
 Public evidence carries its immutable source link and fixed, bounded explanation
 codes for the metric, clock, reviewed outcome/method and contribution class.
 Private request text, receipt IDs, source-ID lists, conditions hashes, participant
@@ -200,12 +246,23 @@ accepted-work marker; it never invents missing labels or copies private values.
 It is separate from the explicit path-policy and locale classification contract,
 so preserving documentation explanations cannot qualify or retarget a locale.
 
+Accepted reproduction proof retains a complete fixed metric/acceptance-clock
+explanation, the explicit observed outcome and
+`accepted_reproduction_scenario_not_bug_confirmation`. Primary ranked proof,
+accepted portfolio copies and contributor timelines preserve the same labels.
+Missing or contradictory accepted labels and disagreement between copies fail
+closed. An explicit observed, pending or unknown activity context, including
+optional evidence metadata, cannot inherit a retained acceptance marker. Raw,
+pending and unknown work do not acquire an acceptance or outcome label from
+private text. This bounded projection never copies scenario/run IDs,
+environment or result hashes, private receipt contents or arbitrary proof fields.
+
 ## Verification and remaining acceptance
 
-The synthetic suite exercises all 20 qualification/exclusion pairs, immutable
+The synthetic suite exercises all 21 qualification/exclusion pairs, immutable
 revision mismatches, stale or ambiguous audits, reviewer roles, policy clocks,
 private-field rejection, source-mode provenance, canonical aliases and proof
-variations, withdrawal and exact performance arithmetic. Each of the 20 metrics
+variations, withdrawal and exact performance arithmetic. Each of the 21 metrics
 also has a source-to-qualification-to-engine case that counts one canonical unit,
 preserves it through repeated review and observation delivery in either order,
 and checks exact half-open event-clock boundaries. These cases support only the
@@ -228,6 +285,14 @@ identifier boundaries, canonical correction conservation and independent units.
 The publication regression uses fictional marker-free data through the actual
 pipeline and API, then reopens its persisted database to verify that obsolete
 generic correction authority cannot retain public proof or private explanations.
+
+Reproduction cases cover all three explicit observed outcomes, generic/unexecuted
+exclusions, exact three-role source pins, reviewer/source authority, canonical
+scenario conservation and fingerprint compatibility. Contract and real-service
+injection cases preserve bounded outcome explanations across proof copies and
+current/pinned API reads without confirming a bug. A fictional marker-free
+pipeline publication reopens persisted storage, withholds obsolete generic
+authority and verifies withdrawal across public proof and private explanations.
 
 Actual source installations, configured path/category mappings, rights and
 measurement review, reviewer enrollment, affected-owner acceptance, external

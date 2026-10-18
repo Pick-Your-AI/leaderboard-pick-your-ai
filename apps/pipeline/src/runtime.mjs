@@ -1475,7 +1475,10 @@ export async function createPipeline(options) {
               `public_${activityState}_work`,
               ...c.contracts.publicDocumentationReasons(original.contribution),
               ...(activityState === "accepted"
-                ? c.contracts.publicDocumentationRecognitionReasons(original.contribution)
+                ? [
+                    ...c.contracts.publicDocumentationRecognitionReasons(original.contribution),
+                    ...c.contracts.publicReproductionRecognitionReasons(original.contribution, true),
+                  ]
                 : []),
             ],
           },
