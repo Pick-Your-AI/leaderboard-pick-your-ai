@@ -52,7 +52,7 @@ const at = (value) => {
 
 /** Read-only REST source with complete, bounded review fanout. */
 export function createGithubCollectionSource({
-  client,
+  client: readClient,
   sourceId,
   repositories,
   isSynthetic = false,
@@ -61,8 +61,9 @@ export function createGithubCollectionSource({
   assertAuthorized = () => {},
 }) {
   if (
-    !client?.scanRest ||
-    !client?.rest ||
+    !readClient?.scanRest ||
+    !readClient?.rest ||
+    typeof readClient.forRepository !== "function" ||
     typeof sourceId !== "string" ||
     !sourceId ||
     !Number.isInteger(maxPages) ||
@@ -75,6 +76,7 @@ export function createGithubCollectionSource({
     const scope = approved.get(repository.id);
     if (!scope || scope.slug !== repository.slug || scope.installationId !== repository.installationId)
       throw new Error("repository_not_authorized");
+    const client = readClient.forRepository(scope.id);
     const value = await client.rest(sourceId, `/repos/${scope.slug}`, assertAuthorized);
     if (
       value?.id !== repository.id ||
@@ -104,6 +106,7 @@ export function createGithubCollectionSource({
           !["reviews", "discussions", "project_current", "project_history", "relationships"].includes(request.family))
       )
         throw new Error("source_family_adapter_unavailable");
+      const client = readClient.forRepository(repository.id);
       assertAuthorized();
       let verification;
       try {

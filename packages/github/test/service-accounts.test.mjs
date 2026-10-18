@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeGithubObservation, createGithubEvidenceNormalizer } from "../dist/index.js";
+import { syntheticRepositoryClient } from "./synthetic-client.mjs";
 
 const at = "2026-10-02T00:00:00Z";
 const author = { id: 101, node_id: "U_synthetic_101", type: "User", login: "synthetic-person-looking-login" };
@@ -131,10 +132,10 @@ test("adapter applies protected reviewed configuration to hydrated and enriched 
   };
   for (const enriched of [false, true]) {
     const normalize = createGithubEvidenceNormalizer({
-      client: {
+      client: syntheticRepositoryClient(2, {
         rest: async (_source, path) =>
           path.endsWith("/pulls/10") ? { ...envelope().payload, updated_at: at } : { id: 2, private: false },
-      },
+      }),
       source: "synthetic-source",
       allowedRepositoryIds: [2],
       isSynthetic: true,
