@@ -18,7 +18,7 @@
   {
     "id": "DEC-02",
     "question": "Which sources and history are public and eligible?",
-    "recommended": "All public repositories and Projects explicitly onboarded by stable IDs, starting with the three repositories and five Projects in the historical audit and including this newly published repository and Project after scope acceptance; unknown adoption boundaries are disclosed",
+    "recommended": "Public repositories and Projects explicitly onboarded by immutable IDs after source-specific approval; refresh the historical inventory and disclose unknown adoption boundaries",
     "alternatives": [
       "Explicit subset for beta",
       "Separate inherited-history lens"
@@ -28,7 +28,8 @@
       "LB-04.02",
       "LB-06.01"
     ],
-    "status": "Proposed"
+    "status": "Source-admission policy adopted; individual source activation and history boundaries remain gated",
+    "decision": "Apply docs/evidence-contributor-rights.md: default-deny source admission, approved event/field types, current visibility and source-use evidence, versioned capability receipts, explicit history gaps, and current suppression across enabled public surfaces. The six repository and six Project examples reviewed for LB-01.01 are candidates, not source-installation grants."
   },
   {
     "id": "DEC-03",
@@ -41,7 +42,10 @@
     "before": [
       "LB-11.01"
     ],
-    "status": "Proposed"
+    "status": "Decision specified; review and merge of LB-01.02 record acceptance",
+    "decision": "Use recognition-governance/v1: independent observed, qualified and reviewed views, dense ties, an inclusive unranked directory and no universal weighted contributor score. Descriptive ratios, wait times, context and editorial recognition remain unranked. The per-definition review preserves all 98 meanings and source limits; runtime policy configuration and public enablement remain separate.",
+    "decision_record": "docs/metric-recognition-policy.md",
+    "definition_review": "docs/metric-definition-review.md"
   },
   {
     "id": "DEC-04",
@@ -56,7 +60,9 @@
       "LB-10.03",
       "LB-17.03"
     ],
-    "status": "Needs role acceptance; no named assignment invented"
+    "status": "Authority rules specified; actual runtime roster and operating acceptance remain required",
+    "decision": "recognition-governance/v1 defines independent evidence review, source and receiving authority, conflict handling, appeal separation and versioned correction receipts. Repository engineering authorization accepts this project's policy decision; it does not create a runtime identity/role, a source observation, contributor consent or external receiving acceptance. No named assignment or response commitment is invented.",
+    "decision_record": "docs/metric-recognition-policy.md"
   },
   {
     "id": "DEC-05",
@@ -86,7 +92,8 @@
       "LB-15.03",
       "LB-17.03"
     ],
-    "status": "Policy decision required before production"
+    "status": "Identity and contributor-rights policy adopted; implementation and operating acceptance remain required",
+    "decision": "Apply docs/evidence-contributor-rights.md: eligible public facts after source admission; voluntary optional profile/external/editorial choices; verified stable-account identity without email/name inference; durable correction, opt-out and independent appeal processes; minimized attributable audit; and separate public suppression, payload deletion and backup completion evidence. Numeric retention windows and the actual operator/reviewer roster retain their own acceptance gates."
   },
   {
     "id": "DEC-07",
@@ -101,7 +108,9 @@
       "LB-19.06",
       "LB-20.04"
     ],
-    "status": "Proposed; explicit release manifest required"
+    "status": "Initial presentation defaults specified; explicit enabled-capability release manifest still required",
+    "decision": "Use the implemented, source-proven per-definition lens without substituting an unsupported state or source clock. Raw activity remains labeled; qualified/reviewed outcomes need their exact acceptance. Retained-line analysis stays deferred. Candidate UI metadata and the complete 98-definition catalog are discovery aids, not permission, live measurement or public activation. The release manifest must independently select enabled capabilities and record disabled reasons.",
+    "decision_record": "docs/metric-recognition-policy.md"
   },
   {
     "id": "DEC-08",
