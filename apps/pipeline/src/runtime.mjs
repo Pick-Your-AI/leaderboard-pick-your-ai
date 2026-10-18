@@ -1,6 +1,6 @@
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
-import { createGithubCollectionSource } from "./github-source.mjs";
+import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -123,8 +123,18 @@ export async function createPipeline(options) {
       disabledMetricIds: [],
       disabledMetrics: [],
     };
+  const projectDeniedRepositories = new Set();
+  const projectDenialKey = (repo) => `project-scope-denial:${repo.id}:${digest(config.version)}`;
   const restrictConfiguration = (state) => {
     const overlay = configurationOverlay(state);
+    if (
+      config.repositories.some(
+        (repo) =>
+          projectDeniedRepositories.has(repo.id) ||
+          state.pipelineSourceDenials?.[repo.id]?.configurationVersion === config.version,
+      )
+    )
+      fail("project_source_scope_requires_reapproval");
     if (
       overlay.allowedRepositoryIds !== null &&
       config.repositories.some((repo) => !overlay.allowedRepositoryIds.includes(String(repo.id)))
@@ -221,6 +231,13 @@ export async function createPipeline(options) {
     authorized = Boolean(await verifyConfig(copy(config)));
     if (!authorized) return false;
     assertDataMode(config);
+    const persistedDenials = await db.query(
+      "SELECT operation_key FROM leaderboard_pipeline.receipts WHERE kind='project_scope_denial' AND operation_key=ANY($1::text[])",
+      [config.repositories.map(projectDenialKey)],
+    );
+    for (const repo of config.repositories)
+      if (persistedDenials.rows.some((row) => row.operation_key === projectDenialKey(repo)))
+        projectDeniedRepositories.add(repo.id);
     restrictConfiguration(controlsStore.read());
     required(config.version, "config_version_required");
     required(config.organization, "organization_required");
@@ -293,6 +310,20 @@ export async function createPipeline(options) {
     return receiptId;
   }
   async function denyRepository(repo, reason, checkedAt) {
+    let controlsFailure;
+    if (reason === "project_scope_unavailable") {
+      // Persist the public-read/write fence before SQL work. A repository-level
+      // public probe cannot reauthorize its now-private Project evidence.
+      projectDeniedRepositories.add(repo.id);
+      try {
+        controlsStore.transaction((state) => {
+          state.pipelineSourceDenials ||= {};
+          state.pipelineSourceDenials[repo.id] = { configurationVersion: config.version, reason, checkedAt };
+        });
+      } catch (error) {
+        controlsFailure = error;
+      }
+    }
     await db.transaction(async (tx) => {
       await tx.query(
         `INSERT INTO leaderboard_ingestion.repository_access (repository_id,installation_id,state)
@@ -300,12 +331,20 @@ export async function createPipeline(options) {
         generation=repository_access.generation+1,checked_at=clock_timestamp()`,
         [repo.id, repo.installationId],
       );
+      if (reason === "project_scope_unavailable")
+        await receipt(tx, projectDenialKey(repo), "project_scope_denial", {
+          repositoryId: repo.id,
+          configurationVersion: config.version,
+          reason,
+          checkedAt,
+        });
       await receipt(tx, `source-probe:${repo.id}:${checkedAt}:${reason}`, "source_unavailable", {
         repositoryId: repo.id,
         reason,
         checkedAt,
       });
     });
+    if (controlsFailure) throw controlsFailure;
     monitorFailure(
       monitorSource(repo.id),
       "collection",
@@ -446,6 +485,8 @@ export async function createPipeline(options) {
         assertRunConfiguration();
         monitorSuccess(monitorSource(repository.id), "normalization", normalizationStarted);
       } catch (error) {
+        if (isProjectSourceScopeFailure(error))
+          await denyRepository(repository, "project_scope_unavailable", utc(now()));
         monitorFailure(monitorSource(repository.id), "normalization", "schema_changed");
         if (dispatch) {
           assertRunConfiguration();

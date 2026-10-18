@@ -136,7 +136,10 @@ test("Project collector traverses subject memberships and current field snapshot
     sourceId: "synthetic",
     repositories: [{ ...repository, families: ["project_current"], allowedProjectIds: ["PVT_synthetic"] }],
     client: {
-      graphql: async () => ({ node: { project: { id: "PVT_synthetic", public: true } } }),
+      graphql: async (_source, query) =>
+        query.includes("... on ProjectV2 {")
+          ? { node: { id: "PVT_synthetic", public: true } }
+          : { node: { project: { id: "PVT_synthetic", public: true } } },
       rest: async () => ({ id: 2, private: false }),
       scanRest: async () => [{ node_id: "I_synthetic" }],
       scanGraphql: async (scan) => {
