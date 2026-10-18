@@ -14,6 +14,7 @@ const clocks = {
   assumptions_resolved: "accepted_at",
   market_research: "accepted_at",
   evidence_manifests: "accepted_at",
+  data_quality: "accepted_at",
   documentation: "merged_at",
   tests: "merged_at",
   regressions_prevented: "accepted_at",
@@ -34,6 +35,7 @@ const authorMetrics = new Set([
   "negative_findings",
   "rights_reviews",
   "evidence_manifests",
+  "data_quality",
   "documentation",
   "tests",
 ]);
@@ -186,7 +188,15 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
   // reviewing someone else's change. Other roles need their own future adapter.
   if (authorMetrics.has(metric)) require(["author", "coauthor"].includes(candidate.role));
 
-  if (["catalog_proposals", "pricebook_proposals", "compatibility_proposals", "evidence_manifests"].includes(metric))
+  if (
+    [
+      "catalog_proposals",
+      "pricebook_proposals",
+      "compatibility_proposals",
+      "evidence_manifests",
+      "data_quality",
+    ].includes(metric)
+  )
     approvedOwner(domain.ownerIds, decision.actor);
   if (metric === "compatibility_proposals") approvedOwner(domain.contractReviewerIds, decision.actor);
   if (metric === "security") approvedOwner(domain.disclosureReviewerIds, decision.actor);
@@ -311,6 +321,70 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
       ids(detail.sourceIds);
       unit = [id(detail.artifactIdentity), digest(detail.artifactHash)];
       break;
+    case "data_quality": {
+      object(detail, [
+        "canonicalKind",
+        "canonicalId",
+        "correctionId",
+        "correctionVersion",
+        "correctionType",
+        "factualReview",
+        "sourceIds",
+        "before",
+        "after",
+        "origin",
+      ]);
+      // A correction's canonical identity does not change when its proof or
+      // private review version changes. No receipt or source line is a unit.
+      const exactId = (value) => {
+        id(value);
+        require(value.trim() === value);
+        return value;
+      };
+      const exactIds = (value) => ids(value).map(exactId);
+      unit = [exactId(detail.canonicalKind), exactId(detail.canonicalId), exactId(detail.correctionId)];
+      exactId(detail.correctionVersion);
+      exactIds(detail.sourceIds);
+      choice(detail.correctionType, ["incorrect", "stale"]);
+      require(detail.factualReview === true);
+      const pins = [detail.before, detail.after].map((pin) => {
+        object(pin, ["revision", "sourceRevisionUrl", "contentHash"]);
+        require(typeof pin.revision === "string" && [40, 64].includes(pin.revision.length));
+        pinnedGithubUrl(pin.sourceRevisionUrl, pin.revision);
+        require(digest(pin.contentHash).length === 64);
+        const locator = new URL(pin.sourceRevisionUrl).pathname.split("/");
+        require(locator.slice(1).every((part) => part.length > 0));
+        locator[4] = "";
+        return JSON.stringify(locator);
+      });
+      // Both versions describe the same repository and artifact locator. The
+      // reviewed after version must be the exact currently collected evidence.
+      require(
+        pins[0] === pins[1] &&
+          detail.before.revision !== detail.after.revision &&
+          detail.before.contentHash !== detail.after.contentHash &&
+          detail.after.revision === record.sourceRevision &&
+          detail.after.sourceRevisionUrl === record.sourceRevisionUrl,
+      );
+      const origin = object(detail.origin, ["kind", "complete", "contributorIds"]);
+      require(origin.complete === true);
+      choice(origin.kind, ["prior_contributors", "external_source_change"]);
+      if (origin.kind === "prior_contributors") {
+        const contributors = exactIds(origin.contributorIds);
+        require(
+          contributors.every(
+            (contributor) => contributor !== request.owner && !Object.hasOwn(request.collaborators ?? {}, contributor),
+          ),
+        );
+      } else {
+        // External staleness needs a reviewed cause, not an inference that an
+        // absent or incomplete contributor history proves independence.
+        require(
+          detail.correctionType === "stale" && Array.isArray(origin.contributorIds) && !origin.contributorIds.length,
+        );
+      }
+      break;
+    }
     case "documentation":
     case "tests":
       object(detail, ["authorship", "category", "substantiveReview"]);
