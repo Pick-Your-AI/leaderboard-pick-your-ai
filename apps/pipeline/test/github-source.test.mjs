@@ -173,3 +173,55 @@ test("Project collector traverses subject memberships and current field snapshot
   assert.equal(page.facts[0].occurredAt, null);
   assert.equal(page.facts[0].evidence, "current_state");
 });
+
+test("selected relationship history enters collection as timestamped native transitions", async () => {
+  const source = createGithubCollectionSource({
+    sourceId: "synthetic",
+    repositories: [{ ...repository, families: ["relationships"] }],
+    client: {
+      rest: async () => ({ id: 2, private: false }),
+      scanRest: async () => [{ number: 1 }],
+      scanGraphql: async (scan) =>
+        scan.select({
+          repository: {
+            databaseId: 2,
+            isPrivate: false,
+            issue: {
+              id: "I_synthetic",
+              url: `https://github.com/${repository.slug}/issues/1`,
+              timelineItems: {
+                nodes: [
+                  {
+                    id: "E_synthetic",
+                    __typename: "ParentIssueAddedEvent",
+                    createdAt: "2026-10-01T00:00:00Z",
+                    actor: { __typename: "User", databaseId: 3, id: "U_synthetic" },
+                    parent: {
+                      id: "I_parent",
+                      url: `https://github.com/${repository.slug}/issues/2`,
+                      repository: { databaseId: 2, isPrivate: false },
+                    },
+                  },
+                ],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        }).nodes,
+    },
+  });
+  const page = await source.readPage({ ...request, family: "relationships" });
+  assert.equal(page.facts[0].subjectId, "E_synthetic");
+  assert.equal(page.facts[0].actorId, "3");
+  assert.equal(page.facts[0].occurredAt, "2026-10-01T00:00:00.000Z");
+  assert.equal(page.facts[0].evidence, "observed_transition");
+});
+
+test("Project history requires approved IDs even when repository inventory is empty", async () => {
+  const source = createGithubCollectionSource({
+    sourceId: "synthetic",
+    repositories: [{ ...repository, families: ["project_history"] }],
+    client: { rest: async () => ({ id: 2, private: false }), scanRest: async () => [] },
+  });
+  await assert.rejects(source.readPage({ ...request, family: "project_history" }), /approved_project_scope_required/);
+});

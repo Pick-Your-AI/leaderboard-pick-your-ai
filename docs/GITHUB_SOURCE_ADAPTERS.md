@@ -55,8 +55,19 @@ no contribution metrics. The runtime retains opaque source provenance, not a
 published Project field-value or current-context view. See [Project item fields](https://docs.github.com/en/graphql/reference/projects)
 and [issue Project memberships](https://docs.github.com/en/graphql/reference/issues).
 
-Remaining source work includes selectively supported Project history and
-relationship event collectors, verified readiness cohorts, and live installation
-permission/reconciliation evidence. Real source approval, public permission
-probes, independent evidence review and launch gates remain external acceptance
-prerequisites. None of these issues is closed by synthetic tests alone.
+Selected native issue histories now support ProjectV2ItemStatusChangedEvent and
+ParentIssueAdded/RemovedEvent plus BlockedByAdded/RemovedEvent. They traverse the
+bounded filtered GraphQL timelineItems connection and retain exact event IDs,
+actors and creation clocks. Distinct native events in the same second remain
+distinct; replaying one event does not create another unit. Status details are
+hydrated only after the event's public Project matches repository.allowedProjectIds.
+Parent/blocker endpoints must both be public in the approved repository; foreign
+or hidden endpoints remain unavailable. Current parent or blocker fields never
+stand in for missing history. This adapter currently covers issue timelines;
+PR-specific Project timelines and other event subtypes remain unsupported.
+
+Remaining source work includes broader typed historical subtypes, verified
+readiness cohorts, and live installation permission/reconciliation evidence.
+Real source approval, public permission probes, independent evidence review and
+launch gates remain external acceptance prerequisites. None of these issues is
+closed by synthetic tests alone.

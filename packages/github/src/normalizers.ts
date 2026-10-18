@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { GithubReadClient } from "./client.js";
+import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
   classifyPhysicalDiff,
@@ -490,7 +491,12 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
     });
     return fact;
   };
-  const transitionUnit = stable(id, sourceAction, at, sender?.id ?? null);
+  const nativeEventId =
+    proof.eventId &&
+    (proof.source === "github_graphql" || proof.eventId.startsWith(`github:${repository.id}:issue-event:`))
+      ? proof.eventId
+      : null;
+  const transitionUnit = nativeEventId ? stable(id, nativeEventId) : stable(id, sourceAction, at, sender?.id ?? null);
   if (envelope.family === "project_snapshot") {
     out.reasons.push("current_project_context_does_not_prove_editor_or_time");
   } else if (envelope.family === "pull_request") {
@@ -820,7 +826,7 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
           sender,
           "triager",
           at,
-          stable(relationship.kind, endpoints, sourceAction, at, sender?.id),
+          stable(relationship.kind, endpoints, sourceAction, at, sender?.id, nativeEventId),
           { rawState: String(relationship.kind) },
         );
       }
@@ -1024,6 +1030,65 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       return none("repository_not_authorized_for_normalization");
     if (!text(input.policyVersion) || !time(input.observedAt))
       throw new Error("Pipeline policy and observation time are required");
+    if (input.family === "relationships" || input.family === "project_history") {
+      const match = input.fact.sourceUrl.match(
+        new RegExp(`^https://github\\.com/${input.repository.slug.replaceAll(".", "\\.")}/issues/([1-9]\\d*)$`),
+      );
+      if (!match) return none("typed_history_subject_url_unverified");
+      const records = await readTypedIssueHistory({
+        client: options.client,
+        source: options.source,
+        repository: input.repository,
+        number: Number(match[1]),
+        family: input.family,
+        scanId: input.factKey,
+        ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
+      });
+      const record = records.find((item) => item.event.id === input.fact.subjectId);
+      if (!record || typedHistoryRevision(record) !== input.fact.sourceRevision)
+        return none("typed_history_revision_unverified");
+      const event = record.event;
+      const project = object(event.project) ? event.project : null;
+      const target = object(event.parent) ? event.parent : object(event.blockingIssue) ? event.blockingIssue : null;
+      const isProject = input.family === "project_history";
+      return normalizeGithubObservation({
+        repository: { ...input.repository, visibility: "public" },
+        proof: {
+          verified: true,
+          source: "github_graphql",
+          eventId: input.fact.subjectId,
+          revision: input.fact.sourceRevision,
+          isSynthetic: options.isSynthetic === true,
+        },
+        family: isProject ? "field_change" : "relationship",
+        observedAt: input.observedAt,
+        occurredAt: time(event.createdAt),
+        action: isProject
+          ? "project_status_changed"
+          : String(event.__typename).includes("Removed")
+            ? "removed"
+            : "added",
+        ...(project ? { eventContext: { projects: [String(project.id)], workstreams: [] } } : {}),
+        payload: isProject
+          ? {
+              id: event.id,
+              url: record.subject.url,
+              sender: event.actor,
+              change: { before: event.previousStatus, after: event.status },
+            }
+          : {
+              issue: { id: record.subject.id, url: record.subject.url },
+              sender: event.actor,
+              relationship: {
+                kind: event.parent ? "parent_child" : "blocked_by",
+                from: record.subject.id,
+                to: target?.id,
+                intentional: true,
+                publicEndpointsVerified: true,
+              },
+            },
+      });
+    }
     if (input.family === "project_current") {
       const snapshot = await readPublicProjectSnapshot({
         client: options.client,

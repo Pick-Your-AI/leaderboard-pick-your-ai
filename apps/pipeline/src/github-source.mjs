@@ -1,3 +1,4 @@
+import { readTypedIssueHistory, typedHistoryRevision } from "../../../packages/github/dist/timeline-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "../../../packages/github/dist/project-snapshots.js";
 import {
   githubReviewRevision,
@@ -61,7 +62,8 @@ export function createGithubCollectionSource({
       if (
         !repository ||
         !repository.families.includes(request.family) ||
-        (!route && !["reviews", "discussions", "project_current"].includes(request.family))
+        (!route &&
+          !["reviews", "discussions", "project_current", "project_history", "relationships"].includes(request.family))
       )
         throw new Error("source_family_adapter_unavailable");
       assertAuthorized();
@@ -93,7 +95,39 @@ export function createGithubCollectionSource({
           },
         });
       let values;
-      if (request.family === "project_current") {
+      if (["project_history", "relationships"].includes(request.family)) {
+        if (request.family === "project_history" && !repository.allowedProjectIds?.length)
+          throw new Error("approved_project_scope_required");
+        const subjects = await scan(`${request.family}:subjects`, routes.issues, (items) =>
+          items.filter((item) => !item.pull_request),
+        );
+        if (subjects.length > 10000) throw new Error("source_dataset_budget_exceeded");
+        values = [];
+        for (const subject of subjects) {
+          if (!Number.isSafeInteger(subject.number) || subject.number < 1)
+            throw new Error("history_subject_unverified");
+          const records = await readTypedIssueHistory({
+            client,
+            source: sourceId,
+            repository,
+            number: subject.number,
+            family: request.family,
+            scanId: request.runId,
+            maxPages,
+            assertAuthorized,
+          });
+          values.push(
+            ...records.map((record) => ({
+              node_id: record.event.id,
+              html_url: record.subject.url,
+              source_revision: typedHistoryRevision(record),
+              created_at: record.event.createdAt,
+              actor: record.event.actor,
+            })),
+          );
+          if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
+        }
+      } else if (request.family === "project_current") {
         const allowedProjectIds = repository.allowedProjectIds ?? [];
         if (!allowedProjectIds.length) throw new Error("approved_project_scope_required");
         if (!client.scanGraphql) throw new Error("project_source_unavailable");
@@ -224,8 +258,9 @@ export function createGithubCollectionSource({
       if (offset > values.length) throw new Error("invalid_source_cursor");
       const facts = values.slice(offset, offset + request.limit).map((value) => {
         const subjectId = value.node_id ?? value.sha ?? (Number.isSafeInteger(value.id) ? String(value.id) : null);
-        const revision =
-          request.family === "timelines"
+        const revision = ["project_history", "relationships"].includes(request.family)
+          ? value.source_revision
+          : request.family === "timelines"
             ? githubTimelineRevision(value)
             : request.family === "reviews"
               ? githubSnapshotRevision(githubReviewRevision(value), request.runId)
@@ -247,12 +282,18 @@ export function createGithubCollectionSource({
           subjectId,
           sourceRevision: revision,
           sourceUrl: value.html_url,
-          evidence: request.family === "timelines" ? "observed_transition" : "current_state",
+          evidence: ["timelines", "project_history", "relationships"].includes(request.family)
+            ? "observed_transition"
+            : "current_state",
           actorId:
-            request.family === "timelines" && Number.isSafeInteger(value.actor?.id) && value.actor.id > 0
-              ? String(value.actor.id)
+            ["timelines", "project_history", "relationships"].includes(request.family) &&
+            Number.isSafeInteger(value.actor?.databaseId ?? value.actor?.id) &&
+            (value.actor?.databaseId ?? value.actor?.id) > 0
+              ? String(value.actor.databaseId ?? value.actor.id)
               : null,
-          occurredAt: request.family === "timelines" ? at(value.created_at) : null,
+          occurredAt: ["timelines", "project_history", "relationships"].includes(request.family)
+            ? at(value.created_at)
+            : null,
           state: value.merged_at
             ? "merged"
             : value.state === "closed"

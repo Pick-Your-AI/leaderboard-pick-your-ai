@@ -1145,3 +1145,23 @@ test("repository issue-event hydration preserves actor clocks without inferring 
   assert.equal(metrics(unknown, "assignments_coordinated")[0].actorId, null);
   assert.equal(metrics(unknown, "assignments_coordinated")[0].state, "unknown");
 });
+
+test("native issue events in the same second remain distinct while replays deduplicate", () => {
+  const input = envelope({
+    family: "triage",
+    action: "assigned",
+    payload: { issue: issue(), actor: fixture.merger, assignee: fixture.reviewer },
+    proof: {
+      verified: true,
+      source: "github_rest",
+      revision: at,
+      eventId: "github:2:issue-event:901",
+      isSynthetic: true,
+    },
+  });
+  const first = normalizeGithubObservation(input);
+  const replay = normalizeGithubObservation(input);
+  const next = normalizeGithubObservation({ ...input, proof: { ...input.proof, eventId: "github:2:issue-event:903" } });
+  assert.equal(metrics(first, "assignments_coordinated")[0].id, metrics(replay, "assignments_coordinated")[0].id);
+  assert.notEqual(metrics(first, "assignments_coordinated")[0].id, metrics(next, "assignments_coordinated")[0].id);
+});
