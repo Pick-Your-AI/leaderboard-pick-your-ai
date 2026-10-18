@@ -19,6 +19,12 @@ import {
   type PublicEvidenceAction,
 } from "@pick-your-ai/contracts";
 import { GithubReadClient } from "./client.js";
+import {
+  hasGithubRestSnapshotPrefix,
+  isGithubRestSnapshotFamily,
+  githubRestSnapshotSemanticRevision,
+  verifyGithubRestSnapshotRevision,
+} from "./rest-snapshot.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
@@ -1490,6 +1496,12 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       return none("repository_not_authorized_for_normalization");
     if (!text(input.policyVersion) || !time(input.observedAt))
       throw new Error("Pipeline policy and observation time are required");
+    if (
+      hasGithubRestSnapshotPrefix(input.fact.sourceRevision) &&
+      (!isGithubRestSnapshotFamily(input.family) ||
+        githubRestSnapshotSemanticRevision(input.fact.sourceRevision) === null)
+    )
+      return none("hydrated_source_revision_unverified");
     let repositoryClient: GithubReadClient | undefined;
     const client = () => (repositoryClient ??= options.client.forRepository(input.repository.id));
     if (input.family === "relationships" || input.family === "project_history") {
@@ -1765,26 +1777,29 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       if (!object(payload)) return none("missing_hydrated_source_object");
       const identities = [payload.node_id, payload.id, payload.sha].filter((value) => value !== undefined).map(String);
       if (!identities.includes(input.fact.subjectId)) return none("hydrated_subject_identity_mismatch");
-      const revisionMatches = options.verifyRevision
-        ? await options.verifyRevision(input, payload)
-        : timeline
-          ? input.fact.sourceRevision === githubTimelineRevision(payload)
-          : family === "review"
-            ? matchesSnapshotRevision(input.fact.sourceRevision, githubReviewRevision(payload))
-            : family === "discussion"
-              ? matchesSnapshotRevision(input.fact.sourceRevision, githubDiscussionRevision(payload))
-              : [
-                  payload.sha,
-                  payload.updated_at,
-                  payload.created_at,
-                  payload.submitted_at,
-                  payload.published_at,
-                  payload.updatedAt,
-                ].some(
-                  (value) =>
-                    value === input.fact.sourceRevision ||
-                    (time(value) !== null && time(value) === time(input.fact.sourceRevision)),
-                );
+      const revisionMatches = hasGithubRestSnapshotPrefix(input.fact.sourceRevision)
+        ? verifyGithubRestSnapshotRevision(input.family, payload, input.fact.sourceRevision) &&
+          (!options.verifyRevision || (await options.verifyRevision(input, payload)))
+        : options.verifyRevision
+          ? await options.verifyRevision(input, payload)
+          : timeline
+            ? input.fact.sourceRevision === githubTimelineRevision(payload)
+            : family === "review"
+              ? matchesSnapshotRevision(input.fact.sourceRevision, githubReviewRevision(payload))
+              : family === "discussion"
+                ? matchesSnapshotRevision(input.fact.sourceRevision, githubDiscussionRevision(payload))
+                : [
+                    payload.sha,
+                    payload.updated_at,
+                    payload.created_at,
+                    payload.submitted_at,
+                    payload.published_at,
+                    payload.updatedAt,
+                  ].some(
+                    (value) =>
+                      value === input.fact.sourceRevision ||
+                      (time(value) !== null && time(value) === time(input.fact.sourceRevision)),
+                  );
       if (!revisionMatches) return none("hydrated_source_revision_unverified");
       if (family === "issue" && "pull_request" in payload) return none("pull_request_is_not_an_issue_creation_unit");
       // Hydration proves immutable creation/submission fields. It does not prove

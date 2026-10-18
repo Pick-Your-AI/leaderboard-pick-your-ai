@@ -36,6 +36,7 @@ const collectorReasons = [
   "attempt_overdue",
   "partial_collection",
   "completion_time_unknown",
+  "reconciliation_gap",
   "reconciliation_overdue",
   "completed_empty_window",
   "source_count_unknown",
@@ -320,6 +321,9 @@ function collector(value: unknown, asOf: string, budget: number): OperatorHealth
         break;
       case "completion_time_unknown":
         coherent = state === "unknown" && timely && (lastSuccessAt === null || reconciledThrough === null);
+        break;
+      case "reconciliation_gap":
+        coherent = state === "unknown" && timely && lastSuccessAt !== null && reconciledThrough !== null;
         break;
       case "reconciliation_overdue":
         coherent = state === "overdue" && timely && lastSuccessAt !== null && reconciledThrough !== null && !completed;

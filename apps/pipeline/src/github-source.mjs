@@ -1,6 +1,7 @@
 import { GithubClientError } from "../../../packages/github/dist/client.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "../../../packages/github/dist/timeline-history.js";
 import { assertPublicProjects } from "../../../packages/github/dist/project-snapshots.js";
+import { githubRestSnapshotRevision, isGithubRestSnapshotFamily } from "../../../packages/github/dist/rest-snapshot.js";
 import {
   readPublicSubjectProjectSnapshot,
   projectSubjectSnapshotRevision,
@@ -48,6 +49,30 @@ const at = (value) => {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 19) === value.slice(0, 19)
     ? date.toISOString()
     : null;
+};
+
+// These APIs expose an actual updated/event-time lower bound. Parent updated
+// order, commit author dates and current Project positions are not change feeds.
+export const githubRecentSourceFamilies = Object.freeze(["issues", "comments", "project_history", "relationships"]);
+const sourceWindow = (request) => {
+  if (request.since == null) return null;
+  const since = at(request.since),
+    until = at(request.until);
+  if (since === null || until === null || since >= until) throw new Error("invalid_source_window");
+  if (!githubRecentSourceFamilies.includes(request.family)) throw new Error("source_recent_window_unsupported");
+  // REST `since` is strictly after the supplied second. Read one extra whole
+  // second, then apply the exact inclusive boundary to the returned observations.
+  const apiSince = new Date(Math.floor(Date.parse(since) / 1000) * 1000 - 1000).toISOString().replace(".000Z", "Z");
+  if (at(apiSince) === null) throw new Error("invalid_source_window");
+  return { since, until, apiSince };
+};
+const recentRoute = (route, window) => {
+  const [path, query] = route.split("?");
+  const parameters = new URLSearchParams(query);
+  parameters.set("since", window.apiSince);
+  parameters.set("sort", "updated");
+  parameters.set("direction", "asc");
+  return path + "?" + parameters.toString();
 };
 
 /** Read-only REST source with complete, bounded review fanout. */
@@ -106,6 +131,7 @@ export function createGithubCollectionSource({
           !["reviews", "discussions", "project_current", "project_history", "relationships"].includes(request.family))
       )
         throw new Error("source_family_adapter_unavailable");
+      const window = sourceWindow(request);
       const client = readClient.forRepository(repository.id);
       assertAuthorized();
       let verification;
@@ -191,6 +217,7 @@ export function createGithubCollectionSource({
             subjectId: subject.node_id,
             family: request.family,
             scanId: request.runId,
+            ...(window ? { since: window.apiSince } : {}),
             maxPages,
             assertAuthorized,
           });
@@ -299,7 +326,7 @@ export function createGithubCollectionSource({
           if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
         }
       } else {
-        values = await scan(request.family, route, (body) =>
+        values = await scan(request.family, window ? recentRoute(route, window) : route, (body) =>
           request.family === "issues" ? body.filter((item) => !item.pull_request) : body,
         );
       }
@@ -309,6 +336,17 @@ export function createGithubCollectionSource({
           node_id: Number.isSafeInteger(value.id) && value.id > 0 ? String(value.id) : null,
           html_url: value.issue?.html_url,
         }));
+      if (window) {
+        const history = ["project_history", "relationships"].includes(request.family);
+        values = values.filter((value) => {
+          const timestamp = at(history ? value.created_at : value.updated_at);
+          if (timestamp === null) throw new Error("source_window_timestamp_unverified");
+          // Current objects have no historical as-of representation. Retain an
+          // observation newer than the event cutoff; never turn it into a past
+          // transition or silently drop it as proof of complete source coverage.
+          return timestamp >= window.since && (!history || timestamp <= window.until);
+        });
+      }
       assertAuthorized();
       if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
       const expectedCount = projectSubjectCount ?? values.length;
@@ -316,6 +354,8 @@ export function createGithubCollectionSource({
       const selected = projectSubjectCount === null ? values.slice(offset, offset + request.limit) : values;
       const facts = selected.map((value) => {
         const subjectId = value.node_id ?? value.sha ?? (Number.isSafeInteger(value.id) ? String(value.id) : null);
+        const nativeRevision =
+          value.sha ?? at(value.updated_at) ?? at(value.submitted_at) ?? at(value.published_at) ?? at(value.created_at);
         const revision = ["project_history", "relationships"].includes(request.family)
           ? value.source_revision
           : request.family === "timelines"
@@ -324,11 +364,9 @@ export function createGithubCollectionSource({
               ? githubSnapshotRevision(githubReviewRevision(value), request.runId)
               : ["discussions", "project_current"].includes(request.family)
                 ? githubSnapshotRevision(value.source_revision, request.runId)
-                : (value.sha ??
-                  at(value.updated_at) ??
-                  at(value.submitted_at) ??
-                  at(value.published_at) ??
-                  at(value.created_at));
+                : isGithubRestSnapshotFamily(request.family) && nativeRevision
+                  ? githubRestSnapshotRevision(request.family, value, request.runId)
+                  : nativeRevision;
         if (
           typeof subjectId !== "string" ||
           !revision ||

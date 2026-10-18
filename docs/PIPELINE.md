@@ -39,6 +39,7 @@ The protected configuration has this shape:
 
 - `version`, `organization`, `approvalReceipt`.
 - `repositories`: reviewed numeric `id`, numeric `installationId`, canonical `owner/repo` `slug`, approved `families`, and `approvalReceipt`.
+- Optional `reconciliation`: the exact approved `lookbackMs`, `overlapMs` and `fullAuditsPerCycle` policy described in [bounded reconciliation](reconciliation-windows.md). It is absent by default; it does not create a schedule or source grant.
 - `policies`: an actual `MetricPolicy`, its exact `metrics.stableJSON(policy)` signature, an independent `approvalReceipt`, and optional public `policyLink`.
 - `scopes`: exact public API scopes `{organization,repository,workstream,start,end}`. Repository IDs are numeric strings or null. Date bounds are both explicit UTC instants or both null. Null bounds mean the API's all-time lens; a last-30-day view must use explicit reviewed dates. Unknown/unmaterialized scopes are unavailable rather than reconstructed by summing overlapping aggregates.
 

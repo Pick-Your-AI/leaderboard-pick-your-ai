@@ -61,6 +61,13 @@ recognition or source-generation change replaces that row's cycle; unrelated
 controls audit/current-state revisions do not restart collection. Explicit
 `runOnce({ cutoff })` callers retain their fixed-window contract.
 
+An approved optional [reconciliation policy](reconciliation-windows.md) selects
+recent overlapping windows and rotating full audits for implicit reconcile cycles.
+Its complete per-family plan commits with the continuation before source reads;
+restart reloads the original plan, including completed empty rows. The existing
+page budget and continuous interval still bound execution. Without that policy,
+the original per-family scan selection is unchanged.
+
 Approved named-period templates resolve inside a new continuation's transaction
 from its selected event cutoff, including the complete role and Project scope keys
 whose heads are retained. A resumed cycle keeps those exact windows when the clock
@@ -124,7 +131,9 @@ this change does not select an expiry interval or implement generic derived-stor
 receipts, but does not solve coordinated PostgreSQL/SQLite/source/cache deletion.
 Accepted retention policy, protected host composition, actual source permissions,
 operating ownership and deployed shutdown/recovery evidence remain release gates.
-Scheduled recent-window overlap, rotating audit policy and actual omitted-webhook
-reconciliation acceptance remain separate work in #64. A completed page traversal
+The optional #64 recent-window and audit policy has its own source/SQL/runtime
+validation in the linked reconciliation guide. Approved operating configuration
+and actual deployed omitted-webhook recovery remain separate operating and release
+limits. A completed page traversal
 still reports partial, historically uncertified coverage and does not manufacture
 actor or occurrence-time evidence.

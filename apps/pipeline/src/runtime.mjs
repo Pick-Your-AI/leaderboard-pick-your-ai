@@ -11,6 +11,13 @@ import {
   publicationMonitorIdentity,
 } from "./scope-storage.mjs";
 import { retainedRankHistory } from "./rank-history.mjs";
+import { readImportedHistory } from "./reconciliation-history.mjs";
+import {
+  validateReconciliationPolicy,
+  reconciliationContextDigest,
+  prepareReconciliationPlan,
+} from "./reconciliation-plan.mjs";
+import { readReconciliationProgress, leastReconciliationTime } from "./reconciliation-progress.mjs";
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
 import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
 import { AggregateExplanationStore } from "./aggregate-explanations.mjs";
@@ -211,6 +218,7 @@ export async function createPipeline(options) {
       fail("synthetic_data_forbidden_in_public_runtime");
   };
   const config = copy(options.config ?? { version: "unconfigured", repositories: [], policies: [], scopes: [] });
+  const reconciliationPolicy = validateReconciliationPolicy(config.reconciliation);
   const projectWorkstreamMappings = canonicalProjectWorkstreamMappings(
     config,
     c.github?.validateProjectWorkstreamMapping,
@@ -579,6 +587,57 @@ export async function createPipeline(options) {
       fail("recognition_changed_during_run");
     if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
   };
+  const scanContext = (mode, sources, revision, fingerprint) => ({
+    key: digest(["bounded-scan/v1", config, dataMode, mode]),
+    contextHash: digest([revision, recognitionBindings.length ? fingerprint : null, sources]),
+  });
+  async function reconciliationState(tx, repositories, asOf, { untilCutoff = asOf, scan = null } = {}) {
+    const state = controlsStore.read();
+    const revision = restrictConfiguration(state).revision;
+    const fingerprint = recognitionFingerprint(state, recognitionBindings);
+    // The plan context binds the complete configuration, even for a single-repo
+    // public or private read. Never derive another context from a scope subset.
+    const access = (
+      await tx.query(
+        "SELECT repository_id,installation_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE",
+        [config.repositories.map((repo) => repo.id)],
+      )
+    ).rows;
+    if (
+      access.length !== config.repositories.length ||
+      access.some(
+        (row) =>
+          row.state !== "public" ||
+          String(row.installation_id) !==
+            String(config.repositories.find((repo) => String(repo.id) === String(row.repository_id))?.installationId),
+      )
+    )
+      fail("reconciliation_source_context_unavailable");
+    const sources = access.map((row) => ({
+      repositoryId: Number(row.repository_id),
+      generation: String(row.generation),
+    }));
+    const identity = scanContext("reconcile", sources, revision, fingerprint);
+    if (scan && (scan.key !== identity.key || scan.contextHash !== identity.contextHash))
+      fail("reconciliation_source_context_changed");
+    const progress = await readReconciliationProgress(tx, repositories, asOf, {
+      contextDigest: reconciliationContextDigest(identity),
+      untilCutoff,
+    });
+    const confirmCurrent = () => {
+      try {
+        const current = controlsStore.read();
+        return (
+          restrictConfiguration(current).revision === revision &&
+          (!recognitionBindings.length || recognitionFingerprint(current, recognitionBindings) === fingerprint)
+        );
+      } catch {
+        return false;
+      }
+    };
+    if (!confirmCurrent()) fail("reconciliation_source_context_changed");
+    return { progress, sources, confirmCurrent };
+  }
   const inbox = new c.ingestion.InboxStore(db);
   const outbox = new c.ingestion.OutboxStore(db);
   if (options.webhookDispatch !== undefined && typeof options.webhookDispatch !== "boolean")
@@ -1361,22 +1420,16 @@ export async function createPipeline(options) {
         repos.map((repo) => repo.id),
       ])
     ).rows.map((row) => row.document.fact);
-    // Ordinary reconcile runs append activity without rewriting history. Retain
-    // the immutable facts actually introduced by explicit backfill/audit runs,
-    // including committed pages of a later-failed run. Current-state refreshes
-    // must not erase that lineage when they replace the selected normalization.
+    // Keep legacy imports literal. Versioned observations retain every read,
+    // while unchanged audits do not manufacture another semantic history epoch.
+    // Committed pages of a later-failed audit remain part of its actual evidence.
     const importedHistory = replayedBackfillRevision
       ? []
-      : (
-          await db.query(
-            `SELECT fact.first_run_id, fact.fact_key FROM leaderboard_ingestion.source_facts AS fact
-        JOIN leaderboard_ingestion.collection_runs AS run ON run.run_id=fact.first_run_id
-        WHERE fact.repository_id=ANY($1::bigint[]) AND fact.observed_at <= $2
-        AND run.mode IN ('backfill','audit') ORDER BY fact.first_run_id,fact.fact_key LIMIT 10001`,
-            [repos.map((repo) => repo.id), observationCutoff],
-          )
-        ).rows.map((row) => [row.first_run_id, row.fact_key]);
-    if (importedHistory.length > 10_000) fail("reconciliation_history_budget_exceeded");
+      : await readImportedHistory(
+          db,
+          repos.map((repo) => repo.id),
+          observationCutoff,
+        );
     const engineScope = {
       ...window,
       repos: repos.map((repo) => String(repo.id)),
@@ -1390,21 +1443,48 @@ export async function createPipeline(options) {
     assertRunConfiguration();
     for (const actor of actors.values()) if (state.profiles[actor.id]?.suppressed) actor.publicState = "suppressed";
     // Completed scans establish bounded progress, not complete historic source capability.
+    const reconciliation = reconciliationPolicy
+      ? await db.transaction((tx) =>
+          reconciliationState(tx, repos, observationCutoff, { untilCutoff: cutoff, scan: scan?.plan ? scan : null }),
+        )
+      : null;
     const coverage = repos.flatMap((repo) =>
-      [...new Set(config.policies.flatMap((item) => item.policy.sources))].map((source) => ({
-        schemaVersion: "leaderboard/v1",
-        state: "partial",
-        source,
-        scopeId: String(repo.id),
-        windowStart: window.from,
-        windowEnd: window.to,
-        knownStart: null,
-        lastSuccessfulSync: cutoff,
-        sourceWatermark: cutoff,
-        missingPages: 0,
-        permissionsMissing: [],
-        sourceErrors: ["historical_capability_not_certified"],
-      })),
+      [...new Set(config.policies.flatMap((item) => item.policy.sources))].map((source) => {
+        const progress = reconciliation?.progress.filter((row) => row.repositoryId === repo.id);
+        const github = source.startsWith("github_");
+        const lastSuccessfulSync = reconciliation
+          ? github
+            ? leastReconciliationTime(progress.map((row) => row.lastSuccessfulSync))
+            : null
+          : cutoff;
+        const sourceWatermark = reconciliation
+          ? github
+            ? leastReconciliationTime(progress.map((row) => row.reconciledThrough))
+            : null
+          : cutoff;
+        const sourceErrors = ["historical_capability_not_certified"];
+        if (reconciliation && github) {
+          if (sourceWatermark === null) sourceErrors.push("reconciliation_baseline_unavailable");
+          else if (sourceWatermark < cutoff) sourceErrors.push("reconciliation_gap");
+          if (progress.some((row) => row.expectedCount === null || row.expectedCount !== row.itemCount))
+            sourceErrors.push("reconciliation_count_unknown");
+          if (progress.some((row) => row.state !== "complete")) sourceErrors.push("reconciliation_incomplete");
+        }
+        return {
+          schemaVersion: "leaderboard/v1",
+          state: "partial",
+          source,
+          scopeId: String(repo.id),
+          windowStart: window.from,
+          windowEnd: window.to,
+          knownStart: null,
+          lastSuccessfulSync,
+          sourceWatermark,
+          missingPages: 0,
+          permissionsMissing: [],
+          sourceErrors,
+        };
+      }),
     );
     const frozen = {
       datasetId: digest([facts, corrections]),
@@ -1629,22 +1709,32 @@ export async function createPipeline(options) {
           return publication;
         };
         await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`pipeline:${scopeKey(scope)}`]);
+        const scopeSources = generations.map((row) => ({
+          repositoryId: Number(row.repository_id),
+          generation: String(row.generation),
+        }));
+        const expectedSources = reconciliation?.sources ?? scopeSources;
         const access = (
           await tx.query(
             "SELECT repository_id,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) AND state='public' FOR SHARE",
-            [repos.map((repo) => repo.id)],
+            [expectedSources.map((source) => source.repositoryId)],
           )
         ).rows;
         if (
-          access.length !== repos.length ||
-          generations.some(
-            (prior) =>
-              !access.some(
-                (current) =>
-                  String(current.repository_id) === String(prior.repository_id) &&
-                  String(current.generation) === String(prior.generation),
-              ),
-          )
+          access.length !== expectedSources.length ||
+          // The full reconciliation context supplements the generations captured
+          // before normalization; it cannot replace that earlier source fence.
+          expectedSources
+            .concat(scopeSources)
+            .some(
+              (prior) =>
+                !access.some(
+                  (current) =>
+                    String(current.repository_id) === String(prior.repositoryId) &&
+                    String(current.generation) === prior.generation,
+                ),
+            ) ||
+          reconciliation?.confirmCurrent() === false
         )
           fail("source_revoked_before_publication");
         const removed = new Set(
@@ -1916,18 +2006,22 @@ export async function createPipeline(options) {
               [selected.repository_ids],
             )
           ).rows.map((row) => row.subject_id);
-          const currentSourceHealth = health
-            ? await readCurrentSourceHealth(
-                tx,
-                repositoriesFor(scope).filter((repo) =>
-                  selected.document.snapshot.coverage.some(
-                    (coverage) => coverage.scopeId === String(repo.id) && coverage.source.startsWith("github_"),
-                  ),
+          const healthRepositories = health
+            ? repositoriesFor(scope).filter((repo) =>
+                selected.document.snapshot.coverage.some(
+                  (coverage) => coverage.scopeId === String(repo.id) && coverage.source.startsWith("github_"),
                 ),
-                utc(now()),
               )
+            : [];
+          const healthAt = health ? utc(now()) : null;
+          const healthReconciliation =
+            health && reconciliationPolicy && healthRepositories.length
+              ? await reconciliationState(tx, healthRepositories, healthAt)
+              : null;
+          const currentSourceHealth = health
+            ? await readCurrentSourceHealth(tx, healthRepositories, healthAt, healthReconciliation?.progress)
             : undefined;
-          if (!(await approved(tx)) || signal.aborted) return null;
+          if (!(await approved(tx)) || signal.aborted || healthReconciliation?.confirmCurrent() === false) return null;
           // Read current private controls after all awaited I/O, even for pinned historical snapshots.
           const controls = controlsStore.read();
           const overlay = restrictConfiguration(controls);
@@ -2036,12 +2130,7 @@ export async function createPipeline(options) {
       if (sources.length !== config.repositories.length) fail("pipeline_scan_source_changed");
       scan = await scanContinuations.claim(
         {
-          key: digest(["bounded-scan/v1", config, dataMode, mode]),
-          contextHash: digest([
-            runConfigurationRevision,
-            recognitionBindings.length ? runRecognitionFingerprint : null,
-            sources,
-          ]),
+          ...scanContext(mode, sources, runConfigurationRevision, runRecognitionFingerprint),
           cutoff,
           sources,
         },
@@ -2051,6 +2140,17 @@ export async function createPipeline(options) {
           resolvePublicationWindows(config.scopes, savedCutoff, c.metrics.resolveMetricWindow).map(({ scope }) =>
             scopeKey(scope),
           ),
+        reconciliationPolicy && mode === "reconcile"
+          ? (tx, selected, { fresh }) =>
+              prepareReconciliationPlan(tx, {
+                scan: selected,
+                repositories: config.repositories,
+                policy: reconciliationPolicy,
+                fresh,
+                startInTransaction: (session, request) => collection.startInTransaction(session, request),
+                readProgress: readReconciliationProgress,
+              })
+          : null,
       );
       cutoff = scan.cutoff;
     }
@@ -2058,18 +2158,30 @@ export async function createPipeline(options) {
     const progress = [];
     for (const repo of config.repositories) {
       await verifyRepository(repo, cutoff);
-      for (const family of repo.families) {
-        const runId = digest([
-          config.version,
-          repo.id,
-          family,
-          cutoff,
-          mode,
-          dataMode,
-          ...(scan ? [scan.token] : []),
-          ...(dispatch ? [dispatch.lease.operation.operationKey, dispatch.lease.collectionRevision] : []),
-        ]);
-        await collection.start({ runId, repositoryId: repo.id, family, mode, since: null, until: cutoff });
+      const requests = scan?.plan
+        ? scan.plan.filter((request) => request.repositoryId === repo.id)
+        : repo.families.map((family) => ({
+            runId: digest([
+              config.version,
+              repo.id,
+              family,
+              cutoff,
+              mode,
+              dataMode,
+              ...(scan ? [scan.token] : []),
+              ...(dispatch ? [dispatch.lease.operation.operationKey, dispatch.lease.collectionRevision] : []),
+            ]),
+            repositoryId: repo.id,
+            family,
+            mode,
+            since: null,
+            until: cutoff,
+          }));
+      for (const request of requests) {
+        const { runId, family } = request;
+        // Scheduled plan rows were committed atomically with the continuation.
+        // Legacy/explicit callers retain their existing per-family start path.
+        if (!scan?.plan) await collection.start(request);
         const collectionStarted = performance.now();
         let status = "progress";
         for (let page = 0; page < maxPages && status === "progress"; page++) {
@@ -2276,10 +2388,13 @@ export async function createPipeline(options) {
             }
           };
           if (!current()) fail("operation_health_unavailable");
+          const asOf = utc(now());
+          const reconciliation = reconciliationPolicy ? await reconciliationState(tx, [repository], asOf) : null;
           const read = await readOperatorHealth(tx, {
             scope,
             repository,
-            asOf: utc(now()),
+            asOf,
+            reconciliationProgress: reconciliation?.progress,
             freshnessBudgetSeconds: diagnosticOptions.freshnessBudgetSeconds,
             protocol: c.ingestion,
             verifyPublications: verifyReplayPublications,
@@ -2293,7 +2408,11 @@ export async function createPipeline(options) {
             },
           });
           if (!(await approved(tx))) fail("operation_health_changed");
-          return { health: read.health, confirmCurrent: () => current() && read.confirmCurrent() === true };
+          return {
+            health: read.health,
+            confirmCurrent: () =>
+              current() && reconciliation?.confirmCurrent() !== false && read.confirmCurrent() === true,
+          };
         },
       })
     : null;
