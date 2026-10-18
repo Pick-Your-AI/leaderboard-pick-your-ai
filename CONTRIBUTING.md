@@ -26,6 +26,8 @@ Create a branch and pull request against `main`. Reference the work-package issu
 
 The canonical baseline is [planning/project-backlog.json](planning/project-backlog.json). When scope changes, update metric/UI mappings, decision and release records, then regenerate documentation. Match existing stable LB IDs to native issues rather than publishing duplicates. GitHub carries live execution state; the baseline must not reset assignees or progress.
 
+Use the [offline-first publication reconciler](docs/PUBLICATION.md) to verify existing issues and native parents. Its CLI is read-only. Authorized publication uses durable receipts and a connected-integration adapter; never force a retry by discarding an uncertain receipt or overwrite live issue bodies from the baseline.
+
 ```bash
 python scripts/sync_baseline.py
 python scripts/render_docs.py
