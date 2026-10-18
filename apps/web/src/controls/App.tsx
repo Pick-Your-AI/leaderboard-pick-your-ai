@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { canReview, control, ControlsFailure, verifiedSession, type Receipt, type Session } from "./client.ts";
 
+import { Spotlights, type Nomination } from "./Spotlights.tsx";
+
 type Run = (path: string, input: unknown) => Promise<boolean>;
 const categories = [
   "governance",
@@ -192,6 +194,19 @@ function ReceiptCard({
         <summary>Audit history</summary>
         <pre>{JSON.stringify(r.history, null, 2)}</pre>
       </details>
+      {own && r.kind === "evidence" && r.status === "accepted" && (
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            await run("/controls/spotlights", { claimId: r.id, consent: true });
+          }}
+        >
+          <label>
+            <input type="checkbox" required /> I opt in to editorial spotlight consideration for this accepted evidence
+          </label>
+          <button>Nominate for spotlight</button>
+        </form>
+      )}
       {own && !["withdrawn", "merged", "applied"].includes(r.status) && (
         <form
           onSubmit={async (e) => {
@@ -289,6 +304,7 @@ export function ControlsApp() {
     Array<{ id: string; version: number; locator: string; scope: string; consent: string }>
   >([]);
   const [configuration, setConfiguration] = useState<unknown>(null);
+  const [nominations, setNominations] = useState<Nomination[]>([]);
   const generation = useRef(0);
   const [profile, setProfile] = useState<ProfileData | null>(null);
   function clear() {
@@ -297,6 +313,7 @@ export function ControlsApp() {
     setInvitations([]);
     setConfiguration(null);
     setProfile(null);
+    setNominations([]);
     setNotice("");
   }
   async function reload() {
@@ -306,10 +323,11 @@ export function ControlsApp() {
     clear();
     try {
       const s = verifiedSession(await control<Session>("/controls/session"));
-      const [p, r, i] = await Promise.all([
+      const [p, r, i, editorial] = await Promise.all([
         control<ProfileData>("/controls/profile"),
         control<{ requests: Receipt[] }>("/controls/requests"),
         control<{ invitations: typeof invitations }>("/controls/invitations"),
+        control<{ nominations: Nomination[] }>("/controls/spotlights/queue"),
       ]);
       let c: unknown = null;
       if (admin && s.roles.includes("operator")) c = await control("/controls/configuration");
@@ -326,11 +344,14 @@ export function ControlsApp() {
         !Array.isArray(i.invitations)
       )
         throw new Error("Invalid controls response.");
+      if (!Array.isArray(editorial.nominations)) throw new Error("Invalid nomination response.");
+      setNominations(editorial.nominations);
       setProfile(p);
       setSession(s);
       setReceipts(r.requests);
       setInvitations(i.invitations);
       setConfiguration(c);
+      return true;
     } catch (e) {
       if (current !== generation.current) return;
       clear();
@@ -345,6 +366,7 @@ export function ControlsApp() {
     const visibility = () => {
       if (document.hidden) {
         ++generation.current;
+        setBusy(false);
         clear();
       } else void reload();
     };
@@ -358,6 +380,8 @@ export function ControlsApp() {
     if (!session) return;
     const timer = setTimeout(
       () => {
+        ++generation.current;
+        setBusy(false);
         clear();
         setError("Your session ended. Sign in again.");
       },
@@ -366,26 +390,31 @@ export function ControlsApp() {
     return () => clearTimeout(timer);
   }, [session]);
   const run: Run = async (path, input) => {
-    if (busy || !session) return false;
+    if (busy || !session || document.hidden) return false;
+    let current = generation.current;
     setBusy(true);
     setError("");
     setNotice("");
     try {
       const result = await control<unknown>(path, session, input);
+      if (current !== generation.current || document.hidden) return false;
       if (path === "/controls/logout" || path === "/controls/sessions/revoke") {
         clear();
         setNotice("Session revoked.");
       } else {
-        await reload();
+        current += 1;
+        const fresh = await reload();
+        if (!fresh || current !== generation.current || document.hidden) return false;
         setNotice(`Service confirmed: ${JSON.stringify(result)}`);
       }
       return true;
     } catch (e) {
+      if (current !== generation.current || document.hidden) return false;
       if (e instanceof ControlsFailure && [401, 403].includes(e.status)) clear();
       setError(e instanceof Error ? e.message : "Request failed.");
       return false;
     } finally {
-      setBusy(false);
+      if (current === generation.current && !document.hidden) setBusy(false);
     }
   };
   const authorized = !admin || !!session?.roles.some((r) => ["operator", "reviewer", "privacy"].includes(r));
@@ -485,6 +514,7 @@ export function ControlsApp() {
                     <ReceiptCard key={`${r.id}:${r.version}`} receipt={r} session={session} run={run} admin={admin} />
                   ))}
               </section>
+              <Spotlights nominations={nominations} session={session} run={run} admin={admin} />
               {admin && session.roles.includes("operator") && (
                 <section>
                   <h2>Configuration and operations</h2>

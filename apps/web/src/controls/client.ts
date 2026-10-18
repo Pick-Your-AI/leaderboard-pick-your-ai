@@ -36,7 +36,7 @@ export class ControlsFailure extends Error {
 /** Same-origin controls only. Never reuse the public API base URL or persist CSRF tokens. */
 export async function control<T>(path: string, session?: Session, input?: unknown): Promise<T> {
   if (
-    !/^\/controls\/(session|logout|sessions\/revoke|profile(?:\/suppression)?|requests(?:\/[a-f0-9-]{36}(?:\/(review|appeal|withdraw|consent|amend))?)?|invitations|configuration)$/.test(
+    !/^\/controls\/(spotlights(?:\/(?:queue|[a-f0-9-]{36}))?|session|logout|sessions\/revoke|profile(?:\/suppression)?|requests(?:\/[a-f0-9-]{36}(?:\/(review|appeal|withdraw|consent|amend))?)?|invitations|configuration)$/.test(
       path,
     )
   )
@@ -57,7 +57,25 @@ export async function control<T>(path: string, session?: Session, input?: unknow
   if (!response.ok) throw new ControlsFailure(response.status);
   if (!response.headers.get("content-type")?.includes("application/json"))
     throw new Error("Controls service unavailable.");
-  return response.json() as Promise<T>;
+  if (!response.body) throw new Error("Missing controls response.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let size = 0,
+    body = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 2_000_000) throw new Error("Controls response exceeds the supported size.");
+      body += decoder.decode(value, { stream: true });
+    }
+    body += decoder.decode();
+    return JSON.parse(body) as T;
+  } finally {
+    await reader.cancel();
+    reader.releaseLock();
+  }
 }
 export function verifiedSession(value: Session): Session {
   if (

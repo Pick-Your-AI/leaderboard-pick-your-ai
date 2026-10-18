@@ -53,3 +53,16 @@ test("controls client fixes same-origin credentials, forbids arbitrary paths, an
     globalThis.fetch = previous;
   }
 });
+
+test("controls rejects oversized bodies and invalid JSON rather than trusting a successful status", async () => {
+  const previous = globalThis.fetch;
+  try {
+    globalThis.fetch = async () =>
+      new Response(" ".repeat(2_000_001), { headers: { "content-type": "application/json" } });
+    await assert.rejects(() => control("/controls/session"), /exceeds/);
+    globalThis.fetch = async () => new Response("not json", { headers: { "content-type": "application/json" } });
+    await assert.rejects(() => control("/controls/session"));
+  } finally {
+    globalThis.fetch = previous;
+  }
+});

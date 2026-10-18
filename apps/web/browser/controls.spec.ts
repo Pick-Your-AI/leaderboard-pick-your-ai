@@ -30,6 +30,7 @@ async function controls(page: Page, roles: string[] = [], expires = Date.now() +
       },
       "/controls/invitations": { invitations: [] },
       "/controls/configuration": { revision: 0, proposals: {} },
+      "/controls/spotlights/queue": { nominations: [] },
     };
     await route.fulfill({ json: responses[path] ?? {} });
   });
@@ -116,4 +117,67 @@ test("receipt conflict does not retry or claim success", async ({ page }) => {
   await expect(page.getByRole("alert")).toContainText("Reload before trying again");
   await expect(page.getByText(/Service confirmed/)).toHaveCount(0);
   expect(writes).toHaveLength(0);
+});
+
+test("late mutation after hiding cannot restore a private receipt or overwrite a reopened session", async ({
+  page,
+}) => {
+  await controls(page);
+  let release!: () => void;
+  let started!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const requested = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  await page.route("**/controls/profile", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fallback();
+      return;
+    }
+    started();
+    await pending;
+    await route.fulfill({ json: { id: "private-late-receipt", saved: true } });
+  });
+  await page.goto("/account");
+  await page.getByLabel("Replace my optional profile with these values").check();
+  await page.getByRole("button", { name: "Save profile" }).click();
+  await requested;
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  release();
+  await expect(page.getByLabel("Bio (up to 500 characters)")).toHaveCount(0);
+  await expect(page.getByText(/private-late-receipt/)).toHaveCount(0);
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect(page.getByLabel("Bio (up to 500 characters)")).toHaveValue("Saved bio");
+  await expect(page.getByText(/private-late-receipt/)).toHaveCount(0);
+});
+
+test("editorial nomination decisions require explicit public explanation and current version", async ({ page }) => {
+  const writes = await controls(page, ["reviewer"]);
+  await page.route("**/controls/spotlights/queue", (r) =>
+    r.fulfill({
+      json: {
+        nominations: [
+          { id, owner: "2", claimId: "accepted-evidence", claimVersion: 2, status: "pending", version: 4, history: [] },
+        ],
+      },
+    }),
+  );
+  await page.goto("/admin");
+  await page.getByLabel("Nomination action").selectOption("accept");
+  await page.getByLabel("Public selection explanation").fill("Reviewed contribution helps new contributors.");
+  await page.getByLabel("I independently reviewed this nomination and have no conflict of interest").check();
+  await page.getByRole("button", { name: "Record nomination decision" }).click();
+  await expect(page.getByRole("status")).toContainText("Service confirmed");
+  expect(writes[0]).toMatchObject({
+    path: `/controls/spotlights/${id}`,
+    body: { version: 4, action: "accept", reason: "Reviewed contribution helps new contributors.", conflict: false },
+  });
 });
