@@ -26,7 +26,8 @@ export function renderContributorCard(
   });
   for (const key of ["repository", "workstream", "start", "end"] as const)
     if (scope[key] !== null) params.set(key, scope[key]);
-  const href = `/api/v1/contributors/${encodeURIComponent(actorId)}?${params}`;
+  params.set("ui", "api");
+  const href = `/contributors/${encodeURIComponent(actorId)}?${params}`;
   const evidence = read.selected.evidence.filter((entry) =>
     row.evidenceIds.includes(entry.contribution.contributionId),
   );

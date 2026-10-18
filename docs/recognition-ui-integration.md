@@ -1,6 +1,6 @@
 # Public recognition component integration
 
-Standalone components live in `apps/web/src/remote/Recognition.tsx`. They are not mounted by this change because concurrent PR #153 owns the public app integration.
+Standalone components live in `apps/web/src/remote/Recognition.tsx`. They are mounted on validated contributor profiles and the current organization overview in the public app.
 
 On a successfully validated contributor profile, mount `ContributorRecognition` with:
 
@@ -14,10 +14,17 @@ Remove the component whenever its parent profile becomes unavailable or is being
 
 On the current unfiltered organization overview, mount `EditorialSpotlights` only if a same-origin controls deployment is configured. Pass `controlsBase="/controls"`, the explicitly configured `organization` and `selected`. This API does not support historical or filtered scopes: the component rejects them before fetching. Do not describe its selections as part of a pinned metric snapshot. Source eligibility is still enforced by the controls backend and defaults to denial.
 
-Both components abort replaced requests, clear their prior evidence at every refresh, clear errors rather than keeping stale successful data, and refresh every 30 seconds plus browser visibility changes. Responses are allowlisted and source URLs restricted to public GitHub locators. Text is rendered by React without HTML injection. Backend suppression checks remain authoritative when a card/source view is opened. Downloaded copies cannot be remotely withdrawn.
+Both components abort replaced requests, preserve existing same-selection DOM while revalidating so focused source links remain focused, clear evidence on hidden state, changed selection or error, and refresh every 30 seconds plus browser visibility changes. Responses are allowlisted and source URLs restricted to public GitHub locators. Text is rendered by React without HTML injection. Backend suppression checks remain authoritative when a card/source view is opened. Downloaded copies cannot be remotely withdrawn.
 
 ## Validation and remaining browser integration
 
 Client tests cover exact scope/pin binding, dropped pagination/search filters, mismatched actor/policy/snapshot rejection, unsafe URLs, bounded evidence, private-field omission and unapproved-policy failures without fallback. Web TypeScript validation passes.
 
-After mounting in the app, run browser journeys for: dated card navigation; unapproved achievement policy; successful accepted evidence and qualifying artifact links; a second request failing or suppressing evidence after success; changing actor/scope while requests are pending; current-only editorial scope; keyboard traversal and accessibility checks. Standalone components alone do not claim those integrated journeys passed or close #69/#70/#123/#124.
+Real-service browser journeys cover dated HTML card navigation back to the visible pinned portfolio, approved and unapproved achievement handling, source-link focus preservation across successful refresh, failure clearing, and current-only editorial scope with source-eligibility revocation. The recognition region also passes automated axe checks. Run these tests after integration using the isolated port configuration:
+
+```bash
+VITE_PUBLIC_CONTROLS_BASE=/controls npm run build --workspace @pick-your-ai/web
+npx playwright test --config apps/web/playwright.recognition.config.ts
+```
+
+Further manual accessibility/acceptance checks remain for: dated card navigation; unapproved achievement policy; successful accepted evidence and qualifying artifact links; a second request failing or suppressing evidence after success; changing actor/scope while requests are pending; current-only editorial scope; keyboard traversal and accessibility checks. Automated synthetic journeys do not certify assistive technology usability or close external evidence/policy gates for #69/#70/#123/#124.

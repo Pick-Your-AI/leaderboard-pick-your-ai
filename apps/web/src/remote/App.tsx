@@ -1,3 +1,4 @@
+import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MetricDefinition, MetricRegistry } from "@pick-your-ai/contracts";
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
@@ -755,6 +756,13 @@ export function RemoteApp() {
               </ul>
             </>
           )}
+          {data?.kind === "health" && url.pathname === "/" && import.meta.env.VITE_PUBLIC_CONTROLS_BASE && (
+            <EditorialSpotlights
+              controlsBase={import.meta.env.VITE_PUBLIC_CONTROLS_BASE}
+              organization="Pick-Your-AI"
+              selected={selected}
+            />
+          )}
           {data?.kind === "health" && (
             <>
               <h2>{data.value.status === "recently_reconciled" ? "Recently reconciled" : "Stale or degraded"}</h2>
@@ -990,6 +998,14 @@ export function RemoteApp() {
                   </li>
                 ))}
               </ul>
+              <ContributorRecognition
+                key={`${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
+                base={parsed.base}
+                selected={selected}
+                snapshotId={data.value.snapshotId}
+                actorId={data.value.actorId}
+                metricIds={data.value.results.map((result) => result.metricId)}
+              />
               <h3>Participant roles</h3>
               <ul>
                 {data.value.roleBreakdown.map((item) => (

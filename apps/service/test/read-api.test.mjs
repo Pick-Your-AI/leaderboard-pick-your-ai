@@ -849,7 +849,10 @@ test("share cards are scoped, dated, source-linked and deny external framing", a
   assert.match(current.body, /Current snapshot card/);
   assert.match(current.body, /2026-10-17T12:00:00.000Z/);
   assert.match(current.body, /https:\/\/github.com\/synthetic\/example\/pull\/1/);
-  assert.match(current.body, /snapshot=public-1&amp;metric=pr_opened/);
+  assert.match(
+    current.body,
+    /href="\/contributors\/alice\?organization=Pick-Your-AI&amp;snapshot=public-1&amp;metric=pr_opened&amp;ui=api"/,
+  );
   const pinned = await app.inject({ url: "/api/v1/cards/alice?metric=pr_opened&snapshot=public-1" });
   assert.equal(pinned.statusCode, 200);
   assert.match(pinned.body, /Archived snapshot card/);
@@ -886,6 +889,7 @@ test("achievement rules require approval and use only dated accepted evidence wi
     observedAt: at,
   }));
   value.selected.portfolioEvidence[0].contribution.roles = ["reviewer", "coauthor"];
+  value.selected.snapshot.coverage[0].knownStart = value.selected.snapshot.coverage[0].windowStart;
   const source = { read: async () => structuredClone(value) };
   const blocked = createService({ source });
   const app = createService({ source, approvedAchievementRuleVersion: "accepted-evidence/v1" });
@@ -900,6 +904,12 @@ test("achievement rules require approval and use only dated accepted evidence wi
   assert.equal(awards[0].sharedCredit, true);
   assert.equal(awards[0].ruleVersion, "accepted-evidence/v1");
   assert.match(awards[0].scopeMeaning, /not a claim of first-ever/);
+  value.selected.snapshot.coverage[0].knownStart = null;
+  assert.deepEqual((await app.inject({ url })).json().achievements, []);
+  value.selected.snapshot.coverage[0].knownStart = value.selected.snapshot.coverage[0].windowStart;
+  value.selected.snapshot.coverage[0].state = "partial";
+  assert.deepEqual((await app.inject({ url })).json().achievements, []);
+  value.selected.snapshot.coverage[0].state = "complete";
   for (const state of ["observed", "pending", "unknown"]) {
     value.selected.portfolioEvidence[0].activityState = state;
     assert.deepEqual((await app.inject({ url })).json().achievements, []);

@@ -13,8 +13,11 @@ function useCurrentRead<T>(key: string, load: (signal: AbortSignal) => Promise<T
       controller?.abort();
       const current = new AbortController();
       controller = current;
-      setState({ key });
-      if (document.hidden) return;
+      if (document.hidden) {
+        setState({ key });
+        return;
+      }
+      setState((previous) => (previous.key === key && previous.value !== undefined ? previous : { key }));
       try {
         const value = await load(current.signal);
         if (!stopped && !current.signal.aborted) setState({ key, value });
