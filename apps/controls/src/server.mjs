@@ -1,3 +1,4 @@
+import { createOperationsManager } from "./operations.mjs";
 import { createServer } from "node:http";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { actorId, ControlError, exactKeys, locator, record, requireThat, text } from "./store.mjs";
@@ -73,6 +74,8 @@ export function createControlsServer({
   sessionSeconds = 900,
   loginSuccessPath = "/controls/session",
   spotlightEligibility = () => false,
+  operations,
+  authorizeRepository,
 }) {
   requireThat(["/controls/session", "/account"].includes(loginSuccessPath), 500, "Unsupported login landing path");
   const base = new URL(origin);
@@ -269,6 +272,24 @@ export function createControlsServer({
           refreshSession: () => authenticate(req, parsed),
           respond: (result, beforeSend) => send(result.status, result.data, beforeSend),
         });
+        return;
+      }
+      if (path.startsWith("/controls/operations/")) {
+        requireThat(session.roles.includes("operator"), 403, "Operator role required");
+        const input = req.method === "GET" ? undefined : await inputBody();
+        try {
+          const result = await createOperationsManager({
+            operations,
+            authorizeRepository,
+            refreshSession: () => authenticate(req, parsed),
+          })({ path, method: req.method, input });
+          send(result.status, result.data, () => {
+            requireThat(store.read().sessions[session.sid]?.expires > now(), 401, "Session revoked");
+          });
+        } catch (error) {
+          if (error instanceof ControlError) throw error;
+          throw new ControlError(409, "Operation unavailable or changed; reload before retry");
+        }
         return;
       }
       if (path.startsWith("/controls/configuration")) {
