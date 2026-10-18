@@ -114,3 +114,34 @@ test("template metadata never admits malformed or unknown public-scope fields", 
     assert.throws(() => resolve(template), /invalid_public_scope/);
   }
 });
+
+test("named role unions preserve every canonical lens without widening approval", () => {
+  const membership = { ...base, context: "current", projects: ["PVT_synthetic_B", "PVT_synthetic_A"] };
+  const templates = [[], ["reporter"], ["author"], ["reporter", "author", "reporter"]].map((roles) => ({
+    ...membership,
+    roles,
+    period: "30d",
+  }));
+  const original = structuredClone(templates);
+  assert.doesNotThrow(() => validatePublicationPeriods(templates));
+  const scopes = resolvePublicationWindows(templates, cutoff, resolveMetricWindow).map(({ scope }) => scope);
+  assert.equal(new Set(scopes.map(publicScopeKey)).size, templates.length);
+  assert.equal(scopes[0].schemaVersion, "public-scope/v2");
+  assert.equal(Object.hasOwn(scopes[0], "roles"), false);
+  assert.deepEqual(scopes[3].roles, ["author", "reporter"]);
+  assert.equal(scopes[3].schemaVersion, "public-scope/v3");
+  assert.equal(scopes[3].end, cutoff);
+  for (const [i, template] of templates.entries()) {
+    for (const [j, scope] of scopes.entries()) {
+      assert.equal(approvedPublicationScope([template], scope, resolveMetricWindow), i === j, `named role ${i}/${j}`);
+      assert.equal(approvedPublicationScope([scopes[i]], scope, resolveMetricWindow), i === j, `exact role ${i}/${j}`);
+    }
+  }
+  assert.throws(
+    () => validatePublicationPeriods([templates[3], { ...templates[3], roles: ["author", "reporter"] }]),
+    /duplicate_public_scope/,
+  );
+  scopes[3].roles.push("reviewer");
+  scopes[3].projects.push("PVT_synthetic_detached");
+  assert.deepEqual(templates, original, "resolving a role window never mutates approved configuration arrays");
+});

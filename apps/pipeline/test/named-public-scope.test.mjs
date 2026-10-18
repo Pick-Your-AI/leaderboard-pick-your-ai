@@ -139,3 +139,61 @@ test("webhook retry binds the original named current-Project key through confirm
   t.after(() => restarted.stop());
   assert.deepEqual(await board(restarted, scope, { snapshot: publication.snapshotId }), accepted);
 });
+
+test("named role materializations preserve authorization, engine selection and retained pins", async (t) => {
+  const templates = [
+    { ...publicScope, period: "30d" },
+    { ...publicScope, roles: ["reporter"], period: "30d" },
+    { ...publicScope, roles: ["author"], period: "30d" },
+    {
+      ...publicScope,
+      context: "current",
+      projects: [...projectIds].reverse(),
+      roles: ["reporter", "author", "reporter"],
+      period: "30d",
+    },
+  ];
+  const h = await publicScopeHarness(t, { scopes: templates });
+  const configured = structuredClone(h.config);
+  const cutoff = second(ago(1 / 24));
+  const scopes = templates.map((template) => selected(template, cutoff));
+  const result = await h.runtime.runOnce({ cutoff });
+  assert.equal(result.state, "published");
+  assert.equal(result.publications.length, templates.length);
+  assert.equal(new Set(result.publications.map((entry) => entry.snapshotId)).size, templates.length);
+  const views = [];
+  for (const [index, scope] of scopes.entries()) {
+    const view = await board(h.runtime, scope);
+    views.push(view);
+    assert.deepEqual(view.scope, scope);
+    assert.equal(view.snapshotId, result.publications[index].snapshotId);
+    assert.equal(view.schemaVersion, index === 0 ? "leaderboard/v1" : "public-read/v3");
+    const frozen = await h.frozen({ snapshotId: view.snapshotId });
+    assert.equal(frozen.document.engineScope.period, "30d");
+    assert.deepEqual(frozen.document.engineScope.roles, scope.roles ?? []);
+    assert.deepEqual(frozen.document.engineScope.projects, scope.projects ?? []);
+    assert.equal(frozen.document.engineScope.to, cutoff);
+    const confirmation = h.controlsStore.read().pipelinePublications[view.snapshotId];
+    assert.equal(confirmation.scopeKey, publicScopeKey(scope));
+    assert.equal(confirmation.configurationHash, comparisonHash(configured));
+  }
+  assert.equal(views[0].rows[0].result.value, 2);
+  assert.equal(views[1].rows[0].result.value, 2);
+  assert.deepEqual(views[2].rows, [], "an author-only named window cannot include issue reporter contributions");
+  assert.ok(views[2].coverage.every((entry) => entry.state === "partial"));
+  assert.equal(views[3].rows[0].result.value, 1, "overlapping roles and Projects do not sum duplicate actions");
+  for (const wrongScope of [scopes[0], scopes[2], scopes[3]]) {
+    const response = await h.runtime.app.inject(url(wrongScope, { snapshot: views[1].snapshotId }));
+    assert.equal(response.statusCode, 410, response.body);
+  }
+  const before = (await h.db.query("SELECT run_id FROM leaderboard_ingestion.collection_runs ORDER BY run_id")).rows;
+  const absent = canonicalPublicScope({ ...scopes[1], roles: ["reviewer"] });
+  assert.equal((await h.runtime.app.inject(url(absent))).statusCode, 503);
+  assert.deepEqual(
+    (await h.db.query("SELECT run_id FROM leaderboard_ingestion.collection_runs ORDER BY run_id")).rows,
+    before,
+  );
+  await h.reopenDatabase();
+  assert.deepEqual(await board(h.runtime, scopes[1], { snapshot: views[1].snapshotId }), views[1]);
+  assert.deepEqual(h.config, configured, "named role resolution preserves the original approval bytes and hash");
+});
