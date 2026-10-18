@@ -10,6 +10,7 @@ const files = [
   "002_snapshots",
   "003_collection",
   "004_outbox_dispatch",
+  "006_delivery_payload_expiry",
   "007_operator_replay_results",
 ];
 const allow = async () => ({ policyVersion: "synthetic-replay-policy", revision: "grant-1" });
