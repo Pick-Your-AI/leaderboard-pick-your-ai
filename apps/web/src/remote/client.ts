@@ -1,3 +1,4 @@
+import { stableJSON } from "@pick-your-ai/metrics";
 import {
   compareSourceInstants,
   actorFilterSchema,
@@ -301,6 +302,7 @@ export async function exportPage(
   selected: Selection,
   format: "json" | "csv",
   signal: AbortSignal,
+  expectedMetric: MetricDefinition,
 ): Promise<Blob> {
   const params = parameters(selected, { board: true, cursor: selected.cursor });
   params.set("format", format);
@@ -343,7 +345,7 @@ export async function exportPage(
   }
   if (format === "json") {
     try {
-      validateExport(JSON.parse(raw), selected);
+      validateExport(JSON.parse(raw), selected, expectedMetric);
     } catch {
       throw new ReadFailure(502, "invalid_export_response");
     }
@@ -390,7 +392,7 @@ function descriptiveMetric(metric: MetricDefinition): boolean {
   );
 }
 /** Validate the minimized export contract, which intentionally has no actor profile or live head. */
-export function validateExport(value: unknown, selected: Selection): void {
+export function validateExport(value: unknown, selected: Selection, expectedMetric: MetricDefinition): void {
   const data = object(value),
     scope = object(data.scope);
   if (data.exportSchemaVersion !== "public-export/v1" || data.schemaVersion !== "leaderboard/v1")
@@ -406,6 +408,8 @@ export function validateExport(value: unknown, selected: Selection): void {
   identity(data.policyVersion);
   const metric = metricDefinitionSchema.parse(data.metric);
   if (metric.id !== selected.metric) throw new ReadFailure(502, "api_metric_mismatch");
+  if (!expectedMetric || stableJSON(metric) !== stableJSON(expectedMetric))
+    throw new ReadFailure(502, "api_metric_definition_mismatch");
   const ranking = data.ranking === null ? null : object(data.ranking);
   if (
     ranking &&

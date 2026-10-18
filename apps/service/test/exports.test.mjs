@@ -451,7 +451,7 @@ test("browser download validates the minimized JSON export rather than the board
   const document = response.json();
   assert.equal(document.head, undefined);
   assert.equal(document.rows[0].actor, undefined);
-  assert.doesNotThrow(() => validateExport(document, selected));
+  assert.doesNotThrow(() => validateExport(document, selected, document.metric));
   t.mock.method(
     globalThis,
     "fetch",
@@ -462,7 +462,15 @@ test("browser download validates the minimized JSON export rather than the board
       }),
   );
   assert.equal(
-    await (await exportPage("https://synthetic.invalid/api/v1", selected, "json", new AbortController().signal)).text(),
+    await (
+      await exportPage(
+        "https://synthetic.invalid/api/v1",
+        selected,
+        "json",
+        new AbortController().signal,
+        document.metric,
+      )
+    ).text(),
     response.body,
   );
   for (const mutate of [
@@ -489,7 +497,7 @@ test("browser download validates the minimized JSON export rather than the board
   ]) {
     const altered = structuredClone(document);
     mutate(altered);
-    assert.throws(() => validateExport(altered, selected));
+    assert.throws(() => validateExport(altered, selected, document.metric));
   }
 });
 
@@ -503,7 +511,7 @@ test("JSON and CSV exports retain service-account kind and unknown execution wit
   assert.equal(json.statusCode, 200, json.body);
   assert.equal(document.rows[0].actorKind, "service_account");
   assert.equal(document.rows[0].executionMode, "unknown");
-  assert.doesNotThrow(() => validateExport(document, selection(`?${params}&limit=1`)));
+  assert.doesNotThrow(() => validateExport(document, selection(`?${params}&limit=1`), document.metric));
   const csv = await h.app.inject(`${exportUrl}&limit=1&format=csv`);
   const records = parseCsv(csv.body);
   assert.equal(records[0].actor_kind, "");
@@ -541,17 +549,24 @@ test("export downloads reject unsupported actor labels while legacy missing labe
   ]) {
     download = structuredClone(document);
     download.rows[0][field] = invalid;
-    assert.throws(() => validateExport(download, selected), `${field}: ${JSON.stringify(invalid)}`);
+    assert.throws(() => validateExport(download, selected, document.metric), `${field}: ${JSON.stringify(invalid)}`);
     await assert.rejects(
-      () => exportPage("https://synthetic.invalid/api/v1", selected, "json", new AbortController().signal),
+      () =>
+        exportPage("https://synthetic.invalid/api/v1", selected, "json", new AbortController().signal, document.metric),
       (error) => error.code === "invalid_export_response",
     );
   }
   for (const absent of [["actorKind"], ["executionMode"], ["actorKind", "executionMode"]]) {
     download = structuredClone(document);
     for (const field of absent) delete download.rows[0][field];
-    assert.doesNotThrow(() => validateExport(download, selected));
-    const legacy = await exportPage("https://synthetic.invalid/api/v1", selected, "json", new AbortController().signal);
+    assert.doesNotThrow(() => validateExport(download, selected, document.metric));
+    const legacy = await exportPage(
+      "https://synthetic.invalid/api/v1",
+      selected,
+      "json",
+      new AbortController().signal,
+      document.metric,
+    );
     assert.equal(await legacy.text(), JSON.stringify(download));
     for (const field of absent) assert.equal(Object.hasOwn(download.rows[0], field), false);
   }

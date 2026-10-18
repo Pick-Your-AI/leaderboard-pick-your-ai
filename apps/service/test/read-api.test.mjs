@@ -175,15 +175,16 @@ test("actor selections narrow all public views without treating user accounts as
     assert.equal(json.evidence.length, ids.length);
     assert.equal(json.rows.find((row) => row.actorId === "bob").executionMode, "automated");
     const selected = selection(`?actors=${actors}&metric=pr_merged&snapshot=public-1`);
-    assert.doesNotThrow(() => validateExport(json, selected));
+    assert.doesNotThrow(() => validateExport(json, selected, json.metric));
     const missingLabels = structuredClone(json);
     delete missingLabels.rows[0].actorKind;
     delete missingLabels.rows[0].executionMode;
-    if (actors === "all") assert.doesNotThrow(() => validateExport(missingLabels, selected));
-    else assert.throws(() => validateExport(missingLabels, selected), /api_actor_filter_mismatch/);
+    if (actors === "all") assert.doesNotThrow(() => validateExport(missingLabels, selected, missingLabels.metric));
+    else
+      assert.throws(() => validateExport(missingLabels, selected, missingLabels.metric), /api_actor_filter_mismatch/);
     const invalidKind = structuredClone(json);
     invalidKind.rows[0].actorKind = "manual";
-    assert.throws(() => validateExport(invalidKind, selected));
+    assert.throws(() => validateExport(invalidKind, selected, invalidKind.metric));
     const csv = await app.inject(`/api/v1/exports?metric=pr_merged&actors=${actors}&format=csv`);
     assert.equal(csv.statusCode, 200);
     assert.equal(csv.headers["x-leaderboard-actor-filter"], actors);
@@ -1295,9 +1296,10 @@ test("descriptive metrics reject ranked provider policies across boards, profile
       assert.ok(boardData.rows.every((row) => row.rank === null));
       assert.doesNotThrow(() => parseBoard(boardData, selected));
       const exported = (await app.inject(`/api/v1/exports?metric=${metricId}&snapshot=public-1&format=json`)).json();
-      assert.doesNotThrow(() => validateExport(exported, selected));
+      assert.doesNotThrow(() => validateExport(exported, selected, exported.metric));
       for (const data of [boardData, exported]) {
-        const parse = data === boardData ? parseBoard : validateExport;
+        const parse =
+          data === boardData ? parseBoard : (value, selected) => validateExport(value, selected, exported.metric);
         const contradictory = structuredClone(data);
         contradictory.ranking.rank = true;
         assert.throws(() => parse(contradictory, selected));

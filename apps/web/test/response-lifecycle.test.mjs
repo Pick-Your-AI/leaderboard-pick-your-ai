@@ -1,3 +1,4 @@
+import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { exportPage, ReadFailure, request, selection } from "../src/remote/client.ts";
@@ -184,7 +185,13 @@ test("a public CSV download preserves UTF-8 and releases the shared reader", asy
     "fetch",
     async () => new Response(body, { headers: { "content-type": "text/csv; charset=utf-8" } }),
   );
-  const blob = await exportPage("/api/v1", selection("?snapshot=s1"), "csv", new AbortController().signal);
+  const blob = await exportPage(
+    "/api/v1",
+    selection("?snapshot=s1"),
+    "csv",
+    new AbortController().signal,
+    metricRegistryV1.metrics.find((metric) => metric.id === "pr_opened"),
+  );
   assert.equal(await blob.text(), csv);
   assert.equal(body.locked, false);
 });
@@ -205,7 +212,14 @@ for (const invalid of ["server", "media_type", "actor_scope"]) {
         }),
     );
     await assert.rejects(
-      () => exportPage("/api/v1", selection("?snapshot=s1&actors=user"), "csv", new AbortController().signal),
+      () =>
+        exportPage(
+          "/api/v1",
+          selection("?snapshot=s1&actors=user"),
+          "csv",
+          new AbortController().signal,
+          metricRegistryV1.metrics.find((metric) => metric.id === "pr_opened"),
+        ),
       failure(
         invalid === "server"
           ? "export_http_503"
@@ -224,7 +238,14 @@ test("a CSV download rejects corrupt UTF-8 instead of offering changed bytes", a
   const { body } = source([new Uint8Array([0x63, 0x2c, 0xc3, 0x28])]);
   t.mock.method(globalThis, "fetch", async () => new Response(body, { headers: { "content-type": "text/csv" } }));
   await assert.rejects(
-    () => exportPage("/api/v1", selection("?snapshot=s1"), "csv", new AbortController().signal),
+    () =>
+      exportPage(
+        "/api/v1",
+        selection("?snapshot=s1"),
+        "csv",
+        new AbortController().signal,
+        metricRegistryV1.metrics.find((metric) => metric.id === "pr_opened"),
+      ),
     failure("invalid_export_response"),
   );
   assert.equal(body.locked, false);

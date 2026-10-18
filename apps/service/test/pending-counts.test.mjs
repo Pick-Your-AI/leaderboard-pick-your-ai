@@ -37,7 +37,7 @@ test("real API and minimized exports preserve 14 accepted and 3 pending without 
   assert.equal(alice(exported).pending.count, 3);
   assert.equal(exported.evidence.length, 29);
   assert.equal(exported.pendingEvidence.length, 3);
-  validateExport(exported, selection(`?metric=pr_merged&snapshot=${result.snapshotId}`));
+  validateExport(exported, selection(`?metric=pr_merged&snapshot=${result.snapshotId}`), result.metric);
   const csv = await app.inject("/api/v1/exports?metric=pr_merged&format=csv");
   assert.equal(csv.statusCode, 200);
   assert.match(csv.body, /"pending","pending_evidence"/);
