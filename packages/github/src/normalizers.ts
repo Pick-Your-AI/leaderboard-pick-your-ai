@@ -1097,9 +1097,9 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
               databaseId isPrivate hasDiscussionsEnabled
               discussion(number:$number) {
                 id url createdAt updatedAt answerChosenAt
-                author { id __typename login ... on User { databaseId } ... on Bot { databaseId } }
-                answerChosenBy { id __typename login ... on User { databaseId } ... on Bot { databaseId } }
-                answer { id isAnswer author { id __typename login ... on User { databaseId } ... on Bot { databaseId } } }
+                author { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }
+                answerChosenBy { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }
+                answer { id isAnswer author { __typename login ... on User { id databaseId } ... on Bot { id databaseId } } }
               }
             }
           }`,

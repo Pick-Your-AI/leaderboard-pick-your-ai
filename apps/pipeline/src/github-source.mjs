@@ -165,9 +165,9 @@ export function createGithubCollectionSource({
               databaseId isPrivate hasDiscussionsEnabled
               discussions(first:$first, after:$after, orderBy:{field:CREATED_AT,direction:ASC}) {
                 nodes { id url updatedAt createdAt answerChosenAt
-                  author { id __typename login ... on User { databaseId } ... on Bot { databaseId } }
-                  answerChosenBy { id __typename ... on User { databaseId } ... on Bot { databaseId } }
-                  answer { id isAnswer author { id __typename ... on User { databaseId } ... on Bot { databaseId } } }
+                  author { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }
+                  answerChosenBy { __typename ... on User { id databaseId } ... on Bot { id databaseId } }
+                  answer { id isAnswer author { __typename ... on User { id databaseId } ... on Bot { id databaseId } } }
                 }
                 pageInfo { hasNextPage endCursor }
               }
