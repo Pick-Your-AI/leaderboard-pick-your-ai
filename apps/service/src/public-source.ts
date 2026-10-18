@@ -546,7 +546,14 @@ export function projectRead(
     )
       return reject();
   }
-  const pendingMetadata = new Map(pendingInput.map((entry) => [entry.contribution.contributionId, entry.observedAt]));
+  // Match projectEvidence's contract-normalized IDs before checking uniqueness
+  // and retrieving clocks. Raw aliases must not duplicate proof or lose metadata.
+  const pendingMetadata = new Map(
+    pendingInput.map((entry) => [
+      contributionSchema.shape.contributionId.parse(entry.contribution.contributionId),
+      entry.observedAt,
+    ]),
+  );
   if (pendingMetadata.size !== pendingInput.length) return reject();
   const pendingEvidence = projectEvidence(pendingInput).map((entry) => ({
     ...entry,
