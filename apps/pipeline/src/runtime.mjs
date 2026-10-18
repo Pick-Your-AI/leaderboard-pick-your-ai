@@ -1,3 +1,4 @@
+import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createGithubCollectionSource } from "./github-source.mjs";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
@@ -45,6 +46,10 @@ const statements = [
     snapshot_id text PRIMARY KEY, scope_key text NOT NULL, revision bigint NOT NULL,
     config_version text NOT NULL, repository_ids jsonb NOT NULL,
     document jsonb NOT NULL, document_hash text NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp())`,
+  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.dispatch_publications (
+    operation_key text NOT NULL, scope_key text NOT NULL,
+    snapshot_id text NOT NULL REFERENCES leaderboard_pipeline.snapshots(snapshot_id),
+    PRIMARY KEY(operation_key,scope_key))`,
   `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.heads (
     scope_key text PRIMARY KEY, snapshot_id text NOT NULL REFERENCES leaderboard_pipeline.snapshots(snapshot_id), revision bigint NOT NULL)`,
 ];
@@ -130,6 +135,10 @@ export async function createPipeline(options) {
     if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
   };
   const inbox = new c.ingestion.InboxStore(db);
+  const outbox = new c.ingestion.OutboxStore(db);
+  if (options.webhookDispatch !== undefined && typeof options.webhookDispatch !== "boolean")
+    fail("invalid_webhook_dispatch_option");
+  if (options.webhookDispatch && dataMode !== "synthetic") fail("public_webhook_dispatch_not_approved");
   const normalizer =
     options.normalizer ??
     (options.githubClient && c.github.createGithubEvidenceNormalizer
@@ -148,6 +157,8 @@ export async function createPipeline(options) {
   let webhookServer = null;
   let workerController = null;
   let workerPromise = null;
+  let outboxController = null;
+  let outboxPromise = null;
   let controlsServer = null;
   let authorized = false;
   let operation = Promise.resolve();
@@ -320,7 +331,19 @@ export async function createPipeline(options) {
     if (!(await collection.verifyPublic(repo.id, repo.installationId, current ? String(current.generation) : null)))
       fail("repository_revoked_or_changed");
   }
-  async function normalizeStored(repositoryIds, cutoff) {
+  const hasDispatchEvidence = (document, dispatch, row) =>
+    !dispatch?.targetKeys.includes(row.fact_key) ||
+    document.facts.some(
+      (fact) =>
+        fact.metricId === "issues_opened" &&
+        fact.artifactId === dispatch.lease.observation.subjectId &&
+        document.evidence.some(
+          (entry) =>
+            entry.contribution.contributionId === fact.id &&
+            entry.artifact.publicUrl === dispatch.lease.observation.sourceUrl,
+        ),
+    );
+  async function normalizeStored(repositoryIds, cutoff, dispatch) {
     const sourceRows = (
       await db.query(
         `SELECT fact.* FROM leaderboard_ingestion.source_facts AS fact
@@ -333,6 +356,12 @@ export async function createPipeline(options) {
       )
     ).rows;
     if (sourceRows.length > 10000) fail("frozen_dataset_budget_exceeded");
+    if (
+      dispatch &&
+      repositoryIds.includes(dispatch.lease.observation.repositoryId) &&
+      dispatch.targetKeys.some((key) => !sourceRows.some((row) => row.fact_key === key))
+    )
+      fail("dispatch_enrichment_unavailable");
     const unlabeled = (
       await db.query(
         `SELECT fact.fact_key FROM leaderboard_ingestion.source_facts AS fact LEFT JOIN leaderboard_pipeline.source_modes AS mode USING(fact_key) WHERE fact.repository_id=ANY($1::bigint[]) AND (mode.data_mode IS NULL OR mode.data_mode<>$2) LIMIT 1`,
@@ -353,8 +382,10 @@ export async function createPipeline(options) {
         if (digest(cached.document) !== cached.document_hash) fail("normalization_integrity_error");
         if (cached.document.isSynthetic !== (dataMode === "synthetic")) fail("normalization_data_mode_mismatch");
         assertDataMode(cached.document);
-        outputs.push(cached.document);
-        continue;
+        if (hasDispatchEvidence(cached.document, dispatch, row)) {
+          outputs.push(cached.document);
+          continue;
+        }
       }
       const repository = config.repositories.find((repo) => String(repo.id) === String(row.repository_id));
       const normalizationStarted = performance.now();
@@ -373,6 +404,10 @@ export async function createPipeline(options) {
         monitorSuccess(monitorSource(repository.id), "normalization", normalizationStarted);
       } catch (error) {
         monitorFailure(monitorSource(repository.id), "normalization", "schema_changed");
+        if (dispatch) {
+          assertRunConfiguration();
+          fail("dispatch_enrichment_unavailable");
+        }
         throw error;
       }
       assertDataMode(output);
@@ -422,6 +457,9 @@ export async function createPipeline(options) {
           [repository.id, artifactId],
         );
       }
+      // Persist authoritative exclusions even when this dispatch cannot yet
+      // prove the target creation. Failure must not leave older evidence visible.
+      if (!hasDispatchEvidence(output, dispatch, row)) fail("dispatch_enrichment_unavailable");
       const document = {
         suppressArtifactIds: suppressed,
         isSynthetic: dataMode === "synthetic",
@@ -436,8 +474,10 @@ export async function createPipeline(options) {
       };
       await db.query(
         `INSERT INTO leaderboard_pipeline.normalizations (fact_key,policy_signature,document,document_hash)
-        VALUES ($1,$2,$3::jsonb,$4) ON CONFLICT DO NOTHING`,
-        [row.fact_key, signature, JSON.stringify(document), digest(document)],
+        VALUES ($1,$2,$3::jsonb,$4) ON CONFLICT (fact_key,policy_signature) DO UPDATE
+        SET document=EXCLUDED.document,document_hash=EXCLUDED.document_hash
+        WHERE normalizations.document_hash=$5`,
+        [row.fact_key, signature, JSON.stringify(document), digest(document), cached?.document_hash ?? null],
       );
       outputs.push(document);
     }
@@ -467,7 +507,18 @@ export async function createPipeline(options) {
       };
     });
   }
-  async function publish(scope, cutoff, observationCutoff) {
+  function confirmPublication(publication) {
+    controlsStore.transaction((state) => {
+      const overlay = restrictConfiguration(state);
+      if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
+      state.pipelinePublications ||= {};
+      state.pipelinePublications[publication.snapshotId] = {
+        configurationVersion: config.version,
+        controlsConfigurationRevision: runConfigurationRevision,
+      };
+    });
+  }
+  async function publish(scope, cutoff, observationCutoff, dispatch) {
     assertRunConfiguration();
     if (!configuredScope(scope)) fail("scope_not_approved");
     const repos = repositoriesFor(scope);
@@ -479,9 +530,40 @@ export async function createPipeline(options) {
     ).rows;
     if (generations.length !== repos.length || generations.some((row) => row.state !== "public"))
       fail("source_unavailable_before_normalization");
+    if (
+      dispatch &&
+      generations.some(
+        (row) =>
+          !dispatch.generations.some(
+            (saved) => saved.repositoryId === Number(row.repository_id) && saved.generation === String(row.generation),
+          ),
+      )
+    )
+      fail("dispatch_source_generation_changed");
+    if (dispatch) {
+      // A committed operation can be acknowledged after another publisher advances
+      // the head. Never repoint the head to its historical immutable revision.
+      const prior = (
+        await db.query(
+          `SELECT saved.document,saved.document_hash,saved.snapshot_id,saved.revision
+        FROM leaderboard_pipeline.dispatch_publications AS operation
+        JOIN leaderboard_pipeline.snapshots AS saved USING(snapshot_id)
+        WHERE operation.operation_key=$1 AND operation.scope_key=$2`,
+          [dispatch.lease.operation.operationKey, scopeKey(scope)],
+        )
+      ).rows[0];
+      if (prior) {
+        if (digest(prior.document) !== prior.document_hash) fail("dispatch_snapshot_integrity_error");
+        await db.transaction((tx) => outbox.assertLease(tx, dispatch.lease));
+        const publication = { snapshotId: prior.snapshot_id, revision: Number(prior.revision), changed: false };
+        confirmPublication(publication);
+        return publication;
+      }
+    }
     const outputs = await normalizeStored(
       repos.map((repo) => repo.id),
       observationCutoff,
+      dispatch,
     );
     const suppressedArtifactIds = new Set(outputs.flatMap((output) => output.suppressArtifactIds ?? []));
     const uniqueFacts = new Map();
@@ -667,6 +749,26 @@ export async function createPipeline(options) {
     const publicationStarted = performance.now();
     try {
       const publication = await db.transaction(async (tx) => {
+        if (dispatch) await outbox.assertLease(tx, dispatch.lease);
+        const bindDispatch = async (publication) => {
+          if (dispatch) {
+            await tx.query(
+              `INSERT INTO leaderboard_pipeline.dispatch_publications(operation_key,scope_key,snapshot_id)
+              VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,
+              [dispatch.lease.operation.operationKey, scopeKey(scope), publication.snapshotId],
+            );
+            const saved = (
+              await tx.query(
+                `SELECT snapshot_id FROM leaderboard_pipeline.dispatch_publications WHERE operation_key=$1 AND scope_key=$2`,
+                [dispatch.lease.operation.operationKey, scopeKey(scope)],
+              )
+            ).rows[0];
+            if (saved?.snapshot_id !== publication.snapshotId) fail("dispatch_publication_conflict");
+            await outbox.assertLease(tx, dispatch.lease);
+            assertRunConfiguration();
+          }
+          return publication;
+        };
         await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`pipeline:${scopeKey(scope)}`]);
         const access = (
           await tx.query(
@@ -693,7 +795,7 @@ export async function createPipeline(options) {
         ).rows[0];
         assertRunConfiguration();
         if (current?.snapshot_id === snapshotId)
-          return { snapshotId, revision: Number(current.revision), changed: false };
+          return bindDispatch({ snapshotId, revision: Number(current.revision), changed: false });
         const revision = Number(current?.revision ?? 0) + 1;
         if (!Number.isSafeInteger(revision)) fail("pipeline_revision_exhausted");
         const document = {
@@ -749,19 +851,11 @@ export async function createPipeline(options) {
           controlsRevision: state.revision,
         });
         assertRunConfiguration();
-        return { snapshotId, revision, changed: true, receiptId };
+        return bindDispatch({ snapshotId, revision, changed: true, receiptId });
       });
       // PostgreSQL can commit while controls change. Confirm publication only in
       // the same synchronous SQLite boundary used by configuration activation.
-      controlsStore.transaction((state) => {
-        const overlay = restrictConfiguration(state);
-        if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
-        state.pipelinePublications ||= {};
-        state.pipelinePublications[publication.snapshotId] = {
-          configurationVersion: config.version,
-          controlsConfigurationRevision: runConfigurationRevision,
-        };
-      });
+      confirmPublication(publication);
       monitorSuccess(scopeKey(scope), "publication", publicationStarted, String(publication.revision));
       return publication;
     } catch (error) {
@@ -858,43 +952,152 @@ export async function createPipeline(options) {
     cursorSecret: options.cursorSecret,
     now: () => Date.parse(now()),
   });
-  async function runOnce({ cutoff = now(), mode = "reconcile", maxPages = 100 } = {}) {
-    return serialize(async () => {
-      utc(cutoff);
-      if (stopped) fail("pipeline_stopped");
-      if (!(await approved())) return { state: "blocked", reason: "approved_configuration_required" };
-      runConfigurationRevision = restrictConfiguration(controlsStore.read()).revision;
-      if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 10000) fail("invalid_pipeline_page_budget");
-      const progress = [];
-      for (const repo of config.repositories) {
-        await verifyRepository(repo, cutoff);
-        for (const family of repo.families) {
-          const runId = digest([config.version, repo.id, family, cutoff, mode, dataMode]);
-          await collection.start({ runId, repositoryId: repo.id, family, mode, since: null, until: cutoff });
-          const collectionStarted = performance.now();
-          let status = "progress";
-          for (let page = 0; page < maxPages && status === "progress"; page++) {
-            assertRunConfiguration();
-            status = await collection.step(runId, guardedSource);
-            assertRunConfiguration();
-            if (status === "progress" || status === "complete")
-              await db.query(
-                `INSERT INTO leaderboard_pipeline.source_modes(fact_key,data_mode) SELECT item.fact_key,$2 FROM leaderboard_ingestion.collection_items AS item JOIN leaderboard_ingestion.source_facts AS fact USING(fact_key) WHERE item.run_id=$1 AND fact.first_run_id=$1 ON CONFLICT DO NOTHING`,
-                [runId, dataMode],
-              );
-          }
-          if (status === "complete") monitorSuccess(monitorSource(repo.id), "collection", collectionStarted);
-          else if (status === "failed") monitorFailure(monitorSource(repo.id), "collection", "source_unavailable");
-          progress.push({ repositoryId: repo.id, family, runId, status });
-          if (status !== "complete") return { state: "collecting", progress, publications: [] };
+  async function runOnceInternal({ cutoff = now(), mode = "reconcile", maxPages = 100, dispatch = null } = {}) {
+    utc(cutoff);
+    if (stopped) fail("pipeline_stopped");
+    if (!(await approved())) return { state: "blocked", reason: "approved_configuration_required" };
+    runConfigurationRevision = restrictConfiguration(controlsStore.read()).revision;
+    if (dispatch && runConfigurationRevision !== dispatch.lease.operation.configurationRevision)
+      fail("dispatch_configuration_changed");
+    if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 10000) fail("invalid_pipeline_page_budget");
+    const progress = [];
+    for (const repo of config.repositories) {
+      await verifyRepository(repo, cutoff);
+      for (const family of repo.families) {
+        const runId = digest([
+          config.version,
+          repo.id,
+          family,
+          cutoff,
+          mode,
+          dataMode,
+          ...(dispatch ? [dispatch.lease.operation.operationKey, dispatch.lease.collectionRevision] : []),
+        ]);
+        await collection.start({ runId, repositoryId: repo.id, family, mode, since: null, until: cutoff });
+        const collectionStarted = performance.now();
+        let status = "progress";
+        for (let page = 0; page < maxPages && status === "progress"; page++) {
+          assertRunConfiguration();
+          status = await collection.step(runId, guardedSource);
+          assertRunConfiguration();
+          if (status === "progress" || status === "complete")
+            await db.query(
+              `INSERT INTO leaderboard_pipeline.source_modes(fact_key,data_mode) SELECT item.fact_key,$2 FROM leaderboard_ingestion.collection_items AS item JOIN leaderboard_ingestion.source_facts AS fact USING(fact_key) WHERE item.run_id=$1 AND fact.first_run_id=$1 ON CONFLICT DO NOTHING`,
+              [runId, dataMode],
+            );
         }
+        if (status === "complete") monitorSuccess(monitorSource(repo.id), "collection", collectionStarted);
+        else if (status === "failed") monitorFailure(monitorSource(repo.id), "collection", "source_unavailable");
+        progress.push({ repositoryId: repo.id, family, runId, status });
+        if (status !== "complete") return { state: "collecting", progress, publications: [] };
       }
-      const publications = [];
-      const observationCutoff = utc(now());
-      if (observationCutoff < cutoff) fail("observation_clock_precedes_event_cutoff");
-      for (const scope of config.scopes) publications.push(await publish(scope, cutoff, observationCutoff));
-      return { state: "published", progress, publications };
-    });
+    }
+    const publications = [];
+    let observationCutoff = utc(now());
+    if (dispatch) {
+      const lease = dispatch.lease;
+      const keys = (
+        await db.query(
+          `SELECT item.fact_key FROM leaderboard_ingestion.collection_items AS item
+          JOIN leaderboard_ingestion.source_facts AS fact USING(fact_key)
+          WHERE item.run_id=ANY($1::text[]) AND fact.repository_id=$2 AND fact.family='issues' AND fact.subject_id=$3 AND fact.document->>'sourceUrl'=$4`,
+          [
+            progress.map((item) => item.runId),
+            lease.observation.repositoryId,
+            lease.observation.subjectId,
+            lease.observation.sourceUrl,
+          ],
+        )
+      ).rows;
+      if (!keys.length) {
+        await outbox.refreshCollection(lease);
+        fail("dispatch_source_subject_unavailable");
+      }
+      dispatch.targetKeys = keys.map((row) => row.fact_key);
+      const generations = (
+        await db.query(
+          `SELECT repository_id,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) AND state='public' ORDER BY repository_id`,
+          [config.repositories.map((repo) => repo.id)],
+        )
+      ).rows;
+      if (generations.length !== config.repositories.length) fail("dispatch_source_unavailable");
+      const frozen = await outbox.freeze(
+        lease,
+        observationCutoff,
+        generations.map((row) => ({ repositoryId: Number(row.repository_id), generation: String(row.generation) })),
+      );
+      observationCutoff = frozen.cutoff;
+      dispatch.generations = frozen.generations;
+    }
+    if (observationCutoff < cutoff) fail("observation_clock_precedes_event_cutoff");
+    for (const scope of config.scopes) publications.push(await publish(scope, cutoff, observationCutoff, dispatch));
+    return { state: "published", progress, publications };
+  }
+  function runOnce(options) {
+    return serialize(() => runOnceInternal(options));
+  }
+  const dispatch = createWebhookDispatcher({
+    outbox,
+    config,
+    dataMode,
+    policyVersion: c.metrics.metricRegistryV1.policy_version,
+    approved,
+    configurationRevision: () => restrictConfiguration(controlsStore.read()).revision,
+    now: () => utc(now()),
+    execute: async (lease) => {
+      const result = await runOnceInternal({ cutoff: lease.operation.cutoff, dispatch: { lease } });
+      if (result.state !== "published") fail("dispatch_collection_incomplete");
+      return result.publications.map((publication, index) => ({
+        scopeKey: scopeKey(config.scopes[index]),
+        snapshotId: publication.snapshotId,
+        revision: publication.revision,
+      }));
+    },
+    assertAuthorized: () => assertRunConfiguration(),
+    confirm: async (tx, lease, publications) => {
+      assertRunConfiguration();
+      const saved = (
+        await tx.query(`SELECT source_generations FROM leaderboard_ingestion.outbox WHERE event_key=$1`, [
+          lease.eventKey,
+        ])
+      ).rows[0];
+      const access = (
+        await tx.query(
+          `SELECT repository_id,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) AND state='public' FOR SHARE`,
+          [config.repositories.map((repo) => repo.id)],
+        )
+      ).rows;
+      if (
+        access.length !== config.repositories.length ||
+        access.some(
+          (row) =>
+            !saved.source_generations.some(
+              (prior) =>
+                prior.repositoryId === Number(row.repository_id) && prior.generation === String(row.generation),
+            ),
+        )
+      )
+        fail("dispatch_source_generation_changed");
+      for (const publication of publications) {
+        const receipt = (
+          await tx.query(
+            `SELECT snapshot_id FROM leaderboard_pipeline.dispatch_publications WHERE operation_key=$1 AND scope_key=$2 AND snapshot_id=$3`,
+            [lease.operation.operationKey, publication.scopeKey, publication.snapshotId],
+          )
+        ).rows[0];
+        const confirmation = controlsStore.read().pipelinePublications?.[publication.snapshotId];
+        if (
+          !receipt ||
+          confirmation?.configurationVersion !== config.version ||
+          confirmation?.controlsConfigurationRevision !== runConfigurationRevision
+        )
+          fail("dispatch_publication_unconfirmed");
+      }
+      assertRunConfiguration();
+    },
+  });
+  function dispatchOnce() {
+    return serialize(() => (stopped || !options.webhookDispatch ? "blocked" : dispatch()));
   }
   async function applyCorrection({ requestId, expectedVersion, factId, operatorId, approvalReceipt }) {
     return serialize(async () => {
@@ -1022,6 +1225,15 @@ export async function createPipeline(options) {
           webhookServer.listen(webhook.port, webhook.host, resolve);
         });
       }
+      if (options.webhookDispatch) {
+        if (!allowed) fail("webhook_dispatch_configuration_required");
+        outboxController = new AbortController();
+        outboxPromise = c.ingestion.runOutboxWorker(dispatchOnce, {
+          signal: outboxController.signal,
+          idleMs: 100,
+          failureBackoffMs: 1000,
+        });
+      }
       if (controls) {
         if (!options.controlsAuthentication) fail("controls_authentication_required");
         controlsServer = c.controls.createControlsServer({ ...options.controlsAuthentication, store: controlsStore });
@@ -1045,9 +1257,11 @@ export async function createPipeline(options) {
     stopped = true;
     controller?.abort();
     workerController?.abort();
+    outboxController?.abort();
     stopping = (async () => {
       if (runner) await runner;
       if (workerPromise) await workerPromise;
+      if (outboxPromise) await outboxPromise;
       await operation;
       await Promise.all([
         app.close(),
@@ -1085,6 +1299,8 @@ export async function createPipeline(options) {
     source,
     collection,
     inbox,
+    outbox,
+    dispatchOnce,
     runOnce,
     applyCorrection,
     start,

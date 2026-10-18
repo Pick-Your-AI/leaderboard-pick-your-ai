@@ -6,6 +6,8 @@ import { PGlite } from "@electric-sql/pglite";
 import { Pool } from "pg";
 import {
   InboxStore,
+  OutboxStore,
+  runOutboxWorker,
   SnapshotStore,
   CollectionStore,
   EnrichmentStore,
@@ -24,8 +26,12 @@ const up =
   "\n" +
   snapshotUp +
   "\n" +
-  collectionUp;
+  collectionUp +
+  "\n" +
+  (await readFile(new URL("../sql/004_outbox_dispatch.up.sql", import.meta.url), "utf8"));
 const down =
+  (await readFile(new URL("../sql/004_outbox_dispatch.down.sql", import.meta.url), "utf8")) +
+  "\n" +
   collectionDown +
   "\n" +
   snapshotDown +
@@ -1325,3 +1331,156 @@ test(
     assert.deepEqual(result.rows, [{ subject_id: "SYNTHETIC_REMOVED" }]);
   },
 );
+
+const dispatchBinding = {
+  configurationHash: "a".repeat(64),
+  configurationVersion: "synthetic-v1",
+  configurationRevision: 0,
+  normalizationVersion: "issues-creation-dispatch.v1",
+  policyVersion: "candidate-0.1.0",
+  dataMode: "synthetic",
+  cutoff: "2026-10-01T00:00:00.000Z",
+};
+const dispatchProof = [{ scopeKey: "synthetic-scope", snapshotId: "b".repeat(64), revision: 1 }];
+async function outboxNotice(n = 1) {
+  await store.insert(delivery(n));
+  assert.equal(await store.complete(await store.claim()), true);
+  return `github:delivery:${id(n)}`;
+}
+async function expireOutbox() {
+  await db.query(
+    "UPDATE leaderboard_ingestion.outbox SET lease_until=clock_timestamp()-interval '1 second' WHERE state='leased'",
+  );
+}
+
+test("outbox leases preserve frozen operation/cutoff across expiry and fence stale completion", async () => {
+  await outboxNotice();
+  const outbox = new OutboxStore(db, 3);
+  const first = await outbox.claim(dispatchBinding);
+  const frozen = await outbox.freeze(first, "2026-10-02T00:00:00.000Z", [{ repositoryId: 2, generation: "1" }]);
+  assert.equal(await outbox.claim(dispatchBinding), null);
+  await expireOutbox();
+  const replacement = await outbox.claim({ ...dispatchBinding, cutoff: "2026-10-03T00:00:00.000Z" });
+  assert.deepEqual(replacement.operation, first.operation);
+  assert.notEqual(replacement.token, first.token);
+  assert.deepEqual(
+    await outbox.freeze(replacement, "2026-10-04T00:00:00.000Z", [{ repositoryId: 2, generation: "2" }]),
+    frozen,
+  );
+  assert.equal(await outbox.complete(first, dispatchProof, async () => assert.fail("stale confirmation")), false);
+  assert.equal(await outbox.fail(first, "source_unavailable"), "lease_lost");
+  assert.equal(await outbox.complete(replacement, dispatchProof, async () => {}), true);
+  assert.equal(await outbox.claim(dispatchBinding), null);
+  assert.equal((await outbox.health()).completed, 1);
+  assert.deepEqual(
+    (await db.query("SELECT outcome FROM leaderboard_ingestion.outbox_attempts ORDER BY attempt")).rows.map(
+      (row) => row.outcome,
+    ),
+    ["expired", "done"],
+  );
+});
+
+test("outbox completion confirmation and receipt commit atomically", async () => {
+  await outboxNotice();
+  const outbox = new OutboxStore(db);
+  const lease = await outbox.claim(dispatchBinding);
+  await assert.rejects(
+    outbox.complete(lease, dispatchProof, async () => {
+      throw Error("synthetic failure");
+    }),
+    /synthetic failure/,
+  );
+  const prior = (await db.query("SELECT state,completion FROM leaderboard_ingestion.outbox")).rows[0];
+  assert.equal(prior.state, "leased");
+  assert.equal(prior.completion, null);
+  assert.equal(await outbox.complete(lease, dispatchProof, async () => {}), true);
+});
+
+test("outbox retries are delayed/bounded, poison is quarantined, and reviewed replay retains identity", async () => {
+  const event = await outboxNotice();
+  const outbox = new OutboxStore(db, 2);
+  let lease = await outbox.claim(dispatchBinding);
+  const operation = lease.operation;
+  assert.equal(await outbox.fail(lease, "source_unavailable"), "retry_scheduled");
+  assert.equal(await outbox.claim(dispatchBinding), null);
+  await db.query("UPDATE leaderboard_ingestion.outbox SET available_at=clock_timestamp()");
+  lease = await outbox.claim(dispatchBinding);
+  assert.equal(await outbox.fail(lease, "enrichment_unavailable"), "quarantined");
+  assert.equal(await outbox.claim(dispatchBinding), null);
+  assert.equal(await outbox.replay(event, "synthetic-reviewed-replay"), true);
+  lease = await outbox.claim(dispatchBinding);
+  assert.equal(lease.attempt, 1);
+  assert.deepEqual(lease.operation, operation);
+  assert.equal(await outbox.fail(lease, "unsupported_observation", true), "quarantined");
+  assert.equal(
+    (await db.query("SELECT prior_reason_code FROM leaderboard_ingestion.outbox_replays")).rows[0].prior_reason_code,
+    "enrichment_unavailable",
+  );
+});
+
+test("a crashed final outbox lease quarantines and cannot remain leased indefinitely", async () => {
+  await outboxNotice();
+  const outbox = new OutboxStore(db, 1);
+  await outbox.claim(dispatchBinding);
+  await expireOutbox();
+  assert.equal(await outbox.claim(dispatchBinding), null);
+  assert.equal((await outbox.health()).quarantined, 1);
+  assert.equal(
+    (await db.query("SELECT reason_code FROM leaderboard_ingestion.outbox")).rows[0].reason_code,
+    "attempts_exhausted",
+  );
+});
+
+test("outbox worker awaits in-flight work and aborts idle/backoff waits without leaking exceptions", async () => {
+  const controller = new AbortController();
+  let release, entered;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  let finished = false;
+  const running = runOutboxWorker(
+    async () => {
+      entered();
+      await gate;
+      finished = true;
+      return "processed";
+    },
+    { signal: controller.signal },
+  );
+  await started;
+  controller.abort();
+  assert.equal(finished, false);
+  release();
+  await running;
+  assert.equal(finished, true);
+  const failureController = new AbortController();
+  const statuses = [];
+  await runOutboxWorker(
+    async () => {
+      throw Error("private source text");
+    },
+    {
+      signal: failureController.signal,
+      onStatus(status) {
+        statuses.push(status);
+        failureController.abort();
+        throw Error("observer failure");
+      },
+    },
+  );
+  assert.deepEqual(statuses, ["store_unavailable"]);
+});
+
+test("independent PostgreSQL outbox workers claim disjoint rows with SKIP LOCKED", { skip: !url }, async () => {
+  await outboxNotice(1);
+  await outboxNotice(2);
+  const outbox = new OutboxStore(db);
+  const [first, second] = await Promise.all([outbox.claim(dispatchBinding), outbox.claim(dispatchBinding)]);
+  assert.notEqual(first.eventKey, second.eventKey);
+  assert.equal(await outbox.complete(first, dispatchProof, async () => {}), true);
+  assert.equal(await outbox.complete(second, dispatchProof, async () => {}), true);
+  assert.equal((await outbox.health()).completed, 2);
+});

@@ -12,3 +12,12 @@ export { CollectionStore, sourceFamilies } from "./collection.js";
 export type { ScanRequest, SourceFact, SourcePage, SourceFamily, ReadOnlySource } from "./collection.js";
 export { EnrichmentStore } from "./enrichment.js";
 export type { SourceMetadata, EnrichmentSource } from "./enrichment.js";
+export { OutboxStore, runOutboxWorker } from "./outbox.js";
+export type {
+  DispatchBinding,
+  DispatchOperation,
+  OutboxLease,
+  DispatchPublication,
+  DispatchFailure,
+  DispatchStatus,
+} from "./outbox.js";
