@@ -117,7 +117,7 @@ function snapshot(id = "api-1", revision = 1) {
     },
   };
 }
-async function service(page: Page) {
+async function service(page: Page, options: { holdUpdates?: boolean; resetUpdates?: boolean } = {}) {
   // Dynamic path avoids coupling the web TypeScript project to server source.
   // CI builds all packages before browser tests. Requests use the actual Fastify
   // handler, contract projection, query checks and signed cursor implementation.
@@ -126,6 +126,7 @@ async function service(page: Page) {
   let current = snapshot();
   const snapshots = new Map([[current.head.snapshotId, current]]);
   let unavailable = false;
+  let wrongHealthScope = false;
   const app = createService({
     now: () => Date.parse(at),
     cursorSecret: "synthetic-browser-cursor-secret-0001",
@@ -143,14 +144,37 @@ async function service(page: Page) {
     },
   });
   const calls: URL[] = [];
+  const healthResponses: { status: number; conditional: string | null }[] = [];
+  let releaseUpdates = () => {};
+  const updateGate = options.holdUpdates
+    ? new Promise<void>((resolve) => {
+        releaseUpdates = resolve;
+      })
+    : Promise.resolve();
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     calls.push(url);
-    const response = await app.inject({ method: "GET", url: url.pathname + url.search });
-    await route.fulfill({ status: response.statusCode, headers: response.headers, body: response.body });
+    const headers = route.request().headers();
+    if (wrongHealthScope && url.pathname.endsWith("/health")) delete headers["if-none-match"];
+    if (url.pathname.endsWith("/updates")) {
+      await updateGate;
+      if (options.resetUpdates) headers["last-event-id"] = "0:expired:privacy-0";
+    }
+    const response = await app.inject({ method: "GET", url: url.pathname + url.search, headers });
+    let body = response.body;
+    if (wrongHealthScope && url.pathname.endsWith("/health") && response.statusCode === 200) {
+      const invalid = JSON.parse(body);
+      invalid.scope.repository = "another-repository";
+      body = JSON.stringify(invalid);
+    }
+    if (url.pathname.endsWith("/health"))
+      healthResponses.push({ status: response.statusCode, conditional: headers["if-none-match"] ?? null });
+    await route.fulfill({ status: response.statusCode, headers: response.headers, body });
   });
   return {
     calls,
+    healthResponses,
+    releaseUpdates: () => releaseUpdates(),
     mixedActors() {
       current.selected.actors[1]!.actor.executionMode = "automated";
       current.selected.actors[2]!.actor.kind = "bot";
@@ -202,11 +226,15 @@ async function service(page: Page) {
         { ...structuredClone(third!), activityState: "accepted" },
       );
     },
-    close: () => app.close(),
-    next() {
-      current = snapshot("api-2", 2);
-      current.selected.rows[0]!.result.value = 10;
-      snapshots.set("api-2", current);
+    async close() {
+      releaseUpdates();
+      await page.unrouteAll({ behavior: "wait" });
+      await app.close();
+    },
+    next(revision = 2) {
+      current = snapshot(`api-${revision}`, revision);
+      current.selected.rows[0]!.result.value = (revision - 1) * 10;
+      snapshots.set(current.head.snapshotId, current);
     },
     suppress() {
       current.controls.version = "privacy-2";
@@ -219,8 +247,144 @@ async function service(page: Page) {
     fail() {
       unavailable = true;
     },
+    stale() {
+      current.selected.snapshot.coverage[0]!.lastSuccessfulSync = "2026-10-17T11:00:00.000Z";
+    },
+    recover() {
+      unavailable = false;
+      current.selected.snapshot.coverage[0]!.lastSuccessfulSync = at;
+    },
+    wrongHealthScope() {
+      wrongHealthScope = true;
+    },
   };
 }
+
+test("API polling fallback uses conditional health, holds new rankings and reports stale or failed checks truthfully", async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    Object.defineProperty(window, "EventSource", { value: undefined, configurable: true }),
+  );
+  await page.clock.install({ time: new Date(at) });
+  await page.clock.pauseAt(new Date(Date.parse(at) + 1000));
+  const api = await service(page);
+  try {
+    await page.goto("/live?ui=api&metric=pr_merged&repository=repo-1&workstream=triage&actors=user&limit=1");
+    const freshness = page.getByRole("region", { name: "Current source freshness" });
+    const provenance = page.getByRole("region", { name: "Snapshot provenance" });
+    const actor = page.getByRole("link", { name: "Synthetic API A", exact: true });
+    await expect(actor).toBeVisible();
+    await expect(freshness).toContainText("Update connection: Polling for updates.");
+    await expect(freshness).toContainText("Source freshness: Recently reconciled.");
+    await page.clock.runFor(3000);
+    await expect
+      .poll(() => api.healthResponses.some((entry) => entry.status === 304 && entry.conditional !== null))
+      .toBe(true);
+    expect(api.calls.filter((url) => url.pathname.endsWith("/updates"))).toHaveLength(0);
+    expect(
+      api.calls
+        .filter((url) => url.pathname.endsWith("/health"))
+        .every(
+          (url) =>
+            url.searchParams.get("actors") === "user" &&
+            url.searchParams.get("repository") === "repo-1" &&
+            url.searchParams.get("workstream") === "triage" &&
+            !["snapshot", "cursor", "metric", "limit"].some((key) => url.searchParams.has(key)),
+        ),
+    ).toBe(true);
+    await actor.focus();
+    api.next();
+    await page.clock.runFor(3000);
+    await expect(page.getByText("Update held: snapshot api-2 is available.")).toBeVisible();
+    await expect(provenance).toContainText("Snapshot api-1");
+    await expect(actor).toBeFocused();
+    await expect(page.getByRole("row", { name: /Synthetic API A/ }).locator("strong")).toHaveText("2");
+    await page.getByRole("button", { name: "Apply new snapshot" }).click();
+    await expect(provenance).toContainText("Snapshot api-2");
+    await expect(page.getByRole("row", { name: /Synthetic API A/ }).locator("strong")).toHaveText("10");
+    api.stale();
+    await page.clock.runFor(3000);
+    await expect(freshness).toContainText("Source freshness: Stale or degraded.");
+    const lastSuccess = await freshness.locator("time").getAttribute("datetime");
+    api.fail();
+    await page.clock.runFor(3000);
+    await expect(freshness).toContainText("Update connection: Update checks unavailable.");
+    await expect(freshness).toContainText("Source freshness: Unknown.");
+    await expect(freshness.locator("time")).toHaveAttribute("datetime", lastSuccess!);
+    api.recover();
+    await page.clock.runFor(6000);
+    await expect(freshness).toContainText("Source freshness: Recently reconciled.");
+    expect(await freshness.locator("time").getAttribute("datetime")).not.toBe(lastSuccess);
+    api.wrongHealthScope();
+    await page.clock.runFor(3000);
+    await expect(freshness).toContainText("Source freshness: Unknown.");
+    await expect(freshness).toContainText("Update checks unavailable");
+  } finally {
+    await api.close();
+  }
+});
+
+test("real SSE reset rechecks pinned privacy before the next poll, and visibility resume recovers missed publication changes", async ({
+  page,
+}) => {
+  await page.clock.install({ time: new Date(at) });
+  await page.clock.pauseAt(new Date(Date.parse(at) + 1000));
+  const api = await service(page, { holdUpdates: true, resetUpdates: true });
+  try {
+    await page.goto("/leaderboards/pr_merged?ui=api&snapshot=api-1&repository=repo-1");
+    const freshness = page.getByRole("region", { name: "Current source freshness" });
+    const provenance = page.getByRole("region", { name: "Snapshot provenance" });
+    const actor = page.getByRole("link", { name: "Synthetic API A", exact: true });
+    await expect(actor).toBeVisible();
+    await expect(freshness).toContainText("Source freshness: Recently reconciled.");
+    await expect.poll(() => api.calls.filter((url) => url.pathname.endsWith("/updates")).length).toBe(1);
+    const initialHealth = api.healthResponses.length;
+    api.next();
+    api.suppress();
+    api.releaseUpdates();
+    await expect(actor).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Synthetic API B", exact: true })).toBeVisible();
+    await expect(provenance).toContainText("Snapshot api-1");
+    await expect(provenance).toContainText("privacy-2");
+    await expect(freshness).toContainText("Source freshness: Unknown.");
+    expect(api.healthResponses).toHaveLength(initialHealth);
+    expect(
+      api.calls
+        .filter((url) => url.pathname.endsWith("/updates"))
+        .every(
+          (url) =>
+            url.searchParams.get("repository") === "repo-1" &&
+            !url.searchParams.has("snapshot") &&
+            !url.searchParams.has("cursor"),
+        ),
+    ).toBe(true);
+    await page.evaluate(() => {
+      Object.defineProperty(document, "hidden", { value: true, configurable: true });
+      Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await expect(freshness).toContainText("Paused while this page is hidden");
+    const pausedCalls = api.calls.length;
+    api.next(3);
+    api.revoke();
+    await page.clock.runFor(60000);
+    expect(api.calls).toHaveLength(pausedCalls);
+    await page.evaluate(() => {
+      Reflect.deleteProperty(document, "hidden");
+      Reflect.deleteProperty(document, "visibilityState");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await expect(page.getByRole("alert")).toContainText("Selection expired or revoked");
+    await expect(page.getByRole("link", { name: "Synthetic API B", exact: true })).toHaveCount(0);
+    await expect(freshness).toContainText("Source freshness: Recently reconciled.");
+    await page.getByRole("link", { name: "Restart from the current publication" }).click();
+    await expect(provenance).toContainText("Snapshot api-3");
+    await expect(page.getByRole("row", { name: /Synthetic API A/ }).locator("strong")).toHaveText("20");
+  } finally {
+    await api.close();
+  }
+});
 
 test("actor selections persist through controls and board-to-profile navigation", async ({ page }) => {
   const api = await service(page);
