@@ -2,7 +2,7 @@ import { exactKeys, requireThat } from "./store.mjs";
 /** Host opt-in only; never infer a repository grant from the operator role. */
 export function createOperationsManager({ operations, authorizeRepository, refreshSession }) {
   return async ({ path, method, input }) => {
-    const match = /^\/controls\/operations\/([1-9][0-9]{0,15})(?:\/(replay))?$/.exec(path);
+    const match = /^\/controls\/operations\/([1-9][0-9]{0,15})(?:\/(replay|replay-window(?:\/preview)?))?$/.exec(path);
     requireThat(match, 404, "Not found");
     const repositoryId = Number(match[1]);
     requireThat(Number.isSafeInteger(repositoryId));
@@ -33,6 +33,44 @@ export function createOperationsManager({ operations, authorizeRepository, refre
       return { status, data };
     };
     if (method === "GET" && !match[2]) return finish(200, await operations.read(repositoryId, authorize));
+    if (match[2] === "replay-window/preview" || match[2] === "replay-window") {
+      requireThat(method === "POST", 405, "Method not allowed");
+      const preview = match[2] === "replay-window/preview";
+      requireThat(
+        typeof operations[preview ? "previewReplayWindow" : "replayWindow"] === "function",
+        503,
+        "Window replay unavailable",
+      );
+      exactKeys(input, [
+        "receivedSince",
+        "receivedUntil",
+        "limit",
+        "policyVersion",
+        ...(preview ? [] : ["expectedRevision", "reason", "confirmed"]),
+      ]);
+      const window = {
+        repositoryId,
+        receivedSince: input.receivedSince,
+        receivedUntil: input.receivedUntil,
+        limit: input.limit,
+        policyVersion: input.policyVersion,
+      };
+      if (preview) return finish(200, await operations.previewReplayWindow(window, authorize));
+      requireThat(input.confirmed === true, 400, "Scoped confirmation required");
+      const session = await refreshSession();
+      return finish(
+        201,
+        await operations.replayWindow(
+          {
+            ...window,
+            expectedRevision: input.expectedRevision,
+            reason: input.reason,
+            operatorId: session.actorId,
+          },
+          authorize,
+        ),
+      );
+    }
     requireThat(method === "POST" && match[2] === "replay", 405, "Method not allowed");
     exactKeys(input, ["deliveryId", "expectedRevision", "reason", "confirmed"]);
     requireThat(input.confirmed === true, 400, "Scoped confirmation required");

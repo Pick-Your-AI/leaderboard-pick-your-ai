@@ -232,7 +232,7 @@ export class OperatorInbox {
       };
     });
   }
-  /** No HTTP route or scheduler calls this. The protected host supplies the authenticated operator identity. */
+  /** Explicit protected host operation; its authenticated HTTP bridge requires a reviewed preview and confirmation. */
   async replayWindow(input: ReplayWindowRequest, authorize: OperatorAuthorize) {
     const window = replayWindow(input);
     const { expectedRevision, operatorId, reason } = input;
