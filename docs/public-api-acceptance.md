@@ -33,8 +33,9 @@ deleted or unavailable copy of a contribution could be discarded before duplicat
 contribution IDs were checked, leaving its public counterpart readable.
 
 Uniqueness is now checked against the full bounded provider actor list and primary
-evidence collection first. Duplicate IDs produce the existing generic `503 public_projection_unavailable`
-response with `Cache-Control: no-store`. The API does not select a preferred copy,
+evidence collection first. Duplicate IDs in the selected read produce the existing
+generic `503 public_projection_unavailable` response with `Cache-Control: no-store`.
+The API does not select a preferred copy,
 reuse an earlier conditional response or disclose conflicting identity metadata.
 An ordinary unique hidden actor or private proof still removes only the affected
 actor/aggregate and dependent evidence; unrelated contributors remain available.
@@ -44,12 +45,17 @@ must also agree across all supplied primary, portfolio and pending proof for the
 same contribution or known artifact identity. Actor node/database-ID canonicalization
 and account linking retain their separate #36 scope.
 
+The selected read's authority is distinct from an optional prior rank-comparison
+baseline. If only that baseline cannot be projected, valid current totals remain
+available with comparison availability withheld, preserving the accepted #212
+behavior.
+
 ### Initial correction receipts at `503ca9a0`
 
 Nine synthetic regressions in `apps/service/test/public-actor-ambiguity.test.mjs`
 exercise both ordering directions for all non-public actor and identity states,
-current and historical conditional reads, all shared query/profile/proof/export/
-health/notice boundaries, and the unique-hidden-actor control. On the unchanged
+current and current-head-pinned conditional reads, all shared query/profile/proof/
+export/health/notice boundaries, and the unique-hidden-actor control. On the unchanged
 accepted source, eight cases failed at the intended ambiguity assertions and the
 control passed. With the correction, all nine pass with no skipped cases.
 Update notices intentionally use current scope only; the test does not invent a
@@ -74,8 +80,9 @@ The shared projection now checks visibility consistency for every supplied
 collection before returning a result. Contribution IDs have a separate identity
 map from known artifact IDs. Both an artifact's stable ID and a contribution's
 non-null artifact reference participate; omitted/null artifact identities are
-not grouped together or resolved from names. A conflict produces the same generic
-`503` and `no-store` response before any conditional response can be reused.
+not grouped together or resolved from names. A visibility conflict in the selected
+read produces the same generic `503` and `no-store` response before any conditional
+response for that selected read can be reused.
 
 `apps/service/test/public-evidence-visibility.test.mjs` covers all four non-public
 dispositions, both encounter directions, cross-collection contribution copies,
