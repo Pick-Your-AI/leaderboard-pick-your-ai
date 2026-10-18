@@ -913,24 +913,29 @@ export function normalizeGithubObservation(
       unlocked: "public_moderation",
     };
     const metric = mapping[sourceAction];
-    const target = object(payload.label)
-      ? payload.label
-      : object(payload.milestone)
-        ? payload.milestone
-        : object(payload.assignee)
-          ? payload.assignee
-          : null;
-    const targetId = target ? resourceId(target, "metadata", repository.id) : text(payload.target_id);
+    // Resolve the action's own target, never another field or the issue's current
+    // metadata snapshot. Removal and type transitions need the same identity
+    // proof as additions before they can participate in raw-state grouping.
+    const targetField =
+      ["labeled", "unlabeled"].includes(sourceAction) || sourceAction.startsWith("label_")
+        ? "label"
+        : ["milestoned", "demilestoned"].includes(sourceAction) || sourceAction.startsWith("milestone_")
+          ? "milestone"
+          : ["assigned", "unassigned"].includes(sourceAction)
+            ? "assignee"
+            : ["issue_typed", "issue_untyped"].includes(sourceAction)
+              ? "issue_type"
+              : null;
+    const target = targetField ? payload[targetField] : null;
+    const targetId = object(target) ? resourceId(target, "metadata", repository.id) : text(payload.target_id);
     if (!metric || !proof.eventId) out.reasons.push("unsupported_or_unproven_triage_action");
     else if (object(payload.change) && JSON.stringify(payload.change.before) === JSON.stringify(payload.change.after))
       out.reasons.push("no_op_metadata_change");
     else {
-      const missingTarget =
-        ["labels_applied", "assignments_coordinated", "milestones_curated"].includes(metric) && !targetId;
+      const missingTarget = targetField !== null && !targetId;
       if (missingTarget) out.reasons.push("unknown_metadata_target_identity");
       const properties: Partial<NormalizedGithubFact> = {
-        rawState: `${sourceAction}:${targetId ?? "unknown"}`,
-        ...(missingTarget ? { state: "unknown" } : {}),
+        ...(missingTarget ? { state: "unknown" } : { rawState: `${sourceAction}:${targetId ?? "unknown"}` }),
       };
       const metadataUnit = stable(transitionUnit, targetId ?? id);
       emit(metric, sender, "triager", at, metadataUnit, properties);

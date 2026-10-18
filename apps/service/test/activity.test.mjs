@@ -78,7 +78,7 @@ function fixture(snapshotId = "public-1", revision = 1) {
         snapshotId,
         revision,
         generatedAt: at,
-        metricDefinitionVersion: "candidate-0.1.0",
+        metricDefinitionVersion: "candidate-0.1.1",
         computationVersion: "synthetic-test-only",
         coverage: [structuredClone(coverage)],
         results: [],

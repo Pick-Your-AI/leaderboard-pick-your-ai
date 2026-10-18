@@ -77,7 +77,7 @@ function fixture() {
         snapshotId: "public-1",
         revision: 1,
         generatedAt: at,
-        metricDefinitionVersion: "candidate-0.1.0",
+        metricDefinitionVersion: "candidate-0.1.1",
         computationVersion: "synthetic-only",
         coverage: [structuredClone(coverage)],
         results: [],
@@ -198,7 +198,7 @@ test("CSV metadata and metric rows preserve versions, source mapping and half-op
   const [metadata, ...rows] = parseCsv(response.body);
   assert.equal(metadata.record_type, "metadata");
   assert.equal(metadata.snapshot, "public-1");
-  assert.equal(metadata.metric_definition_version, "candidate-0.1.0");
+  assert.equal(metadata.metric_definition_version, "candidate-0.1.1");
   assert.equal(metadata.computation_version, "synthetic-only");
   for (const key of ["organization", "repository", "workstream", "start", "end"])
     assert.equal(metadata[key], scope[key]);
