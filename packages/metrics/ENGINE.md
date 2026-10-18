@@ -23,6 +23,12 @@ inferred to be automation. User-account and automation views can overlap for
 a user account executing automated actions. An absent execution mode remains
 unknown. Source adapters and review services must authenticate the identity,
 membership, source rights and repository inventory supplied to this boundary.
+Reviewed `service_account` actors must carry matching versioned private
+classification evidence no later than the frozen cutoff; they cannot enter
+the `user` filter. Evidence attached to an actor relabeled `user` is rejected.
+Service accounts remain in automation/all scopes without claiming every action
+was automated. Public projections omit the private evidence. See
+[service-account compatibility](../../docs/service-account-classification.md).
 
 ## Qualification uncertainty and exact arithmetic
 

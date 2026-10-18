@@ -2,6 +2,7 @@ export {
   actorIdentityStateSchema,
   actorKindSchema,
   actorSchema,
+  serviceAccountClassificationSchema,
   artifactKindSchema,
   artifactLineageSchema,
   artifactSchema,
@@ -33,6 +34,7 @@ export {
 
 export type {
   Actor,
+  ServiceAccountClassification,
   Artifact,
   ArtifactLineage,
   Attribution,
