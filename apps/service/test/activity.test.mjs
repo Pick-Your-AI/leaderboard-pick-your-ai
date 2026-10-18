@@ -86,7 +86,7 @@ function fixture(snapshotId = "public-1", revision = 1) {
       actors,
       rows,
       evidence,
-      ranking: [{ metricId: "pr_opened", direction: "descending" }],
+      ranking: [{ metricId: "pr_opened", direction: "descending", rank: false }],
     },
   };
 }

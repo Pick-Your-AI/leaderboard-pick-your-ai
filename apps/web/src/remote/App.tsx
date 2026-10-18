@@ -656,7 +656,14 @@ export function RemoteApp() {
     const controller = new AbortController();
     activeExport.current = controller;
     try {
-      const blob = await exportPage(parsed.base, pinned, format, controller.signal);
+      if (state.status !== "ready") throw new ReadFailure(503, "export_unavailable");
+      const blob = await exportPage(
+        parsed.base,
+        pinned,
+        format,
+        controller.signal,
+        registryMetric(state.registry, pinned.metric),
+      );
       const href = URL.createObjectURL(blob),
         anchor = document.createElement("a");
       anchor.href = href;

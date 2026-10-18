@@ -49,7 +49,7 @@ function snapshot(id = "api-1", revision = 1) {
       actorId,
       roles: ["author"],
       qualification: "eligible",
-      metricIds: ["pr_opened", "documentation"],
+      metricIds: ["pr_merged", "documentation"],
       reasonCodes: ["public_accepted_source"],
     },
     occurredAt: at,
@@ -80,7 +80,7 @@ function snapshot(id = "api-1", revision = 1) {
       actors,
       evidence,
       portfolioEvidence: evidence.map((entry) => ({ ...entry, activityState: "observed", observedAt: at })),
-      rows: ["pr_opened", "documentation"].flatMap((metricId) =>
+      rows: ["pr_merged", "documentation"].flatMap((metricId) =>
         actors.map(({ actorId }, index) => ({
           actorId,
           result: { schemaVersion: "leaderboard/v1", metricId, state: "measured", value: index < 2 ? 2 : 1, coverage },
@@ -88,10 +88,10 @@ function snapshot(id = "api-1", revision = 1) {
         })),
       ),
       ranking: [
-        { metricId: "pr_opened", direction: "descending", rank: true },
+        { metricId: "pr_merged", direction: "descending", rank: true },
         { metricId: "documentation", direction: "descending", rank: false },
       ],
-      diagnostics: ["pr_opened", "documentation"].flatMap((metricId) =>
+      diagnostics: ["pr_merged", "documentation"].flatMap((metricId) =>
         actors.map(({ actorId }, index) => ({
           metricId,
           actorId,
@@ -105,7 +105,7 @@ function snapshot(id = "api-1", revision = 1) {
       ),
       methodology: [
         {
-          metricId: "pr_opened",
+          metricId: "pr_merged",
           policyVersion: "approved-policy-1",
           policySignature: "a".repeat(64),
           policyLink: "https://github.com/synthetic-api/example/blob/main/policy.md",
