@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { RemoteApp } from "./remote/App.tsx";
+import { RemoteWall } from "./remote/Wall.tsx";
 import { applyThemePreference, readThemePreference } from "./lib/theme.ts";
 import "./styles/tokens.css";
 import "./styles/app.css";
@@ -29,9 +30,5 @@ if (["/account", "/admin"].includes(location.pathname.replace(/\/+$/, ""))) {
     ),
   );
 } else {
-  root.render(
-    <React.StrictMode>
-      <RemoteApp />
-    </React.StrictMode>,
-  );
+  root.render(<React.StrictMode>{location.pathname === "/live" ? <RemoteWall /> : <RemoteApp />}</React.StrictMode>);
 }

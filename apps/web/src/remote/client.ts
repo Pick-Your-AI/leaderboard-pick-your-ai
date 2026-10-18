@@ -732,11 +732,18 @@ export function profile(value: unknown, selected: Selection): Profile {
     participation !== null &&
     (!participation.success ||
       participation.data.denominatorWeeks !== participationWeekDenominator(selected.start, selected.end) ||
-      participation.data.metrics.some(
-        (entry) =>
-          !results.some((result) => result.metricId === entry.metricId) ||
-          ["pr_accepted_rate", "review_wait"].includes(entry.metricId),
-      ))
+      participation.data.metrics.some((entry) => {
+        const result = results.find((result) => result.metricId === entry.metricId);
+        const earliest = entry.earliestDatedEvidence;
+        return (
+          result === undefined ||
+          ["pr_accepted_rate", "review_wait"].includes(entry.metricId) ||
+          (entry.state === "measured" && entry.activeWeeks === 0 && result.value !== 0) ||
+          (earliest !== null &&
+            ((selected.start !== null && compareSourceInstants(earliest.effectiveAt, selected.start) < 0) ||
+              (selected.end !== null && compareSourceInstants(earliest.effectiveAt, selected.end) >= 0)))
+        );
+      }))
   )
     throw new ReadFailure(502, "invalid_participation_response");
   return {

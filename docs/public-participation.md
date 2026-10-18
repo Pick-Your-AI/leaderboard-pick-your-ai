@@ -22,11 +22,18 @@ time. Earliest-evidence ordering preserves source offsets and fractional precisi
 its independently supplied observation time remains unknown when absent.
 
 Known activity is partial unless bounded source coverage encloses the entire
-selected interval with no gaps. Zero active weeks needs that coverage and a
+selected interval with no gaps, and both the reconciled source watermark and
+snapshot cutoff reach its exclusive end. These comparisons retain the exact
+source timestamp precision. Zero active weeks needs that coverage and a
 published zero result. Unknown dates do not become zero. Pending receipts do not
 enter this summary. Decided-PR ratios and readiness/review durations remain in the
 existing descriptive diagnostics with their policy-qualified sample and censoring
 values; participation does not recompute these or change any rank.
+
+The client checks the summary against the same selection and projected metric
+result. Earliest effective timestamps must fall within the selected half-open
+interval, and a measured zero summary requires a zero metric result. Missing
+legacy summaries and explicit unknown states remain supported.
 
 **Newcomer status remains unknown.** Complete coverage of one selected window is
 not reviewed organization-wide origin evidence. The public protocol cannot yet

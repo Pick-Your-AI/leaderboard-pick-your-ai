@@ -5,11 +5,15 @@ export const participationEnd = "2026-10-19T00:00:00.000Z";
 export function participationFixture() {
   const read = readFixture();
   Object.assign(read.selected.scope, { start: participationStart, end: participationEnd });
+  read.selected.snapshot.generatedAt = participationEnd;
+  read.head.publishedAt = participationEnd;
   Object.assign(read.selected.snapshot.coverage[0], {
     state: "complete",
     knownStart: participationStart,
     windowStart: participationStart,
     windowEnd: participationEnd,
+    sourceWatermark: participationEnd,
+    lastSuccessfulSync: participationEnd,
   });
   for (const row of read.selected.rows) row.result.state = "measured";
   const entries = read.selected.evidence.filter((entry) => entry.contribution.actorId === "101");

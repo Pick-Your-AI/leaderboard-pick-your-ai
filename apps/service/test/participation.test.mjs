@@ -100,6 +100,35 @@ test("zero activity requires bounded complete coverage, including exact known-st
   assert.equal(metric.state, "unknown");
 });
 
+for (const zero of [false, true]) {
+  for (const [name, watermark, cutoff, complete] of [
+    ["reconciled source and snapshot reach the end", participationEnd, participationEnd, true],
+    ["source watermark is absent", null, "2026-10-20T00:00:00Z", false],
+    ["source watermark is shortened", "2026-10-10T00:00:00Z", "2026-10-20T00:00:00Z", false],
+    ["source watermark is one nanosecond short", "2026-10-18T23:59:59.999999999Z", "2026-10-20T00:00:00Z", false],
+    ["snapshot cutoff is one nanosecond short", participationEnd, "2026-10-18T23:59:59.999999999Z", false],
+  ]) {
+    test(`${zero ? "empty" : "positive"} participation coverage when ${name}`, async (t) => {
+      const { input, app } = harness(t);
+      const row = input.selected.rows.find((entry) => entry.actorId === "101");
+      row.result.coverage.sourceWatermark = watermark;
+      input.selected.snapshot.generatedAt = cutoff;
+      input.head.publishedAt = "2026-10-20T00:00:00Z";
+      if (zero) {
+        row.result.value = 0;
+        row.evidenceIds = [];
+      }
+      const response = await app.inject(path);
+      assert.equal(response.statusCode, 200, response.body);
+      const body = response.json(),
+        metric = body.activitySummary.metrics[0];
+      assert.equal(metric.state, complete ? "measured" : zero ? "unknown" : "partial");
+      assert.equal(metric.activeWeeks, zero ? (complete ? 0 : null) : 3);
+      assert.deepEqual(profile(body, selection(`?${bounded}`)).activitySummary, body.activitySummary);
+    });
+  }
+}
+
 test("earliest dated evidence preserves offset and fractional chronology with deterministic identity ties", async (t) => {
   const { input, app } = harness(t);
   const entries = input.selected.evidence.filter((entry) => entry.contribution.actorId === "101");
@@ -169,6 +198,56 @@ test("client rejects claimed newcomer status, mismatched denominators and summar
   delete legacy.activitySummary;
   assert.equal(profile(legacy, selected).activitySummary, null);
   assert.equal(publicParticipationSchema.safeParse(original.activitySummary).success, true);
+});
+
+test("client binds earliest participation evidence to exact half-open selection bounds", async (t) => {
+  const { app } = harness(t),
+    selected = selection(`?${bounded}`);
+  const original = (await app.inject(path)).json();
+  assert.deepEqual(profile(original, selected).activitySummary, original.activitySummary);
+  for (const effectiveAt of [
+    participationStart,
+    "2026-10-03T20:00:00-04:00",
+    "2026-10-04T00:00:00.000000001Z",
+    "2026-10-18T23:59:59.999999999Z",
+  ]) {
+    const value = structuredClone(original);
+    value.activitySummary.metrics[0].earliestDatedEvidence.effectiveAt = effectiveAt;
+    assert.equal(profile(value, selected).activitySummary.metrics[0].earliestDatedEvidence.effectiveAt, effectiveAt);
+  }
+  for (const effectiveAt of [
+    "2026-10-03T23:59:59.999999999Z",
+    participationEnd,
+    "2026-10-18T20:00:00-04:00",
+    "2099-01-01T00:00:00Z",
+  ]) {
+    const value = structuredClone(original);
+    value.activitySummary.metrics[0].earliestDatedEvidence.effectiveAt = effectiveAt;
+    assert.throws(() => profile(value, selected), undefined, effectiveAt);
+  }
+});
+
+test("client requires a zero metric result for a measured zero participation summary", async (t) => {
+  const { input, app } = harness(t),
+    selected = selection(`?${bounded}`);
+  const original = (await app.inject(path)).json();
+  assert.deepEqual(profile(original, selected).activitySummary, original.activitySummary);
+  const contradictory = structuredClone(original);
+  Object.assign(contradictory.activitySummary.metrics[0], {
+    state: "measured",
+    activeWeeks: 0,
+    datedEvidenceCount: 0,
+    unknownDateEvidenceCount: 0,
+    earliestDatedEvidence: null,
+  });
+  assert.equal(contradictory.results[0].value, 14);
+  assert.throws(() => profile(contradictory, selected));
+  const row = input.selected.rows.find((entry) => entry.actorId === "101");
+  row.result.value = 0;
+  row.evidenceIds = [];
+  const zero = (await app.inject(path)).json();
+  assert.equal(zero.activitySummary.metrics[0].activeWeeks, 0);
+  assert.deepEqual(profile(zero, selected).activitySummary, zero.activitySummary);
 });
 
 test("half-open UTC week denominators retain early years, offsets, midnight and sub-millisecond boundaries", () => {
