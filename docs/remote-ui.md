@@ -26,7 +26,7 @@ New publication heads remain held until explicitly applied. Optional follow mode
 
 Requests omit credentials, reject redirects, impose an eight-second deadline and cap decoded bodies at two megabytes. Responses are checked against the leaderboard contracts and exact selection. Text is rendered as escaped React content; source links allow only bounded public GitHub HTTPS artifact/revision URLs. API bases are public configuration, never credentials. Cross-origin HTTPS bases need the hosting/API's separately approved CORS policy; same-origin routing is the default.
 
-If `VITE_PUBLIC_CONTROLS_BASE` is explicitly configured, the corrections page links to that endpoint's supported `/auth/login` entry. The separate same-origin `/account` and `/admin` UI uses authenticated `/controls/*` routes, never the public API base. See [protected controls UI](protected-controls-ui.md) for implemented flows and remaining gates. A configured link does not certify staffing, approval, storage or a working deployment.
+If `VITE_PUBLIC_CONTROLS_BASE` is explicitly configured, the corrections page links to that endpoint's supported `/auth/login` entry. This top-level account navigation may use a separately configured HTTPS origin; it does not configure public fetch or live-update connections. The separate same-origin `/account` and `/admin` UI uses authenticated `/controls/*` routes, never the public API base. See [protected controls UI](protected-controls-ui.md) for implemented flows and remaining gates. A configured link does not certify staffing, approval, storage or a working deployment.
 
 ## Reproducible evidence
 

@@ -278,6 +278,35 @@ Transport status never implies live data: `onState` reports the observed health
 state, unknown during outages/new notices, and paused when hidden. `onSnapshot`
 requests a complete refetch; the consumer decides when to replace the visible board.
 
+The API-backed web interface consumes the built, browser-only
+`@pick-your-ai/service/live-client` export. Importing that entry does not start the
+service or load its server dependencies. The interface subscribes to the current
+organization/repository/workstream/period and actor selection, excluding any
+historical snapshot, page cursor or proof selection. Registry-only pages still
+request only the registry. The deployment-configured public API origin and path
+are used for both full reads and update transport; route parameters cannot select
+a different server. The web consumer validates complete health metadata against
+its requested scope before accepting a freshness state.
+
+New snapshot or privacy-policy notices immediately trigger a complete public
+projection read, including for pinned snapshots. New rankings stay held until the
+reader applies them or the existing opt-in safe-follow conditions permit an update.
+Current suppression and revocation still apply while a historic snapshot is held.
+The existing twenty-second visible-page privacy recheck and focus recheck remain
+active. Hidden pages pause the transport, abort reads and remove displayed source
+data; resuming checks the current publication and selected snapshot again.
+
+The visible **Current source freshness** section separates connection state from
+`recently_reconciled`, `stale_or_degraded` or unknown source health. It names the
+last successful health check without representing that time as a source-event or
+snapshot date. New notices invalidate the freshness claim until their health is
+verified; a failed or mismatched-scope response reports unknown. The timestamp is
+not a repeating live-region announcement. Browser regressions exercise actual
+EventSource reset delivery, conditional polling without EventSource, pinned
+suppression/revocation, held keyboard-focused rows and visibility recovery against
+synthetic inputs passed through the real service handler. They do not establish
+source installation, production freshness, physical-device behavior or a display soak.
+
 ## Bounds and verification
 
 Defaults: 4 KiB query URLs, 100 rows/page, 10,000 projection rows/actors, 20,000
@@ -333,6 +362,15 @@ time. Group identity does not depend on rank or page position. An observed,
 pending or independently accepted state is supplied by the authorized portfolio;
 legacy evidence remains acceptance-unknown. Missing occurrence and collection
 clocks remain null. A date-window selection excludes unknown occurrence dates.
+
+The shared source contract also validates coverage windows at their full fractional
+precision: distinct sub-millisecond bounds form a valid half-open window, while
+equivalent or reversed bounds do not. The service and browser use its shared
+comparator. Browser activity validation rejects reversed occurrence/collection
+bounds and proofs outside a group's exact source-time range, including differences
+smaller than one millisecond. Timestamp representation, null clocks and UTC-hour
+grouping remain unchanged. Direct contract and browser regressions cover these
+boundaries, equivalent offsets and trailing zeros.
 
 Canonical facts use source event, artifact and actor identity. Multiple metric
 representations of that same fact count once within each explicit work state,

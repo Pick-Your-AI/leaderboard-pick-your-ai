@@ -1,4 +1,5 @@
 import {
+  compareSourceInstants,
   actorFilterSchema,
   actorKindSchema,
   executionModeSchema,
@@ -161,18 +162,31 @@ export function uiHref(
   if (extra.cursor) params.set("cursor", extra.cursor);
   return `${path}?${params}`;
 }
-export function apiBase(raw = "/api/v1"): string {
-  const url = new URL(raw, window.location.origin);
+function configuredServiceBase(raw: string): URL {
+  let url: URL;
+  try {
+    url = new URL(raw, window.location.origin);
+  } catch {
+    throw new ReadFailure(500, "invalid_public_api_configuration");
+  }
   if (
     url.username ||
     url.password ||
     url.search ||
     url.hash ||
     (url.protocol !== "https:" && url.origin !== window.location.origin) ||
-    !/^\/[A-Za-z0-9/_-]+$/.test(url.pathname)
+    !/^\/(?!\/)[A-Za-z0-9/_-]+$/.test(url.pathname)
   )
     throw new ReadFailure(500, "invalid_public_api_configuration");
+  return url;
+}
+export function apiBase(raw = "/api/v1"): string {
+  const url = configuredServiceBase(raw);
   return url.href.replace(/\/$/, "");
+}
+/** An explicitly configured top-level account link, never a public request base. */
+export function controlsNavigationBase(raw: string): string {
+  return configuredServiceBase(raw).href.replace(/\/$/, "");
 }
 export function publicLink(raw: string | null | undefined): string | null {
   if (!raw || raw.length > 2048) return null;
@@ -862,16 +876,16 @@ function activityGroup(value: unknown, selected: Selection): ActivityGroup {
     (result.firstCollectedAt === null) !== (result.lastCollectedAt === null) ||
     (result.latestOccurredAt !== null &&
       result.earliestOccurredAt !== null &&
-      (Date.parse(result.earliestOccurredAt) > Date.parse(result.latestOccurredAt) ||
+      (compareSourceInstants(result.earliestOccurredAt, result.latestOccurredAt) > 0 ||
         Math.floor(Date.parse(result.earliestOccurredAt) / 3600000) !==
           Math.floor(Date.parse(result.latestOccurredAt) / 3600000))) ||
     (result.firstCollectedAt !== null &&
       result.lastCollectedAt !== null &&
-      Date.parse(result.firstCollectedAt) > Date.parse(result.lastCollectedAt)) ||
+      compareSourceInstants(result.firstCollectedAt, result.lastCollectedAt) > 0) ||
     (selected.start !== null &&
-      (result.earliestOccurredAt === null || Date.parse(result.earliestOccurredAt) < Date.parse(selected.start))) ||
+      (result.earliestOccurredAt === null || compareSourceInstants(result.earliestOccurredAt, selected.start) < 0)) ||
     (selected.end !== null &&
-      (result.latestOccurredAt === null || Date.parse(result.latestOccurredAt) >= Date.parse(selected.end)))
+      (result.latestOccurredAt === null || compareSourceInstants(result.latestOccurredAt, selected.end) >= 0))
   )
     throw new ReadFailure(502, "invalid_activity_response");
   return result;
@@ -915,8 +929,8 @@ export function activityDetail(value: unknown, selected: Selection): ActivityDet
       (result.occurredAt !== null &&
         group.latestOccurredAt !== null &&
         group.earliestOccurredAt !== null &&
-        (Date.parse(result.occurredAt) > Date.parse(group.latestOccurredAt) ||
-          Date.parse(result.occurredAt) < Date.parse(group.earliestOccurredAt)))
+        (compareSourceInstants(result.occurredAt, group.latestOccurredAt) > 0 ||
+          compareSourceInstants(result.occurredAt, group.earliestOccurredAt) < 0))
     )
       throw new ReadFailure(502, "invalid_activity_response");
     return {
