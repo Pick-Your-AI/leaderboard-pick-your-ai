@@ -7,6 +7,7 @@ import {
 } from "./research.js";
 import { createHash } from "node:crypto";
 import {
+  compareSourceInstants,
   publicDocumentationReasons,
   serviceAccountClassificationSchema,
   type ServiceAccountClassification,
@@ -589,7 +590,7 @@ export function normalizeGithubObservation(
     const classification = serviceAccountClassificationSchema.parse(entry);
     if (
       !envelope.authorizedClassifierIds?.includes(classification.reviewerActorId) ||
-      Date.parse(classification.reviewedAt) > Date.parse(observedAt) ||
+      compareSourceInstants(classification.reviewedAt, observedAt) > 0 ||
       classifications.has(classification.githubDatabaseId) ||
       (classification.githubNodeId && classifiedNodes.has(classification.githubNodeId))
     )

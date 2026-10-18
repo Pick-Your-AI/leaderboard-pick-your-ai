@@ -38,6 +38,12 @@ node/database references, unsupported versions, unauthorized or self-review,
 future reviews and conflicts with a source Bot/App/Organization fail closed.
 An unrelated account with a similar login never inherits a classification.
 
+The contract's `reviewedAt` accepts explicit ISO offsets and arbitrary fractional
+precision. Cutoff checks compare that validated source instant exactly: an
+equivalent offset or zero-padded endpoint is valid, while a review one nanosecond
+after the observation is still future evidence. This does not widen the existing
+UTC, millisecond observation and metric clocks or round/rewrite the review time.
+
 A reviewed classification specializes only a known source `User` into
 `service_account`. Native `bot` and `github_app` kinds remain distinct where
 source evidence supports them. Missing classification leaves `user` as a
@@ -125,6 +131,16 @@ retain their previous behavior, but cannot replay service accounts without valid
 reviewed evidence. Classification-enabled replay requires this coordinated
 pipeline/controls integration; the engine has no bypass flag.
 
+Cached publication and frozen identity restoration also validate the private
+classification against each immutable source row's observation time before
+joining actor evidence. Both hash-only and source-bound historical inputs obey
+this check, including identical documents retained for multiple source rows. A
+later metric cutoff or valid retained copy cannot repair an earlier source-time
+violation. An affected publication or preview is withheld without changing its
+normalization signature, source/cache/frozen hashes, or published head. Retained
+bytes remain available for an explicit reviewed correction; this check does not
+invent a replacement classification or claim to have recomputed old snapshots.
+
 ## Verification and remaining acceptance
 
 Synthetic contract, normalizer, engine, public read and JSON/CSV export tests
@@ -134,6 +150,13 @@ protected hydrated/enriched configuration; separate author/merger/release
 roles; user/automation/all filtering; missing/future/downcast evidence; and
 private provenance exclusion. Existing role/coauthor/model-trailer tests
 continue to apply. Tests are not real contributor evidence or source canaries.
+
+The classification-time cases cover REST/GraphQL and protected hydrated/enriched
+normalization, independent aggregation and portfolio selection, exact and offset
+endpoints, sub-millisecond future reviews, and strict observation/metric clocks.
+Actual disposable PGlite/PostgreSQL and SQLite pipeline cases exercise cached
+publication and both frozen identity binding formats, database reopen, unchanged
+historical bytes on denial, and a valid copy alongside an earlier invalid source.
 
 Completed in this slice: service-account representation, reviewed source
 normalization, engine filter enforcement and safe public labels. Public API
