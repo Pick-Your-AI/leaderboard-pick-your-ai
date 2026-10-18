@@ -89,32 +89,68 @@
     {
       "phase": "Concept and Project publication",
       "exit": "Approved concept, issue hierarchy, preserved existing scope and recorded open decisions",
-      "not_claimed": "Implementation, data accuracy or deployment"
+      "not_claimed": "Implementation, data accuracy or deployment",
+      "required_evidence": [
+        "Reviewed product, metric, contributor-rights and phase decisions with unresolved choices recorded",
+        "Publication receipt with native hierarchy, preserved source boundaries and actual GitHub readback"
+      ],
+      "receiving_roles": "Maintainer / product policy and Data / application engineering"
     },
     {
       "phase": "Synthetic design prototype",
       "exit": "Representative accessible journeys and all failure states reviewed using labeled synthetic data",
-      "not_claimed": "Live contributor counts"
+      "not_claimed": "Live contributor counts",
+      "required_evidence": [
+        "Exact source/build and labeled synthetic fixture scope, including empty, partial, unavailable, privacy and recovery states",
+        "Reviewed deterministic results and the required accessible user-journey evidence; no source or participant result inferred from mocks"
+      ],
+      "receiving_roles": "UI / application engineering and accessibility review"
     },
     {
       "phase": "Public-data shadow collection",
       "exit": "Read-only sources, replay, reconciliation and source-specific coverage verified; no public rankings",
-      "not_claimed": "Complete historical observability"
+      "not_claimed": "Complete historical observability",
+      "required_evidence": [
+        "Approved immutable source IDs, event/field permissions, source-use conditions and known history boundaries",
+        "Actual read-only source probes, durable replay/deduplication, reconciliation and coverage receipts",
+        "Private shadow-output access verified; public rankings remain disabled"
+      ],
+      "receiving_roles": "Source/App owner, Data / application engineering and privacy review"
     },
     {
       "phase": "Public beta",
       "exit": "Working public journeys, attribution/LOC/triage audits, functional correction controls, disclosed limitations and active operator",
-      "not_claimed": "Unsupported qualitative recognition or guaranteed service targets"
+      "not_claimed": "Unsupported qualitative recognition or guaranteed service targets",
+      "required_evidence": [
+        "All mandatory public-release packages and first complete product journey accepted for the selected manifest",
+        "Exact enabled/disabled metric and optional-module records with source, identity, privacy, methodology and receiving evidence",
+        "Host/cost/operating decision, functioning correction receipt, accepted target profile and declared monitoring interval",
+        "Independent anonymous journey readback with attribution, freshness, coverage and privacy limits visible"
+      ],
+      "receiving_roles": "Product, metric/source, privacy, accessibility and accepted operations roles"
     },
     {
       "phase": "Production launch",
       "exit": "Prelaunch staging acceptance, explicit release authority, deployed revision readback, fresh source progress, accessibility/privacy/recovery receipts",
-      "not_claimed": "Completion of every optional expansion"
+      "not_claimed": "Completion of every optional expansion",
+      "required_evidence": [
+        "Accepted staged artifact, accessibility/privacy/load/recovery evidence and explicit deployment authority",
+        "Approved DNS/TLS, actual deployed revision, fresh source progress and independent anonymous board/profile/evidence readback",
+        "Actual correction submission receipt, rollback verification and operator acknowledgement",
+        "Target measurements report their actual intervals and unresolved results; a short run cannot certify 30-day availability"
+      ],
+      "receiving_roles": "Release authority and accepted operations, with independent receiving review"
     },
     {
       "phase": "Full project acceptance",
       "exit": "Every in-scope work package completed or explicitly descoped by owner with reason; enabled-capability manifest reconciled; operations handed off",
-      "not_claimed": "Future scope implicitly implemented"
+      "not_claimed": "Future scope implicitly implemented",
+      "required_evidence": [
+        "Every in-scope work package accepted or explicitly descoped through a reviewed owner decision with reason",
+        "Enabled-capability manifest reconciled with the complete scope and all conditional-module acceptance",
+        "Operations handoff accepted; no optional or future expansion silently substituted for unfinished scope"
+      ],
+      "receiving_roles": "Program scope authority and the actual receiving owners for each package"
     }
   ],
   "postdeployment_gate": {
@@ -128,5 +164,34 @@
       "Actual correction submission receipt",
       "Operator acknowledgment"
     ]
-  }
+  },
+  "decision_version": "release-gates/v1",
+  "decision_record": "docs/release-decision.md",
+  "proposed_evaluation_targets": [
+    {
+      "measure": "Durable webhook acknowledgement, p95",
+      "target": "Under 2 seconds within the declared load and payload envelope",
+      "receiving_boundary": "LB-19.04 and LB-20.01: measure failures/timeouts and durable confirmation; no acknowledgement before persistence"
+    },
+    {
+      "measure": "Receive-to-publication latency, p95",
+      "target": "Under 60 seconds for received in-scope events requiring publication",
+      "receiving_boundary": "LB-19.04 and LB-20.04: retain unpublished events, oldest-pending age and separate upstream lag"
+    },
+    {
+      "measure": "Public read availability",
+      "target": "At least 99.5% of minute observation slots over a complete rolling 30-day window",
+      "receiving_boundary": "LB-20.01 and LB-20.04: each declared critical anonymous journey returns the correct privacy-safe contract within 10 seconds; missing observations prevent full-window acceptance"
+    },
+    {
+      "measure": "Recovery time objective",
+      "target": "At most 4 hours from first observed service loss through safe recovery and independent readback",
+      "receiving_boundary": "LB-18.04, LB-20.01 and LB-20.03: include detection/decision delay, reconciliation and current privacy restrictions"
+    },
+    {
+      "measure": "Recovery point objective for public source observations",
+      "target": "At most 24 hours of acknowledged source observations unrecovered after reconciliation",
+      "receiving_boundary": "LB-18.04 and LB-20.03: verify actual missing observations; backup age alone is insufficient; privacy/consent/correction state is outside the loss allowance"
+    }
+  ]
 }

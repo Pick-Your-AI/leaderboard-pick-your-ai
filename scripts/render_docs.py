@@ -405,6 +405,8 @@ Distinct contribution roles can share an artifact, but a repeated event or impor
 
 The dedicated repository boundary has been selected. The [metric and recognition decision](metric-recognition-policy.md) and its [definition review](metric-definition-review.md) specify this project's policy choices; review and merge record their acceptance. Each register entry retains its unresolved source, role or operating evidence. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
 
+The [release-phase decision](release-decision.md) defines transition evidence and proposed evaluation targets. Its adoption does not establish that a phase has passed or turn a proposed role into a named operational commitment.
+
 {json_detail(decisions)}
 
 ## Related policies
@@ -416,6 +418,14 @@ The dedicated repository boundary has been selected. The [metric and recognition
 {release['principle']}
 
 Creating this repository, issue hierarchy and Project establishes the delivery plan. It does not install a GitHub App, select a host, provision credentials, enable a public metric or deploy a website. Staging validation and production verification remain separate work packages.
+
+The [release-phase decision](release-decision.md) defines the measurement protocol, privacy priority and receiving evidence for `{release['decision_version']}`. Review and merge adopt the gate policy; actual phase acceptance remains evidence-bound.
+
+## Proposed evaluation targets
+
+{table(['Measure', 'Proposed target', 'Receiving boundary'], [(t['measure'], t['target'], t['receiving_boundary']) for t in release['proposed_evaluation_targets']])}
+
+These values are proposed evaluation objectives, not measured results or operating commitments. The selected host, budget, declared load, source scope and accepted operational roles must support the receiving profile before public beta. Missing observations, unsafe publication and unreconciled data loss cannot be reported as a pass. See the decision for exact clocks, denominators and privacy-preserving recovery.
 
 ## Release phases
 
