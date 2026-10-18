@@ -9,6 +9,7 @@ import { applyThemePreference, readThemePreference, type ThemePreference } from 
 import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
 import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
+import { SnapshotCoverage } from "./Coverage.tsx";
 import {
   discoverMetrics,
   isCatalogPath,
@@ -782,6 +783,15 @@ export function RemoteApp() {
           </section>
         )}
         {meta && <Meta value={meta} selected={selected} />}
+        {meta && (
+          <SnapshotCoverage
+            key={meta.snapshotId}
+            coverage={meta.coverage}
+            snapshotId={meta.snapshotId}
+            expanded={data?.kind === "health"}
+            correctionHref={uiHref("/corrections", pinned)}
+          />
+        )}
         {meta && (
           <section aria-label="Publication updates" className="update-control">
             <p>
