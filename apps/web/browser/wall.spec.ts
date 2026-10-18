@@ -602,3 +602,43 @@ test("wall freshness and controls fit intended landscape, portrait and overlay d
     await api.close();
   }
 });
+
+for (const publicationRace of [false, true]) {
+  test(`wall preserves final contributor-page progress ${publicationRace ? "after a publication-head race" : "during a coherent recheck"}`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const api = await service(page);
+    try {
+      await page.goto(wall("cycle"));
+      await expect(page.getByRole("link", { name: "Wall contributor 01", exact: true })).toBeVisible();
+      for (let step = 0; step < 4; step++) await next(page);
+      await expect(page.getByRole("heading", { name: "Contributors in this scope", exact: true })).toBeVisible();
+      await expect(page.locator(".api-wall-page")).toContainText("Page 3");
+      await expect(provenance(page)).toContainText("wall-1");
+      if (publicationRace) api.publishBetweenHealthAndContent();
+      await page.getByRole("button", { name: "Recheck current publication controls" }).click();
+      if (publicationRace) {
+        await expect(page.getByRole("alert")).toContainText("wall_publication_changed_during_read");
+        await expect(page.locator(".api-wall-table")).toHaveCount(0);
+        await expect(page.locator(".api-wall-roll")).toHaveCount(0);
+        await expect(page.getByRole("link", { name: /^Wall contributor/ })).toHaveCount(0);
+        await expect(provenance(page)).toHaveCount(0);
+        await page.getByRole("button", { name: "Recheck current publication controls" }).click();
+      }
+      await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeEnabled();
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      await expect(page.locator(".api-wall-page")).toContainText("Page 3");
+      await expect(provenance(page)).toContainText("wall-1");
+      await expect(page.getByRole("link", { name: "Wall contributor 13", exact: true })).toBeVisible();
+      if (!publicationRace) api.next();
+      await next(page);
+      await expect(page.getByRole("heading", { name: "PRs merged", exact: true })).toBeVisible();
+      await expect(page.locator(".api-wall-page")).toContainText("Page 1");
+      await expect(provenance(page)).toContainText("wall-2");
+      await expect(page.locator(".api-wall-table tbody tr").first()).toContainText("90");
+    } finally {
+      await api.close();
+    }
+  });
+}
