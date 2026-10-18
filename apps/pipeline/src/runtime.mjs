@@ -893,7 +893,7 @@ export async function createPipeline(options) {
         ON CONFLICT (scope_key) DO UPDATE SET snapshot_id=EXCLUDED.snapshot_id,revision=EXCLUDED.revision`,
           [scopeKey(scope), snapshotId, revision],
         );
-        const frozenDocument = { frozen, engineScope, policies: config.policies };
+        const frozenDocument = { frozen, engineScope, scope, policies: config.policies };
         await tx.query(
           "INSERT INTO leaderboard_pipeline.frozen_inputs(snapshot_id,document,document_hash) VALUES($1,$2::jsonb,$3)",
           [snapshotId, JSON.stringify(frozenDocument), digest(frozenDocument)],
@@ -1163,6 +1163,21 @@ export async function createPipeline(options) {
   function dispatchOnce() {
     return serialize(() => (stopped || !options.webhookDispatch ? "blocked" : dispatch()));
   }
+  async function policyInputGuard(snapshotId, input) {
+    if (!input.scope) fail("policy_input_scope_unavailable");
+    const read = await source.read(input.scope, snapshotId, new AbortController().signal);
+    if (
+      !read ||
+      input.frozen.actors.some((actor) => read.controls.suppressedActorIds.includes(actor.id)) ||
+      input.frozen.facts.some((fact) => read.controls.suppressedArtifactIds.includes(fact.artifactId))
+    )
+      fail("policy_input_revoked");
+    return digest([
+      read.controls.version,
+      recognitionFingerprint(controlsStore.read()),
+      configurationOverlay(controlsStore.read()),
+    ]);
+  }
   async function previewPolicy({ snapshotId, policy, operatorId }) {
     return serialize(async () => {
       if (
@@ -1177,15 +1192,17 @@ export async function createPipeline(options) {
         ])
       ).rows[0];
       if (!saved || digest(saved.document) !== saved.document_hash) fail("frozen_input_unavailable");
+      const guard = await policyInputGuard(snapshotId, saved.document);
       const previous = saved.document.policies.find((p) => p.policy.metricId === policy.metricId)?.policy;
       if (!previous) fail("policy_metric_not_in_snapshot");
       const comparison = c.metrics.comparePolicies(saved.document.frozen, previous, policy, saved.document.engineScope);
-      const document = { snapshotId, comparison, previousPolicy: previous, targetPolicy: copy(policy) };
+      const document = { snapshotId, guard, comparison, previousPolicy: previous, targetPolicy: copy(policy) };
       const comparisonId = digest(document);
       await db.query(
         "INSERT INTO leaderboard_pipeline.policy_comparisons(comparison_id,document,document_hash) VALUES($1,$2::jsonb,$3) ON CONFLICT DO NOTHING",
         [comparisonId, JSON.stringify(document), digest(document)],
       );
+      if (guard !== (await policyInputGuard(snapshotId, saved.document))) fail("policy_input_changed");
       return { comparisonId, ...copy(document) };
     });
   }
@@ -1201,6 +1218,17 @@ export async function createPipeline(options) {
         )
       ).rows[0];
       if (!saved || digest(saved.document) !== saved.document_hash) fail("policy_comparison_unavailable");
+      const input = (
+        await db.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
+          saved.document.snapshotId,
+        ])
+      ).rows[0];
+      if (
+        !input ||
+        digest(input.document) !== input.document_hash ||
+        saved.document.guard !== (await policyInputGuard(saved.document.snapshotId, input.document))
+      )
+        fail("policy_input_changed");
       const manifest = c.metrics.planPolicyRelease(saved.document.comparison, {
         approverId: operatorId,
         designatedApproverIds: options.policyApproverIds ?? [],
@@ -1212,6 +1240,8 @@ export async function createPipeline(options) {
       const receiptId = await db.transaction((tx) =>
         receipt(tx, `policy-release:${digest(document)}`, "policy_release_reviewed", document),
       );
+      if (saved.document.guard !== (await policyInputGuard(saved.document.snapshotId, input.document)))
+        fail("policy_input_changed");
       return { receiptId, ...document };
     });
   }

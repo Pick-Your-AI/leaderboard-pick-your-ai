@@ -974,20 +974,92 @@ test("accepted controls receipt materializes a separate lens and withdrawal fenc
     };
     s.audit.push(event);
   });
-  const runtime = await createPipeline({ ...h.options, config });
+  const runtime = await createPipeline({
+    ...h.options,
+    config,
+    authorizePolicyPreview: async () => {
+      h.controlsStore.transaction((s) => {
+        s.requests.claim.status = "withdrawn";
+      });
+      return true;
+    },
+  });
   t.after(() => runtime.stop());
   const publication = (await runtime.runOnce()).publications[0];
   const signal = new AbortController().signal;
   const visible = await runtime.source.read(publicScope, publication.snapshotId, signal);
   assert.equal(visible.selected.rows.find((r) => r.actorId === "101").result.value, 1);
-  h.controlsStore.transaction((s) => {
-    s.requests.claim.status = "withdrawn";
-  });
+  await assert.rejects(
+    runtime.previewPolicy({
+      snapshotId: publication.snapshotId,
+      policy: { ...policy, version: "synthetic-accepted-v2" },
+      operatorId: "202",
+    }),
+    /policy_input_revoked/,
+  );
   assert.equal(await runtime.source.read(publicScope, publication.snapshotId, signal), null);
   const next = (await runtime.runOnce()).publications[0];
   const after = await runtime.source.read(publicScope, next.snapshotId, signal);
   assert.equal(
     after.selected.rows.some((r) => r.result.value > 0),
     false,
+  );
+});
+
+for (const action of ["contributor suppression", "source revocation"])
+  test(`policy preview fences ${action} during asynchronous authorization`, async (t) => {
+    let revoke;
+    const h = await harness(t, {
+      authorizePolicyPreview: async () => {
+        await revoke();
+        return true;
+      },
+    });
+    const publication = (await h.runtime.runOnce()).publications[0];
+    revoke =
+      action === "contributor suppression"
+        ? async () =>
+            h.controlsStore.transaction((s) => {
+              s.profiles["101"] = { suppressed: true };
+            })
+        : async () => h.setPrivate(true);
+    if (action === "source revocation")
+      revoke = async () => {
+        await h.db.query(
+          "UPDATE leaderboard_ingestion.repository_access SET state='unavailable' WHERE repository_id=2",
+        );
+      };
+    await assert.rejects(
+      h.runtime.previewPolicy({
+        snapshotId: publication.snapshotId,
+        policy: { ...h.options.config.policies[0].policy, version: "v2" },
+        operatorId: "201",
+      }),
+      /policy_input_revoked/,
+    );
+  });
+test("policy approval rejects a frozen comparison after contributor suppression", async (t) => {
+  const h = await harness(t, {
+    authorizePolicyPreview: async () => true,
+    authorizePolicyRelease: async () => true,
+    policyApproverIds: ["202"],
+  });
+  const publication = (await h.runtime.runOnce()).publications[0];
+  const preview = await h.runtime.previewPolicy({
+    snapshotId: publication.snapshotId,
+    policy: { ...h.options.config.policies[0].policy, version: "v2" },
+    operatorId: "201",
+  });
+  h.controlsStore.transaction((s) => {
+    s.profiles["101"] = { suppressed: true };
+  });
+  await assert.rejects(
+    h.runtime.approvePolicyComparison({
+      comparisonId: preview.comparisonId,
+      operatorId: "202",
+      approvalReceipt: "review",
+      releaseNotes: "Reviewed",
+    }),
+    /policy_input_revoked|policy_input_changed/,
   );
 });
