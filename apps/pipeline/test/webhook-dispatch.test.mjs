@@ -485,7 +485,7 @@ test("dispatch stays opt-in, rejects public mode, and does not claim unapproved 
   await denied.stop();
 });
 
-function revokeAndRestoreConfiguration(store) {
+function revokeAndRestoreConfiguration(store, repository) {
   store.transaction(
     (state) => {
       state.configuration = {
@@ -505,7 +505,14 @@ function revokeAndRestoreConfiguration(store) {
   store.transaction(
     (state) => {
       state.configuration.revision++;
-      state.configuration.active.document.repositories = [{ id: "2" }];
+      state.configuration.active.document.repositories = [
+        {
+          id: String(repository.id),
+          installationId: String(repository.installationId),
+          slug: repository.slug,
+          capabilities: repository.families,
+        },
+      ];
     },
     { publish: true },
   );
@@ -518,7 +525,7 @@ test("configuration removal and restoration during dispatch hydration cannot aut
   h.setFetchHook((url) => {
     if (!changed && /\/issues\/1$/.test(url.pathname)) {
       changed = true;
-      revokeAndRestoreConfiguration(h.controlsStore);
+      revokeAndRestoreConfiguration(h.controlsStore, h.config.repositories[0]);
     }
   });
   assert.equal(await h.runtime.dispatchOnce(), "quarantined");
@@ -526,6 +533,31 @@ test("configuration removal and restoration during dispatch hydration cannot aut
   assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 0);
   assert.equal(await h.runtime.dispatchOnce(), "idle");
 });
+
+for (const change of ["capability", "installation"])
+  test(`configuration ${change} narrowing during dispatch is quarantined without publication`, async (t) => {
+    const h = await harness(t, { webhookDispatch: true });
+    await enqueueNotice(h);
+    let changed = false;
+    h.setFetchHook((url) => {
+      if (!changed && /\/issues\/1$/.test(url.pathname)) {
+        changed = true;
+        revokeAndRestoreConfiguration(h.controlsStore, h.config.repositories[0]);
+        h.controlsStore.transaction(
+          (state) => {
+            const repository = state.configuration.active.document.repositories[0];
+            if (change === "capability") repository.capabilities = [];
+            else repository.installationId = "999";
+          },
+          { publish: true },
+        );
+      }
+    });
+    assert.equal(await h.runtime.dispatchOnce(), "quarantined");
+    assert.equal((await dispatchRow(h)).reason_code, "configuration_changed");
+    assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 0);
+    assert.equal((await dispatchRow(h)).completion, null);
+  });
 
 test("a restarted dispatcher cannot rebind failed work to a different approved policy/configuration", async (t) => {
   const h = await harness(t, { webhookDispatch: true });
