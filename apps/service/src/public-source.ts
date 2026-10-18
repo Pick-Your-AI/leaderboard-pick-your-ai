@@ -330,6 +330,9 @@ export function projectRead(
     throw new PublicReadError(410, "snapshot_revoked_refetch");
   const suppressedActors = new Set(controls.suppressedActorIds);
   const suppressedArtifacts = new Set(controls.suppressedArtifactIds);
+  // Check the whole identity set before privacy filtering. Dropping a hidden or
+  // unresolved duplicate first could expose a contradictory public copy.
+  if (new Set(selected.actors.map((entry) => entry.actorId)).size !== selected.actors.length) return reject();
   const actors = selected.actors
     .map((entry) => {
       if (!id(entry.actorId) || !["public", "hidden", "deleted", "unlinked"].includes(entry.state)) return reject();
@@ -340,7 +343,6 @@ export function projectRead(
       (entry) =>
         entry.state === "public" && entry.actor.identityState === "resolved" && !suppressedActors.has(entry.actorId),
     );
-  if (new Set(actors.map((actor) => actor.actorId)).size !== actors.length) return reject();
   const actorIds = new Set(actors.map((actor) => actor.actorId));
   const metadataByContribution = new Map<string, string>();
   const documentationClassificationByContribution = new Map<string, string>();
