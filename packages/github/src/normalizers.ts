@@ -84,6 +84,12 @@ function matchesSnapshotRevision(revision: string, fingerprint: string): boolean
   );
 }
 
+function canonicalTriageAction(action: string): string {
+  if (action === "issue_type_added") return "issue_typed";
+  if (action === "issue_type_removed") return "issue_untyped";
+  return action;
+}
+
 export function githubTimelineRevision(value: Record<string, unknown>): string {
   const identity = (item: unknown) =>
     object(item) ? [item.id ?? null, item.node_id ?? null, item.name ?? null] : null;
@@ -97,6 +103,12 @@ export function githubTimelineRevision(value: Record<string, unknown>): string {
         identity(value.label),
         identity(value.milestone),
         identity(value.assignee),
+        // Type targets affect raw-state identity and must survive the same
+        // collection/hydration revision check as other credited metadata.
+        // Keep existing non-type event fingerprints unchanged.
+        ...(["issue_typed", "issue_untyped"].includes(canonicalTriageAction(String(value.event)))
+          ? [identity(value.issue_type), value.target_id ?? null]
+          : []),
       ]),
     )
     .digest("hex");
@@ -534,7 +546,8 @@ export function normalizeGithubObservation(
     return out;
   }
   const at = time(envelope.occurredAt);
-  const sourceAction = envelope.action ?? text(payload.action) ?? "snapshot";
+  const observedAction = envelope.action ?? text(payload.action) ?? "snapshot";
+  const sourceAction = envelope.family === "triage" ? canonicalTriageAction(observedAction) : observedAction;
   const history =
     envelope.publicHistory?.approvedPublic === true
       ? publicEvidenceHistorySchema.parse(envelope.publicHistory.history)
@@ -610,7 +623,7 @@ export function normalizeGithubObservation(
   out.observations.push({
     id: observationId,
     source: proof.source,
-    action: sourceAction,
+    action: observedAction,
     actorId: sender?.id ?? null,
     artifactId: id,
     occurredAt: at,
