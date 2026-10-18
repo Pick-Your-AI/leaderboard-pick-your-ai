@@ -34,7 +34,7 @@ const base = {
   snapshotId: "public-1",
   revision: 1,
   generatedAt: at,
-  metricDefinitionVersion: "candidate-0.1.0",
+  metricDefinitionVersion: "candidate-0.1.1",
   computationVersion: "synthetic",
   policyVersion: "privacy-1",
   head: { snapshotId: "public-1", revision: 1, publishedAt: at },

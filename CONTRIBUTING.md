@@ -2,6 +2,20 @@
 
 This repository owns the Pick Your AI contributor-recognition delivery plan and service implementation. Read the [product scope](docs/PRODUCT.md), [delivery plan](docs/DELIVERY_PLAN.md) and your issue before starting. The repository contains planning tools, source and metric packages, public and protected services, and a browser application. Remaining implementation, source authorization and public release remain tracked work.
 
+## First local fixture journey
+
+Use the pinned Node.js 24/npm toolchain in `package.json`. From the repository root, run:
+
+```bash
+npm ci
+npm run build
+node --test apps/service/test/pending-counts.test.mjs
+```
+
+This synthetic journey calls the actual public API and JSON/CSV export handlers in process. It verifies that 14 accepted contributions plus 3 pending remain below 15 accepted, then exercises current artifact/actor suppression, disabled policy, revoked snapshots, unsafe receipts, unknown coverage and half-open date boundaries, including source timestamps with fractional-second precision. A successful run passes every case with zero failures and zero skipped tests. The fixtures do not require GitHub credentials, a database server, browser installation or published contributor data; dependency installation still needs the normal package registry/cache. Build first because tests import compiled workspace packages.
+
+For the optional browser prototype, API startup, worker boundaries and disposable database workflow, continue with [local runtime setup](docs/runtime-foundation.md). Synthetic results demonstrate the tested behavior only; they do not enable real sources or certify production acceptance. Do not seed synthetic observations into a public runtime.
+
 ## Choose and own work
 
 Use GitHub Assignees as the source of truth. Agree an owner and confirm prerequisites before moving an issue from Backlog to Ready. The initial plan is unassigned; a proposed owner role is not an assignment. Preserve existing assignees, triage and source decision-record paths across the organization.
