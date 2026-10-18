@@ -17,6 +17,7 @@ import {
   families,
   familyLabel,
   getMetric,
+  leadMetrics,
   metricsInFamily,
   searchMetrics,
 } from "../data/registry.ts";
@@ -27,19 +28,9 @@ import { useLatestSnapshotId, useRead, useScope } from "../lib/hooks.ts";
 import { Link, useRouter } from "../lib/router.tsx";
 import { inWindow, serializeScope } from "../lib/scope.ts";
 
-/**
- * Prototype example board per registry family. The lead metric per family is
- * an unresolved registry decision, so this is labeled as a prototype choice.
- */
-const exampleBoards: Record<string, string> = {
-  research: "decision_records",
-  issues: "issues_opened",
-  triage: "labels_applied",
-  delivery: "pr_merged",
-  review: "prs_reviewed",
-  craft: "documentation",
-  lines: "pr_lines_changed",
-};
+const exampleBoards: Record<string, string> = Object.fromEntries(
+  leadMetrics("overview").map((metric) => [metric.family, metric.id]),
+);
 
 export function OverviewPage() {
   const { scope, hrefWith } = useScope();
@@ -84,8 +75,8 @@ export function OverviewPage() {
           <section aria-labelledby="families-heading" className="section">
             <h2 id="families-heading">Contribution families</h2>
             <p className="muted">
-              Grouped by the metric registry's own families. Department names and each family's lead metric are still
-              open registry decisions, so example boards are prototype choices.
+              Departments and lead measures come from the versioned registry. These navigation defaults do not assign
+              organizational ownership or certify source coverage.
             </p>
             <ul className="family-grid">
               {families.map((family) => {
@@ -102,7 +93,7 @@ export function OverviewPage() {
                       <>
                         <p>
                           Example: <Link to={hrefWith(`/leaderboards/${board.metric.id}`)}>{board.metric.name}</Link>{" "}
-                          <span className="tag">Prototype choice</span>
+                          <span className="tag">Registry default</span>
                         </p>
                         {board.rows.length ? (
                           <ol className="mini-board" aria-label={`Top of ${board.metric.name}`}>
