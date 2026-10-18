@@ -10,6 +10,7 @@ import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
 import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
+import { TimeZoneOptions, WindowBounds } from "../components/DisplayTimeZone.tsx";
 import { LastVerifiedSnapshot, type SnapshotReference } from "./LastVerifiedSnapshot.tsx";
 import {
   discoverMetrics,
@@ -215,6 +216,7 @@ function Meta({ value, selected }: { value: Metadata; selected: Selection }) {
         {selected.workstream ? ` · workstream ${selected.workstream}` : ""}
         {` · ${actorFilterLabels[value.actorFilter ?? "all"]}`}
       </p>
+      <WindowBounds start={selected.start} end={selected.end} timeZone={selected.timeZone ?? "UTC"} />
       <a data-api-nav href={uiHref(location.pathname, selected, { snapshot: value.snapshotId })}>
         Permalink to this snapshot
       </a>
@@ -254,6 +256,7 @@ function Filters({
             "search",
             "category",
             "actors",
+            "tz",
           ]) {
             const value = String(input.get(key) ?? "").trim();
             if (value) params.set(key, value);
@@ -270,6 +273,7 @@ function Filters({
           Use one stable repository/workstream ID. Dates are paired canonical UTC timestamps; blank dates request an
           explicitly materialized all-time scope. Unsupported scopes remain unavailable.
         </p>
+        <input type="hidden" name="tz" value={selected.timeZone ?? "UTC"} />
         <label>
           Activity selection
           <select name="actors" defaultValue={selected.actors ?? "all"}>
@@ -772,6 +776,23 @@ export function RemoteApp() {
           <p>Evidence-backed public reads. Unknown values and unavailable scopes remain explicit.</p>
         </header>
         <Filters key={`${url.pathname}${url.search}`} selected={selected} path={url.pathname} navigate={navigate} />
+        <label>
+          Display timezone
+          <select
+            value={selected.timeZone ?? "UTC"}
+            onChange={(event) => {
+              const params = new URLSearchParams(url.search);
+              if (event.target.value === "UTC") params.delete("tz");
+              else params.set("tz", event.target.value);
+              // A clock-label change keeps the actual displayed page, including its cursor/proof.
+              if (meta && !params.has("snapshot")) params.set("snapshot", meta.snapshotId);
+              navigate(`${url.pathname}?${params}`);
+            }}
+          >
+            <TimeZoneOptions selected={selected.timeZone ?? "UTC"} />
+          </select>
+        </label>
+        <p className="small">Display timezone changes clock labels. Date inputs and counting boundaries use UTC.</p>
         <div className="visually-hidden" role="status" aria-live="polite">
           {announcement}
         </div>
