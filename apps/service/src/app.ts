@@ -6,6 +6,8 @@ import {
   publicScopeKey,
   publicScopeParameters,
   publicRoleScopeSchemaVersion,
+  achievementMilestoneVersion,
+  achievementMilestonesPageSchema,
   metricRegistrySchema,
   type ActorFilter,
   type MetricRegistry,
@@ -13,6 +15,7 @@ import {
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { comparePublishedRanks, type ComparedRanks } from "./rank-comparison.js";
 import { acceptedAchievements, ACHIEVEMENT_RULE_VERSION } from "./achievements.js";
+import { acceptedMilestones } from "./achievement-milestones.js";
 import { renderContributorCard, renderContributorCardImage } from "./cards.js";
 import { renderPublicExport } from "./exports.js";
 import { publicParticipation } from "./participation.js";
@@ -44,7 +47,7 @@ export interface ServiceOptions {
   maxConcurrentStreams?: number;
   cursorSecret?: string;
   serviceVersion?: string;
-  approvedAchievementRuleVersion?: typeof ACHIEVEMENT_RULE_VERSION;
+  approvedAchievementRuleVersion?: typeof ACHIEVEMENT_RULE_VERSION | typeof achievementMilestoneVersion;
 }
 const allowed = new Set([
   "actors",
@@ -756,11 +759,45 @@ export function createService(options: ServiceOptions = {}) {
   });
   app.get<{ Params: { actorId: string } }>("/api/v1/contributors/:actorId/achievements", async (request, reply) => {
     const q = query(request);
-    if (q.metric || q.category || q.cursor || q.search || q.format !== "json") fail(400, "unsupported_filter");
-    if (options.approvedAchievementRuleVersion !== ACHIEVEMENT_RULE_VERSION) fail(503, "achievement_policy_unapproved");
-    const read = await load(q.scope, q.snapshot, q.actors);
+    const version = options.approvedAchievementRuleVersion;
+    const milestones = version === achievementMilestoneVersion;
+    if (q.metric || (!milestones && (q.category || q.cursor)) || q.search || q.format !== "json")
+      fail(400, "unsupported_filter");
+    if (version !== ACHIEVEMENT_RULE_VERSION && !milestones) fail(503, "achievement_policy_unapproved");
+    const cursor = q.cursor ? decodeCursor(q.cursor) : null;
+    const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors);
     if (!read.selected.actors.some((actor) => actor.actorId === request.params.actorId))
       fail(404, "profile_unavailable");
+    if (milestones) {
+      if (read.selected.disabledMetrics?.some((entry) => entry.id === q.category)) fail(503, "metric_disabled");
+      const result = acceptedMilestones(read, request.params.actorId, q.category, registry.metrics);
+      // Bind paging to the actual current projection as well as the existing policy/snapshot
+      // token. Changed privacy, names or proof cannot silently replace an earlier page cohort.
+      const digest = createHash("sha256");
+      for (const entry of [...result.achievements, ...result.coContributions])
+        digest.update(JSON.stringify(entry)).update("\n");
+      const binding = JSON.stringify([
+        "achievement-milestones/v2",
+        request.params.actorId,
+        cursorScope(q.scope),
+        q.category,
+        q.limit,
+        q.actors,
+        digest.digest("hex"),
+      ]);
+      boundCursor(q, binding);
+      const { entries, nextCursor } = page(result.coContributions, q, read, cursor, binding, 1_000_000);
+      const extension = achievementMilestonesPageSchema.parse({
+        ...result,
+        coContributions: entries,
+        totalCoContributions: result.coContributions.length,
+        pageSize: q.limit,
+        nextCursor,
+      });
+      const body = { ...meta(read), actorId: request.params.actorId, ...extension };
+      if (Buffer.byteLength(JSON.stringify(body)) > 1_500_000) fail(503, "achievement_response_too_large");
+      return send(request, reply, body, "application/json; charset=utf-8", "no-store");
+    }
     return send(
       request,
       reply,
