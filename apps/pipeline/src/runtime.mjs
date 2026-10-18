@@ -655,7 +655,12 @@ export async function createPipeline(options) {
         if (digest(cached.document) !== cached.document_hash) fail("normalization_integrity_error");
         if (cached.document.isSynthetic !== (dataMode === "synthetic")) fail("normalization_data_mode_mismatch");
         assertDataMode(cached.document);
-        if (hasDispatchEvidence(cached.document, dispatch, row)) {
+        // Reprocess Project caches created before collected-subject binding.
+        // Keep the shared policy signature stable for frozen comparisons.
+        const currentHistoryNormalizer =
+          row.family !== "project_history" ||
+          cached.document.projectHistoryNormalizationVersion === "collected-subject/v1";
+        if (currentHistoryNormalizer && hasDispatchEvidence(cached.document, dispatch, row)) {
           outputs.push(cached.document);
           continue;
         }
@@ -746,6 +751,7 @@ export async function createPipeline(options) {
       // prove the target creation. Failure must not leave older evidence visible.
       if (!hasDispatchEvidence(output, dispatch, row)) fail("dispatch_enrichment_unavailable");
       const document = {
+        ...(row.family === "project_history" ? { projectHistoryNormalizationVersion: "collected-subject/v1" } : {}),
         suppressArtifactIds: suppressed,
         isSynthetic: dataMode === "synthetic",
         facts: output.facts,

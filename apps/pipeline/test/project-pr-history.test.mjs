@@ -156,6 +156,7 @@ test("Project status collection traverses issue and closed-PR inventories and pa
   assert.equal(prFacts.length, 2);
   assert.notEqual(prFacts[0].sourceRevision, prFacts[1].sourceRevision);
   for (const fact of prFacts) {
+    assert.equal(fact.historySubjectId, "PR_synthetic");
     assert.equal(fact.actorId, "32", "the native editor receives credit, not the PR author");
     assert.equal(fact.occurredAt, "2026-10-01T00:00:00.000Z");
     assert.equal(fact.evidence, "observed_transition");
@@ -223,6 +224,12 @@ test("PR status hydration withholds unapproved Project details and rejects chang
   const out = await changed.normalize(fact);
   assert.deepEqual(out.reasons, ["typed_history_revision_unverified"]);
   assert.equal(out.facts.length, 0);
+  const refreshed = (await changed.source.readPage({ ...request, runId: "synthetic-refreshed" })).facts.find(
+    (entry) => entry.subjectId === "E_pull",
+  );
+  assert.equal(refreshed.historySubjectId, fact.historySubjectId);
+  assert.notEqual(refreshed.sourceRevision, fact.sourceRevision);
+  assert.equal((await changed.normalize(refreshed)).facts.length, 1);
 });
 
 test("PR status no-ops and private Projects cannot produce contribution credit", async () => {
@@ -360,6 +367,28 @@ test("normalization independently binds stable Project subject identity across p
   const fact = (await h.source.readPage(request)).facts.find((entry) => entry.subjectId === "E_pull_second");
   h.state.subjectIdAfter = "PR_replaced_during_hydration";
   await assert.rejects(h.normalize(fact), /project_subject_identity_unverified/);
+});
+
+test("Project normalization binds the collected subject when every hydration page changes identity", async () => {
+  const h = harness({ paginated: true });
+  h.state.events.push(projectEvent("E_pull_second", 2));
+  const fact = (await h.source.readPage(request)).facts.find((entry) => entry.subjectId === "E_pull_second");
+  h.state.subjectId = "PR_replaced_before_hydration";
+  await assert.rejects(h.normalize(fact), /project_subject_identity_unverified/);
+});
+
+test("legacy Project facts without a collected subject remain uncredited until recollected", async () => {
+  const h = harness();
+  const fact = (await h.source.readPage(request)).facts.find((entry) => entry.subjectId === "E_pull");
+  delete fact.historySubjectId;
+  const out = await h.normalize(fact);
+  assert.equal(out.facts.length, 0);
+  assert.deepEqual(out.reasons, ["project_history_subject_identity_not_collected"]);
+  const recollected = (await h.source.readPage({ ...request, runId: "synthetic-recollected" })).facts.find(
+    (entry) => entry.subjectId === "E_pull",
+  );
+  assert.equal(recollected.historySubjectId, "PR_synthetic");
+  assert.equal((await h.normalize(recollected)).facts.length, 1);
 });
 
 test("resumed Project timelines revalidate saved subject identities against subsequent pages", async () => {
