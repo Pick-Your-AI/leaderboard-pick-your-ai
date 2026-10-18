@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import {
+  serviceAccountClassificationSchema,
+  type ServiceAccountClassification,
   publicEvidenceActionSchema,
   publicEvidenceHistorySchema,
   publicEvidenceMetadataSchema,
@@ -123,7 +125,9 @@ export interface NormalizedGithubFact {
 export interface NormalizedGithubActor {
   id: string;
   login: string | null;
-  kind: "user" | "bot" | "github_app" | "organization" | "system" | "unknown";
+  kind: "user" | "service_account" | "bot" | "github_app" | "organization" | "system" | "unknown";
+  /** Internal authenticated evidence, deliberately absent from the public Actor contract. */
+  serviceAccountClassification?: ServiceAccountClassification;
   publicState: "visible" | "deleted" | "suppressed";
   githubDatabaseId: number;
   githubNodeId?: string;
@@ -230,6 +234,9 @@ export interface GithubEvidenceEnvelope {
   eventContext?: { projects: string[]; workstreams: string[] } | null;
   currentContext?: { projects: string[]; workstreams: string[] } | null;
   verifiedCoauthors?: readonly { actor: unknown; verificationReceipt: string }[];
+  /** Protected collector input, never copied from API payloads, trailers or public request bodies. */
+  reviewedServiceAccounts?: readonly ServiceAccountClassification[];
+  authorizedClassifierIds?: readonly string[];
   assistance?: readonly { model: string; version: string | null }[];
   integration?: {
     before: string;
@@ -294,22 +301,27 @@ function actor(value: unknown, automated = false): NormalizedGithubActor | null 
       : positive(value.id)
         ? value.id
         : undefined;
-  if (databaseId === undefined) return null;
-  const kind =
-    value.type === "User" || value.__typename === "User" || value.kind === "user"
-      ? "user"
-      : value.type === "Bot" || value.__typename === "Bot" || value.kind === "bot"
-        ? "bot"
-        : value.type === "Organization" || value.__typename === "Organization"
-          ? "organization"
-          : value.type === "GitHubApp" || value.__typename === "App"
-            ? "github_app"
-            : "unknown";
-  if (kind === "unknown") return null;
-  const nodeId =
-    text(value.node_id) ??
-    text(value.githubNodeId) ??
-    (typeof value.id === "string" && !/^\d+$/.test(value.id) ? text(value.id) : null);
+  if (
+    databaseId === undefined ||
+    new Set([value.databaseId, value.githubDatabaseId, value.id].filter(positive)).size > 1
+  )
+    return null;
+  const sourceKinds: (NormalizedGithubActor["kind"] | null)[] = [
+    value.type === "User" || value.__typename === "User" || value.kind === "user" ? "user" : null,
+    value.type === "Bot" || value.__typename === "Bot" || value.kind === "bot" ? "bot" : null,
+    value.type === "Organization" || value.__typename === "Organization" ? "organization" : null,
+    value.type === "GitHubApp" || value.__typename === "App" ? "github_app" : null,
+  ];
+  const kinds = sourceKinds.filter((kind) => kind !== null);
+  const kind = kinds[0];
+  if (!kind || kinds.length !== 1) return null;
+  const nodeIds = [
+    text(value.node_id),
+    text(value.githubNodeId),
+    typeof value.id === "string" && !/^\d+$/.test(value.id) ? text(value.id) : null,
+  ].filter((id) => id !== null);
+  if (new Set(nodeIds).size > 1) return null;
+  const nodeId = nodeIds[0];
   return {
     id: String(databaseId),
     githubDatabaseId: databaseId,
@@ -483,9 +495,62 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
   const observationId = proof.eventId
     ? stable("event", proof.eventId)
     : stable("observation", id, proof.source, proof.revision, sourceAction);
+  const classifications = new Map<number, ServiceAccountClassification>();
+  const classifiedNodes = new Set<string>();
+  for (const entry of envelope.reviewedServiceAccounts ?? []) {
+    const classification = serviceAccountClassificationSchema.parse(entry);
+    if (
+      !envelope.authorizedClassifierIds?.includes(classification.reviewerActorId) ||
+      Date.parse(classification.reviewedAt) > Date.parse(observedAt) ||
+      classifications.has(classification.githubDatabaseId) ||
+      (classification.githubNodeId && classifiedNodes.has(classification.githubNodeId))
+    )
+      throw new Error("Unique independently authorized service-account classification is required");
+    classifications.set(classification.githubDatabaseId, classification);
+    if (classification.githubNodeId) classifiedNodes.add(classification.githubNodeId);
+  }
+  // A single observation cannot bind one node to multiple database IDs or vice versa.
+  // Keep these bindings even when an earlier occurrence lacked one of the IDs;
+  // deduplicating the actor list must not hide conflicting evidence in later roles.
+  const observedNodes = new Map<number, string>();
+  const observedDatabaseIds = new Map<string, number>();
+  const registeredActors = new Map<string, NormalizedGithubActor>();
   const register = (value: unknown, automated = false) => {
     const parsed = actor(value, automated);
-    if (parsed && !out.actors.some((candidate) => candidate.id === parsed.id)) out.actors.push(parsed);
+    if (parsed?.githubNodeId) {
+      const previousNode = observedNodes.get(parsed.githubDatabaseId);
+      const previousDatabaseId = observedDatabaseIds.get(parsed.githubNodeId);
+      if (
+        (previousNode !== undefined && previousNode !== parsed.githubNodeId) ||
+        (previousDatabaseId !== undefined && previousDatabaseId !== parsed.githubDatabaseId)
+      )
+        throw new Error("Conflicting observed actor database/node identity bindings");
+      observedNodes.set(parsed.githubDatabaseId, parsed.githubNodeId);
+      observedDatabaseIds.set(parsed.githubNodeId, parsed.githubDatabaseId);
+    }
+    const classification = parsed && classifications.get(parsed.githubDatabaseId);
+    if (parsed && classification) {
+      if (
+        parsed.kind !== "user" ||
+        classification.reviewerActorId === parsed.githubNodeId ||
+        (classification.githubNodeId && classification.githubNodeId !== parsed.githubNodeId)
+      )
+        throw new Error("Service-account classification conflicts with source actor identity or kind");
+      parsed.kind = "service_account";
+      parsed.serviceAccountClassification = classification;
+    } else if (parsed?.githubNodeId && classifiedNodes.has(parsed.githubNodeId)) {
+      throw new Error("Service-account classification conflicts with source actor database ID");
+    }
+    if (parsed) {
+      const previous = registeredActors.get(parsed.id);
+      if (previous && previous.kind !== parsed.kind) throw new Error("Conflicting observed actor kinds");
+      // Retain a later evidenced node on the same database ID for cross-observation checks.
+      if (previous && !previous.githubNodeId && parsed.githubNodeId) previous.githubNodeId = parsed.githubNodeId;
+      if (!previous) {
+        registeredActors.set(parsed.id, parsed);
+        out.actors.push(parsed);
+      }
+    }
     return parsed;
   };
   const author = register(resource.user ?? resource.author);
@@ -769,7 +834,9 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
       emit(
         "release_stewardship",
         sender,
-        sender?.kind === "bot" || sender?.kind === "github_app" ? "automation" : "author",
+        sender?.kind === "bot" || sender?.kind === "github_app" || sender?.kind === "service_account"
+          ? "automation"
+          : "author",
         at,
         `${id}:published`,
       );
@@ -1112,6 +1179,9 @@ export interface GithubEvidenceNormalizerOptions {
     normalized: NormalizedGithubResult,
   ) => Promise<readonly VerifiedRecognitionReceipt[]>;
   authorizedReviewerIds?: readonly string[];
+  /** Frozen reviewed account classification configuration, selected and authenticated by the host. */
+  reviewedServiceAccounts?: readonly ServiceAccountClassification[];
+  authorizedClassifierIds?: readonly string[];
   /** Bound the complete review cohort scan; exhaustion never establishes participation. */
   maxReviewPages?: number;
 }
@@ -1226,6 +1296,12 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         return none("enrichment_scope_or_revision_mismatch");
       normalized = normalizeGithubObservation({
         ...enriched,
+        ...(options.reviewedServiceAccounts === undefined
+          ? {}
+          : { reviewedServiceAccounts: options.reviewedServiceAccounts }),
+        ...(options.authorizedClassifierIds === undefined
+          ? {}
+          : { authorizedClassifierIds: options.authorizedClassifierIds }),
         proof: { ...enriched.proof, isSynthetic: options.isSynthetic === true || enriched.proof.isSynthetic === true },
       });
     } else {
@@ -1428,6 +1504,12 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         ...(timeline ? { occurredAt: time(payload.created_at) } : {}),
         observedAt: input.observedAt,
         payload: hydrated,
+        ...(options.reviewedServiceAccounts === undefined
+          ? {}
+          : { reviewedServiceAccounts: options.reviewedServiceAccounts }),
+        ...(options.authorizedClassifierIds === undefined
+          ? {}
+          : { authorizedClassifierIds: options.authorizedClassifierIds }),
         ...(reviewParticipation ? { reviewParticipation } : {}),
         ...(family === "discussion" && input.selectedCurrentState
           ? { discussionAnswerSelection: { verified: true as const } }
