@@ -13,6 +13,8 @@ import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
 import { RankComparisonControls, RankMovementValue } from "./RankComparison.tsx";
+import { PublishedWindowPicker } from "./PublishedWindows.tsx";
+import { windowStartHref } from "./published-windows.ts";
 import { TimeZoneOptions, WindowBounds } from "../components/DisplayTimeZone.tsx";
 import { LastVerifiedSnapshot, type SnapshotReference } from "./LastVerifiedSnapshot.tsx";
 import {
@@ -394,6 +396,7 @@ export function RemoteApp() {
   }, [url.pathname]);
   const [state, setState] = useState<State>({ status: "loading" });
   const [checking, setChecking] = useState(false);
+  const [windowsOpen, setWindowsOpen] = useState(false);
   const [live, setLive] = useState<{ base: string; scope: string; value: LiveState } | null>(null);
   const [nonce, setNonce] = useState(0),
     [heldPin, setHeldPin] = useState<string | null>(null);
@@ -504,6 +507,16 @@ export function RemoteApp() {
     }
   }, [url]);
   const { selected } = parsed;
+  const startHref = useMemo(() => {
+    if (parsed.error) return null;
+    try {
+      return windowStartHref(selected);
+    } catch (error) {
+      // A bounded new-entry link must never substitute broader filters or break the current reader.
+      if (error instanceof ReadFailure) return null;
+      throw error;
+    }
+  }, [selected, parsed.error]);
   const refresh = useCallback(() => {
     active.current?.abort();
     activeExport.current?.abort();
@@ -745,7 +758,9 @@ export function RemoteApp() {
     <div
       className="remote-app"
       onClick={(event) => {
-        const target = (event.target as Element).closest<HTMLAnchorElement>("a[data-api-nav], a[data-api-proof]");
+        const target = (event.target as Element).closest<HTMLAnchorElement>(
+          "a[data-api-nav], a[data-api-proof], a[data-window-entry]",
+        );
         if (
           !target ||
           event.defaultPrevented ||
@@ -756,10 +771,14 @@ export function RemoteApp() {
           event.altKey
         )
           return;
-        // The display has its own bounded page lifecycle. A normal same-tab
-        // navigation tears down this reader and its in-flight requests first.
-        if (new URL(target.href).pathname === "/live") {
+        // The display and date-window entry have their own bounded page lifecycle.
+        // Normal same-tab navigation tears down this reader and its requests first.
+        if (target.hasAttribute("data-window-entry") || new URL(target.href).pathname === "/live") {
           preserveDisplayedPage();
+          if (target.hasAttribute("data-window-entry")) {
+            active.current?.abort();
+            activeExport.current?.abort();
+          }
           return;
         }
         event.preventDefault();
@@ -782,11 +801,22 @@ export function RemoteApp() {
       </a>
       <header className="app-header">
         <div className="header-inner">
-          <a data-api-nav href={uiHref("/", pinned)} className="wordmark">
-            PickYour.AI Credits
-          </a>
+          {startHref ? (
+            <a data-window-entry href={startHref} className="wordmark">
+              PickYour.AI Credits
+            </a>
+          ) : (
+            <span className="wordmark">PickYour.AI Credits</span>
+          )}
           <nav aria-label="Primary">
             <ul>
+              {startHref && (
+                <li>
+                  <a data-window-entry href={startHref}>
+                    Browse
+                  </a>
+                </li>
+              )}
               {[
                 ["/", "Overview"],
                 ["/leaderboards", "Measures"],
@@ -819,6 +849,21 @@ export function RemoteApp() {
           <p>Evidence-backed public reads. Unknown values and unavailable scopes remain explicit.</p>
         </header>
         <Filters key={`${url.pathname}${url.search}`} selected={selected} path={url.pathname} navigate={navigate} />
+        {!parsed.error && (isCatalogPath(url.pathname) || rankComparisonPath(url.pathname)) && (
+          <details className="method" open={windowsOpen} onToggle={(event) => setWindowsOpen(event.currentTarget.open)}>
+            <summary>Choose a published date window</summary>
+            {windowsOpen && (
+              <PublishedWindowPicker
+                base={parsed.base}
+                selected={selected}
+                path={
+                  isCatalogPath(url.pathname) ? `/leaderboards/${encodeURIComponent(selected.metric)}` : url.pathname
+                }
+                navigate={navigate}
+              />
+            )}
+          </details>
+        )}
         <label>
           Display timezone
           <select

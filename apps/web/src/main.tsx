@@ -17,6 +17,15 @@ try {
 }
 if (["/account", "/admin"].includes(location.pathname.replace(/\/+$/, ""))) {
   void import("./controls/App.tsx").then(({ ControlsApp }) => root.render(<ControlsApp />));
+} else if (location.pathname === "/start") {
+  // New-entry discovery runs before any snapshot reader or persisted prototype mode.
+  void import("./remote/PublishedWindows.tsx").then(({ PublishedWindowStart }) =>
+    root.render(
+      <React.StrictMode>
+        <PublishedWindowStart base={import.meta.env.VITE_PUBLIC_API_BASE || "/api/v1"} search={location.search} />
+      </React.StrictMode>,
+    ),
+  );
 } else if (mode === "prototype") {
   const path = `${location.pathname}${location.search}${location.hash}`;
   const { href } = prototypeNavigation(path);

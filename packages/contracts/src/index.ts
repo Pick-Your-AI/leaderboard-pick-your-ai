@@ -90,3 +90,13 @@ export {
 export type { PublicEvidenceAction, PublicEvidenceHistory, PublicEvidenceMetadata } from "./v1/evidence-metadata.js";
 export { publicDocumentationReasons, publicDocumentationRecognitionReasons } from "./documentation-reasons.js";
 export { publicReproductionRecognitionReasons } from "./reproduction-reasons.js";
+
+export {
+  publicWindowsSchemaVersion,
+  publicWindowPeriods,
+  parsePublicWindows,
+  type PublicWindowPeriod,
+  type PublicWindow,
+  type PublicWindows,
+  type PublicWindowResolver,
+} from "./public-windows.js";
