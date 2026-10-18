@@ -350,6 +350,9 @@ export function projectRead(
     throw new PublicReadError(410, "snapshot_revoked_refetch");
   const suppressedActors = new Set(controls.suppressedActorIds);
   const suppressedArtifacts = new Set(controls.suppressedArtifactIds);
+  // Check the whole identity set before privacy filtering. Dropping a hidden or
+  // unresolved duplicate first could expose a contradictory public copy.
+  if (new Set(selected.actors.map((entry) => entry.actorId)).size !== selected.actors.length) return reject();
   const actors = selected.actors
     .map((entry) => {
       if (!id(entry.actorId) || !["public", "hidden", "deleted", "unlinked"].includes(entry.state)) return reject();
@@ -360,8 +363,21 @@ export function projectRead(
       (entry) =>
         entry.state === "public" && entry.actor.identityState === "resolved" && !suppressedActors.has(entry.actorId),
     );
-  if (new Set(actors.map((actor) => actor.actorId)).size !== actors.length) return reject();
   const actorIds = new Set(actors.map((actor) => actor.actorId));
+  // Every supplied copy must agree before any public response can be returned.
+  // Contribution IDs and known artifact IDs are separate identity namespaces.
+  const visibilityByContribution = new Map<string, Artifact["visibility"]>();
+  const visibilityByArtifact = new Map<string, Artifact["visibility"]>();
+  const checkVisibility = (
+    seen: Map<string, Artifact["visibility"]>,
+    key: string | null | undefined,
+    visibility: Artifact["visibility"],
+  ) => {
+    if (key === null || key === undefined) return;
+    const previous = seen.get(key);
+    if (previous !== undefined && previous !== visibility) return reject();
+    seen.set(key, visibility);
+  };
   const metadataByContribution = new Map<string, string>();
   const documentationClassificationByContribution = new Map<string, string>();
   const projectEvidence = (entries: PublicEvidence[]) =>
@@ -369,6 +385,9 @@ export function projectRead(
       .map((entry) => {
         const artifact = artifactSchema.parse(entry.artifact);
         const parsed = contributionSchema.parse(entry.contribution);
+        checkVisibility(visibilityByContribution, parsed.contributionId, artifact.visibility);
+        checkVisibility(visibilityByArtifact, artifact.stableId, artifact.visibility);
+        checkVisibility(visibilityByArtifact, parsed.artifactId, artifact.visibility);
         const classification = publicDocumentationReasons(parsed);
         if (parsed.metricIds.includes("documentation") && classification.length > 0) {
           // Legacy copies can lack labels. Every present classification must
@@ -451,6 +470,12 @@ export function projectRead(
             (entry.occurredAt !== null && compareSourceInstants(entry.occurredAt, scope.start) >= 0)) &&
           (scope.end === null || (entry.occurredAt !== null && compareSourceInstants(entry.occurredAt, scope.end) < 0)),
       );
+  // Check parsed IDs before filtering: surrounding whitespace is normalized by
+  // the contribution schema and must not disguise a duplicate primary proof.
+  const primaryContributionIds = selected.evidence.map((entry) =>
+    contributionSchema.shape.contributionId.parse(entry.contribution.contributionId),
+  );
+  if (new Set(primaryContributionIds).size !== selected.evidence.length) return reject();
   const evidence = projectEvidence(selected.evidence);
   const portfolioInput = selected.portfolioEvidence ?? [];
   const portfolioMetadata = new Map(
@@ -537,7 +562,6 @@ export function projectRead(
     return parsed;
   }
   const evidenceMap = new Map(evidence.map((entry) => [entry.contribution.contributionId, entry]));
-  if (evidenceMap.size !== evidence.length) return reject();
   let evidenceReferenceCount = 0;
   const rows = selected.rows
     .map((entry) => {
