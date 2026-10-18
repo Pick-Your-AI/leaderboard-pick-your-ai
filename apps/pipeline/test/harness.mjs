@@ -73,10 +73,11 @@ export async function harness(t, extra = {}) {
     config.policies[0].approvalReceipt = "policy-approval";
     config.policies[0].signature = components.metrics.stableJSON(policy);
   }
+  extra.configure?.(config);
   let privateRepository = false;
   let fixturePage = false;
   let sourceFailure = false;
-  let payloads = [
+  let payloads = extra.payloads ?? [
     {
       id: 1001,
       node_id: "SYNTHETIC_ISSUE_1",
@@ -109,9 +110,9 @@ export async function harness(t, extra = {}) {
       const repository = { id: 2, private: privateRepository, full_name: slug, default_branch: "main" };
       let body;
       if (url.pathname === `/repos/${slug}`) body = repository;
-      else if (url.pathname === `/repos/${slug}/issues`) body = payloads;
+      else if ([`/repos/${slug}/issues`, `/repos/${slug}/pulls`].includes(url.pathname)) body = payloads;
       else {
-        const number = Number(url.pathname.match(/\/issues\/(\d+)$/)?.[1]);
+        const number = Number(url.pathname.match(/\/(?:issues|pulls)\/(\d+)$/)?.[1]);
         body = payloads.find((payload) => payload.number === number);
       }
       return new Response(JSON.stringify(body ?? { message: "not found" }), {
@@ -122,7 +123,10 @@ export async function harness(t, extra = {}) {
   });
   const source = {
     async readPage(request) {
-      const items = await githubClient.rest("installation:1", `/repos/${slug}/issues`);
+      const items = await githubClient.rest(
+        "installation:1",
+        `/repos/${slug}/${request.family === "pull_requests" ? "pulls" : "issues"}`,
+      );
       return {
         repositoryId: 2,
         visibility: "public",
@@ -164,6 +168,7 @@ export async function harness(t, extra = {}) {
       };
     },
     ...extra,
+    ...(extra.enrichmentFactory ? { githubEnrich: extra.enrichmentFactory(githubClient, slug) } : {}),
   };
   const { createPolicyPreviewAuthority, previewAuthorityLimitsV1 } =
     await import("../../controls/src/policy-preview-authority.mjs");

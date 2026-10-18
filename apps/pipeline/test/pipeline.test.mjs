@@ -1066,6 +1066,120 @@ for (const narrowing of ["capability", "project", "installation", "slug"]) {
     assert.equal(sourceReads, priorReads);
   });
 }
+
+test("documentation source enrichment reaches runtime as one revision-bound observed participation, not accepted research", async (t) => {
+  const after = "c".repeat(40),
+    before = "b".repeat(40),
+    mergedAt = ago(1);
+  const payload = {
+    id: 1001,
+    node_id: "SYNTHETIC_PR_DOCS",
+    number: 1,
+    html_url: "https://github.com/synthetic-org/synthetic-repo/pull/1",
+    created_at: ago(2),
+    updated_at: mergedAt,
+    merged_at: mergedAt,
+    closed_at: mergedAt,
+    state: "closed",
+    merged: true,
+    draft: false,
+    merge_commit_sha: after,
+    base: { ref: "main" },
+    user: { id: 101, node_id: "U_SYNTHETIC_A", login: "synthetic-alice", type: "User" },
+  };
+  let enrichCalls = 0;
+  const h = await harness(t, {
+    payloads: [payload],
+    configure(config) {
+      config.repositories[0].families = ["pull_requests"];
+      config.documentationPolicies = [
+        {
+          repositoryId: 2,
+          version: "docs-v1",
+          documentationPaths: ["docs/"],
+          researchPaths: ["docs/research/"],
+          generatedPaths: ["docs/generated/"],
+          importedPaths: ["docs/imported/"],
+        },
+      ];
+      const policy = {
+        ...config.policies[0].policy,
+        metricId: "documentation",
+        unit: components.metrics.getMetricDefinition("documentation").definition.unit,
+        roles: ["author"],
+        rank: false,
+      };
+      config.policies = [
+        { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-docs-policy" },
+      ];
+    },
+    enrichmentFactory(client, slug) {
+      return async (input) => {
+        enrichCalls++;
+        assert.equal(input.family, "pull_requests");
+        const fetched = await client.rest("installation:1", `/repos/${slug}/pulls/1`);
+        return {
+          repository: { id: 2, slug, visibility: "public", defaultBranch: "main" },
+          proof: { verified: true, source: "github_rest", revision: input.fact.sourceRevision, isSynthetic: true },
+          family: "pull_request",
+          observedAt: input.observedAt,
+          payload: { pull_request: fetched },
+          integration: {
+            before,
+            after,
+            targetBranch: "main",
+            defaultBranch: "main",
+            canonicalChangeId: "docs-merge",
+            commitShas: [after],
+            diff: {
+              before,
+              after,
+              complete: true,
+              files: [
+                { path: "docs/guide.md", additions: 2, deletions: 0 },
+                { path: "docs/example.md", additions: 500, deletions: 0 },
+                { path: "docs/generated/api.md", additions: 10000, deletions: 0 },
+                { path: "docs/research/finding.md", additions: 20, deletions: 0 },
+              ],
+            },
+          },
+        };
+      };
+    },
+  });
+  const published = await h.runtime.runOnce();
+  assert.equal(published.state, "published");
+  assert.equal(enrichCalls, 1);
+  const response = await h.runtime.app.inject("/api/v1/boards?metric=documentation");
+  assert.equal(response.statusCode, 200, response.body);
+  const board = response.json();
+  assert.equal(board.rows.length, 1);
+  assert.equal(board.rows[0].result.value, 1);
+  assert.equal(board.rows[0].rank, null);
+  const read = await h.runtime.source.read(
+    publicScope,
+    published.publications[0].snapshotId,
+    new AbortController().signal,
+  );
+  const docs = read.selected.portfolioEvidence.filter((entry) =>
+    entry.contribution.metricIds.includes("documentation"),
+  );
+  assert.equal(docs.length, 1);
+  assert.equal(docs[0].activityState, "observed");
+  assert.equal(docs[0].sourceRevision, after);
+  assert.match(docs[0].sourceRevisionUrl, /\/commit\/c{40}$/);
+  assert.equal(
+    read.selected.portfolioEvidence.some((entry) => entry.contribution.metricIds.includes("accepted_findings")),
+    false,
+  );
+  h.setPrivate(true);
+  await assert.rejects(h.runtime.runOnce(), /public_source_not_verified/);
+  assert.equal(
+    await h.runtime.source.read(publicScope, published.publications[0].snapshotId, new AbortController().signal),
+    null,
+  );
+});
+
 test("materialization retains separate pending provenance through replay and reviewed corrections", async (t) => {
   const { normalized, configuration } = await import("../../../tests/fixtures/pending-metric.mjs");
   const h = await harness(t, { config: configuration, normalizer: async () => normalized() });
