@@ -1,3 +1,4 @@
+import { captureRankEvidence, retainedRankHistory } from "./rank-history.mjs";
 import { createHash } from "node:crypto";
 
 // Local fail-closed bounds, not a production retention or capacity commitment.
@@ -371,7 +372,9 @@ export function buildAggregateExplanation(capture, binding) {
     },
     references,
     metrics,
+    rankEvidence: captureRankEvidence(aggregates),
   };
+  retainedRankHistory(document);
   check(Number.isSafeInteger(snapshot.revision) && snapshot.revision > 0);
   check(
     Buffer.byteLength(stable(document)) <= aggregateExplanationLimitsV1.bytes,
@@ -409,6 +412,7 @@ export class AggregateExplanationStore {
         validateRanks(metric.rows, metric.ranked);
         validateAudit(metric.rows, metric.audit, metric.aggregation, metric.evidenceClass);
       }
+      retainedRankHistory(document);
       return { digest: row.digest, document };
     } catch {
       fail();

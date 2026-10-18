@@ -1,3 +1,4 @@
+import { retainedRankHistory } from "./rank-history.mjs";
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
 import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
 import { AggregateExplanationStore } from "./aggregate-explanations.mjs";
@@ -1496,6 +1497,74 @@ export async function createPipeline(options) {
     }
   }
   const source = {
+    async readComparison(scope, pin, previous, signal) {
+      if (["organization", "repository", "workstream"].some((key) => scope[key] !== previous.scope[key])) return null;
+      // Both reads reuse this transaction. Source locks remain held through the
+      // final authority query, including expanded retained-source revocations.
+      return db.transaction(async (tx) => {
+        const current = await source.read(scope, pin, signal, tx);
+        if (!current) return null;
+        const prior = await source.read(previous.scope, previous.snapshotId, signal, tx);
+        const repositoryIds = repositoriesFor(scope).map((repo) => repo.id);
+        const access = (
+          await tx.query(
+            "SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE",
+            [repositoryIds],
+          )
+        ).rows;
+        if (signal.aborted || access.length !== repositoryIds.length || access.some((row) => row.state !== "public"))
+          return null;
+        const removed = (
+          await tx.query(
+            `${sourceSuppressionQuery}
+          UNION SELECT artifact_id AS subject_id FROM leaderboard_pipeline.corrections WHERE repository_id=ANY($1::bigint[])`,
+            [repositoryIds],
+          )
+        ).rows.map((row) => row.subject_id);
+        if (!(await approved(tx)) || signal.aborted) return null;
+        // No awaits below: configuration, recognition, confirmed heads and exact
+        // current privacy/source signatures fence both captured projections.
+        const controls = controlsStore.read(),
+          overlay = restrictConfiguration(controls);
+        const version = `controls-${controls.revision}-${overlay.revision}-${digest([config.version, access.map((row) => [String(row.repository_id), String(row.generation)]), [...removed].sort()]).slice(0, 16)}`;
+        const suppressedActors = Object.entries(controls.profiles)
+          .filter(([, profile]) => profile.suppressed)
+          .map(([id]) => id)
+          .sort();
+        for (const read of [current, prior].filter(Boolean)) {
+          const selectedScope = read.selected.scope,
+            head = controls.pipelineHeads?.[scopeKey(selectedScope)];
+          if (
+            read.controls.version !== version ||
+            canonical([...read.controls.suppressedActorIds].sort()) !== canonical(suppressedActors) ||
+            canonical([...read.controls.suppressedArtifactIds].sort()) !== canonical([...removed].sort()) ||
+            !confirmationMatches(head, selectedScope, read.head.snapshotId, read.head.revision) ||
+            !confirmationMatches(
+              controls.pipelinePublications?.[read.selected.snapshot.snapshotId],
+              selectedScope,
+              read.selected.snapshot.snapshotId,
+              read.selected.snapshot.revision,
+            ) ||
+            (recognitionBindings.length &&
+              [read.head.snapshotId, read.selected.snapshot.snapshotId].some(
+                (id) =>
+                  controls.pipelinePublications?.[id]?.recognitionFingerprint !== recognitionFingerprint(controls),
+              ))
+          )
+            return null;
+        }
+        const history = (read) =>
+          read === null
+            ? null
+            : retainedRankHistory(
+                aggregateExplanations.verify(read.selected.snapshot.snapshotId, {
+                  ...explanationBinding(read.selected.scope, read.selected.snapshot),
+                  digest: controls.pipelinePublications[read.selected.snapshot.snapshotId].aggregateExplanationHash,
+                }).document,
+              );
+        return { current, previous: prior, currentHistory: history(current), previousHistory: history(prior) };
+      });
+    },
     async read(scope, pin, signal, transaction) {
       if (signal.aborted || !(await approved(transaction ?? db)) || !configuredScope(scope)) return null;
       // The SQL head allocates revisions, not visibility. Only this private

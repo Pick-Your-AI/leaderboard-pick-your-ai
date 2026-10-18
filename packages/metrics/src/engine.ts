@@ -778,7 +778,21 @@ export function stableJSON(value: unknown): string {
     .join(",")}}`;
 }
 
-function compatibleScopes(before: MetricAggregate, after: MetricAggregate): boolean {
+/** Minimum immutable history used for movement, excluding audit/provider records. */
+export type RankComparisonInput = Pick<
+  MetricAggregate,
+  | "metricId"
+  | "policyVersion"
+  | "policySignature"
+  | "definitionVersion"
+  | "unit"
+  | "aggregation"
+  | "scope"
+  | "cutoff"
+  | "backfillRevision"
+  | "coverage"
+> & { rows: Pick<AggregateRow, "actorId" | "value" | "rank" | "evidence">[] };
+function compatibleScopes(before: RankComparisonInput, after: RankComparisonInput): boolean {
   if (stableJSON(before.scope) === stableJSON(after.scope)) return true;
   const { from: beforeFrom, to: beforeTo, ...beforeFilters } = before.scope;
   const { from: afterFrom, to: afterTo, ...afterFilters } = after.scope;
@@ -794,8 +808,8 @@ function compatibleScopes(before: MetricAggregate, after: MetricAggregate): bool
 }
 
 export function compareRankMovement(
-  before: MetricAggregate,
-  after: MetricAggregate,
+  before: RankComparisonInput,
+  after: RankComparisonInput,
 ): {
   actorId: string;
   state: "comparable" | "new_entrant" | "unavailable";
