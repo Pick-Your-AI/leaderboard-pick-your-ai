@@ -1,4 +1,5 @@
 import test from "node:test";
+import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import assert from "node:assert/strict";
 import { createService } from "../dist/app.js";
 import { selection } from "../../web/src/remote/client.ts";
@@ -66,7 +67,7 @@ function fixture(times = ["2026-10-17T10:30:00.000Z"]) {
         snapshotId: "synthetic-snapshot",
         revision: 1,
         generatedAt: at,
-        metricDefinitionVersion: "candidate-0.1.0",
+        metricDefinitionVersion: metricRegistryV1.policy_version,
         computationVersion: "synthetic-test-only",
         coverage: [coverage],
         results: [],

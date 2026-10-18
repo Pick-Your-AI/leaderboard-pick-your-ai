@@ -5,7 +5,7 @@ export const scope = { organization: "Pick-Your-AI", repository: null, workstrea
 export const policy = {
   metricId: "pr_merged",
   version: "synthetic-pending-v1",
-  definitionVersion: "candidate-0.1.0",
+  definitionVersion: "candidate-0.1.1",
   unit: getMetricDefinition("pr_merged").definition.unit,
   aggregation: "count",
   dateBasis: "acceptedAt",
@@ -146,7 +146,7 @@ export function readFixture() {
         snapshotId: "synthetic-pending-1",
         revision: 1,
         generatedAt: at,
-        metricDefinitionVersion: "candidate-0.1.0",
+        metricDefinitionVersion: "candidate-0.1.1",
         computationVersion: "synthetic-pending-v1",
         coverage: [coverage],
         results: [],
