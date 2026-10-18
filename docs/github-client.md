@@ -31,6 +31,10 @@ The names in this example are caller-supplied configuration/functions, not fixtu
 
 REST responses with ETags are privately cached with their Link headers. Later requests send If-None-Match; 304 reuses both the validated representation and its pagination link. An unexpected 304 without a cached representation fails. Conditional requests preserve page traversal rather than treating unchanged pages as empty results.
 
+Structured `email` fields inside `author` and `committer` objects (including REST `commit.author` and `commit.committer`) are omitted recursively before a response is returned, selected or cached, and before selected scan items are persisted. GitHub IDs, logins, SHAs, source URLs, names and timestamps are preserved. Callers must not depend on those prohibited email fields. Loaded legacy HTTP bodies and scan items are minimized and durably rewritten before reuse, including 304 responses and completed or interrupted scans; a failed migration write prevents reuse.
+
+This is structured-field minimization, not complete payload sanitization: commit messages, Co-authored-by trailers, patches, signatures and other free text are unchanged and can contain addresses. GraphQL callers must not request prohibited email fields (including aliases); selectors must not introduce or rename sensitive fields. Unread legacy keys, backups and other downstream stores are not migrated by loading a different key. Operators still need the accepted private-storage, cleanup and retention procedures; this change establishes no retention duration or production privacy approval.
+
 ## Pagination and checkpoints
 
 `scanRest` follows all next Link relations. `scanGraphql` manages `first` (1–100) and `after` for the selected connection, including a connection nested below a repository or node. The caller validates/selects the array or connection for its particular source family. GraphQL responses with any errors never become accepted pages, including partial HTTP 200 data. Permission, authentication, hidden/not-found, rate-limit, transient and invalid-response outcomes remain distinguishable.

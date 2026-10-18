@@ -17,10 +17,10 @@ const fixture = async (name) =>
     ),
   );
 
-test("registry retains all 98 definitions and unresolved UI metadata", () => {
+test("registry retains all 98 definitions and separately versioned candidate UI metadata", () => {
   assert.equal(metricDefinitionsV1.length, 98);
   assert.equal(new Set(metricDefinitionsV1.map(({ id }) => id)).size, 98);
-  assert.equal(metricRegistryV1.ui_metadata.decision_state, "unresolved");
+  assert.equal(metricRegistryV1.ui_metadata.decision_state, "candidate");
   assert.equal(getMetricDefinition("pr_merged").definition.numerator,
     "one per merged PR in window; show team/shared authorship");
   assert.equal(getMetricDefinition("not_a_metric"), undefined);
