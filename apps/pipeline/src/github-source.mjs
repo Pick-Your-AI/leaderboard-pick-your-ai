@@ -1,4 +1,8 @@
-import { githubReviewRevision, githubDiscussionRevision } from "../../../packages/github/dist/normalizers.js";
+import {
+  githubReviewRevision,
+  githubDiscussionRevision,
+  githubSnapshotRevision,
+} from "../../../packages/github/dist/normalizers.js";
 
 const routes = {
   issues: "issues?state=all&sort=created&direction=asc&per_page=100",
@@ -151,9 +155,9 @@ export function createGithubCollectionSource({
         const subjectId = value.node_id ?? value.sha ?? (Number.isSafeInteger(value.id) ? String(value.id) : null);
         const revision =
           request.family === "reviews"
-            ? githubReviewRevision(value)
+            ? githubSnapshotRevision(githubReviewRevision(value), request.runId)
             : request.family === "discussions"
-              ? value.source_revision
+              ? githubSnapshotRevision(value.source_revision, request.runId)
               : (value.sha ??
                 at(value.updated_at) ??
                 at(value.submitted_at) ??

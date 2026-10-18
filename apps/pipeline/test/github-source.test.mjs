@@ -95,3 +95,17 @@ test("review dismissal and body edits change the frozen source revision", async 
   assert.notEqual(dismissed.sourceRevision, edited.sourceRevision);
   assert.equal(JSON.stringify(edited).includes("synthetic edited feedback"), false);
 });
+
+test("review A to B to A observations retain distinct scan revisions", async () => {
+  let value = review(11, 1);
+  const source = harness(async (options) => (options.url.includes("/pulls?") ? [{ number: 1 }] : [value]));
+  const a = (await source.readPage({ ...request, runId: "synthetic-a" })).facts[0];
+  value = { ...value, state: "DISMISSED" };
+  const b = (await source.readPage({ ...request, runId: "synthetic-b" })).facts[0];
+  value = { ...value, state: "APPROVED" };
+  const a2 = (await source.readPage({ ...request, runId: "synthetic-a2" })).facts[0];
+  assert.notEqual(a.sourceRevision, b.sourceRevision);
+  assert.notEqual(a.sourceRevision, a2.sourceRevision);
+  assert.equal(a.sourceRevision.split(".")[0], a2.sourceRevision.split(".")[0]);
+  assert.deepEqual((await source.readPage({ ...request, runId: "synthetic-a2" })).facts[0], a2);
+});

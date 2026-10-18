@@ -11,7 +11,9 @@ The 10,000-record and configured page limits fail closed.
 
 Review snapshots use a SHA256 fingerprint of source identity, submission time,
 state, commit, author and body. Text influences revision identity but is not
-retained in collection facts. Hydration must reproduce the fingerprint. A
+retained in collection facts. A scan-identity suffix distinguishes later observations
+of restored state (A → B → A) while same-scan replay stays idempotent. Hydration
+must reproduce the payload fingerprint. A
 complete review cohort establishes first reviewer/PR participation and first
 reviewer/PR/head submission; duplicate IDs, unknown earlier actors, unknown
 heads, unsupported states or missing submission clocks prevent that proof.

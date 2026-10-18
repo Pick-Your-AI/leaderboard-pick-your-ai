@@ -44,6 +44,16 @@ export function githubDiscussionRevision(value: Record<string, unknown>): string
     .digest("hex");
 }
 
+/** Each completed observation scan retains its own revision even after A → B → A. */
+export function githubSnapshotRevision(fingerprint: string, scanId: string): string {
+  return `${fingerprint}.${createHash("sha256").update(scanId).digest("hex").slice(0, 32)}`;
+}
+function matchesSnapshotRevision(revision: string, fingerprint: string): boolean {
+  return (
+    revision === fingerprint || (/^[a-f0-9]{64}\.[a-f0-9]{32}$/.test(revision) && revision.slice(0, 64) === fingerprint)
+  );
+}
+
 export type GithubRole =
   | "author"
   | "coauthor"
@@ -1095,9 +1105,9 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       const revisionMatches = options.verifyRevision
         ? await options.verifyRevision(input, payload)
         : family === "review"
-          ? input.fact.sourceRevision === githubReviewRevision(payload)
+          ? matchesSnapshotRevision(input.fact.sourceRevision, githubReviewRevision(payload))
           : family === "discussion"
-            ? input.fact.sourceRevision === githubDiscussionRevision(payload)
+            ? matchesSnapshotRevision(input.fact.sourceRevision, githubDiscussionRevision(payload))
             : [
                 payload.sha,
                 payload.updated_at,
