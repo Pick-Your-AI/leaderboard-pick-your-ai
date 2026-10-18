@@ -17,6 +17,13 @@ Names, writing style, model names and unverified declarations do not classify an
 actor. Reviewed service-account identity classification is a separate source
 boundary.
 
+Positive execution evidence is retained when one account occupies multiple
+roles in an observation, and across compatible observations of that same
+account. An unknown or legacy-absent execution label cannot erase known
+automation. Provider bindings, account kind, login, visibility and reviewed
+classification metadata must still agree. Publication and both frozen comparison
+replay paths use the same evidence join; no manual-execution label is inferred.
+
 Selection runs after current source authorization and privacy projection, including
 for pinned snapshots. It removes complete actor rows, diagnostics and proof
 collections before ranking, counts, grouping or pagination. It never subtracts
@@ -44,6 +51,8 @@ label remain compatible only with all activity.
 Validation covers overlap between user accounts and known automation, invalid
 selectors before source I/O, direct proof and card exclusion, filtered dense
 ranks after suppression, cursor replay and selection changes, export provenance,
-SSE/polling selection, and responsive keyboard-accessible UI navigation. Fixtures
-are synthetic; this implementation does not establish real account classification,
+SSE/polling selection, and responsive keyboard-accessible UI navigation. Tests
+also exercise mixed execution observations in both orders, legacy missing labels,
+saved comparisons and replay after restart, plus conflicting identity metadata.
+Fixtures are synthetic; this implementation does not establish real account classification,
 source acceptance, manual authorship, or completion of every #40 criterion.

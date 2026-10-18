@@ -35,6 +35,21 @@ const previewActor = ({ id, login, kind, publicState, executionMode }) => ({
   publicState,
   ...(executionMode === undefined ? {} : { executionMode }),
 });
+// Execution evidence accumulates across observations of the same account. Join
+// only that evidence; every provider binding, label and reviewed classification
+// must still agree. Publication and frozen replay use the identical rule.
+const joinActorExecutionEvidence = (previous, actor, serialize) => {
+  const modes = [previous?.executionMode, actor.executionMode];
+  if (modes.some((mode) => mode !== undefined && mode !== "unknown" && mode !== "automated")) return null;
+  if (!previous) return copy(actor);
+  const { executionMode: previousMode, ...previousMetadata } = previous;
+  const { executionMode: actorMode, ...actorMetadata } = actor;
+  if (serialize(previousMetadata) !== serialize(actorMetadata)) return null;
+  const joined = copy(previous);
+  if (previousMode === "automated" || actorMode === "automated") joined.executionMode = "automated";
+  else if (previousMode === "unknown" || actorMode === "unknown") joined.executionMode = "unknown";
+  return joined;
+};
 const utc = (value) => {
   if (
     typeof value !== "string" ||
@@ -186,13 +201,9 @@ export async function createPipeline(options) {
           );
           assertDataMode(row.document);
           for (const actor of row.document.actors) {
-            const previous = actors.get(actor.id);
-            requireThat(
-              !previous || canonical(previous) === canonical(actor),
-              409,
-              "Frozen identity evidence conflict",
-            );
-            actors.set(actor.id, actor);
+            const joined = joinActorExecutionEvidence(actors.get(actor.id), actor, canonical);
+            requireThat(joined, 409, "Frozen identity evidence conflict");
+            actors.set(actor.id, joined);
           }
         }
         restoredActors.set(digest(authorization), actors);
@@ -953,10 +964,9 @@ export async function createPipeline(options) {
       evidence = new Map();
     for (const output of outputs) {
       for (const actor of output.actors) {
-        const previous = actors.get(actor.id);
-        if (previous && c.metrics.stableJSON(previous) !== c.metrics.stableJSON(actor))
-          fail("conflicting_actor_metadata");
-        actors.set(actor.id, copy(actor));
+        const joined = joinActorExecutionEvidence(actors.get(actor.id), actor, c.metrics.stableJSON);
+        if (!joined) fail("conflicting_actor_metadata");
+        actors.set(actor.id, joined);
       }
       for (const entry of output.evidence) {
         const id = entry.contribution.contributionId,
