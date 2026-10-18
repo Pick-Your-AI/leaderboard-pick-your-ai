@@ -21,6 +21,14 @@ The versioned registry copies all 98 canonical metric definitions from `planning
 - Coauthor participation is represented by distinct roles on a shared artifact. No fractional allocation is inferred. PR, commit and line measures remain separate metric results.
 - A source gap, incomplete page, missing permission or unresolved actor cannot be represented as a measured zero or verified identity.
 
+The candidate now recognizes `service_account` and exports a separate strict
+`leaderboard-service-account/v1` evidence schema. This enum addition requires
+coordinated consumer rollout; it is not forward-compatible with older strict
+readers. [Service-account migration rules](service-account-classification.md)
+cover fail-closed legacy readers, reviewed classification, immutable source
+observations and recomputation. Existing `user` records remain generic GitHub
+User-account observations, never certifications of human/manual work.
+
 ## Decisions still required
 
 - Approve the evidence, identity-link, opt-out, correction and retention policies before public recognition or account-link workflows are enabled.

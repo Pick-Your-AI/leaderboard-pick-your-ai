@@ -492,3 +492,67 @@ test("browser download validates the minimized JSON export rather than the board
     assert.throws(() => validateExport(altered, selected));
   }
 });
+
+test("JSON and CSV exports retain service-account kind and unknown execution without review receipts", async (t) => {
+  const { selection, validateExport } = await import("../../web/src/remote/client.ts");
+  const h = harness(t);
+  h.data.selected.actors[0].actor.kind = "service_account";
+  h.data.selected.actors[0].serviceAccountClassification = { classificationId: "PRIVATE_CLASSIFICATION_RECEIPT" };
+  const json = await h.app.inject(`${exportUrl}&limit=1`);
+  const document = json.json();
+  assert.equal(json.statusCode, 200, json.body);
+  assert.equal(document.rows[0].actorKind, "service_account");
+  assert.equal(document.rows[0].executionMode, "unknown");
+  assert.doesNotThrow(() => validateExport(document, selection(`?${params}&limit=1`)));
+  const csv = await h.app.inject(`${exportUrl}&limit=1&format=csv`);
+  const records = parseCsv(csv.body);
+  assert.equal(records[0].actor_kind, "");
+  assert.equal(records[1].actor_kind, "service_account");
+  assert.equal(records[1].execution_mode, "unknown");
+  assert.doesNotMatch(json.body + csv.body, /PRIVATE_|serviceAccountClassification|manual/);
+});
+
+test("export downloads reject unsupported actor labels while legacy missing labels remain compatible", async (t) => {
+  const { exportPage, selection, validateExport } = await import("../../web/src/remote/client.ts");
+  const h = harness(t);
+  h.data.selected.actors[0].actor.kind = "service_account";
+  const response = await h.app.inject(`${exportUrl}&limit=1`);
+  assert.equal(response.statusCode, 200, response.body);
+  const document = response.json();
+  const selected = selection(`?${params}&limit=1`);
+  let download = document;
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () =>
+      new Response(JSON.stringify(download), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+  );
+  for (const [field, invalid] of [
+    ["actorKind", "human"],
+    ["actorKind", 17],
+    ["actorKind", null],
+    ["executionMode", "manual"],
+    ["executionMode", "ai"],
+    ["executionMode", 17],
+    ["executionMode", null],
+  ]) {
+    download = structuredClone(document);
+    download.rows[0][field] = invalid;
+    assert.throws(() => validateExport(download, selected), `${field}: ${JSON.stringify(invalid)}`);
+    await assert.rejects(
+      () => exportPage("https://synthetic.invalid/api/v1", selected, "json", new AbortController().signal),
+      (error) => error.code === "invalid_export_response",
+    );
+  }
+  for (const absent of [["actorKind"], ["executionMode"], ["actorKind", "executionMode"]]) {
+    download = structuredClone(document);
+    for (const field of absent) delete download.rows[0][field];
+    assert.doesNotThrow(() => validateExport(download, selected));
+    const legacy = await exportPage("https://synthetic.invalid/api/v1", selected, "json", new AbortController().signal);
+    assert.equal(await legacy.text(), JSON.stringify(download));
+    for (const field of absent) assert.equal(Object.hasOwn(download.rows[0], field), false);
+  }
+});

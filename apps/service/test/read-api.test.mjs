@@ -837,6 +837,28 @@ test("legacy portfolio and detail routes also restrict categories to published p
   assert.deepEqual((await h.app.inject("/api/v1/evidence/e-alice")).json().contribution.metricIds, ["pr_opened"]);
 });
 
+test("service-account classification survives public projection without private review evidence", async (t) => {
+  const h = harness(t);
+  h.data.selected.actors[0].actor.kind = "service_account";
+  h.data.selected.actors[0].serviceAccountClassification = {
+    classificationId: "PRIVATE_CLASSIFICATION_ID",
+    reviewerActorId: "PRIVATE_REVIEWER",
+    evidenceIds: ["PRIVATE_CONFIG_EVIDENCE"],
+  };
+  const board = await h.app.inject(boardUrl);
+  assert.equal(board.statusCode, 200, board.body);
+  const serviceAccount = board.json().rows.find((row) => row.actorId === "alice");
+  assert.equal(serviceAccount.actor.kind, "service_account");
+  assert.equal(serviceAccount.actor.executionMode, "unknown");
+  const profile = await h.app.inject("/api/v1/contributors/alice");
+  assert.equal(profile.statusCode, 200, profile.body);
+  assert.equal(profile.json().actor.kind, "service_account");
+  assert.doesNotMatch(board.body + profile.body, /PRIVATE_|serviceAccountClassification|manual/);
+  // A raw actor cannot accidentally serialize internal receipt fields as public profile fields.
+  h.data.selected.actors[0].actor.serviceAccountClassification = h.data.selected.actors[0].serviceAccountClassification;
+  assert.equal((await h.app.inject(boardUrl)).statusCode, 503);
+});
+
 test("share cards are scoped, dated, source-linked and deny external framing", async (t) => {
   const value = fixture();
   const app = createService({ source: { read: async () => structuredClone(value) } });
