@@ -28,6 +28,8 @@ export interface SourceFact {
   subjectId: string;
   /** Collected native issue/PR node ID for a Project-history event. */
   historySubjectId?: string;
+  /** Native issue/PR identity for a complete current Project membership snapshot. */
+  projectSubjectId?: string;
   sourceRevision: string;
   sourceUrl: string;
   /** Snapshot state never establishes a transition's actor or occurrence time. */
@@ -72,6 +74,11 @@ function cursor(value: string | null): void {
 function normalizeFact(value: SourceFact): SourceFact {
   id(value.subjectId);
   if (value.historySubjectId !== undefined) id(value.historySubjectId);
+  if (value.projectSubjectId !== undefined) {
+    id(value.projectSubjectId);
+    if (value.projectSubjectId !== value.subjectId || value.evidence !== "current_state")
+      throw new Error("invalid_current_project_subject");
+  }
   id(value.sourceRevision);
   const url = new URL(value.sourceUrl);
   if (
@@ -99,6 +106,7 @@ function normalizeFact(value: SourceFact): SourceFact {
   return {
     subjectId: value.subjectId,
     ...(value.historySubjectId !== undefined ? { historySubjectId: value.historySubjectId } : {}),
+    ...(value.projectSubjectId !== undefined ? { projectSubjectId: value.projectSubjectId } : {}),
     sourceRevision: value.sourceRevision,
     sourceUrl: url.href,
     evidence: value.evidence,
@@ -307,6 +315,8 @@ export class CollectionStore {
         throw new Error("source_event_outside_window");
       if (request.family === "project_current" && facts.some((fact) => fact.evidence !== "current_state"))
         throw new Error("invalid_current_project_evidence");
+      if (request.family !== "project_current" && facts.some((fact) => fact.projectSubjectId !== undefined))
+        throw new Error("invalid_current_project_subject");
       failureCode = "source_commit_failed";
       return await this.db.transaction(async (tx) => {
         // Public readers share this repository gate while reading current controls.

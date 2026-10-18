@@ -99,7 +99,7 @@ for (const [index, [sourceCase]] of cases.entries()) {
     const client = {
       rest: async (_source, path) => {
         reads.push(path);
-        return path === `/repos/${repository.slug}` ? { id: repository.id, private: false } : input.payload;
+        return path === `/repos/${repository.slug}` ? { id: repository.id, private: false, full_name: repository.slug } : input.payload;
       },
       scanRest: async (scan) =>
         scan.select([
