@@ -28,6 +28,9 @@ export function recognitionFingerprint(state, bindings = []) {
   if (bindings.some((binding) => binding.metricId === "data_quality")) authority.push("data-quality-recognition/v1");
   // Generic reproduction receipts had no scenario/environment/result boundary.
   if (bindings.some((binding) => binding.metricId === "reproductions")) authority.push("reproduction-recognition/v1");
+  // Earlier generic bug receipts admitted non-issue and explicitly synthetic sources.
+  if (bindings.some((binding) => binding.metricId === "confirmed_bugs"))
+    authority.push("confirmed-bug-source-admission/v1");
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
@@ -189,6 +192,26 @@ export function materializeRecognition(
     );
     if (!candidates.length) continue;
     if (candidates.length !== 1) throw new Error("ambiguous_recognition_target");
+    if (binding.metricId === "confirmed_bugs") {
+      const target = candidates[0];
+      const evidence = input.evidence.filter((entry) => entry.contribution.contributionId === target.id);
+      const proof = evidence[0];
+      // Check before calling even a host-supplied receipt adapter. Combined
+      // inputs retain synthetic provenance per fact, not as one global flag.
+      if (
+        input.isSynthetic === true ||
+        (input.syntheticFactIds ?? []).includes(target.id) ||
+        binding.sourceMetricId !== "issues_opened" ||
+        !target.artifactId ||
+        evidence.length !== 1 ||
+        proof.artifact.kind !== "issue" ||
+        proof.artifact.stableId !== target.artifactId ||
+        proof.contribution.artifactId !== target.artifactId ||
+        proof.artifact.repositoryId !== target.repoId ||
+        proof.contribution.actorId !== target.actorId
+      )
+        throw new Error("recognition_source_unverified");
+    }
     const domain = qualifyDomainRecognition({
       input,
       request,

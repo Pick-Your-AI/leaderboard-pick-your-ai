@@ -1,7 +1,7 @@
 import React from "react";
 import { PageHeader } from "../components/Layout.tsx";
 import { PersonName, ReceiptBody } from "../components/Receipt.tsx";
-import { ScopeBar } from "../components/ScopeBar.tsx";
+import { ReferenceScope, ScopeBar } from "../components/ScopeBar.tsx";
 import {
   EmptyState,
   ErrorState,
@@ -188,6 +188,9 @@ export function CorrectionsPage() {
       <PageHeader eyebrow="Accountability" title="Corrections">
         <p>A minimized public history of corrections to counted results. Privacy choices are not published here.</p>
       </PageHeader>
+      <ReferenceScope>
+        The history below is shown across scopes. Contribution links carry the selection above.
+      </ReferenceScope>
       {records.length === 0 ? (
         <EmptyState title="No corrections">No published result has been corrected.</EmptyState>
       ) : (
