@@ -114,3 +114,19 @@ test("Project approvals cannot be a substring-matched string", async () => {
     /approved_project_scope_required/,
   );
 });
+
+test("approved Project probes reject hidden nodes and authorization failures", async () => {
+  const { assertPublicProjects, GithubClientError } = await import("../dist/index.js");
+  for (const client of [
+    { graphql: async () => ({ node: null }) },
+    {
+      graphql: async () => {
+        throw new GithubClientError({ kind: "permission_denied", visibility: "unknown", status: 403 }, "synthetic");
+      },
+    },
+  ])
+    await assert.rejects(
+      assertPublicProjects({ client, source: "synthetic", allowedProjectIds: ["PVT_synthetic"] }),
+      /project_not_authorized/,
+    );
+});

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { assertPublicProjects } from "./project-snapshots.js";
 import type { GithubReadClient } from "./client.js";
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -29,6 +30,13 @@ export async function readTypedIssueHistory(options: {
       ))
   )
     throw new Error("approved_project_scope_required");
+  if (options.family === "project_history")
+    await assertPublicProjects({
+      client: options.client,
+      source: options.source,
+      allowedProjectIds: options.repository.allowedProjectIds ?? [],
+      ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
+    });
   const [owner, name] = options.repository.slug.split("/");
   const actor = "actor { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }";
   const endpoints = "id url repository { databaseId isPrivate }";

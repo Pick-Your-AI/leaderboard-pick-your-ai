@@ -73,3 +73,14 @@ readiness cohorts, and live installation permission/reconciliation evidence.
 Real source approval, public permission probes, independent evidence review and
 launch gates remain external acceptance prerequisites. None of these issues is
 closed by synthetic tests alone.
+
+Confirmed Project privacy or authorization loss denies the repository's current
+and pinned publications. Every approved Project receives an explicit public-node
+probe, even when histories or memberships omit it. Collection and normalization
+scope-loss paths persist a private configuration-bound denial in controls and a
+SQL receipt; an immediate in-process fence prevents a failed controls write from
+leaving published evidence readable. A public repository probe cannot clear this
+Project denial. Recovery requires a newly approved configuration version and a
+successful rebuilt publication; old-version snapshots remain unavailable.
+Transient transport failures retain ordinary retry behavior and are not asserted
+to prove a Project became private.

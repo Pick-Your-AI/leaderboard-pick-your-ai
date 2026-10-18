@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { GithubReadClient } from "./client.js";
+import { GithubClientError, type GithubReadClient } from "./client.js";
 
 export interface PublicProjectSnapshot {
   id: string;
@@ -14,6 +14,41 @@ const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 export const projectSnapshotRevision = (snapshot: PublicProjectSnapshot): string =>
   createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
+
+/** Verify every explicitly approved Project even when no current membership is visible. */
+export async function assertPublicProjects(options: {
+  client: GithubReadClient;
+  source: string;
+  allowedProjectIds: readonly string[];
+  assertAuthorized?: () => void;
+}): Promise<void> {
+  if (
+    !Array.isArray(options.allowedProjectIds) ||
+    !options.allowedProjectIds.length ||
+    options.allowedProjectIds.length > 100 ||
+    !options.allowedProjectIds.every((id) => typeof id === "string" && /^[A-Za-z0-9_=.-]{1,128}$/.test(id))
+  )
+    throw new Error("approved_project_scope_required");
+  for (const id of options.allowedProjectIds) {
+    let result;
+    try {
+      result = await options.client.graphql<{ node?: { id?: string; public?: boolean } }>(
+        options.source,
+        `query($id:ID!) { node(id:$id) { ... on ProjectV2 { id public } } }`,
+        { id },
+        options.assertAuthorized,
+      );
+    } catch (error) {
+      if (
+        error instanceof GithubClientError &&
+        ["authentication_required", "permission_denied", "not_found_or_hidden"].includes(error.outcome.kind)
+      )
+        throw new Error("project_not_authorized");
+      throw error;
+    }
+    if (result.node?.id !== id || result.node?.public !== true) throw new Error("project_not_authorized");
+  }
+}
 
 /** Read one complete public Project item snapshot through bounded nested pagination. */
 export async function readPublicProjectSnapshot(options: {

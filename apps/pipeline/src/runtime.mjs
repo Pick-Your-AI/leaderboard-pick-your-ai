@@ -1,6 +1,6 @@
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
-import { createGithubCollectionSource } from "./github-source.mjs";
+import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -123,8 +123,18 @@ export async function createPipeline(options) {
       disabledMetricIds: [],
       disabledMetrics: [],
     };
+  const projectDeniedRepositories = new Set();
+  const projectDenialKey = (repo) => `project-scope-denial:${repo.id}:${digest(config.version)}`;
   const restrictConfiguration = (state) => {
     const overlay = configurationOverlay(state);
+    if (
+      config.repositories.some(
+        (repo) =>
+          projectDeniedRepositories.has(repo.id) ||
+          state.pipelineSourceDenials?.[repo.id]?.configurationVersion === config.version,
+      )
+    )
+      fail("project_source_scope_requires_reapproval");
     if (
       overlay.allowedRepositoryIds !== null &&
       config.repositories.some((repo) => !overlay.allowedRepositoryIds.includes(String(repo.id)))
@@ -219,10 +229,17 @@ export async function createPipeline(options) {
     operation = pending.catch(() => undefined);
     return pending;
   };
-  async function approved() {
+  async function approved(transaction = db) {
     authorized = Boolean(await verifyConfig(copy(config)));
     if (!authorized) return false;
     assertDataMode(config);
+    const persistedDenials = await transaction.query(
+      "SELECT operation_key FROM leaderboard_pipeline.receipts WHERE kind='project_scope_denial' AND operation_key=ANY($1::text[])",
+      [config.repositories.map(projectDenialKey)],
+    );
+    for (const repo of config.repositories)
+      if (persistedDenials.rows.some((row) => row.operation_key === projectDenialKey(repo)))
+        projectDeniedRepositories.add(repo.id);
     restrictConfiguration(controlsStore.read());
     required(config.version, "config_version_required");
     required(config.organization, "organization_required");
@@ -295,6 +312,20 @@ export async function createPipeline(options) {
     return receiptId;
   }
   async function denyRepository(repo, reason, checkedAt) {
+    let controlsFailure;
+    if (reason === "project_scope_unavailable") {
+      // Persist the public-read/write fence before SQL work. A repository-level
+      // public probe cannot reauthorize its now-private Project evidence.
+      projectDeniedRepositories.add(repo.id);
+      try {
+        controlsStore.transaction((state) => {
+          state.pipelineSourceDenials ||= {};
+          state.pipelineSourceDenials[repo.id] = { configurationVersion: config.version, reason, checkedAt };
+        });
+      } catch (error) {
+        controlsFailure = error;
+      }
+    }
     await db.transaction(async (tx) => {
       await tx.query(
         `INSERT INTO leaderboard_ingestion.repository_access (repository_id,installation_id,state)
@@ -302,12 +333,20 @@ export async function createPipeline(options) {
         generation=repository_access.generation+1,checked_at=clock_timestamp()`,
         [repo.id, repo.installationId],
       );
+      if (reason === "project_scope_unavailable")
+        await receipt(tx, projectDenialKey(repo), "project_scope_denial", {
+          repositoryId: repo.id,
+          configurationVersion: config.version,
+          reason,
+          checkedAt,
+        });
       await receipt(tx, `source-probe:${repo.id}:${checkedAt}:${reason}`, "source_unavailable", {
         repositoryId: repo.id,
         reason,
         checkedAt,
       });
     });
+    if (controlsFailure) throw controlsFailure;
     monitorFailure(
       monitorSource(repo.id),
       "collection",
@@ -448,6 +487,8 @@ export async function createPipeline(options) {
         assertRunConfiguration();
         monitorSuccess(monitorSource(repository.id), "normalization", normalizationStarted);
       } catch (error) {
+        if (isProjectSourceScopeFailure(error, row.family))
+          await denyRepository(repository, "project_scope_unavailable", utc(now()));
         monitorFailure(monitorSource(repository.id), "normalization", "schema_changed");
         if (dispatch) {
           assertRunConfiguration();
@@ -734,6 +775,13 @@ export async function createPipeline(options) {
       }
     }
     const aggregates = config.policies.map((item) => c.metrics.aggregateMetric(frozen, item.policy, engineScope));
+    const pendingFor = (aggregate, row) => ({
+      schemaVersion: "leaderboard-pending/v1",
+      state: aggregate.coverage === "complete" ? "measured" : row.pending > 0 ? "partial" : "unknown",
+      valueClass: config.policies.find((item) => item.policy.metricId === aggregate.metricId).policy.rankedStates[0],
+      count: row.pending > 0 || aggregate.coverage === "complete" ? row.pending : null,
+      evidenceIds: row.pendingEvidence.map((fact) => fact.id),
+    });
     const diagnostics = aggregates.flatMap((aggregate) =>
       aggregate.rows.map((row) => ({
         metricId: aggregate.metricId,
@@ -744,6 +792,7 @@ export async function createPipeline(options) {
         censored: row.censored,
         missingReadiness: row.missingReadiness,
         p75: row.p75,
+        pending: pendingFor(aggregate, row),
       })),
     );
     const rows = aggregates.flatMap((aggregate) =>
@@ -757,7 +806,36 @@ export async function createPipeline(options) {
           coverage: { ...coverage[0], scopeId: scopeKey(scope) },
         },
         evidenceIds: row.evidenceIds,
+        pending: pendingFor(aggregate, row),
       })),
+    );
+    // Dependency receipts use the exact aggregate selection, not portfolio grouping.
+    // If any receipt is absent or no longer public, projection withholds the pending count.
+    const pendingEvidence = aggregates.flatMap((aggregate) =>
+      aggregate.rows.flatMap((row) =>
+        row.pendingEvidence.flatMap((fact) => {
+          const original = evidence.get(fact.id);
+          if (!original) return [];
+          return [
+            {
+              artifact: copy(original.artifact),
+              contribution: {
+                ...copy(original.contribution),
+                actorId: fact.actorId,
+                roles: [fact.role],
+                qualification: "eligible",
+                metricIds: [fact.metricId],
+                reasonCodes: ["public_pending_work"],
+              },
+              occurredAt: fact.occurredAt,
+              observedAt: fact.observedAt,
+              activityState: "pending",
+              sourceRevision: original.sourceRevision,
+              sourceRevisionUrl: original.sourceRevisionUrl,
+            },
+          ];
+        }),
+      ),
     );
     // Descriptive public work is not conditional on earning a ranked outcome.
     // Selection reuses existing corrections, source/role/context checks and receipt validation.
@@ -803,6 +881,7 @@ export async function createPipeline(options) {
       rows,
       evidence: publicEvidence,
       portfolioEvidence,
+      pendingEvidence,
       ranking: config.policies.map((item) => ({
         metricId: item.policy.metricId,
         direction: "descending",
@@ -882,6 +961,7 @@ export async function createPipeline(options) {
           rows,
           evidence: publicEvidence,
           portfolioEvidence,
+          pendingEvidence,
           ranking: content.ranking,
           dataMode,
           diagnostics,
@@ -947,7 +1027,7 @@ export async function createPipeline(options) {
   }
   const source = {
     async read(scope, pin, signal, transaction) {
-      if (signal.aborted || !(await approved()) || !configuredScope(scope)) return null;
+      if (signal.aborted || !(await approved(transaction ?? db)) || !configuredScope(scope)) return null;
       const readTransaction = transaction ? (work) => work(transaction) : (work) => db.transaction(work);
       return readTransaction(async (tx) => {
         const result = await tx.query(

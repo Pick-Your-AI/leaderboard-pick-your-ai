@@ -635,7 +635,7 @@ test("diagnostic denominators/samples stay bound to visible selected rows and re
   assert.equal(profile.diagnostics[0].actorId, "bob");
   const exported = await h.app.inject("/api/v1/exports?metric=pr_opened&format=csv&limit=1");
   assert.match(exported.body, /"numerator","denominator","sample_count","censored","missing_readiness","p75"/);
-  assert.match(exported.body, /"2","3","3","1","0",""\r\n/);
+  assert.match(exported.body, /"2","3","3","1","0","","","\[\]"\r\n/);
   h.data.controls.suppressedActorIds = ["alice"];
   assert.ok((await h.app.inject(boardUrl)).json().diagnostics.every((entry) => entry.actorId !== "alice"));
   h.data.selected.diagnostics[0].sampleCount = -1;

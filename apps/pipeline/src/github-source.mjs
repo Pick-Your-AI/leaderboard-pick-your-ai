@@ -1,11 +1,36 @@
+import { GithubClientError } from "../../../packages/github/dist/client.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "../../../packages/github/dist/timeline-history.js";
-import { readPublicProjectSnapshot, projectSnapshotRevision } from "../../../packages/github/dist/project-snapshots.js";
+import {
+  assertPublicProjects,
+  readPublicProjectSnapshot,
+  projectSnapshotRevision,
+} from "../../../packages/github/dist/project-snapshots.js";
 import {
   githubReviewRevision,
   githubDiscussionRevision,
   githubSnapshotRevision,
   githubTimelineRevision,
 } from "../../../packages/github/dist/normalizers.js";
+
+/** Conservative scope-loss codes emitted by the trusted Project adapters. */
+export function isProjectSourceScopeFailure(error, family) {
+  if (
+    ["project_current", "project_history"].includes(family) &&
+    error instanceof GithubClientError &&
+    ["authentication_required", "permission_denied", "not_found_or_hidden"].includes(error.outcome.kind)
+  )
+    return true;
+  return (
+    error instanceof Error &&
+    [
+      "project_not_authorized",
+      "project_public_scope_unverified",
+      "project_public_subject_unverified",
+      "project_history_scope_unverified",
+      "project_subject_identity_unverified",
+    ].includes(error.message)
+  );
+}
 
 const routes = {
   issues: "issues?state=all&sort=created&direction=asc&per_page=100",
@@ -54,7 +79,7 @@ export function createGithubCollectionSource({
       isSynthetic,
     };
   }
-  return {
+  const adapter = {
     probeRepository,
     async readPage(request) {
       const repository = approved.get(request.repositoryId),
@@ -81,6 +106,13 @@ export function createGithubCollectionSource({
       }
       if (request.cursor !== null && !/^(0|[1-9]\d{0,4})$/.test(request.cursor))
         throw new Error("invalid_source_cursor");
+      if (["project_current", "project_history"].includes(request.family))
+        await assertPublicProjects({
+          client,
+          source: sourceId,
+          allowedProjectIds: repository.allowedProjectIds ?? [],
+          assertAuthorized,
+        });
       const scan = (key, path, filter = (body) => body) =>
         client.scanRest({
           source: sourceId,
@@ -316,6 +348,19 @@ export function createGithubCollectionSource({
         nextCursor: next < values.length ? String(next) : null,
         expectedCount: values.length,
       };
+    },
+  };
+  return {
+    probeRepository,
+    async readPage(request) {
+      try {
+        return await adapter.readPage(request);
+      } catch (error) {
+        const repository = approved.get(request.repositoryId);
+        if (repository && isProjectSourceScopeFailure(error, request.family))
+          await onUnavailable?.(repository, "project_scope_unavailable");
+        throw error;
+      }
     },
   };
 }

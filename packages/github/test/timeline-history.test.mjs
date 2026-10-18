@@ -91,7 +91,8 @@ test("Project status values are hydrated only after explicit public Project appr
   };
   const client = {
     ...clientFor(event),
-    graphql: async () => {
+    graphql: async (_source, query) => {
+      if (query.includes("... on ProjectV2 {")) return { node: { id: "PVT_allowed", public: true } };
       reads++;
       return { node: { ...event, previousStatus: "Todo", status: "Done" } };
     },

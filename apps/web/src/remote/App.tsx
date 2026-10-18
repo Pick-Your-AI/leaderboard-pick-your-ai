@@ -119,9 +119,11 @@ function ControlsEntry() {
 function Value({
   result,
   diagnostic,
+  pending = diagnostic?.pending,
 }: {
   result: Board["rows"][number]["result"];
   diagnostic?: Diagnostic | undefined;
+  pending?: Board["rows"][number]["pending"] | undefined;
 }) {
   return (
     <>
@@ -130,9 +132,14 @@ function Value({
           ? "Unknown"
           : result.value.toLocaleString(undefined, { maximumSignificantDigits: 21 })}
       </strong>{" "}
+      {pending && (pending.valueClass === "qualified" ? "accepted" : pending.valueClass)}{" "}
       <span className="muted">
         {result.state}; coverage {result.coverage.state}
       </span>
+      <p className="small">
+        {pending?.count == null ? "Pending unknown" : `${pending.count.toLocaleString()} pending`}
+        {pending?.state === "partial" ? " (partial coverage)" : ""}; pending work is not ranked.
+      </p>
       {diagnostic && (
         <p className="small">
           Numerator {diagnostic.numerator ?? "unknown"}; denominator {diagnostic.denominator ?? "unknown"}; samples{" "}
@@ -835,6 +842,7 @@ export function RemoteApp() {
                             <td role="cell" data-label="Value">
                               <Value
                                 result={row.result}
+                                pending={row.pending}
                                 diagnostic={data.value.diagnostics.find(
                                   (item) => item.actorId === row.actorId && item.metricId === row.result.metricId,
                                 )}
