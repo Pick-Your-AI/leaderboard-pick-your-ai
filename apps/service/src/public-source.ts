@@ -2,7 +2,6 @@ import type { RankSnapshotHistory } from "./rank-comparison.js";
 import {
   canonicalPublicScope,
   publicScopeKey,
-  publicScopeSchemaVersion,
   type PublicScope,
   publicDocumentationReasons,
   publicDocumentationRecognitionReasons,
@@ -216,8 +215,7 @@ export function projectRead(
     const providerScope = canonicalPublicScope(selected.scope);
     if (
       publicScopeKey(scope) !== publicScopeKey(providerScope) ||
-      (providerScope.schemaVersion === publicScopeSchemaVersion &&
-        selected.scope.schemaVersion !== publicScopeSchemaVersion)
+      providerScope.schemaVersion !== selected.scope.schemaVersion
     )
       return reject();
   } catch {
@@ -473,6 +471,7 @@ export function projectRead(
           entry.contribution.qualification === "eligible" &&
           entry.contribution.artifactId === entry.artifact.stableId &&
           actorIds.has(entry.contribution.actorId ?? "") &&
+          (!scope.roles?.length || scope.roles.some((role) => entry.contribution.roles.includes(role))) &&
           (scope.repository === null || entry.artifact.repositoryId === scope.repository) &&
           (scope.start === null ||
             (entry.occurredAt !== null && compareSourceInstants(entry.occurredAt, scope.start) >= 0)) &&
@@ -526,7 +525,14 @@ export function projectRead(
     )
       return reject();
   }
-  const pendingMetadata = new Map(pendingInput.map((entry) => [entry.contribution.contributionId, entry.observedAt]));
+  // Match projectEvidence's contract-normalized IDs before checking uniqueness
+  // and retrieving clocks. Raw aliases must not duplicate proof or lose metadata.
+  const pendingMetadata = new Map(
+    pendingInput.map((entry) => [
+      contributionSchema.shape.contributionId.parse(entry.contribution.contributionId),
+      entry.observedAt,
+    ]),
+  );
   if (pendingMetadata.size !== pendingInput.length) return reject();
   const pendingEvidence = projectEvidence(pendingInput).map((entry) => ({
     ...entry,
@@ -563,6 +569,9 @@ export function projectRead(
       compareSourceInstants(coverage.windowStart, scope.start) <= 0 &&
       coverage.windowEnd !== null &&
       compareSourceInstants(coverage.windowEnd, scope.end) >= 0 &&
+      coverage.sourceWatermark !== null &&
+      compareSourceInstants(coverage.sourceWatermark, scope.end) >= 0 &&
+      compareSourceInstants(snapshot.generatedAt, scope.end) >= 0 &&
       coverage.missingPages === 0 &&
       coverage.permissionsMissing.length === 0 &&
       coverage.sourceErrors.length === 0;

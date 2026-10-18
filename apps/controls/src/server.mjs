@@ -280,16 +280,23 @@ export function createControlsServer({
       }
       if (path.startsWith("/controls/operations/")) {
         requireThat(session.roles.includes("operator"), 403, "Operator role required");
+        requireThat([...url.searchParams].length === 0, 400, "Unexpected operation query");
         const input = req.method === "GET" ? undefined : await inputBody();
         try {
+          let sent = false;
+          const respond = (result, beforeSend) => {
+            send(result.status, result.data, () => {
+              requireThat(store.read().sessions[session.sid]?.expires > now(), 401, "Session revoked");
+              beforeSend?.();
+            });
+            sent = true;
+          };
           const result = await createOperationsManager({
             operations,
             authorizeRepository,
             refreshSession: () => authenticate(req, parsed),
-          })({ path, method: req.method, input });
-          send(result.status, result.data, () => {
-            requireThat(store.read().sessions[session.sid]?.expires > now(), 401, "Session revoked");
-          });
+          })({ path, method: req.method, input, respond });
+          if (!sent) respond(result);
         } catch (error) {
           if (error instanceof ControlError) throw error;
           throw new ControlError(409, "Operation unavailable or changed; reload before retry");

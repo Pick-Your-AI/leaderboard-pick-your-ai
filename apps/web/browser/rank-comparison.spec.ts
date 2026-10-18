@@ -1,6 +1,7 @@
 import { test, expect, type Page, type Request } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { readFile } from "node:fs/promises";
+import { type PublicScope } from "@pick-your-ai/contracts";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { parseCSVExport } from "../src/remote/csv-export.ts";
 
@@ -26,12 +27,12 @@ function deferred() {
   return { promise, resolve };
 }
 
-async function rankService(page: Page) {
+async function rankService(page: Page, filters: Partial<PublicScope> = {}) {
   // Build first. Dynamic import keeps the browser TypeScript project separate
   // from the compiled service and the root synthetic fixture module.
   const module = new URL("../../../tests/fixtures/rank-comparison.mjs", import.meta.url).href;
   const { createRankComparisonHarness } = await import(module);
-  const harness = createRankComparisonHarness();
+  const harness = createRankComparisonHarness(filters);
   const requests: URL[] = [];
   type Gate = {
     entered: ReturnType<typeof deferred>;
@@ -382,3 +383,129 @@ test("current suppression, provider failure and current revocation revalidate pi
     await api.close();
   }
 });
+
+for (const scenario of [
+  { name: "Project membership", roles: undefined, version: "public-export/v2" },
+  { name: "Project membership and roles", roles: ["author", "reviewer"] as const, version: "public-export/v3" },
+]) {
+  test(`${scenario.name} comparison preserves complete scopes through proof, pages, downloads and a filter change`, async ({
+    page,
+  }) => {
+    const api = await rankService(page, {
+      context: "current",
+      projects: ["PVT_B=", "PVT_A"],
+      ...(scenario.roles ? { roles: [...scenario.roles] } : {}),
+    });
+    try {
+      await page.goto(api.href({ limit: "4", tz: "America/New_York" }));
+      await movement(page, "b", "1", "Up 1 rank");
+      const provenance = page.getByLabel("Membership and contribution scope");
+      await expect(provenance).toContainText("Membership: current at snapshot cutoff.");
+      await expect(provenance).toContainText("GitHub Projects: PVT_A, PVT_B=.");
+      await expect(provenance).toContainText(
+        scenario.roles ? "Contribution roles: Author, Reviewer (any selected)." : "Contribution roles: all.",
+      );
+      const keys = [
+        "organization",
+        "repository",
+        "workstream",
+        "context",
+        "project",
+        "role",
+        "start",
+        "end",
+        "snapshot",
+        ...comparisonKeys,
+      ];
+      const checkSelection = (url: URL) => {
+        for (const key of keys) expect(url.searchParams.get(key), key).toBe(api.harness.params.get(key));
+        expect(url.searchParams.get("tz")).toBe("America/New_York");
+      };
+      checkSelection(
+        new URL(
+          (await page.getByRole("link", { name: "Permalink to this snapshot" }).getAttribute("href"))!,
+          page.url(),
+        ),
+      );
+      const next = new URL(
+        (await page.getByRole("link", { name: "Next cursor page" }).getAttribute("href"))!,
+        page.url(),
+      );
+      checkSelection(next);
+      expect(next.searchParams.get("cursor")).toBeTruthy();
+      await page.getByRole("link", { name: "Next cursor page" }).click();
+      await movement(page, "e", "3", "Rank unchanged");
+      const background = page.url();
+      const evidenceId = api.harness.pair.current.selected.rows.find(
+        (entry: { actorId: string; evidenceIds: string[] }) => entry.actorId === api.harness.actorIds.e,
+      ).evidenceIds[0];
+      await page.getByRole("link", { name: evidenceId, exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Contribution evidence" });
+      await expect(dialog).toBeVisible();
+      checkSelection(new URL(page.url()));
+      expect(new URL(page.url()).searchParams.get("cursor")).toBe(next.searchParams.get("cursor"));
+      await dialog.getByRole("button", { name: "Close evidence panel" }).click();
+      await expect(page).toHaveURL(background);
+
+      for (const format of ["json", "csv"] as const) {
+        const downloaded = page.waitForEvent("download");
+        await page.getByRole("button", { name: `Download current ${format.toUpperCase()} page` }).click();
+        const file = await downloaded;
+        const body = await readFile((await file.path())!, "utf8");
+        safe(body);
+        const request = api.requests.filter((url) => url.pathname === "/api/v1/exports").at(-1)!;
+        for (const key of [...keys, "limit", "cursor"])
+          expect(request.searchParams.get(key), key).toBe(next.searchParams.get(key));
+        expect(request.searchParams.has("tz")).toBe(false);
+        const exact = await api.harness.app.inject({ method: "GET", url: request.pathname + request.search });
+        expect(exact.statusCode).toBe(200);
+        expect(body).toBe(exact.body);
+        const document = format === "json" ? JSON.parse(body) : parseCSVExport(body, metric, 4);
+        expect(document).toMatchObject({
+          exportSchemaVersion: scenario.version,
+          scope: api.harness.scope,
+          comparison: {
+            snapshotId: api.harness.beforeId,
+            scope: api.harness.previousScope,
+            generatedAt: api.harness.previousScope.end,
+          },
+          rows: [{ actorId: api.harness.actorIds.e, rank: 3, movement: { state: "comparable", delta: 0 } }],
+        });
+        await expect(page.getByText("Rechecking…")).toHaveCount(0);
+      }
+      for (const request of api.requests) {
+        expect(request.searchParams.has("tz")).toBe(false);
+        if (!["/api/v1/boards", "/api/v1/exports"].includes(request.pathname))
+          for (const key of comparisonKeys) expect(request.searchParams.has(key)).toBe(false);
+      }
+
+      await page.getByText("Exact scope and snapshot", { exact: true }).click();
+      await expect(page.getByLabel("Project and workstream membership")).toHaveValue("current");
+      await expect(page.getByLabel("GitHub Project IDs")).toHaveValue("PVT_A,PVT_B=");
+      if (scenario.roles) {
+        await expect(page.getByRole("checkbox", { name: "Author", exact: true })).toBeChecked();
+        await page.getByRole("checkbox", { name: "Reviewer", exact: true }).uncheck();
+      } else {
+        await page.getByLabel("GitHub Project IDs").fill("PVT_OTHER");
+      }
+      await page.getByRole("button", { name: "Read exact scope" }).click();
+      await expect(page.getByRole("alert")).toBeVisible();
+      const changed = new URL(page.url());
+      expect(changed.searchParams.has("snapshot")).toBe(false);
+      expect(changed.searchParams.has("cursor")).toBe(false);
+      expect(changed.searchParams.has("proof")).toBe(false);
+      for (const key of comparisonKeys) expect(changed.searchParams.get(key)).toBe(api.harness.params.get(key));
+      expect(changed.searchParams.get("tz")).toBe("America/New_York");
+      expect(changed.searchParams.get(scenario.roles ? "role" : "project")).toBe(
+        scenario.roles ? "author" : "PVT_OTHER",
+      );
+      const changedRead = api.requests.filter((url) => url.pathname === "/api/v1/boards").at(-1)!;
+      expect(changedRead.searchParams.has("snapshot")).toBe(false);
+      expect(changedRead.searchParams.get("compare")).toBe(api.harness.beforeId);
+      await expect(page.getByRole("region", { name: "Published contributions" })).toHaveCount(0);
+      await expect(page.getByText("Rank unchanged", { exact: true })).toHaveCount(0);
+    } finally {
+      await api.close();
+    }
+  });
+}

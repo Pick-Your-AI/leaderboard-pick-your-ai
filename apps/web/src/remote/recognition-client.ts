@@ -1,4 +1,4 @@
-import { sourceEventSchema } from "@pick-your-ai/contracts";
+import { compareSourceInstants, sourceEventSchema } from "@pick-your-ai/contracts";
 import { metadata, parameters, publicLink, ReadFailure, type Selection } from "./client.ts";
 const id = /^[A-Za-z0-9_.:-]{1,200}$/;
 const fail = (): never => {
@@ -22,6 +22,24 @@ const date = (value: unknown) => {
 };
 const list = (value: unknown, maximum: number): unknown[] =>
   Array.isArray(value) && value.length <= maximum ? value : fail();
+
+/** Editorial controls have only an unfiltered organization-level protocol. */
+export function supportsEditorialScope(selected: Selection, organization: string): boolean {
+  return (
+    (selected.actors ?? "all") === "all" &&
+    selected.organization === organization &&
+    !selected.repository &&
+    !selected.workstream &&
+    (selected.context ?? "event") === "event" &&
+    !selected.projects?.length &&
+    !selected.roles?.length &&
+    !selected.start &&
+    !selected.end &&
+    !selected.snapshot &&
+    !selected.category &&
+    !selected.search
+  );
+}
 
 export function recognitionParameters(selected: Selection, snapshotId: string) {
   identity(snapshotId);
@@ -48,10 +66,32 @@ export function achievements(value: unknown, selected: Selection, actorId: strin
   const data = record(value);
   const meta = metadata(data, selected);
   if (data.actorId !== actorId || data.ruleVersion !== "accepted-evidence/v1") fail();
+  const suppliedAwards = list(data.achievements, 2);
+  const through = selected.end ?? meta.generatedAt;
+  if (
+    suppliedAwards.length > 0 &&
+    (!meta.coverage.length ||
+      meta.coverage.some(
+        (coverage) =>
+          coverage.state !== "complete" ||
+          coverage.missingPages !== 0 ||
+          coverage.permissionsMissing.length > 0 ||
+          coverage.sourceErrors.length > 0 ||
+          !coverage.windowStart ||
+          !coverage.windowEnd ||
+          !coverage.sourceWatermark ||
+          !(compareSourceInstants(coverage.windowEnd, through) >= 0) ||
+          !(compareSourceInstants(coverage.sourceWatermark, through) >= 0) ||
+          (selected.start
+            ? !(compareSourceInstants(coverage.windowStart, selected.start) <= 0)
+            : !coverage.knownStart || !(compareSourceInstants(coverage.windowStart, coverage.knownStart) <= 0)),
+      ))
+  )
+    fail();
   const seen = new Set<string>();
   return {
     ...meta,
-    achievements: list(data.achievements, 2).map((value) => {
+    achievements: suppliedAwards.map((value) => {
       const item = record(value);
       const rule = identity(item.id);
       if (

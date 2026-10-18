@@ -1,8 +1,11 @@
 import { exactKeys, requireThat } from "./store.mjs";
 /** Host opt-in only; never infer a repository grant from the operator role. */
 export function createOperationsManager({ operations, authorizeRepository, refreshSession }) {
-  return async ({ path, method, input }) => {
-    const match = /^\/controls\/operations\/([1-9][0-9]{0,15})(?:\/(replay|replay-window(?:\/preview)?))?$/.exec(path);
+  return async ({ path, method, input, respond }) => {
+    const match =
+      /^\/controls\/operations\/([1-9][0-9]{0,15})(?:\/(replay|replay-window(?:\/preview)?|health|replays\/([A-Za-z0-9_-]{1,128})))?$/.exec(
+        path,
+      );
     requireThat(match, 404, "Not found");
     const repositoryId = Number(match[1]);
     requireThat(Number.isSafeInteger(repositoryId));
@@ -33,6 +36,24 @@ export function createOperationsManager({ operations, authorizeRepository, refre
       return { status, data };
     };
     if (method === "GET" && !match[2]) return finish(200, await operations.read(repositoryId, authorize));
+    if (match[2] === "health" || match[3]) {
+      requireThat(method === "GET", 405, "Method not allowed");
+      const name = match[2] === "health" ? "readHealth" : "readReplayResult";
+      requireThat(typeof operations[name] === "function", 503, "Observed operation results unavailable");
+      let result;
+      // The real adapter keeps its source/publication locks across the final
+      // grant lookup and the synchronous HTTP serialization/send boundary.
+      const observe = async (data, beforeSend) => {
+        requireThat(typeof beforeSend === "function", 503, "Observed operation result fence unavailable");
+        result = await finish(200, data);
+        beforeSend();
+        respond?.(result, beforeSend);
+      };
+      if (name === "readHealth") await operations.readHealth(repositoryId, authorize, observe);
+      else await operations.readReplayResult(repositoryId, match[3], authorize, observe);
+      requireThat(result, 503, "Observed operation result fence unavailable");
+      return result;
+    }
     if (match[2] === "replay-window/preview" || match[2] === "replay-window") {
       requireThat(method === "POST", 405, "Method not allowed");
       const preview = match[2] === "replay-window/preview";
