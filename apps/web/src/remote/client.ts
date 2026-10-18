@@ -26,7 +26,7 @@ export class ReadFailure extends Error {
 }
 const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
 const scopeKeys = ["organization", "repository", "workstream", "start", "end"] as const;
-const supported = new Set([...scopeKeys, "snapshot", "limit", "cursor", "metric", "ui"]);
+const supported = new Set([...scopeKeys, "snapshot", "limit", "cursor", "metric", "ui", "search", "category"]);
 export interface Selection {
   organization: string;
   repository: string | null;
@@ -37,9 +37,11 @@ export interface Selection {
   limit: string;
   cursor: string | null;
   metric: string;
+  search: string | null;
+  category: string | null;
 }
-export function selection(search: string): Selection {
-  const params = new URLSearchParams(search);
+export function selection(query: string): Selection {
+  const params = new URLSearchParams(query);
   for (const key of params.keys())
     if (!supported.has(key) || params.getAll(key).length !== 1)
       throw new ReadFailure(400, "unsupported_or_duplicate_filter");
@@ -71,7 +73,11 @@ export function selection(search: string): Selection {
   const cursor = params.get("cursor");
   if (cursor !== null && (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(cursor) || cursor.length > 2048))
     throw new ReadFailure(400, "invalid_cursor");
+  const search = params.get("search");
+  if (search !== null && !/^[A-Za-z0-9-]{1,39}$/.test(search)) throw new ReadFailure(400, "invalid_search");
   return {
+    search: search?.toLowerCase() ?? null,
+    category: id("category"),
     organization: id("organization") ?? "Pick-Your-AI",
     repository: id("repository"),
     workstream: id("workstream"),
@@ -107,6 +113,8 @@ export function uiHref(
   params.set("metric", extra.metric ?? value.metric);
   params.set("limit", value.limit);
   params.set("ui", "api");
+  if (path.startsWith("/contributors") && value.category) params.set("category", value.category);
+  if (path === "/contributors" && value.search) params.set("search", value.search);
   if (extra.cursor) params.set("cursor", extra.cursor);
   return `${path}?${params}`;
 }
@@ -439,16 +447,81 @@ export interface Evidence {
   occurredAt: string | null;
   sourceRevision: string | null;
   sourceRevisionUrl: string | null;
+  activityState: "observed" | "pending" | "accepted" | "unknown";
+  observedAt: string | null;
 }
 export function evidence(value: unknown): Evidence {
   const data = object(value);
+  const activityState = data.activityState ?? "unknown";
+  if (!["observed", "pending", "accepted", "unknown"].includes(String(activityState)))
+    throw new ReadFailure(502, "invalid_api_response");
   return {
+    activityState: activityState as Evidence["activityState"],
+    observedAt: data.observedAt == null ? null : string(data.observedAt),
     artifact: artifactSchema.parse(data.artifact),
     contribution: contributionSchema.parse(data.contribution),
     occurredAt: data.occurredAt === null ? null : string(data.occurredAt),
     sourceRevision: data.sourceRevision === null ? null : string(data.sourceRevision),
     sourceRevisionUrl: publicLink(data.sourceRevisionUrl as string | null),
   };
+}
+export interface CategoryTotal {
+  metricId: string;
+  observed: number;
+  pending: number;
+  accepted: number;
+  unknown: number;
+}
+function categoryTotals(value: unknown): CategoryTotal[] {
+  return array(value, 98).map((value) => {
+    const item = object(value);
+    return {
+      metricId: identity(item.metricId),
+      observed: integer(item.observed),
+      pending: integer(item.pending),
+      accepted: integer(item.accepted),
+      unknown: integer(item.unknown),
+    };
+  });
+}
+export interface Directory extends Metadata {
+  contributors: {
+    actorId: string;
+    actor: Actor;
+    roles: string[];
+    categories: CategoryTotal[];
+    evidenceCount: number;
+  }[];
+  totalContributors: number;
+  nextCursor: string | null;
+}
+export function directory(value: unknown, selected: Selection): Directory {
+  const data = object(value);
+  if (data.search !== selected.search || data.category !== selected.category)
+    throw new ReadFailure(502, "api_filter_mismatch");
+  return {
+    ...metadata(value, selected),
+    contributors: array(data.contributors, 100).map((value) => {
+      const item = object(value);
+      return {
+        actorId: identity(item.actorId),
+        actor: actorSchema.parse(item.actor),
+        roles: array(item.roles, 30).map(string),
+        categories: categoryTotals(item.categories),
+        evidenceCount: integer(item.evidenceCount),
+      };
+    }),
+    totalContributors: integer(data.totalContributors),
+    nextCursor: data.nextCursor === null ? null : string(data.nextCursor),
+  };
+}
+export function portfolioParameters(value: Selection, directory = false): URLSearchParams {
+  const params = parameters(value);
+  params.set("limit", value.limit);
+  if (value.cursor) params.set("cursor", value.cursor);
+  if (value.category) params.set("category", value.category);
+  if (directory && value.search) params.set("search", value.search);
+  return params;
 }
 export interface Profile extends Metadata {
   actorId: string;
@@ -458,10 +531,13 @@ export interface Profile extends Metadata {
   roleBreakdown: { role: string; contributions: number }[];
   timeline: Evidence[];
   timelineTruncated: boolean;
+  nextCursor: string | null;
+  categories: CategoryTotal[];
   evidenceCount: number;
 }
 export function profile(value: unknown, selected: Selection): Profile {
   const data = object(value);
+  if ((data.category ?? null) !== selected.category) throw new ReadFailure(502, "api_filter_mismatch");
   return {
     ...metadata(value, selected),
     actorId: identity(data.actorId),
@@ -474,6 +550,8 @@ export function profile(value: unknown, selected: Selection): Profile {
     }),
     timeline: array(data.timeline, 100).map(evidence),
     timelineTruncated: data.timelineTruncated === true,
+    nextCursor: data.nextCursor == null ? null : string(data.nextCursor),
+    categories: categoryTotals(data.categories ?? []),
     evidenceCount: integer(data.evidenceCount),
   };
 }

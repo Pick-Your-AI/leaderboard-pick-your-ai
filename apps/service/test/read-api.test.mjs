@@ -641,3 +641,198 @@ test("diagnostic denominators/samples stay bound to visible selected rows and re
   h.data.selected.diagnostics[0].sampleCount = -1;
   assert.equal((await h.app.inject(boardUrl)).statusCode, 503);
 });
+
+function withPortfolio(data = fixture()) {
+  data.selected.portfolioEvidence = data.selected.evidence.map((entry) => ({
+    ...structuredClone(entry),
+    activityState: "observed",
+    observedAt: at,
+  }));
+  return data;
+}
+
+test("directory includes observed-only public contributors without ranking, membership or identity leakage", async (t) => {
+  const h = harness(t, withPortfolio());
+  h.data.selected.rows = [];
+  h.data.selected.evidence = [];
+  h.data.selected.actors.push({
+    ...structuredClone(h.data.selected.actors[0]),
+    actorId: "assigned-only",
+    actor: { ...h.data.selected.actors[0].actor, login: "assigned-only" },
+  });
+  h.data.selected.actors[1].state = "hidden";
+  h.data.selected.actors[2].state = "deleted";
+  h.data.selected.portfolioEvidence[0].contribution.reasonCodes = ["private request SECRET email@example.invalid"];
+  const response = await h.app.inject("/api/v1/contributors");
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(
+    response.json().contributors.map((entry) => entry.actorId),
+    ["alice"],
+  );
+  assert.deepEqual(response.json().contributors[0].categories, [
+    { metricId: "pr_opened", observed: 1, pending: 0, accepted: 0, unknown: 0 },
+  ]);
+  for (const search of ["bob", "carol", "assigned-only"])
+    assert.deepEqual((await h.app.inject(`/api/v1/contributors?search=${search}`)).json().contributors, []);
+  const profile = await h.app.inject("/api/v1/contributors/alice");
+  assert.deepEqual(profile.json().results, []);
+  assert.equal(profile.json().timeline[0].activityState, "observed");
+  const detail = await h.app.inject("/api/v1/evidence/e-alice");
+  assert.equal(detail.statusCode, 200);
+  assert.doesNotMatch(response.body + profile.body + detail.body, /SECRET|email@example|assigned-only|bob|carol/);
+  assert.equal((await h.app.inject("/api/v1/contributors?search=ALICE")).json().contributors.length, 1);
+});
+
+test("directory cursors bind search, category, scope, size, route and current controls; same-page replay is stable", async (t) => {
+  const h = harness(t, withPortfolio());
+  const first = (await h.app.inject("/api/v1/contributors?limit=1")).json();
+  const url = `/api/v1/contributors?limit=1&cursor=${first.nextCursor}`;
+  const second = await h.app.inject(url);
+  assert.equal(second.statusCode, 200, second.body);
+  assert.equal(second.json().contributors[0].actorId, "bob");
+  assert.equal((await h.app.inject(url)).body, second.body);
+  for (const change of ["&search=a", "&category=pr_opened", "&repository=repo-1", "&snapshot=other"])
+    assert.equal((await h.app.inject(url + change)).json().error, "cursor_scope_mismatch");
+  assert.equal((await h.app.inject(url.replace("limit=1", "limit=2"))).statusCode, 400);
+  assert.equal((await h.app.inject(`/api/v1/contributors/alice?limit=1&cursor=${first.nextCursor}`)).statusCode, 400);
+  assert.equal((await h.app.inject(`${boardUrl}&limit=1&cursor=${first.nextCursor}`)).statusCode, 400);
+  h.data.controls.version = "privacy-next";
+  h.data.controls.suppressedActorIds = ["alice"];
+  assert.equal((await h.app.inject(url)).json().error, "cursor_policy_changed_refetch");
+  assert.deepEqual((await h.app.inject("/api/v1/contributors?search=alice&snapshot=public-1")).json().contributors, []);
+});
+
+test("profile traverses more than 100 equal-time records without loss and reconciles overlapping category totals", async (t) => {
+  const data = withPortfolio();
+  const first = data.selected.portfolioEvidence[0];
+  data.selected.ranking.push({ metricId: "documentation", direction: "descending", rank: false });
+  data.selected.portfolioEvidence = Array.from({ length: 205 }, (_, index) => ({
+    ...structuredClone(first),
+    artifact: {
+      ...first.artifact,
+      stableId: `many-${index}`,
+      publicUrl: `https://github.com/synthetic/example/pull/${index + 1}`,
+    },
+    contribution: {
+      ...first.contribution,
+      contributionId: `many-${String(index).padStart(3, "0")}`,
+      artifactId: `many-${index}`,
+      metricIds: ["pr_opened", "documentation"],
+    },
+    activityState: index % 2 ? "pending" : "observed",
+  }));
+  data.selected.portfolioEvidence[204].activityState = "accepted";
+  const h = harness(t, data);
+  const ids = [];
+  let cursor = null,
+    categories;
+  do {
+    const url = `/api/v1/contributors/alice?category=documentation&limit=100${cursor ? `&cursor=${cursor}` : ""}`;
+    const response = await h.app.inject(url);
+    assert.equal(response.statusCode, 200, response.body);
+    const body = response.json();
+    categories ??= body.categories;
+    assert.deepEqual(body.categories, categories);
+    assert.equal(body.evidenceCount, 205);
+    assert.equal(body.timeline.length <= 100, true);
+    assert.equal(body.evidenceIds.length, body.timeline.length, "IDs must not bypass page bounds");
+    ids.push(...body.timeline.map((item) => item.contribution.contributionId));
+    cursor = body.nextCursor;
+    if (cursor) {
+      assert.equal(
+        (await h.app.inject(`/api/v1/contributors/bob?category=documentation&limit=100&cursor=${cursor}`)).statusCode,
+        400,
+      );
+      assert.equal((await h.app.inject(`/api/v1/contributors/alice?limit=100&cursor=${cursor}`)).statusCode, 400);
+    }
+  } while (cursor);
+  assert.equal(ids.length, 205);
+  assert.equal(new Set(ids).size, 205);
+  assert.deepEqual(ids, [...ids].sort());
+  assert.deepEqual(
+    categories,
+    ["documentation", "pr_opened"].map((metricId) => ({
+      metricId,
+      observed: 102,
+      pending: 102,
+      accepted: 1,
+      unknown: 0,
+    })),
+  );
+  const directory = (await h.app.inject("/api/v1/contributors?category=documentation")).json();
+  assert.deepEqual(directory.contributors[0].categories, categories);
+});
+
+test("portfolio evidence fails closed for unsafe source, missing attribution, unknown role, dates, disabled category and bounds", async (t) => {
+  const h = harness(t, withPortfolio());
+  h.data.selected.portfolioEvidence[0].artifact.publicUrl = "https://evil.invalid/public";
+  h.data.selected.portfolioEvidence[1].contribution.actorId = null;
+  assert.deepEqual(
+    (await h.app.inject("/api/v1/contributors")).json().contributors.map((item) => item.actorId),
+    ["carol"],
+  );
+  h.data.selected.disabledMetrics = [
+    { id: "pr_opened", reason: "withdrawn", policyVersion: "policy-2", policyLink: null },
+  ];
+  assert.deepEqual((await h.app.inject("/api/v1/contributors")).json().contributors, []);
+  h.data.selected.portfolioEvidence[2].activityState = "accepted_by_guess";
+  assert.equal((await h.app.inject("/api/v1/contributors")).statusCode, 503);
+  h.data.selected.portfolioEvidence[2].activityState = "observed";
+  h.data.selected.portfolioEvidence[2].observedAt = "not-a-date";
+  assert.equal((await h.app.inject("/api/v1/contributors")).statusCode, 503);
+  h.data.selected.portfolioEvidence = Array.from({ length: 20001 }, () => h.data.selected.portfolioEvidence[0]);
+  assert.equal((await h.app.inject("/api/v1/contributors")).statusCode, 503);
+  const before = h.calls.length;
+  for (const query of [
+    "search=",
+    "search=private%40example.invalid",
+    "search=" + "a".repeat(40),
+    "category=does-not-exist",
+    "limit=101",
+  ])
+    assert.equal((await h.app.inject(`/api/v1/contributors?${query}`)).statusCode, 400);
+  assert.equal(h.calls.length, before);
+});
+
+test("portfolio projection cannot enable an unapproved metric or retain suppressed artifacts in historic pages", async (t) => {
+  const h = harness(t, withPortfolio());
+  h.data.selected.portfolioEvidence[0].contribution.metricIds.push("documentation");
+  let response = (await h.app.inject("/api/v1/contributors?search=alice")).json();
+  assert.deepEqual(
+    response.contributors[0].categories.map((item) => item.metricId),
+    ["pr_opened"],
+  );
+  h.data.controls.suppressedArtifactIds = ["pr-0"];
+  response = (await h.app.inject("/api/v1/contributors?search=alice&snapshot=public-1")).json();
+  assert.deepEqual(response.contributors, []);
+  assert.deepEqual((await h.app.inject("/api/v1/contributors/alice?snapshot=public-1")).json().timeline, []);
+  assert.equal((await h.app.inject("/api/v1/evidence/e-alice?snapshot=public-1")).statusCode, 404);
+});
+
+test("portfolio cursors expire and tampering cannot select arbitrary offsets", async (t) => {
+  let clock = Date.parse(at);
+  const h = harness(t, withPortfolio(), { now: () => clock });
+  const first = (await h.app.inject("/api/v1/contributors?limit=1")).json();
+  const [body, signature] = first.nextCursor.split(".");
+  const forged = JSON.parse(Buffer.from(body, "base64url").toString());
+  forged.offset = 2;
+  const tampered = `${Buffer.from(JSON.stringify(forged)).toString("base64url")}.${signature}`;
+  assert.equal((await h.app.inject(`/api/v1/contributors?limit=1&cursor=${tampered}`)).statusCode, 410);
+  clock += 900001;
+  assert.equal(
+    (await h.app.inject(`/api/v1/contributors?limit=1&cursor=${first.nextCursor}`)).json().error,
+    "cursor_expired_refetch",
+  );
+});
+
+test("legacy portfolio and detail routes also restrict categories to published policies without inventing acceptance", async (t) => {
+  const h = harness(t);
+  h.data.selected.evidence[0].contribution.metricIds.push("documentation");
+  const directory = (await h.app.inject("/api/v1/contributors?search=alice")).json();
+  assert.deepEqual(directory.contributors[0].categories, [
+    { metricId: "pr_opened", observed: 0, pending: 0, accepted: 0, unknown: 1 },
+  ]);
+  assert.deepEqual((await h.app.inject("/api/v1/contributors?category=documentation")).json().contributors, []);
+  assert.deepEqual((await h.app.inject("/api/v1/contributors/alice?category=documentation")).json().timeline, []);
+  assert.deepEqual((await h.app.inject("/api/v1/evidence/e-alice")).json().contribution.metricIds, ["pr_opened"]);
+});

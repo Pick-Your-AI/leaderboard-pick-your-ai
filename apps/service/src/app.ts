@@ -8,6 +8,7 @@ import {
   PublicReadError,
   unavailableSource,
   type PublicRead,
+  type PortfolioEvidence,
   type PublicScope,
   type PublicSnapshotSource,
 } from "./public-source.js";
@@ -33,6 +34,8 @@ const allowed = new Set([
   "limit",
   "cursor",
   "format",
+  "search",
+  "category",
 ]);
 const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
 function fail(status: number, code: string): never {
@@ -110,12 +113,18 @@ export function createService(options: ServiceOptions = {}) {
     if (!/^[1-9]\d{0,2}$/.test(limitText) || Number(limitText) > 100) fail(400, "invalid_limit");
     const metric = item("metric");
     if (metric !== null && !registry.metrics.some((entry) => entry.id === metric)) fail(400, "unknown_metric");
+    const category = item("category");
+    if (category !== null && !registry.metrics.some((entry) => entry.id === category)) fail(400, "unknown_category");
+    const search = params.get("search");
+    if (search !== null && !/^[A-Za-z0-9-]{1,39}$/.test(search)) fail(400, "invalid_search");
     const format = params.get("format") ?? "json";
     if (!["json", "csv"].includes(format)) fail(400, "unsupported_export_format");
     return {
       scope,
       limit: Number(limitText),
       metric,
+      category,
+      search: search?.toLowerCase() ?? null,
       snapshot: item("snapshot"),
       cursor: params.get("cursor"),
       format,
@@ -147,7 +156,12 @@ export function createService(options: ServiceOptions = {}) {
       if (projected.selected.snapshot.metricDefinitionVersion !== registry.policy_version)
         fail(409, "metric_definition_unavailable");
       const knownMetrics = new Set(registry.metrics.map((metric) => metric.id));
-      if (projected.selected.rows.some((row) => !knownMetrics.has(row.result.metricId)))
+      if (
+        projected.selected.rows.some((row) => !knownMetrics.has(row.result.metricId)) ||
+        [...projected.selected.evidence, ...(projected.selected.portfolioEvidence ?? [])].some((entry) =>
+          entry.contribution.metricIds.some((metricId) => !knownMetrics.has(metricId)),
+        )
+      )
         fail(409, "metric_definition_unavailable");
       return projected;
     } finally {
@@ -214,7 +228,7 @@ export function createService(options: ServiceOptions = {}) {
         !identifier.test(value.policy) ||
         !Number.isSafeInteger(value.offset) ||
         value.offset < 1 ||
-        value.offset > 10000 ||
+        value.offset > 20000 ||
         typeof value.binding !== "string" ||
         !Number.isFinite(value.expires)
       )
@@ -259,11 +273,74 @@ export function createService(options: ServiceOptions = {}) {
       };
     });
   }
+  function page<T>(
+    items: T[],
+    q: ReturnType<typeof query>,
+    read: PublicRead,
+    cursor: ReturnType<typeof decodeCursor> | null,
+    binding: string,
+  ) {
+    if (cursor && cursor.policy !== read.controls.version) fail(410, "cursor_policy_changed_refetch");
+    const offset = cursor?.offset ?? 0;
+    const entries = items.slice(offset, offset + q.limit);
+    const nextOffset = offset + entries.length;
+    let nextCursor: string | null = null;
+    if (nextOffset < items.length) {
+      const value = Buffer.from(
+        JSON.stringify({
+          pin: read.selected.snapshot.snapshotId,
+          policy: read.controls.version,
+          offset: nextOffset,
+          binding,
+          expires: Math.floor(now() / 300000) * 300000 + 900000,
+        }),
+      ).toString("base64url");
+      nextCursor = `${value}.${sign(value)}`;
+    }
+    return { entries, nextCursor };
+  }
+  function boundCursor(q: ReturnType<typeof query>, binding: string) {
+    const cursor = q.cursor ? decodeCursor(q.cursor) : null;
+    if (cursor && (cursor.binding !== binding || (q.snapshot !== null && q.snapshot !== cursor.pin)))
+      fail(400, "cursor_scope_mismatch");
+    return cursor;
+  }
+  function portfolio(read: PublicRead, category: string | null): PortfolioEvidence[] {
+    // Legacy ranked-only snapshots remain readable without inventing acceptance states.
+    const entries =
+      read.selected.portfolioEvidence ??
+      read.selected.evidence.map((entry) => ({
+        ...entry,
+        activityState: "unknown" as const,
+        observedAt: null,
+      }));
+    return entries.filter(
+      (entry) =>
+        !entry.contribution.roles.includes("unknown") &&
+        (category === null || entry.contribution.metricIds.includes(category)),
+    );
+  }
+  function categories(entries: PortfolioEvidence[]) {
+    return [...new Set(entries.flatMap((entry) => entry.contribution.metricIds))].sort().map((metricId) => {
+      const matching = entries.filter((entry) => entry.contribution.metricIds.includes(metricId));
+      const count = (state: PortfolioEvidence["activityState"]) =>
+        new Set(matching.filter((entry) => entry.activityState === state).map((entry) => entry.contribution.artifactId))
+          .size;
+      return {
+        metricId,
+        observed: count("observed"),
+        pending: count("pending"),
+        accepted: count("accepted"),
+        unknown: count("unknown"),
+      };
+    });
+  }
   const definition = (metric: string) => registry.metrics.find((entry) => entry.id === metric)!;
   async function board(request: FastifyRequest, reply: FastifyReply, exporting: boolean) {
     const q = query(request);
     if (q.metric === null) fail(400, "metric_required");
-    const binding = JSON.stringify([q.scope, q.metric, q.limit]);
+    if (q.category || q.search) fail(400, "unsupported_filter");
+    const binding = JSON.stringify(["board", q.scope, q.metric, q.limit]);
     const cursor = q.cursor ? decodeCursor(q.cursor) : null;
     if (cursor && (cursor.binding !== binding || (q.snapshot !== null && q.snapshot !== cursor.pin)))
       fail(400, "cursor_scope_mismatch");
@@ -333,6 +410,7 @@ export function createService(options: ServiceOptions = {}) {
       endpoints: [
         "metrics",
         "boards",
+        "contributors",
         "contributors/:actorId",
         "evidence/:contributionId",
         "health",
@@ -347,28 +425,81 @@ export function createService(options: ServiceOptions = {}) {
   });
   app.get("/api/v1/boards", (request, reply) => board(request, reply, false));
   app.get("/api/v1/exports", (request, reply) => board(request, reply, true));
+  app.get("/api/v1/contributors", async (request, reply) => {
+    const q = query(request);
+    if (q.metric) fail(400, "use_category_filter");
+    const binding = JSON.stringify(["directory", q.scope, q.search, q.category, q.limit]);
+    const cursor = boundCursor(q, binding);
+    const read = await load(q.scope, cursor?.pin ?? q.snapshot);
+    const entries = portfolio(read, q.category);
+    const byActor = new Map<string, PortfolioEvidence[]>();
+    for (const entry of entries) {
+      const id = entry.contribution.actorId!;
+      const values = byActor.get(id) ?? [];
+      values.push(entry);
+      byActor.set(id, values);
+    }
+    const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+    const actors = read.selected.actors
+      .filter(
+        (entry) => byActor.has(entry.actorId) && (!q.search || entry.actor.login?.toLowerCase().includes(q.search)),
+      )
+      .sort(
+        (a, b) =>
+          compare(a.actor.login?.toLowerCase() ?? "", b.actor.login?.toLowerCase() ?? "") ||
+          compare(a.actorId, b.actorId),
+      );
+    const { entries: selectedActors, nextCursor } = page(actors, q, read, cursor, binding);
+    return send(request, reply, {
+      ...meta(read),
+      search: q.search,
+      category: q.category,
+      contributors: selectedActors.map((entry) => {
+        const contributions = byActor.get(entry.actorId)!;
+        return {
+          actorId: entry.actorId,
+          actor: entry.actor,
+          categories: categories(contributions),
+          roles: [...new Set(contributions.flatMap((item) => item.contribution.roles))].sort(),
+          evidenceCount: contributions.length,
+        };
+      }),
+      totalContributors: actors.length,
+      nextCursor,
+    });
+  });
   app.get<{ Params: { actorId: string } }>("/api/v1/contributors/:actorId", async (request, reply) => {
     const q = query(request);
-    if (q.cursor) fail(400, "cursor_not_supported");
-    const read = await load(q.scope, q.snapshot);
+    if (q.search || (q.category && q.metric && q.category !== q.metric)) fail(400, "unsupported_filter");
+    const category = q.category ?? q.metric;
+    const binding = JSON.stringify(["profile", request.params.actorId, q.scope, category, q.limit]);
+    const cursor = boundCursor(q, binding);
+    const read = await load(q.scope, cursor?.pin ?? q.snapshot);
     const actor = read.selected.actors.find((actor) => actor.actorId === request.params.actorId);
     if (!actor) fail(404, "profile_unavailable");
     const rows = read.selected.rows.filter(
-      (row) => row.actorId === actor.actorId && (q.metric === null || row.result.metricId === q.metric),
+      (row) => row.actorId === actor.actorId && (category === null || row.result.metricId === category),
     );
-    const ids = new Set(rows.flatMap((row) => row.evidenceIds));
-    const evidence = read.selected.evidence
-      .filter((entry) => ids.has(entry.contribution.contributionId))
+    const evidence = portfolio(read, category)
+      .filter((entry) => entry.contribution.actorId === actor.actorId)
       .sort(
         (a, b) =>
-          (b.occurredAt ?? "").localeCompare(a.occurredAt ?? "") ||
-          a.contribution.contributionId.localeCompare(b.contribution.contributionId),
+          (b.occurredAt === null ? -Infinity : Date.parse(b.occurredAt)) -
+            (a.occurredAt === null ? -Infinity : Date.parse(a.occurredAt)) ||
+          (a.contribution.contributionId < b.contribution.contributionId
+            ? -1
+            : a.contribution.contributionId > b.contribution.contributionId
+              ? 1
+              : 0),
       );
+    const { entries: timeline, nextCursor } = page(evidence, q, read, cursor, binding);
     return send(request, reply, {
       ...meta(read),
       actor: actor.actor,
       actorId: actor.actorId,
+      category,
       results: rows.map((row) => row.result),
+      categories: categories(evidence),
       diagnostics:
         read.selected.diagnostics?.filter(
           (entry) => entry.actorId === actor.actorId && rows.some((row) => row.result.metricId === entry.metricId),
@@ -377,16 +508,17 @@ export function createService(options: ServiceOptions = {}) {
         role,
         contributions: evidence.filter((entry) => entry.contribution.roles.includes(role)).length,
       })),
-      timeline: evidence.slice(0, q.limit),
-      timelineTruncated: evidence.length > q.limit,
+      timeline,
+      nextCursor,
+      timelineTruncated: nextCursor !== null,
       evidenceCount: evidence.length,
-      evidenceIds: [...ids],
+      evidenceIds: timeline.map((entry) => entry.contribution.contributionId),
     });
   });
   app.get<{ Params: { contributionId: string } }>("/api/v1/evidence/:contributionId", async (request, reply) => {
     const q = query(request);
     const read = await load(q.scope, q.snapshot);
-    const evidence = read.selected.evidence.find(
+    const evidence = [...(read.selected.portfolioEvidence ?? []), ...read.selected.evidence].find(
       (entry) => entry.contribution.contributionId === request.params.contributionId,
     );
     if (!evidence) fail(404, "evidence_unavailable");

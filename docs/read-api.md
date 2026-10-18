@@ -71,7 +71,8 @@ All paths are under `/api/v1`:
 | --- | --- |
 | `/metrics` | Machine-readable existing v1 metric registry and definitions |
 | `/boards?metric=pr_opened` | Approved ranking, definition, scope, coverage, versions, pinned share URL and cursor page |
-| `/contributors/:actorId` | Same-snapshot metric totals, role counts, bounded contribution timeline and evidence IDs |
+| `/contributors` | Unranked public-evidence directory, username search, category artifact counts and cursor page |
+| `/contributors/:actorId` | Same-snapshot metric totals, role/category counts, cursor-paginated timeline and page evidence IDs |
 | `/evidence/:contributionId` | Public artifact, eligibility reasons, source revision links and snapshot metadata |
 | `/health` | Per-source coverage, reconciliation watermark, sync time and safe degraded state |
 | `/exports?metric=pr_opened&format=json` | Bounded selected board totals, minimized identity and page evidence provenance |
@@ -95,10 +96,31 @@ view, preventing skipped rows after suppression. Rows sort using the explicitly
 approved direction, stable actor ID as the tie breaker and dense ranks for
 equal values (1, 1, 2). Approved descriptive-only policies set `rank: false`; these
 rows have null ranks and stable actor-ID ordering. Unknown results have no rank or
-numeric value. Profiles use the same
-rows as boards. Timelines are bounded by `limit` and expose truncation plus IDs for
-individual evidence reads; they never silently imply that a truncated timeline is
-complete. Hidden, deleted, suppressed and unlinked profiles share a generic 404.
+numeric value. Profiles use the same rows as boards. Timelines are bounded by
+`limit` and return `nextCursor` plus only that page's evidence IDs; there is no
+100-record truncation ceiling. Hidden, deleted, suppressed and unlinked profiles
+share a generic 404.
+
+Directory `search` is a case-insensitive current public-username substring (1–39
+ASCII letters, digits or hyphens). `category` is an existing published metric ID;
+it is independent of board `metric`. Directory and profile cursors additionally
+bind endpoint, search/category and profile actor, preventing cross-route reuse.
+Directory ordering is current username (case-insensitive codepoint order), then
+stable actor ID. Timeline ordering is newest occurrence instant then contribution
+ID, so equal timestamps remain traversable. Same-query cursor replay is idempotent.
+
+The separate bounded portfolio projection retains attributable observed and
+in-progress work even before ranking eligibility. It reuses frozen correction,
+canonical attribution, role, source, context and independent-acceptance checks,
+without changing the approved ranking policy. Portfolio dates use the actual
+occurrence clock; board totals retain their declared metric clock. Each category
+reports independent unique-artifact counts by observed, pending, accepted or unknown
+state. Categories and states can overlap and must never be summed into a score.
+Legacy snapshots without this projection retain unknown acceptance rather than
+inferring acceptance from eligibility. Only policy-enabled categories can appear,
+including through legacy detail routes. An actor roster, membership, mention or
+assignment alone never establishes directory inclusion. See the
+[bounded directory design and acceptance limits](contributor-directory-runtime.md).
 
 JSON and CSV downloads use the `public-export/v1` export envelope. Markdown
 portfolio, print, HTML and SVG presentation exports are disabled: `format=markdown`,

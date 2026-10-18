@@ -4,6 +4,8 @@ import { applyThemePreference, readThemePreference, type ThemePreference } from 
 import {
   apiBase,
   board,
+  directory,
+  portfolioParameters,
   catalog,
   evidence,
   exportPage,
@@ -17,6 +19,8 @@ import {
   selection,
   uiHref,
   type Board,
+  type Directory,
+  type CategoryTotal,
   type Diagnostic,
   type Evidence,
   type Health,
@@ -29,6 +33,7 @@ type Data =
   | { kind: "catalog" }
   | { kind: "health"; value: Health }
   | { kind: "board"; value: Board }
+  | { kind: "directory"; value: Directory }
   | { kind: "profile"; value: Profile }
   | { kind: "evidence"; value: Evidence & Metadata }
   | { kind: "unavailable" };
@@ -46,6 +51,8 @@ const fallback: Selection = {
   limit: "50",
   cursor: null,
   metric: "pr_opened",
+  search: null,
+  category: null,
 };
 const decode = (value: string) => {
   try {
@@ -67,7 +74,7 @@ const title = (path: string) =>
           : path === "/leaderboards"
             ? "Measures"
             : path === "/contributors"
-              ? "Contributors in this measure"
+              ? "Contributor directory"
               : path === "/activity"
                 ? "Published evidence"
                 : path === "/coverage" || path === "/health"
@@ -181,6 +188,8 @@ function Filters({
             "snapshot",
             "limit",
             "metric",
+            "search",
+            "category",
           ]) {
             const value = String(input.get(key) ?? "").trim();
             if (value) params.set(key, value);
@@ -204,6 +213,12 @@ function Filters({
               />
             </label>
           ),
+        )}
+        {path.startsWith("/contributors") && (
+          <>
+            <input type="hidden" name="category" value={selected.category ?? ""} />
+            {path === "/contributors" && <input type="hidden" name="search" value={selected.search ?? ""} />}
+          </>
         )}
         <button className="button" type="submit">
           Read exact scope
@@ -251,11 +266,30 @@ function Methods({ metric, meta }: { metric: MetricDefinition; meta?: Metadata }
     </section>
   );
 }
+function CategoryCounts({ categories, registry }: { categories: CategoryTotal[]; registry: MetricDefinition[] }) {
+  return (
+    <ul>
+      {categories.map((item) => (
+        <li key={item.metricId}>
+          {registry.find((metric) => metric.id === item.metricId)?.name ?? item.metricId}: {item.observed} observed;{" "}
+          {item.pending} in progress; {item.accepted} independently accepted; {item.unknown} acceptance unknown
+        </li>
+      ))}
+    </ul>
+  );
+}
 function Receipt({ value, selected }: { value: Evidence; selected: Selection }) {
   return (
     <dl className="receipt">
       <dt>Contribution</dt>
       <dd>{value.contribution.contributionId}</dd>
+      <dt>Work state</dt>
+      <dd>{value.activityState === "unknown" ? "Acceptance state unknown" : value.activityState}</dd>
+      <dt>Collected at</dt>
+      <dd>
+        {value.observedAt ?? "Unknown"}. Collection time can be later than the contribution; current corrections and
+        privacy controls apply.
+      </dd>
       <dt>Qualification</dt>
       <dd>{value.contribution.qualification}</dd>
       <dt>Participant roles</dt>
@@ -316,7 +350,12 @@ export function RemoteApp() {
     focusOnLoad = useRef(false);
   const active = useRef<AbortController | null>(null);
   const activeExport = useRef<AbortController | null>(null);
+  const displayedPortfolio = useRef<{ location: string; href: string } | null>(null);
   const navigate = useCallback((href: string) => {
+    // Make the previous page reproducible when Back is used after a new head arrives.
+    // Store only the pin in the URL; no contributor response is kept in browser history.
+    if (displayedPortfolio.current?.location === `${location.pathname}${location.search}`)
+      history.replaceState(null, "", displayedPortfolio.current.href);
     history.pushState(null, "", href);
     active.current?.abort();
     activeExport.current?.abort();
@@ -428,7 +467,7 @@ export function RemoteApp() {
           await request(
             parsed.base,
             `contributors/${encodeURIComponent(id)}`,
-            new URLSearchParams([...qs, ["limit", selected.limit]]),
+            portfolioParameters(exact),
             controller.signal,
           ),
           exact,
@@ -436,6 +475,14 @@ export function RemoteApp() {
         if (data.actorId !== id) throw new ReadFailure(502, "api_actor_mismatch");
         return { kind: "profile", value: data };
       }
+      if (path === "/contributors")
+        return {
+          kind: "directory",
+          value: directory(
+            await request(parsed.base, "contributors", portfolioParameters(exact, true), controller.signal),
+            exact,
+          ),
+        };
       if (contribution) {
         const id = decode(contribution[1]!);
         const raw = await request(parsed.base, `evidence/${encodeURIComponent(id)}`, qs, controller.signal);
@@ -445,7 +492,6 @@ export function RemoteApp() {
       }
       if (
         /^\/leaderboards\/[^/]+$/.test(path) ||
-        path === "/contributors" ||
         path === "/activity" ||
         path === "/live" ||
         /^\/projects\/[^/]+$/.test(path) ||
@@ -463,6 +509,12 @@ export function RemoteApp() {
         if ("value" in data && registry.policy_version !== data.value.metricDefinitionVersion)
           throw new ReadFailure(409, "metric_definition_unavailable");
         setChecking(false);
+        if (data.kind === "directory" || data.kind === "profile")
+          displayedPortfolio.current = {
+            location: `${url.pathname}${url.search}`,
+            href: uiHref(url.pathname, selected, { snapshot: data.value.snapshotId, cursor: selected.cursor }),
+          };
+        else displayedPortfolio.current = null;
         setState({ status: "ready", registry, data });
         if ("value" in data && !selected.snapshot && !heldPin) setHeldPin(data.value.snapshotId);
       })
@@ -732,12 +784,6 @@ export function RemoteApp() {
                         ? `Approved ${data.value.ranking.direction} ordering. Ties retain the API’s dense ranks.`
                         : "No ranking policy is supplied."}
                   </p>
-                  {url.pathname === "/contributors" && (
-                    <p>
-                      This directory contains only contributors returned for this selected measure and page; it is not a
-                      complete organization roster.
-                    </p>
-                  )}
                   {url.pathname === "/activity" ? (
                     <>
                       <p>
@@ -838,6 +884,83 @@ export function RemoteApp() {
               )}
             </>
           )}
+          {(data?.kind === "directory" || data?.kind === "profile") && (
+            <>
+              <form
+                className="remote-filters"
+                aria-label="Contribution filters"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const input = new FormData(event.currentTarget);
+                  const filtered = {
+                    ...pinned,
+                    category: String(input.get("category") ?? "") || null,
+                    search: String(input.get("search") ?? "").trim() || null,
+                  };
+                  navigate(uiHref(url.pathname, filtered, { cursor: null }));
+                }}
+              >
+                {data.kind === "directory" && (
+                  <label>
+                    Public username
+                    <input name="search" type="search" maxLength={39} defaultValue={selected.search ?? ""} />
+                  </label>
+                )}
+                <label>
+                  Contribution category
+                  <select name="category" defaultValue={selected.category ?? ""}>
+                    <option value="">All published categories</option>
+                    {catalogEntries.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button className="button" type="submit">
+                  Filter contributions
+                </button>
+              </form>
+              <p>
+                Observed and in-progress work is shown before acceptance when attributable public evidence is available.
+                Category artifact counts can overlap and are not a personal score. Membership, mentions and assignment
+                alone do not establish contributions.
+              </p>
+            </>
+          )}
+          {data?.kind === "directory" && (
+            <>
+              <p>
+                {data.value.totalContributors} contributors with public evidence in this selection. Showing{" "}
+                {data.value.contributors.length} on this page.
+              </p>
+              <ul className="directory">
+                {data.value.contributors.map((item) => (
+                  <li key={item.actorId}>
+                    <h2>
+                      <a data-api-nav href={uiHref(`/contributors/${encodeURIComponent(item.actorId)}`, pinned)}>
+                        {name(item.actor, item.actorId)}
+                      </a>
+                    </h2>
+                    <p>
+                      Public GitHub identity: {item.actor.login ?? item.actorId}. Roles: {item.roles.join(", ")}
+                    </p>
+                    <CategoryCounts categories={item.categories} registry={catalogEntries} />
+                  </li>
+                ))}
+              </ul>
+              {data.value.contributors.length === 0 && (
+                <p>No public contributors match this selection. This does not establish zero activity.</p>
+              )}
+              {data.value.nextCursor && (
+                <nav aria-label="Contributor directory pages">
+                  <a data-api-nav href={uiHref(url.pathname, pinned, { cursor: data.value.nextCursor })}>
+                    Next contributors page
+                  </a>
+                </nav>
+              )}
+            </>
+          )}
           {data?.kind === "profile" && (
             <>
               <h2>{name(data.value.actor, data.value.actorId)}</h2>
@@ -845,6 +968,8 @@ export function RemoteApp() {
                 Stable actor {data.value.actorId}; account kind {data.value.actor.kind}; execution mode{" "}
                 {data.value.actor.executionMode}.
               </p>
+              <h3>Independent category artifact counts</h3>
+              <CategoryCounts categories={data.value.categories} registry={catalogEntries} />
               <h3>Measure results</h3>
               <ul>
                 {data.value.results.map((result) => (
@@ -876,8 +1001,8 @@ export function RemoteApp() {
               <p>
                 {data.value.evidenceCount} public evidence records.{" "}
                 {data.value.timelineTruncated
-                  ? "Timeline is truncated; use individual evidence links."
-                  : "All records in this selected timeline are shown."}
+                  ? "More records are available on the next timeline page."
+                  : "This is the last page in this selected timeline."}
               </p>
               {data.value.timeline.map((item) => (
                 <section className="section" key={item.contribution.contributionId}>
@@ -890,6 +1015,13 @@ export function RemoteApp() {
                   <Receipt value={item} selected={pinned} />
                 </section>
               ))}
+              {data.value.nextCursor && (
+                <nav aria-label="Contribution timeline pages">
+                  <a data-api-nav href={uiHref(url.pathname, pinned, { cursor: data.value.nextCursor })}>
+                    Next timeline page
+                  </a>
+                </nav>
+              )}
             </>
           )}
           {data?.kind === "evidence" && <Receipt value={data.value} selected={pinned} />}
