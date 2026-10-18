@@ -115,6 +115,7 @@ export class GithubQuotaObservations {
     source: string,
     response: Pick<Response, "status" | "headers">,
     assertAuthorized?: () => void,
+    beforeWrite?: () => Promise<void>,
   ): Promise<boolean> {
     assertAuthorized?.();
     if (!headerNames.some((name) => response.headers.has(name))) return false;
@@ -145,7 +146,9 @@ export class GithubQuotaObservations {
     const key = `quota:${scopeKey}:${resource}`;
     const write = (this.writes.get(key) ?? Promise.resolve())
       .catch(() => undefined)
-      .then(() => {
+      .then(async () => {
+        // Repository authority may change while another pool writer is pending.
+        await beforeWrite?.();
         assertAuthorized?.();
         return this.checkpoints.save(key, observation);
       });
