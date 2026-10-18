@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { catalog, parameters, selection, uiHref } from "../src/remote/client.ts";
 import {
@@ -90,7 +91,8 @@ test("API methods and discovery render supplied metadata without prototype recor
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createServer } = await import("vite");
   const server = await createServer({
-    configFile: "apps/web/vite.config.ts",
+    root: fileURLToPath(new URL("../../..", import.meta.url)),
+    configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
     server: { middlewareMode: true, ws: false },
     appType: "custom",
   });

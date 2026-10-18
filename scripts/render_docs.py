@@ -103,7 +103,8 @@ This repository contains the complete delivery baseline: **{len(epics)} epics, {
 - [Product scope](docs/PRODUCT.md) · [Delivery plan and complete task list](docs/DELIVERY_PLAN.md)
 - [Metric catalog](docs/METRICS.md) · [UI concept](docs/UI.md) · [Architecture](docs/ARCHITECTURE.md)
 - [Contribution and ownership](CONTRIBUTING.md) · [Governance](docs/GOVERNANCE.md)
-- [Source audit](docs/SOURCE_AUDIT.md) · [Release and operations plan](docs/OPERATIONS_PLAN.md)
+- [Organization boundaries and current inventory](docs/organization-boundaries.md) · [Historical source audit](docs/SOURCE_AUDIT.md)
+- [Release and operations plan](docs/OPERATIONS_PLAN.md)
 
 The proposed product name is **PickYour.AI Credits**, with the tagline **Contributions, with evidence.** Recognition covers PRs, code and deletions, review, issues, triage, planning, research, documentation, design, accessibility, testing, maintenance and community work. There is no universal contributor score. Every board exposes its unit, period, source coverage and counting policy; observed activity, accepted outcomes and reviewed recognition remain distinct.
 
@@ -125,7 +126,7 @@ These checks cover planning integrity, mappings, dependency cycles, local links 
 
 ## Repository boundaries
 
-The [research repository](https://github.com/Pick-Your-AI/pick-your-ai-research) owns research decisions and its imported v1 contracts. The [website repository](https://github.com/Pick-Your-AI/pickyour.ai) owns the builder. The [organization repository](https://github.com/Pick-Your-AI/.github) owns shared guidance. This repository owns contributor-recognition contracts and the future service. Existing owners, source issues and native relationships remain authoritative.
+The [research repository](https://github.com/Pick-Your-AI/pick-your-ai-research) owns research decisions and its frozen builder v1 contracts. The [website repository](https://github.com/Pick-Your-AI/pickyour.ai) owns the web builder; the [Android](https://github.com/Pick-Your-AI/pick-your-ai-android) and [Apple](https://github.com/Pick-Your-AI/pick-your-ai-apple) repositories own their native applications. The [organization repository](https://github.com/Pick-Your-AI/.github) owns shared guidance. This repository owns contributor-recognition contracts, the local runtime and public-service delivery. The [dated organization inventory](docs/organization-boundaries.md) records stable identifiers and existing work. Live owners, source issues and native relationships remain authoritative.
 
 The structured plan lives in [planning/](planning/README.md). See [local runtime setup](docs/runtime-foundation.md) for Node.js 24 startup, database migrations and explicitly synthetic fixtures, and [ingestion operations](docs/INGESTION.md) for the separate collector primitives. Public hosting and the proposed contributor subdomain require their own approved decisions and operational proof.
 
@@ -185,6 +186,8 @@ Views organize the same issue set. Dependency views use genuine prerequisites; s
 
 [Full definitions and ingestion policy](../planning/metrics-and-ingestion.json) · [Metric-to-package map](../planning/metric-backlog-coverage.json)
 
+The [metric and recognition policy decision](metric-recognition-policy.md) records default evidence lenses, ranking, eligibility, corrections and versions. Its [98-definition review](metric-definition-review.md) retains each source restriction; neither document enables a metric or supplies a live-source receipt.
+
 The catalog defines {len(metrics['metrics'])} possible measures across {len(families)} families. A defined measure is not automatically available or safe to rank. Enable each measure only after its source, identity, eligibility, privacy and acceptance gates pass. Unsupported and incomplete data are explicit states; they must not be displayed as zero contribution.
 
 {table(['Family', 'Definitions'], sorted(families.items()))}
@@ -227,6 +230,8 @@ The default time window is the last 30 days. Support 7, 30 and 90 days, all-time
 Discover every attributable contributor through the searchable directory, including people whose observed work does not qualify for a ranking. Show evidence-backed portfolios rather than only podiums. Research, triage, review, accessibility and maintenance must be as discoverable as code. No inactivity lists, employment evaluation, compensation decisions or pressure-inducing streaks are part of this product.
 
 ## Public journeys
+
+The [audience and product-success decision](product-journeys.md) defines measurable acceptance scenarios for all five audiences, evaluates discovery and evidence understanding, and reviews examples from every current repository and Project. Its targets are an evaluation protocol, not a claim of measured usability or public-service acceptance.
 
 1. A visitor selects a contribution category, period and source scope, then opens a contributor's evidence.
 2. A contributor shares a portfolio with contribution roles, source links, accepted outcomes and coverage caveats.
@@ -375,6 +380,8 @@ All {ui_map['counts']['ui_children']} UI source items map into the existing LB w
 
 Recognition exists to make work discoverable and attributable. It is not a measure of a person's worth or a performance-management system. Activity volume, accepted outcomes and editorial recognition require different labels and evidence.
 
+The [evidence and contributor-rights policy](evidence-contributor-rights.md) defines source admission, voluntary consent, corrections, opt-out, appeals, retention and attributable decisions. Its adoption is separate from source activation, actual deletion and operating acceptance.
+
 ## Ownership and policy changes
 
 GitHub Assignees own delivery work. The plan's owner roles describe required expertise; they do not assign a person. Accept an owner before work is Ready. Source repository owners retain authority over research, code and release acceptance. Leaderboard moderators cannot declare upstream deliverables complete.
@@ -383,13 +390,13 @@ Version metric definitions, identity rules, line classification and eligibility 
 
 ## Evidence and correction
 
-Observe raw activity without inferring its quality. Review receipts when recognition requires acceptance, mentoring, design contribution, source verification or other qualitative judgment. Document the artifact, participants, roles, occurrence date, submitter, independent reviewer, policy version and public summary. Reviewers declare conflicts and do not approve their own disputed recognition.
+Observe raw activity without inferring its quality. Review receipts when recognition requires acceptance, mentoring, design contribution, source verification or other qualitative judgment. Document the artifact, participants, roles, occurrence date, submitter, independent reviewer, policy version and public summary. Reviewers declare conflicts and cannot accept claims submitted by themselves or listing them as collaborators. Appeals and rollbacks require a reviewer who has made no earlier decision on that receipt.
 
-Provide a functioning correction and appeal route with a submission receipt. Preserve an auditable decision trail while minimizing personal data. Withdrawal, duplicate evidence and upheld corrections invalidate derived counts across every affected snapshot, export and cache. Do not promise response times until an operator accepts the commitment.
+Provide a functioning correction and appeal route with a submission receipt. Preserve an auditable decision trail while minimizing personal data. Withdrawal, duplicate evidence and upheld corrections invalidate derived counts across affected service-controlled snapshots, exports and caches. Explain that independently downloaded copies are outside the service's deletion control. Do not promise response times until an operator accepts the commitment.
 
 ## Privacy and consent
 
-Use approved public repositories and Project fields. Never publish commit emails, private issue content, security findings or inferred identities. Verified opt-out and deletion propagate to directory, rankings, profiles, live displays, embeds, caches and exports. Separate authenticated controls from public data. A source becoming private triggers suppression before later enrichment.
+Use approved public repositories and Project fields. Never publish commit emails, private issue content, security findings or inferred identities. Verified opt-out and suppression apply across all enabled service-controlled public surfaces, including historical views. Report actual payload deletion, backup expiry and remaining cleanup separately. Separate authenticated controls from public data. A source becoming private triggers suppression before later enrichment.
 
 ## Counting safeguards
 
@@ -397,7 +404,9 @@ Distinct contribution roles can share an artifact, but a repeated event or impor
 
 ## Decision register
 
-The dedicated repository boundary has been selected. Other recommendations below remain proposals until their responsible roles accept them. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
+The dedicated repository boundary has been selected. The [metric and recognition decision](metric-recognition-policy.md) and its [definition review](metric-definition-review.md) specify this project's policy choices; review and merge record their acceptance. Each register entry retains its unresolved source, role or operating evidence. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
+
+The [release-phase decision](release-decision.md) defines transition evidence and proposed evaluation targets. Its adoption does not establish that a phase has passed or turn a proposed role into a named operational commitment.
 
 {json_detail(decisions)}
 
@@ -410,6 +419,14 @@ The dedicated repository boundary has been selected. Other recommendations below
 {release['principle']}
 
 Creating this repository, issue hierarchy and Project establishes the delivery plan. It does not install a GitHub App, select a host, provision credentials, enable a public metric or deploy a website. Staging validation and production verification remain separate work packages.
+
+The [release-phase decision](release-decision.md) defines the measurement protocol, privacy priority and receiving evidence for `{release['decision_version']}`. Review and merge adopt the gate policy; actual phase acceptance remains evidence-bound.
+
+## Proposed evaluation targets
+
+{table(['Measure', 'Proposed target', 'Receiving boundary'], [(t['measure'], t['target'], t['receiving_boundary']) for t in release['proposed_evaluation_targets']])}
+
+These values are proposed evaluation objectives, not measured results or operating commitments. The selected host, budget, declared load, source scope and accepted operational roles must support the receiving profile before public beta. Missing observations, unsafe publication and unreconciled data loss cannot be reported as a pass. See the decision for exact clocks, denominators and privacy-preserving recovery.
 
 ## Release phases
 
@@ -453,6 +470,8 @@ A release is complete only with the accepted deployment decision, real public UR
 
 The planning audit was captured from {audit['snapshot']['started_at']} to {audit['snapshot']['finished_at']}. It covered the three visible public repositories and five Projects listed below, with {audit['snapshot']['issue_pr_count']} issue/PR records in the source inventory. This is a historical snapshot, not a live inventory or a claim about undisclosed private repositories.
 
+The [2026-10-18 organization boundary inventory](organization-boundaries.md) separately reconciles all six visible public repositories and six Projects, their stable identifiers, configured fields and existing ownership. The historical counts below remain unchanged.
+
 {table(['Repository', 'Reviewed revision', 'Issues', 'PRs'], [(f"[{r['name']}]({r['url']})", r.get('tree_sha','unknown'), r.get('issues_total','unknown'), r.get('pull_requests_total','unknown')) for r in audit['repositories']])}
 
 {bullet(f"[Project {p['number']}]({p['url']})" for p in audit['projects'])}
@@ -490,6 +509,7 @@ These files are the versioned source for generated documentation. GitHub issues 
 | [decision-register.json](decision-register.json) | Proposed decisions, accountable roles and prerequisites |
 | [release-manifest.json](release-manifest.json) | Mandatory foundations, product journey, conditional modules and live readback |
 | [source-audit.json](source-audit.json) | Historical public organization inventory and explicit limits |
+| [organization-inventory-2026-10-18.json](organization-inventory-2026-10-18.json) | Dated complete public repository/issue/PR inventory, six Project identities, all configured field IDs and existing owner roles |
 | [metric-api-evidence.json](metric-api-evidence.json) | Time-bounded official API references and source capability findings |
 | [plan-review-resolution.json](plan-review-resolution.json) | Review findings and their planned resolutions |
 
