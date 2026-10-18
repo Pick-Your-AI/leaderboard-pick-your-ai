@@ -20,7 +20,8 @@ export function githubOAuthProvider({ clientId, clientSecret, fetcher = fetch })
         requireThat(length <= 65_536, 502, "Identity response too large");
         chunks.push(chunk);
       }
-    const raw = Buffer.concat(chunks).toString("utf8");
+    // Reject damaged provider bytes without changing the existing BOM policy.
+    const raw = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks));
     return raw ? JSON.parse(raw) : {};
   }
   return {
@@ -51,7 +52,8 @@ export function githubOAuthProvider({ clientId, clientSecret, fetcher = fetch })
       });
       requireThat(typeof token.access_token === "string", 502, "Identity exchange failed");
       try {
-        requireThat(!token.scope, 502, "Unexpected OAuth scopes");
+        // Missing or non-string metadata cannot confirm the approved empty scope.
+        requireThat(token.scope === "", 502, "Unexpected OAuth scopes");
         const user = await request("https://api.github.com/user", {
           headers: {
             accept: "application/vnd.github+json",

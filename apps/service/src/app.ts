@@ -2,6 +2,10 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   actorFilterSchema,
+  canonicalPublicScope,
+  publicScopeKey,
+  publicScopeParameters,
+  publicScopeSchemaVersion,
   metricRegistrySchema,
   type ActorFilter,
   type MetricRegistry,
@@ -47,6 +51,8 @@ const allowed = new Set([
   "organization",
   "repository",
   "workstream",
+  "context",
+  "project",
   "start",
   "end",
   "snapshot",
@@ -136,7 +142,7 @@ export function createService(options: ServiceOptions = {}) {
       !["/api/v1/boards", "/api/v1/exports"].includes(new URL(request.url, "http://localhost").pathname)
     )
       fail(400, "unsupported_filter");
-    const scope: PublicScope = {
+    let scope: PublicScope = {
       organization: item("organization") ?? "Pick-Your-AI",
       repository: item("repository"),
       workstream: item("workstream"),
@@ -150,6 +156,15 @@ export function createService(options: ServiceOptions = {}) {
         (scope.start >= scope.end || Date.parse(scope.end) - Date.parse(scope.start) > 366 * 86400000))
     )
       fail(400, "invalid_date_window");
+    try {
+      scope = canonicalPublicScope({
+        ...scope,
+        ...(params.has("context") ? { context: params.get("context") } : {}),
+        ...(params.has("project") ? { projects: params.get("project")!.split(",") } : {}),
+      });
+    } catch {
+      fail(400, "invalid_public_scope");
+    }
     const limitText = params.get("limit") ?? "50";
     if (!/^[1-9]\d{0,2}$/.test(limitText) || Number(limitText) > 100) fail(400, "invalid_limit");
     const metric = item("metric");
@@ -228,9 +243,14 @@ export function createService(options: ServiceOptions = {}) {
     health = false,
   ): Promise<PublicRead> {
     return project(
-      await boundedRead((signal) =>
-        health && source.readHealth ? source.readHealth(scope, pin, signal) : source.read(scope, pin, signal),
-      ),
+      await boundedRead((signal) => {
+        // Providers receive detached inputs. Their normalization/mutation cannot
+        // replace the request that later authorizes the returned projection.
+        const selectedScope = canonicalPublicScope(scope);
+        return health && source.readHealth
+          ? source.readHealth(selectedScope, pin, signal)
+          : source.read(selectedScope, pin, signal);
+      }),
       scope,
       pin,
       actors,
@@ -245,7 +265,14 @@ export function createService(options: ServiceOptions = {}) {
       const read = await load(q.scope, pin, q.actors);
       return { read, compared: comparePublishedRanks(read, null, null, null, q.metric!) };
     }
-    const paired = await boundedRead((signal) => source.readComparison!(q.scope, pin, q.comparison!, signal));
+    const paired = await boundedRead((signal) =>
+      source.readComparison!(
+        canonicalPublicScope(q.scope),
+        pin,
+        { snapshotId: q.comparison!.snapshotId, scope: canonicalPublicScope(q.comparison!.scope) },
+        signal,
+      ),
+    );
     if (paired?.previous) {
       const authority = (read: PublicRead) =>
         JSON.stringify([
@@ -298,8 +325,10 @@ export function createService(options: ServiceOptions = {}) {
   }
   function meta(read: PublicRead) {
     const snapshot = read.selected.snapshot;
+    const extendedScope = read.selected.scope.schemaVersion === publicScopeSchemaVersion;
     return {
-      schemaVersion: snapshot.schemaVersion,
+      schemaVersion: extendedScope ? "public-read/v2" : snapshot.schemaVersion,
+      ...(extendedScope ? { snapshotSchemaVersion: snapshot.schemaVersion } : {}),
       snapshotId: snapshot.snapshotId,
       revision: snapshot.revision,
       generatedAt: snapshot.generatedAt,
@@ -316,6 +345,13 @@ export function createService(options: ServiceOptions = {}) {
   }
   function sign(value: string) {
     return createHmac("sha256", secret).update(value).digest("base64url");
+  }
+  // New Project sets can be longer than a cursor. Keep legacy cursor bytes while
+  // binding the complete canonical v2 scope to a fixed-size collision-resistant key.
+  function cursorScope(scope: PublicScope) {
+    return scope.schemaVersion === publicScopeSchemaVersion
+      ? [publicScopeSchemaVersion, createHash("sha256").update(publicScopeKey(scope)).digest("hex")]
+      : scope;
   }
   function decodeCursor(cursor: string): {
     pin: string;
@@ -449,11 +485,11 @@ export function createService(options: ServiceOptions = {}) {
     if (q.category || q.search) fail(400, "unsupported_filter");
     const binding = JSON.stringify([
       "board",
-      q.scope,
+      cursorScope(q.scope),
       q.metric,
       q.limit,
       q.actors,
-      ...(q.comparison ? [q.comparison] : []),
+      ...(q.comparison ? [{ ...q.comparison, scope: cursorScope(q.comparison.scope) }] : []),
     ]);
     const cursor = q.cursor ? decodeCursor(q.cursor) : null;
     if (cursor && (cursor.binding !== binding || (q.snapshot !== null && q.snapshot !== cursor.pin)))
@@ -493,8 +529,8 @@ export function createService(options: ServiceOptions = {}) {
       metric: q.metric,
       snapshot: read.selected.snapshot.snapshotId,
     });
-    for (const key of ["repository", "workstream", "start", "end"] as const)
-      if (q.scope[key] !== null) share.set(key, q.scope[key]);
+    for (const [key, value] of Object.entries(publicScopeParameters(q.scope)))
+      if (key !== "organization") share.set(key, value);
     if (q.comparison) {
       share.set("compare", q.comparison.snapshotId);
       if (q.comparison.scope.start !== null && q.comparison.scope.end !== null) {
@@ -567,7 +603,7 @@ export function createService(options: ServiceOptions = {}) {
       "activity",
       activityGroupingVersion,
       groupId,
-      q.scope,
+      cursorScope(q.scope),
       q.category,
       q.limit,
       q.actors,
@@ -617,7 +653,7 @@ export function createService(options: ServiceOptions = {}) {
   app.get("/api/v1/contributors", async (request, reply) => {
     const q = query(request);
     if (q.metric) fail(400, "use_category_filter");
-    const binding = JSON.stringify(["directory", q.scope, q.search, q.category, q.limit, q.actors]);
+    const binding = JSON.stringify(["directory", cursorScope(q.scope), q.search, q.category, q.limit, q.actors]);
     const cursor = boundCursor(q, binding);
     const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors);
     const entries = portfolio(read, q.category);
@@ -661,7 +697,14 @@ export function createService(options: ServiceOptions = {}) {
     const q = query(request);
     if (q.search || (q.category && q.metric && q.category !== q.metric)) fail(400, "unsupported_filter");
     const category = q.category ?? q.metric;
-    const binding = JSON.stringify(["profile", request.params.actorId, q.scope, category, q.limit, q.actors]);
+    const binding = JSON.stringify([
+      "profile",
+      request.params.actorId,
+      cursorScope(q.scope),
+      category,
+      q.limit,
+      q.actors,
+    ]);
     const cursor = boundCursor(q, binding);
     const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors);
     const actor = read.selected.actors.find((actor) => actor.actorId === request.params.actorId);
@@ -833,10 +876,7 @@ export function createService(options: ServiceOptions = {}) {
         action: "refetch_snapshot",
         pollingUrl: `/api/v1/health?${new URLSearchParams({
           actors: q.actors,
-          organization: q.scope.organization,
-          ...Object.fromEntries(
-            Object.entries(q.scope).filter(([key, value]) => key !== "organization" && value !== null),
-          ),
+          ...publicScopeParameters(q.scope),
         }).toString()}`,
       };
       const event =

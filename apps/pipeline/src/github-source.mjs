@@ -1,10 +1,10 @@
 import { GithubClientError } from "../../../packages/github/dist/client.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "../../../packages/github/dist/timeline-history.js";
+import { assertPublicProjects } from "../../../packages/github/dist/project-snapshots.js";
 import {
-  assertPublicProjects,
-  readPublicProjectSnapshot,
-  projectSnapshotRevision,
-} from "../../../packages/github/dist/project-snapshots.js";
+  readPublicSubjectProjectSnapshot,
+  projectSubjectSnapshotRevision,
+} from "../../../packages/github/dist/project-context.js";
 import {
   githubReviewRevision,
   githubDiscussionRevision,
@@ -52,7 +52,7 @@ const at = (value) => {
 
 /** Read-only REST source with complete, bounded review fanout. */
 export function createGithubCollectionSource({
-  client,
+  client: readClient,
   sourceId,
   repositories,
   isSynthetic = false,
@@ -61,8 +61,9 @@ export function createGithubCollectionSource({
   assertAuthorized = () => {},
 }) {
   if (
-    !client?.scanRest ||
-    !client?.rest ||
+    !readClient?.scanRest ||
+    !readClient?.rest ||
+    typeof readClient.forRepository !== "function" ||
     typeof sourceId !== "string" ||
     !sourceId ||
     !Number.isInteger(maxPages) ||
@@ -75,8 +76,15 @@ export function createGithubCollectionSource({
     const scope = approved.get(repository.id);
     if (!scope || scope.slug !== repository.slug || scope.installationId !== repository.installationId)
       throw new Error("repository_not_authorized");
+    const client = readClient.forRepository(scope.id);
     const value = await client.rest(sourceId, `/repos/${scope.slug}`, assertAuthorized);
-    if (value?.id !== repository.id || typeof value.private !== "boolean")
+    if (
+      value?.id !== repository.id ||
+      typeof value.private !== "boolean" ||
+      typeof value.full_name !== "string" ||
+      !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value.full_name) ||
+      value.full_name.toLowerCase() !== scope.slug.toLowerCase()
+    )
       throw new Error("repository_identity_unverified");
     return {
       repositoryId: value.id,
@@ -98,6 +106,7 @@ export function createGithubCollectionSource({
           !["reviews", "discussions", "project_current", "project_history", "relationships"].includes(request.family))
       )
         throw new Error("source_family_adapter_unavailable");
+      const client = readClient.forRepository(repository.id);
       assertAuthorized();
       let verification;
       try {
@@ -113,6 +122,7 @@ export function createGithubCollectionSource({
       }
       if (request.cursor !== null && !/^(0|[1-9]\d{0,4})$/.test(request.cursor))
         throw new Error("invalid_source_cursor");
+      const offset = request.cursor === null ? 0 : Number(request.cursor);
       if (["project_current", "project_history"].includes(request.family))
         await assertPublicProjects({
           client,
@@ -134,6 +144,7 @@ export function createGithubCollectionSource({
           },
         });
       let values;
+      let projectSubjectCount = null;
       if (["project_history", "relationships"].includes(request.family)) {
         if (
           request.family === "project_history" &&
@@ -202,60 +213,37 @@ export function createGithubCollectionSource({
         if (!client.scanGraphql) throw new Error("project_source_unavailable");
         const subjects = await scan("project-subjects", routes.issues);
         if (subjects.length > 10000) throw new Error("source_dataset_budget_exceeded");
+        if (offset > subjects.length) throw new Error("invalid_source_cursor");
+        projectSubjectCount = subjects.length;
         values = [];
+        const subjectIds = new Set();
         for (const subject of subjects) {
-          if (typeof subject.node_id !== "string") throw new Error("project_subject_identity_unverified");
-          const items = await client.scanGraphql({
+          if (typeof subject.node_id !== "string" || subjectIds.has(subject.node_id))
+            throw new Error("project_subject_identity_unverified");
+          subjectIds.add(subject.node_id);
+        }
+        // Keep the complete subject inventory/count, but hydrate each subject
+        // only on its output page. Repeated output pages must not rescan all items.
+        for (const subject of subjects.slice(offset, offset + request.limit)) {
+          const snapshot = await readPublicSubjectProjectSnapshot({
+            client,
             source: sourceId,
-            key: `pipeline:${repository.id}:${request.runId}:project-items:${subject.node_id}`,
-            query: `query($id:ID!, $first:Int!, $after:String) {
-              node(id:$id) {
-                ... on Issue { id repository { databaseId isPrivate } projectItems(first:$first,after:$after) { nodes { id project { id public } } pageInfo { hasNextPage endCursor } } }
-                ... on PullRequest { id repository { databaseId isPrivate } projectItems(first:$first,after:$after) { nodes { id project { id public } } pageInfo { hasNextPage endCursor } } }
-              }
-            }`,
-            variables: { id: subject.node_id },
+            repository,
+            subjectId: subject.node_id,
+            sourceUrl: subject.html_url,
+            allowedProjectIds,
+            scanId: request.runId,
             maxPages,
             assertAuthorized,
-            select(data) {
-              assertAuthorized();
-              if (
-                data?.node?.id !== subject.node_id ||
-                data.node.repository?.databaseId !== repository.id ||
-                data.node.repository?.isPrivate !== false ||
-                !Array.isArray(data.node.projectItems?.nodes)
-              )
-                throw new Error("project_subject_identity_unverified");
-              if (
-                data.node.projectItems.nodes.some(
-                  (item) => allowedProjectIds.includes(item?.project?.id) && item?.project?.public !== true,
-                )
-              )
-                throw new Error("project_public_scope_unverified");
-              return {
-                ...data.node.projectItems,
-                nodes: data.node.projectItems.nodes.filter((item) => allowedProjectIds.includes(item?.project?.id)),
-              };
-            },
           });
-          if (items.length + values.length > 10000) throw new Error("source_dataset_budget_exceeded");
-          for (const item of items) {
-            const snapshot = await readPublicProjectSnapshot({
-              client,
-              source: sourceId,
-              repository,
-              itemId: item.id,
-              allowedProjectIds,
-              scanId: request.runId,
-              maxPages,
-              assertAuthorized,
-            });
-            values.push({
-              node_id: snapshot.id,
-              html_url: snapshot.sourceUrl,
-              source_revision: projectSnapshotRevision(snapshot),
-            });
-          }
+          // A subject with no current membership is still a complete observation.
+          // One native issue/PR produces one row regardless of its Project count.
+          values.push({
+            node_id: snapshot.subjectId,
+            project_subject_id: snapshot.subjectId,
+            html_url: snapshot.sourceUrl,
+            source_revision: projectSubjectSnapshotRevision(snapshot),
+          });
         }
       } else if (request.family === "discussions") {
         if (!client.scanGraphql) throw new Error("discussions_source_unavailable");
@@ -323,9 +311,10 @@ export function createGithubCollectionSource({
         }));
       assertAuthorized();
       if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
-      const offset = request.cursor === null ? 0 : Number(request.cursor);
-      if (offset > values.length) throw new Error("invalid_source_cursor");
-      const facts = values.slice(offset, offset + request.limit).map((value) => {
+      const expectedCount = projectSubjectCount ?? values.length;
+      if (offset > expectedCount) throw new Error("invalid_source_cursor");
+      const selected = projectSubjectCount === null ? values.slice(offset, offset + request.limit) : values;
+      const facts = selected.map((value) => {
         const subjectId = value.node_id ?? value.sha ?? (Number.isSafeInteger(value.id) ? String(value.id) : null);
         const revision = ["project_history", "relationships"].includes(request.family)
           ? value.source_revision
@@ -350,6 +339,7 @@ export function createGithubCollectionSource({
         return {
           subjectId,
           ...(request.family === "project_history" ? { historySubjectId: value.history_subject_id } : {}),
+          ...(request.family === "project_current" ? { projectSubjectId: value.project_subject_id } : {}),
           sourceRevision: revision,
           sourceUrl: value.html_url,
           evidence: ["timelines", "project_history", "relationships"].includes(request.family)
@@ -379,8 +369,8 @@ export function createGithubCollectionSource({
         visibility: "public",
         isSynthetic,
         facts,
-        nextCursor: next < values.length ? String(next) : null,
-        expectedCount: values.length,
+        nextCursor: next < expectedCount ? String(next) : null,
+        expectedCount,
       };
     },
   };

@@ -14,6 +14,27 @@ Construct the provider with a **separate browser OAuth** `clientId` and `clientS
 
 GitHub authorization requests an empty OAuth scope, single-use state bound to a separate HttpOnly browser cookie, and S256 PKCE. The provider exchanges only with fixed GitHub endpoints, uses a ten-second timeout, refuses redirects, bounds response bytes, reads the stable numeric account ID and revokes the transient token before returning identity. A previously authorized broader scope is rejected and revoked. No OAuth access token or email is persisted. GitHub's documented flow supports [state and S256 PKCE](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps).
 
+The GitHub-specific adapter requires an explicit empty string in the token
+response's `scope` field before requesting the account identity. Missing,
+non-string and nonempty scope values fail with the fixed `502 Unexpected OAuth
+scopes` response. GitHub's documented JSON response includes this scope string;
+this adapter does not infer the approved empty scope from absent metadata or
+JavaScript truthiness. A parsed access token still reaches the existing revocation
+step when its scope is rejected. Failed cleanup also withholds identity, and a
+rejected callback consumes only its login state while retaining an existing
+session and private/public data.
+
+Nonempty successful identity-provider responses require well-formed UTF-8 before
+JSON parsing. This applies to the token exchange, account lookup and any nonempty
+revocation response. Malformed bytes cannot become replacement text and allow a
+session to be created. A known token is still revoked after a failed account
+lookup; malformed UTF-8 in a token response supplies no trusted token to use or revoke.
+An empty successful response remains valid for the documented
+[204 token-revocation result](https://docs.github.com/en/rest/apps/oauth-applications#delete-an-app-token).
+The existing 65,536-byte limit, HTTP error classification and leading-BOM
+rejection remain in force. Failed callbacks retain the existing fixed error and
+consume their one-time login state without rotating an existing session.
+
 Sessions use random 256-bit identifiers stored only as SHA-256 hashes. Reauthentication deletes the presented old session and creates a new identifier. `__Host-controls_session` has `Secure`, `HttpOnly`, `Path=/`, `SameSite=Lax`, no Domain attribute and a maximum lifetime of fifteen minutes. Mutation requires exact same-origin `Origin`, JSON and a per-session CSRF header. Duplicate cookies, duplicate callback parameters and unexpected fields are rejected. No CORS enablement is supplied. Public reading stays anonymous. All responses use `no-store`, JSON content type, `nosniff` and a restrictive CSP.
 
 Protected JSON mutation bodies require well-formed UTF-8 within the existing
@@ -99,6 +120,23 @@ session then accepts valid Unicode. Controls cover separate one-byte writes,
 BOM and JSON syntax rejection, authentication/CSRF ordering and the request-byte
 limit. These checks do not establish the remaining accessible product journey,
 deployed identity or production-storage acceptance for #119/#53.
+
+`node --test apps/controls/test/oauth-response-encoding.test.mjs` covers malformed
+provider bytes at all three response stages, valid Unicode delivered in one-byte
+stream chunks, literal U+FFFD, BOM/JSON rejection, exact byte limits, unsuccessful
+HTTP status handling and empty 204 revocation. Its real disposable HTTP/SQLite
+callback cases use fictional injected provider responses: a failed exchange
+preserves the complete prior state and public projection, consumes only the new
+login nonce, rejects replay, leaves the existing session usable and permits a
+fresh valid login. These are synthetic adapter and callback results, not live
+GitHub authorization, real token revocation or production identity evidence.
+
+`node --test apps/controls/test/oauth-scope.test.mjs` checks explicit empty-scope
+acceptance, missing and malformed scope rejection before account lookup, and
+known-token cleanup including a failed cleanup response. Its disposable HTTP and
+SQLite cases verify nonce consumption, replay denial, unchanged private/public
+data and the existing session, then successful fresh login with session rotation.
+These injected responses establish no actual GitHub grant or deployed identity.
 
 Remaining release evidence includes approved OAuth registration/credentials and exact callback, accepted reviewer/privacy/operator roster, real source/identity probes, production private storage ACL/retention/recovery controls, staffed private alternative verification/destination, accessible UI and real participant journeys, policy recalculation preview/activation, all-public-surface suppression propagation, actual deployed correction readback and affected-owner acceptance. Neither an account role nor a response commitment is accepted by broad repository coding authorization.
 

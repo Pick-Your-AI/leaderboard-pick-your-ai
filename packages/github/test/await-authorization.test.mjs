@@ -76,7 +76,17 @@ for (const protocol of ["REST", "GraphQL"]) {
         await assert.rejects(result, denied);
         assert.equal(requests, 1, "denial does not retry the source");
         assert.deepEqual(context.sleeps, [], "revoked access does not wait through the saved retry pause");
-        assert.equal(context.writes.length, 1, "already-started quota persistence remains durable");
+        assert.equal(
+          context.writes.filter((write) => write.key.startsWith("pause:")).length,
+          1,
+          "already-started retry-pause persistence remains durable",
+        );
+        assert.equal(
+          context.writes.filter((write) => write.key.startsWith("quota:")).length,
+          1,
+          "the bounded response observation was retained before the later pause-write revocation",
+        );
+        assert.equal(context.writes.length, 2, "no other checkpoint advances after denial");
       });
     }
   }

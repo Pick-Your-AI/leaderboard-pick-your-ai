@@ -6,6 +6,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
+import { syntheticRepositoryClient } from "../../../packages/github/test/synthetic-client.mjs";
 import {
   loadPipelineComponents,
   createPipeline,
@@ -265,8 +266,8 @@ for (const [loss, subjectType] of [
       if (inventoryLoss === "inventory_oversized_id") return "P".repeat(129);
       return subjectType === "pull_request" ? "PR_synthetic" : "I_synthetic";
     };
-    const client = {
-      rest: async () => ({ id: 2, private: false }),
+    const client = syntheticRepositoryClient(2, {
+      rest: async () => ({ id: 2, private: false, full_name: config.repositories[0].slug }),
       scanRest: async (o) => {
         const subject = {
           id: 1,
@@ -300,7 +301,7 @@ for (const [loss, subjectType] of [
         query.includes("... on ProjectV2 {")
           ? { node: publicProject === null ? null : { id: "PVT_syntheticAllowed", public: publicProject } }
           : { node: { ...current(), previousStatus: "Todo", status: "Done" } },
-    };
+    });
     const runtimeOptions = {
       ...h.options,
       config,
@@ -337,7 +338,7 @@ for (const [loss, subjectType] of [
       const cached = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
       assert.equal(cached.length, 1);
       const document = structuredClone(cached[0].document);
-      assert.equal(document.projectHistoryNormalizationVersion, "collected-subject/v1");
+      assert.equal(document.projectHistoryNormalizationVersion, "collected-subject/v2");
       // Emulate an intact private cache written before collected-subject
       // binding. It must be recomputed, even with an unchanged event revision.
       delete document.projectHistoryNormalizationVersion;

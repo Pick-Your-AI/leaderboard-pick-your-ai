@@ -10,26 +10,26 @@ Build with `npm run build --workspace @pick-your-ai/github`; run synthetic tests
 import { FileCheckpointStore, GithubReadClient } from "@pick-your-ai/github";
 
 const client = new GithubReadClient({
-  token: async source => obtainAuthorizedInstallationToken(source),
+  token: async (source) => obtainAuthorizedInstallationToken(source),
   checkpoints: new FileCheckpointStore(privateCollectorStateDirectory),
   concurrency: 4,
   maxRetries: 3,
 });
 
-const issues = await client.scanRest({
+const issues = await client.forRepository(approvedRepositoryId).scanRest({
   source: installationAndPermissionScopeId,
   key: "approved-repository-issues/v1",
   url: approvedRepositoryIssuesApiUrl,
   maxPages: 100,
-  select: body => validateAndSelectIssueArray(body),
+  select: (body) => validateAndSelectIssueArray(body),
 });
 ```
 
-The names in this example are caller-supplied configuration/functions, not fixture credentials. Use a stable source identifier for one authorization/quota pool. Tokens sharing a GitHub rate budget must share this identifier. Change it when the permitted installation/repository scope changes, so a different authorization cannot reuse an old cache or checkpoint. A single client coordinates requests within one process; separate processes require a shared scheduler and a transactional checkpoint implementation.
+The names in this example are caller-supplied configuration/functions, not fixture credentials. Use a stable source identifier for one authorization/quota pool. Tokens sharing a GitHub rate budget must share this identifier. Change it when the permitted installation/repository scope changes, so a different authorization cannot reuse an old cache or checkpoint. Bind source payloads to the separately verified numeric repository ID with `forRepository(id)`; the default collector and built-in normalizer require repository-scoped storage. Repository views share the original quota and concurrency pool. A single client coordinates requests within one process; separate processes require a shared scheduler and a transactional checkpoint implementation.
 
 Hosts with revocable access should pass the optional synchronous `assertAuthorized` callback to direct reads and scans. It must throw whenever that source is no longer authorized. The client checks before each HTTP attempt, after awaited response/quota/body/cache work, before invoking page selectors, before accepting a selected page into its scan checkpoint, and before delivering results. Loaded pause/cache state is checked before validation or waiting, and retry-pause persistence and scan continuation are checked before retry exhaustion or pagination errors. Direct reads and scans also check before delivering a rejected operation, so a concurrent denial takes precedence over stale body-validation or checkpoint errors. A denial becomes a sanitized `unsafe_request` failure and is not retried. An unread rejected response body is cancelled without retaining its concurrency slot; requests for other authorized source IDs can continue.
 
-These checks stop newly unauthorized responses from being returned and stop a page rejected before checkpoint admission from advancing a scan. They do not erase earlier accepted pages or HTTP caches, roll back a durable write already started while authorized, or interrupt a pending network/body read, checkpoint operation or quota sleep at the instant access changes. Quota waiting rechecks access after each sleep chunk, which is at most one minute. The host still owns cancellation and the coordinated source-revocation/retention procedure under [#49](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/49). Without a supplied callback, this client cannot observe changes in the host's authorization policy.
+These checks stop newly unauthorized responses from being returned and stop a page rejected before checkpoint admission from advancing a scan. They do not erase earlier accepted pages or HTTP caches, roll back a durable write already started while authorized, or interrupt a pending network/body read, checkpoint operation or quota sleep at the instant access changes. Quota waiting rechecks access after each sleep chunk, which is at most one minute. The host still owns cancellation and the coordinated source-revocation/retention procedure under [#49](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/49). Without a supplied callback, this client cannot observe changes in the host's authorization policy. Repository-bound views additionally check the durable checkpoint authority; an explicit repository retirement remains denied without a callback. See [repository checkpoint retirement](repository-checkpoint-retirement.md) for its exact receipt, restore requirements and remaining cross-store limits.
 
 `rest` issues GET requests only. `graphql` issues POST requests containing read queries only; documents must begin with `query` or a shorthand selection and cannot contain mutation/subscription operation tokens outside comments/strings. This deliberately conservative guard also rejects read fields or operation names literally named `mutation` or `subscription`. There is no arbitrary method or headers override. Every request sets Accept, User-Agent and X-GitHub-Api-Version (default `2022-11-28`, configurable after API compatibility review). Redirects are never followed. Initial URLs, persisted next URLs and REST pagination links must remain on the configured HTTPS API origin without embedded credentials or fragments. Enterprise support requires an explicitly approved API origin and GraphQL path, such as `/api/graphql`.
 
@@ -51,7 +51,11 @@ Every scan fingerprints its URL/query, source operation key, API configuration a
 
 `CheckpointStore` is injectable: `save` must durably and atomically replace the whole value before resolving, and `load` must return independent values. `FileCheckpointStore` writes a private temporary file, fsyncs its contents, atomically renames it, and fsyncs the directory where supported. Windows requires appropriate directory ACLs; POSIX files/directories use restrictive modes. It supports one writer per scan/source key and persistent restarts, not concurrent processes editing the same state. Use a transactional implementation with locking for shared workers. Corrupt or mismatched checkpoint state fails closed. Never store this directory in Git or expose it through public assets: it contains source representations and must follow the approved retention/deletion policy. Files contain hashed keys, never authorization headers/tokens.
 
-Each filesystem checkpoint has a 64 MiB UTF-8 JSON record limit by default. Configure a smaller reviewed collector budget with `new FileCheckpointStore(directory, { maxBytes })`; changing it is an explicit host decision, not an automatic retry. Loading reads at most the configured limit plus one byte from one opened file, so a large, growing or replaced pathname cannot bypass the read bound. Saving checks encoded bytes before creating a temporary file or replacing the previous checkpoint. `CheckpointLimitError` identifies a capacity failure. A failed oversized scan save leaves its last accepted page resumable; it does not truncate results or mark the scan complete. Existing oversized records remain on disk and fail closed until an operator handles them under the retention policy. This limits each encoded record, not directory size, the caller's preexisting objects or total process memory; JSON serialization/parsing also consumes memory. Shared storage, retention and the broader source-deletion requirements in [#95](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/95) remain separate.
+Each filesystem checkpoint has a 64 MiB UTF-8 JSON record limit by default. Configure a smaller reviewed collector budget with `new FileCheckpointStore(directory, { maxBytes })`; changing it is an explicit host decision, not an automatic retry. Loading reads at most the configured limit plus one byte from one opened file, so a large, growing or replaced pathname cannot bypass the read bound. Saving checks encoded bytes before creating a temporary file or replacing the previous checkpoint. `CheckpointLimitError` identifies a capacity failure; an HTTP cache write that exceeds the cap does not retry the network or synthesize a quota pause. The same limit applies to repository-scoped and legacy records. A failed oversized scan save leaves its last accepted page resumable; it does not truncate results or mark the scan complete. Existing oversized records remain on disk and fail closed until an operator handles them under the retention policy. This limits each encoded record, not directory size, the caller's preexisting objects or total process memory; JSON serialization/parsing also consumes memory. Shared storage, retention and the broader source-deletion requirements in [#95](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/95) remain separate.
+
+Repository-bound records live under `repositories-v1/<repositoryId>`. Their permanent retirement marker is stored separately from payloads and is checked on every scoped load/save and awaited client delivery boundary. `retireRepositoryCheckpoints(id, binding)` first durably installs the operation-bound denial marker, then removes only that repository namespace. Read the [retirement procedure and limitations](repository-checkpoint-retirement.md) before integrating this privileged host operation. Legacy unscoped bytes are explicitly outside its receipt; it does not purge database, controls or backup payloads.
+
+Filesystem loads require well-formed UTF-8 before JSON parsing. Damaged bytes produce the existing fixed corrupt-checkpoint error without rewriting the saved record; they cannot become replacement characters in restored source identities. Valid encoded Unicode, including a literal replacement character, remains readable. Leading UTF-8 BOMs retain the existing JSON-parser rejection behavior. This check cannot recover original bytes from legacy records already rewritten by a lossy decoder.
 
 The scan result is not an atomic database commit with a downstream importer. Consume it through an idempotent canonical-event importer or a separately coordinated transaction. A checkpoint is collection progress, not evidence that downstream recognition was accepted. The client does not mark coverage complete merely because a supplied pagination chain ended.
 
@@ -68,3 +72,60 @@ Authorization regressions also exercise revocation during REST/GraphQL fetch and
 `packages/github/test/response-encoding.test.mjs` supplies the synthetic response-byte regressions for [#84](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/84): isolated continuation bytes, truncated and malformed sequences, overlong encodings, encoded surrogates, out-of-range code points, retained ETags, interrupted-page restart, valid byte-split Unicode, and malformed error-body classification. These are client integrity checks; the installed-source canaries and remaining source-family acceptance criteria are separate work.
 
 The implementation follows GitHub's [REST best practices](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api), [REST rate-limit guidance](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api), and [GraphQL pagination guidance](https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api).
+
+## Retained quota observations
+
+`await client.readQuota(installationAndPermissionScopeId, assertAuthorized)` is a
+protected-host diagnostic read. It resolves no token and makes no GitHub request.
+The supplied synchronous host grant is checked before and after the awaited
+checkpoint reads and before queued observation writes, so a revocation withholds
+the result and prevents new writes from starting. The operator HTTP bridge
+must still derive the installation/account scope from its current repository
+grant; this method does not authenticate a browser or authorize a source ID.
+
+Repository views share the original observer and its per-resource write queue.
+Quota metadata remains in the installation/account store, outside repository
+payload namespaces. `view.readQuota(...)` checks that view's durable retirement
+authority before and after its read; a retired view is denied even without a
+host callback. A queued observation rechecks the producing view's durable
+authority before starting its write. Retiring one repository therefore neither
+authorizes its diagnostic reads nor deletes the quota observation used by an
+active sibling. These checks do not roll back a pool write already started while
+authorized, and do not grant a cross-process atomic revocation boundary.
+
+The client records the latest successfully retained response for each of `core`,
+`search`, `code_search` and `graphql`, plus one `unknown` resource slot. The
+resource comes only from the response header; an omitted or unfamiliar resource
+does not inherit an endpoint's expected pool. At most five checkpoint values are
+read. Their binding hashes the configured HTTPS API origin and the exact source
+pool identity, so another installation, account or Enterprise origin cannot reuse
+the observation. A shared client serializes writes for each bound resource; a
+multi-process host still requires the transactional storage/scheduler described
+above.
+
+Each observation contains its actual `observedAt`, HTTP `responseStatus`, numeric
+`limit`, `remaining` and `used`, a UTC `resetAt`, and numeric
+`retryAfterSeconds`. Missing or malformed numeric values remain null; a valid zero
+remains zero. Missing records have state `unknown`, and unreadable, corrupt or
+mismatched records have state `unavailable`. Readback returns detached fixed fields.
+No source label, URL, token, arbitrary header, response body or error text is
+stored in this quota record. A response without quota headers does not refresh an
+old observation. A failed telemetry save preserves the previous retained record
+and does not retry an otherwise successful source request or invent a pause.
+
+Conditional 304 and HTTP error responses are observed after the ordinary trusted
+origin, redirect and current-authorization checks. GraphQL can return errors with
+HTTP 200, so `responseStatus` is a transport observation, not collection success.
+The existing typed request outcome remains authoritative for that operation.
+Previously stored unbound retry-pause deadlines are not exposed as if they were
+origin-bound quota observations.
+
+These values describe a response, not an exact global remaining balance or a
+collector heartbeat. GitHub's [REST rate-limit documentation](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
+and [GraphQL rate-limit documentation](https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api)
+(checked 2026-10-18) define these headers and note that later response counters can
+increase because requests may be processed in different regions. The observer
+preserves the later retained values without summing them, taking a minimum or
+manufacturing global consumption. Unobserved clients, resources and secondary
+quota balances remain unknown. Freshness, queue recovery and confirmed
+publication diagnostics are separate from this observation.

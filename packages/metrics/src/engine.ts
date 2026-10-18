@@ -2,6 +2,7 @@ import {
   actorKindSchema,
   compareSourceInstants,
   contributionRoleSchema,
+  coverageSchema,
   executionModeSchema,
   serviceAccountClassificationSchema,
   type ServiceAccountClassification,
@@ -33,8 +34,18 @@ export interface MetricFact {
   acceptanceReceipt: string | null;
   acceptedBy: string | null;
   subjectActorId: string | null;
-  eventContext: { projects: string[]; workstreams: string[] } | null;
-  currentContext: { projects: string[]; workstreams: string[] } | null;
+  eventContext: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
+  currentContext: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
   quantity?: number;
   /** Literal source state, never an inferred classification. */
   rawState?: string;
@@ -309,6 +320,9 @@ export function resolveMetricWindow(
 /** Necessary source coverage only; qualification and release authority remain separate. */
 export function hasCompleteSourceCoverage(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): boolean {
   if (scope.from === null) return false; // Known history is not proof of complete all-time history.
+  // Source coverage retains its contract clocks; metric scopes remain normalized UTC.
+  instant(scope.from);
+  instant(scope.to);
   const repos = scope.repos.length ? scope.repos : input.repositoryIds;
   if (!repos.length) return false;
   return repos.every(
@@ -320,14 +334,15 @@ export function hasCompleteSourceCoverage(input: FrozenInput, policy: MetricPoli
             item.scopeId === repo &&
             item.source === source &&
             item.state === "complete" &&
+            coverageSchema.safeParse(item).success &&
             item.windowStart !== null &&
-            instant(item.windowStart) <= instant(scope.from!) &&
+            compareSourceInstants(item.windowStart, scope.from!) <= 0 &&
             item.windowEnd !== null &&
-            instant(item.windowEnd) >= instant(scope.to) &&
+            compareSourceInstants(item.windowEnd, scope.to) >= 0 &&
             typeof item.sourceWatermark === "string" &&
             compareSourceInstants(item.sourceWatermark, scope.to) >= 0 &&
             item.knownStart !== null &&
-            instant(item.knownStart) <= instant(scope.from!) &&
+            compareSourceInstants(item.knownStart, scope.from!) <= 0 &&
             item.missingPages === 0 &&
             item.permissionsMissing.length === 0 &&
             item.sourceErrors.length === 0,
@@ -403,6 +418,21 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
   const versions = new Map<string, MetricFact[]>();
   for (const fact of input.facts) {
     if (fact.metricId !== policy.metricId) continue;
+    for (const context of [fact.eventContext, fact.currentContext]) {
+      if (context == null) continue;
+      if (
+        !context ||
+        !Array.isArray(context.projects) ||
+        !Array.isArray(context.workstreams) ||
+        (context.workstreamsKnown !== undefined && typeof context.workstreamsKnown !== "boolean") ||
+        (context.projectScope !== undefined && !Array.isArray(context.projectScope)) ||
+        [context.projects, context.workstreams, context.projectScope ?? []].some(
+          (ids) => ids.some((id) => typeof id !== "string" || !id.trim()) || new Set(ids).size !== ids.length,
+        ) ||
+        (context.projectScope !== undefined && context.projects.some((id) => !context.projectScope!.includes(id)))
+      )
+        throw new Error("Invalid membership context");
+    }
     required(fact.id, "Fact ID");
     required(fact.repoId, "Repository ID");
     if (
@@ -494,9 +524,12 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
     if (!reason && (scope.projects.length || scope.workstreams.length)) {
       if (!context) reason = "unknown_membership_context";
       else if (scope.projects.length && !scope.projects.some((id) => context.projects.includes(id)))
-        reason = "project_filter";
+        reason =
+          context.projectScope && scope.projects.some((id) => !context.projectScope!.includes(id))
+            ? "unknown_membership_context"
+            : "project_filter";
       else if (scope.workstreams.length && !scope.workstreams.some((id) => context.workstreams.includes(id)))
-        reason = "workstream_filter";
+        reason = context.workstreamsKnown === false ? "unknown_membership_context" : "workstream_filter";
     }
     if (
       !reason &&
@@ -636,9 +669,10 @@ export function selectPortfolioFacts(
       source.repoId === fact.repoId &&
       source.role === fact.role &&
       source.rawState === fact.rawState &&
-      source.occurredAt === fact.occurredAt &&
-      source.observedAt === fact.observedAt
+      source.occurredAt === fact.occurredAt
     )
+      // Recollection changes no source unit. Its first observation may precede
+      // the later observation from which an independently accepted copy arose.
       acceptedSources.add(source.id);
   }
   // Keep both immutable facts for audit and recomputation, but expose one current
@@ -943,18 +977,22 @@ export function comparePolicies(
     throw new Error("Changed policy semantics require a new policy version");
   const before = aggregateMetric(input, beforePolicy, scope),
     after = aggregateMetric(input, afterPolicy, scope);
-  const changes = unique([...before.rows.map((row) => row.actorId), ...after.rows.map((row) => row.actorId)])
+  const beforeByActor = new Map(before.rows.map((row) => [row.actorId, row]));
+  const afterByActor = new Map(after.rows.map((row) => [row.actorId, row]));
+  const changes = unique([...beforeByActor.keys(), ...afterByActor.keys()])
     .map((actorId) => {
-      const old = before.rows.find((row) => row.actorId === actorId),
-        next = after.rows.find((row) => row.actorId === actorId);
+      const old = beforeByActor.get(actorId),
+        next = afterByActor.get(actorId);
+      const beforeEvidence = new Set(old?.evidenceIds ?? []);
+      const afterEvidence = new Set(next?.evidenceIds ?? []);
       return {
         actorId,
         beforeValue: old?.value ?? null,
         afterValue: next?.value ?? null,
         beforeRank: old?.rank ?? null,
         afterRank: next?.rank ?? null,
-        included: (next?.evidenceIds ?? []).filter((id) => !old?.evidenceIds.includes(id)),
-        excluded: (old?.evidenceIds ?? []).filter((id) => !next?.evidenceIds.includes(id)),
+        included: (next?.evidenceIds ?? []).filter((id) => !beforeEvidence.has(id)),
+        excluded: (old?.evidenceIds ?? []).filter((id) => !afterEvidence.has(id)),
       };
     })
     .filter(
