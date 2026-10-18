@@ -48,6 +48,13 @@ export class ReadFailure extends Error {
   }
 }
 const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
+const maxPublicRequestTargetBytes = 48 * 1024;
+function validDepartmentId(value: string): boolean {
+  // URLSearchParams and FormData replace isolated UTF-16 surrogates with U+FFFD.
+  return (
+    value !== "" && value.trim() === value && new URLSearchParams({ department: value }).get("department") === value
+  );
+}
 const scopeKeys = ["organization", "repository", "workstream", "start", "end"] as const;
 const comparisonKeys = ["compare", "compareStart", "compareEnd"] as const;
 const supported = new Set([
@@ -88,7 +95,7 @@ export interface Selection extends PublicScope {
   timeZone?: string;
 }
 export function selection(query: string, options: { comparison?: boolean } = {}): Selection {
-  if (query.length > 4096) throw new ReadFailure(400, "selection_too_large");
+  if (query.length > maxPublicRequestTargetBytes) throw new ReadFailure(400, "selection_too_large");
   const params = new URLSearchParams(query);
   if (!options.comparison && comparisonKeys.some((key) => params.has(key)))
     throw new ReadFailure(400, "comparison_requires_board");
@@ -141,6 +148,25 @@ export function selection(query: string, options: { comparison?: boolean } = {})
   const catalogQuery = params.get("q");
   if (catalogQuery !== null && (catalogQuery.length > 120 || /[\u0000-\u001f\u007f]/.test(catalogQuery)))
     throw new ReadFailure(400, "invalid_catalog_query");
+  // Department IDs are exact, trimmed UI metadata selectors, not source identifiers.
+  const department = params.get("department");
+  if (department !== null) {
+    if (!validDepartmentId(department)) throw new ReadFailure(400, "invalid_identifier");
+    const raw =
+      query
+        .replace(/^\?/, "")
+        .split("&")
+        .find((part) => new URLSearchParams(part).has("department")) ?? "";
+    const encoded = raw.includes("=") ? raw.slice(raw.indexOf("=") + 1) : "";
+    let exact: string;
+    try {
+      // Preserve literal percent punctuation; decode actual byte escapes without replacement.
+      exact = decodeURIComponent(encoded.replace(/\+/g, " ").replace(/%(?![0-9a-f]{2})/gi, "%25"));
+    } catch {
+      throw new ReadFailure(400, "invalid_identifier");
+    }
+    if (exact !== department) throw new ReadFailure(400, "invalid_identifier");
+  }
   const search = params.get("search");
   if (search !== null && !/^[A-Za-z0-9-]{1,39}$/.test(search)) throw new ReadFailure(400, "invalid_search");
   let scope: PublicScope;
@@ -163,7 +189,7 @@ export function selection(query: string, options: { comparison?: boolean } = {})
     actors: actorFilter.data,
     timeZone,
     catalogQuery: catalogQuery?.trim() || null,
-    department: id("department"),
+    department,
     search: search?.toLowerCase() ?? null,
     category: id("category"),
     proof: id("proof"),
@@ -214,7 +240,10 @@ export function uiHref(
   if (path === "/contributors" && value.search) params.set("search", value.search);
   if (path === "/leaderboards" || path === "/methodology" || path === "/methodology/changes") {
     if (value.catalogQuery) params.set("q", value.catalogQuery);
-    if (value.department) params.set("department", value.department);
+    if (value.department) {
+      if (!validDepartmentId(value.department)) throw new ReadFailure(400, "invalid_identifier");
+      params.set("department", value.department);
+    }
   }
   if (extra.cursor) params.set("cursor", extra.cursor);
   return `${path}?${params}`;
@@ -309,7 +338,8 @@ async function readBytes(response: Response, signal: AbortSignal): Promise<Uint8
 function publicRequestURL(base: string, path: string, params: URLSearchParams): string {
   const value = `${base}/${path}${params.size ? `?${params}` : ""}`;
   const url = new URL(value, "https://request.invalid");
-  if (url.pathname.length + url.search.length > 4096) throw new ReadFailure(414, "query_too_large");
+  if (url.pathname.length + url.search.length > maxPublicRequestTargetBytes)
+    throw new ReadFailure(414, "query_too_large");
   return value;
 }
 /** Budget both complete live request targets before a subscription can create any transport. */
@@ -1116,6 +1146,12 @@ export function health(value: unknown, selected: Selection): Health {
 export function catalog(value: unknown): MetricRegistry {
   const parsed = metricRegistrySchema.safeParse(value);
   if (!parsed.success) throw new ReadFailure(502, "invalid_metric_registry");
+  // Reject non-transportable identities before a form or link can select another department.
+  if (
+    parsed.data.ui_metadata.decision_state === "candidate" &&
+    parsed.data.ui_metadata.departments.some((department) => !validDepartmentId(department.id))
+  )
+    throw new ReadFailure(502, "invalid_metric_registry");
   return parsed.data;
 }
 

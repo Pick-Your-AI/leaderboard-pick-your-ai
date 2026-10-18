@@ -47,8 +47,9 @@ export function ContributorsPage() {
           const entries = state.data.entries.filter(
             (entry) =>
               !query ||
-              entry.person.login.toLowerCase().includes(query) ||
-              entry.person.displayName.toLowerCase().includes(query),
+              (entry.person.publicState === "visible" &&
+                (entry.person.login.toLowerCase().includes(query) ||
+                  entry.person.displayName.toLowerCase().includes(query))),
           );
           if (state.data.entries.length === 0) {
             return (

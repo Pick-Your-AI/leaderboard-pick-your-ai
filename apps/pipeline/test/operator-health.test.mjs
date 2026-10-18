@@ -221,7 +221,8 @@ test("a later dispatch cannot graft a confirmed snapshot from a different public
     await h.runtime.outbox.complete(lease, prior.publications, async (tx) => {
       for (const publication of prior.publications)
         await tx.query(
-          "INSERT INTO leaderboard_pipeline.dispatch_publications(operation_key,scope_key,snapshot_id) VALUES($1,$2,$3)",
+          `INSERT INTO leaderboard_pipeline.dispatch_publications(operation_key,scope_key,snapshot_id,scope_hash)
+           VALUES($1,$2,$3,sha256(convert_to($2,'UTF8')))`,
           [lease.operation.operationKey, publication.scopeKey, publication.snapshotId],
         );
     }),

@@ -11,7 +11,7 @@ The API accepts two additional query parameters:
 | Parameter | Meaning | Bounds |
 | --- | --- | --- |
 | `context` | `event` or `current`; omission means `event` | One value; other values fail before provider access |
-| `project` | Comma-separated native Project V2 node IDs; membership in any selected Project matches | At most 100 IDs of 1–128 allowed opaque-ID characters; canonical sorted set; the full request remains bounded to 4,096 characters |
+| `project` | Comma-separated native Project V2 node IDs; membership in any selected Project matches | At most 100 IDs of 1–128 allowed opaque-ID characters; canonical sorted set; the complete percent-encoded public request target remains bounded to 48 KiB |
 
 Repeated query parameters, empty Project entries and malformed IDs are rejected. Project node IDs may include `=`; ordinary URL encoding preserves them. Repository and workstream filters combine with the Project union. The producer evaluates the underlying contribution facts once; it never adds together per-Project totals.
 
