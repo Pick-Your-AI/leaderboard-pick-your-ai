@@ -2,7 +2,7 @@ import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
 import { EvidenceDrawer, EvidenceProof, Receipt } from "./Evidence.tsx";
 import { isProofTransition, proofHref, readProof, withoutProof } from "./proof.ts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MetricDefinition, MetricRegistry } from "@pick-your-ai/contracts";
+import { actorFilterLabels, type MetricDefinition, type MetricRegistry } from "@pick-your-ai/contracts";
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
 import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
 import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
@@ -59,6 +59,7 @@ type State =
   | { status: "error"; error: ReadFailure }
   | { status: "ready"; data: Data; registry: MetricRegistry };
 const fallback: Selection = {
+  actors: "all",
   organization: "Pick-Your-AI",
   repository: null,
   workstream: null,
@@ -175,6 +176,7 @@ function Meta({ value, selected }: { value: Metadata; selected: Selection }) {
         {selected.end ? ` to ${selected.end} (exclusive)` : ""} · {selected.organization}
         {selected.repository ? ` · repository ${selected.repository}` : ""}
         {selected.workstream ? ` · workstream ${selected.workstream}` : ""}
+        {` · ${actorFilterLabels[value.actorFilter ?? "all"]}`}
       </p>
       <a data-api-nav href={uiHref(location.pathname, selected, { snapshot: value.snapshotId })}>
         Permalink to this snapshot
@@ -214,6 +216,7 @@ function Filters({
             "metric",
             "search",
             "category",
+            "actors",
           ]) {
             const value = String(input.get(key) ?? "").trim();
             if (value) params.set(key, value);
@@ -229,6 +232,19 @@ function Filters({
         <p>
           Use one stable repository/workstream ID. Dates are paired canonical UTC timestamps; blank dates request an
           explicitly materialized all-time scope. Unsupported scopes remain unavailable.
+        </p>
+        <label>
+          Activity selection
+          <select name="actors" defaultValue={selected.actors ?? "all"}>
+            <option value="all">All activity</option>
+            <option value="user">User accounts</option>
+            <option value="automation">Automation</option>
+          </select>
+        </label>
+        <p className="small">
+          User accounts can run automation. Automation includes classified automation accounts and positively known
+          automated execution. These views may overlap. Account type and unknown execution do not certify manual work or
+          detect AI assistance.
         </p>
         {(["organization", "repository", "workstream", "start", "end", "snapshot", "limit", "metric"] as const).map(
           (key) => (

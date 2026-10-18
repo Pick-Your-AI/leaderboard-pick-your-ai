@@ -1,9 +1,12 @@
 import {
+  actorFilterSchema,
+  actorKindSchema,
+  executionModeSchema,
+  matchesActorFilter,
+  type ActorFilter,
   publicEvidenceMetadataSchema,
   type PublicEvidenceMetadata,
   actorSchema,
-  actorKindSchema,
-  executionModeSchema,
   artifactSchema,
   contributionSchema,
   coverageSchema,
@@ -34,6 +37,7 @@ export class ReadFailure extends Error {
 const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
 const scopeKeys = ["organization", "repository", "workstream", "start", "end"] as const;
 const supported = new Set([
+  "actors",
   ...scopeKeys,
   "snapshot",
   "limit",
@@ -47,6 +51,7 @@ const supported = new Set([
   "department",
 ]);
 export interface Selection {
+  actors?: ActorFilter;
   organization: string;
   repository: string | null;
   workstream: string | null;
@@ -68,6 +73,8 @@ export function selection(query: string): Selection {
   for (const key of params.keys())
     if (!supported.has(key) || params.getAll(key).length !== 1)
       throw new ReadFailure(400, "unsupported_or_duplicate_filter");
+  const actorFilter = actorFilterSchema.safeParse(params.get("actors") ?? "all");
+  if (!actorFilter.success) throw new ReadFailure(400, "invalid_actor_filter");
   const id = (key: string) => {
     const value = params.get(key);
     if (value !== null && !identifier.test(value)) throw new ReadFailure(400, "invalid_identifier");
@@ -102,6 +109,7 @@ export function selection(query: string): Selection {
   const search = params.get("search");
   if (search !== null && !/^[A-Za-z0-9-]{1,39}$/.test(search)) throw new ReadFailure(400, "invalid_search");
   return {
+    actors: actorFilter.data,
     catalogQuery: catalogQuery?.trim() || null,
     department: id("department"),
     search: search?.toLowerCase() ?? null,
@@ -123,6 +131,7 @@ export function parameters(
   extra: { metric?: string; snapshot?: string | null; cursor?: string | null; board?: boolean } = {},
 ): URLSearchParams {
   const params = new URLSearchParams();
+  if (value.actors && value.actors !== "all") params.set("actors", value.actors);
   for (const key of scopeKeys) if (value[key] !== null) params.set(key, value[key]);
   const pin = extra.snapshot === undefined ? value.snapshot : extra.snapshot;
   if (pin) params.set("snapshot", pin);
@@ -258,6 +267,8 @@ export async function exportPage(
   if (!response.ok) throw new ReadFailure(response.status, `export_http_${response.status}`);
   const type = format === "json" ? "application/json" : "text/csv";
   if (!response.headers.get("content-type")?.includes(type)) throw new ReadFailure(502, "invalid_export_response");
+  if ((response.headers.get("x-leaderboard-actor-filter") ?? "all") !== (selected.actors ?? "all"))
+    throw new ReadFailure(502, "api_actor_filter_mismatch");
   const raw = new TextDecoder().decode(await readBytes(response));
   if (format === "json") {
     try {
@@ -289,12 +300,25 @@ const array = (value: unknown, maximum = 10000): unknown[] => {
   if (!Array.isArray(value) || value.length > maximum) throw new ReadFailure(502, "invalid_api_response");
   return value;
 };
+function actorSelection(data: Record<string, unknown>, selected: Selection): ActorFilter {
+  // Missing labels on legacy responses mean only the existing all-activity view.
+  const parsed = actorFilterSchema.safeParse(data.actorFilter ?? "all");
+  if (!parsed.success || parsed.data !== (selected.actors ?? "all"))
+    throw new ReadFailure(502, "api_actor_filter_mismatch");
+  return parsed.data;
+}
+function selectedActor(value: unknown, selected: Selection): Actor {
+  const actor = actorSchema.parse(value);
+  if (!matchesActorFilter(actor, selected.actors ?? "all")) throw new ReadFailure(502, "api_actor_filter_mismatch");
+  return actor;
+}
 /** Validate the minimized export contract, which intentionally has no actor profile or live head. */
 export function validateExport(value: unknown, selected: Selection): void {
   const data = object(value),
     scope = object(data.scope);
   if (data.exportSchemaVersion !== "public-export/v1" || data.schemaVersion !== "leaderboard/v1")
     throw new ReadFailure(502, "invalid_export_response");
+  const filter = actorSelection(data, selected);
   for (const key of scopeKeys) if (scope[key] !== selected[key]) throw new ReadFailure(502, "api_scope_mismatch");
   if (!selected.snapshot || identity(data.snapshotId) !== selected.snapshot)
     throw new ReadFailure(502, "api_snapshot_mismatch");
@@ -354,8 +378,13 @@ export function validateExport(value: unknown, selected: Selection): void {
     if (row.login !== null) string(row.login);
     // Legacy v1 exports may omit these labels; present labels must never certify
     // unsupported kinds or manual execution. Absence remains unknown.
-    if (Object.hasOwn(row, "actorKind")) actorKindSchema.parse(row.actorKind);
-    if (Object.hasOwn(row, "executionMode")) executionModeSchema.parse(row.executionMode);
+    const actorKind = Object.hasOwn(row, "actorKind") ? actorKindSchema.parse(row.actorKind) : null;
+    const executionMode = Object.hasOwn(row, "executionMode") ? executionModeSchema.parse(row.executionMode) : null;
+    if (
+      filter !== "all" &&
+      (actorKind === null || executionMode === null || !matchesActorFilter({ kind: actorKind, executionMode }, filter))
+    )
+      throw new ReadFailure(502, "api_actor_filter_mismatch");
     if (result.metricId !== metric.id || (row.rank !== null && (integer(row.rank) < 1 || ranking?.rank === false)))
       throw new ReadFailure(502, "invalid_export_response");
     if (row.pending !== undefined)
@@ -384,6 +413,7 @@ export function validateExport(value: unknown, selected: Selection): void {
   }
 }
 export interface Metadata {
+  actorFilter?: ActorFilter;
   snapshotId: string;
   revision: number;
   generatedAt: string;
@@ -403,6 +433,7 @@ export function metadata(value: unknown, selected: Selection): Metadata {
   const snapshotId = identity(data.snapshotId);
   if (selected.snapshot && selected.snapshot !== snapshotId) throw new ReadFailure(502, "api_snapshot_mismatch");
   return {
+    actorFilter: actorSelection(data, selected),
     snapshotId,
     revision: integer(data.revision),
     generatedAt: string(data.generatedAt),
@@ -498,7 +529,7 @@ export function board(value: unknown, selected: Selection): Board {
       return {
         rank: row.rank === null ? null : integer(row.rank),
         actorId: identity(row.actorId),
-        actor: actorSchema.parse(row.actor),
+        actor: selectedActor(row.actor, selected),
         result,
         evidenceIds: array(row.evidenceIds).map(identity),
         ...(row.pending === undefined ? {} : { pending: pendingCountSchema.parse(row.pending) }),
@@ -586,7 +617,7 @@ export function directory(value: unknown, selected: Selection): Directory {
       const item = object(value);
       return {
         actorId: identity(item.actorId),
-        actor: actorSchema.parse(item.actor),
+        actor: selectedActor(item.actor, selected),
         roles: array(item.roles, 30).map(string),
         categories: categoryTotals(item.categories),
         evidenceCount: integer(item.evidenceCount),
@@ -622,7 +653,7 @@ export function profile(value: unknown, selected: Selection): Profile {
   return {
     ...metadata(value, selected),
     actorId: identity(data.actorId),
-    actor: actorSchema.parse(data.actor),
+    actor: selectedActor(data.actor, selected),
     results: array(data.results, 98).map((item) => metricResultSchema.parse(item)),
     diagnostics: diagnostics(data.diagnostics),
     roleBreakdown: array(data.roleBreakdown, 30).map((value) => {
@@ -729,7 +760,7 @@ function activityGroup(value: unknown, selected: Selection): ActivityGroup {
   const result: ActivityGroup = {
     groupId: activityDigest(data.groupId),
     actorId: identity(data.actorId),
-    actor: actorSchema.parse(data.actor),
+    actor: selectedActor(data.actor, selected),
     repositoryId: data.repositoryId === null ? null : identity(data.repositoryId),
     activityState: state as Evidence["activityState"],
     latestOccurredAt: activityTime(data.latestOccurredAt),
