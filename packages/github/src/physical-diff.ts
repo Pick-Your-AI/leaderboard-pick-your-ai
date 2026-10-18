@@ -70,6 +70,8 @@ export function classifyFile(file: PhysicalFile): FileClass {
 export function classifyPhysicalDiff(diff: PinnedPhysicalDiff): ClassifiedPhysicalDiff {
   if (!pinnedSha(diff.before) || !pinnedSha(diff.after) || diff.before === diff.after)
     throw new Error("Distinct pinned before/after SHAs are required");
+  const complete = diff.complete;
+  if (typeof complete !== "boolean") throw new Error("Boolean diff completeness proof is required");
   if (diff.files.length > 10_000) throw new Error("Diff exceeds file bound");
   const seen = new Set<string>();
   const files = diff.files.map((file) => {
@@ -97,16 +99,16 @@ export function classifyPhysicalDiff(diff: PinnedPhysicalDiff): ClassifiedPhysic
   )
     throw new Error("Physical aggregate exceeds safe integer bound");
   return {
-    complete: diff.complete,
-    additions: diff.complete ? additions : null,
-    deletions: diff.complete ? deletions : null,
-    changed: diff.complete ? additions + deletions : null,
-    net: diff.complete ? additions - deletions : null,
-    filesChanged: diff.complete ? eligible.length : null,
+    complete,
+    additions: complete ? additions : null,
+    deletions: complete ? deletions : null,
+    changed: complete ? additions + deletions : null,
+    net: complete ? additions - deletions : null,
+    filesChanged: complete ? eligible.length : null,
     rawAdditions,
     rawDeletions,
     files,
-    reasons: diff.complete ? [] : ["incomplete_or_truncated_diff"],
+    reasons: complete ? [] : ["incomplete_or_truncated_diff"],
   };
 }
 
