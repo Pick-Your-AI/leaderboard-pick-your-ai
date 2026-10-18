@@ -5,7 +5,11 @@ export {
   publicScopeFilterKey,
   publicScopeParameters,
   publicScopeSchemaVersion,
+  publicRoleScopeSchemaVersion,
   publicScopeProjectLimit,
+  publicScopeRoleLimit,
+  publicContributionRoles,
+  type PublicContributionRole,
   type PublicScope,
 } from "./public-scope.js";
 export { compareSourceInstants } from "./v1/source-time.js";
