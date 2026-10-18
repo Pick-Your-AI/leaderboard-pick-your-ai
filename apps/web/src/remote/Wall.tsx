@@ -393,15 +393,19 @@ function WallDisplay({
   };
   const advanceRef = useRef(advanceAutomatically);
   advanceRef.current = advanceAutomatically;
+  const displayedPosition = frame?.position;
   // A 20-second privacy recheck must not perpetually reset a slower rotation timer.
+  // Only a successfully displayed page starts its full interval. The position
+  // object stays stable across privacy reads, but changes for a new page.
   useEffect(() => {
     automaticDue.current = false;
+    if (!displayedPosition || displayedPosition !== position) return;
     if (paused || reduced || !visible || pointerInside || focusInside || mode === "frozen") return;
     const timer = setInterval(() => {
       advanceRef.current();
     }, interval * 1000);
     return () => clearInterval(timer);
-  }, [paused, reduced, visible, pointerInside, focusInside, mode, interval, position]);
+  }, [paused, reduced, visible, pointerInside, focusInside, mode, interval, position, displayedPosition]);
   useEffect(() => {
     if (!automatic) automaticDue.current = false;
     else if (automaticDue.current && !reading) advanceRef.current();

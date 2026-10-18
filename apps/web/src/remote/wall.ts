@@ -115,6 +115,8 @@ function samePublication(first: Metadata, second: Metadata): void {
     "policyVersion",
   ] as const)
     if (first[key] !== second[key]) throw new ReadFailure(409, "wall_publication_changed_during_read");
+  for (const key of ["snapshotId", "revision", "publishedAt"] as const)
+    if (first.head[key] !== second.head[key]) throw new ReadFailure(409, "wall_publication_changed_during_read");
 }
 
 export async function readWallFrame(

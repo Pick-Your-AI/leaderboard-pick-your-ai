@@ -125,7 +125,13 @@ async function service(page: Page, readDelayMs = 0) {
   let current = snapshot(),
     failed = false;
   let healthGate: Promise<void> | null = null;
+  let publishAfterHealth = false;
   const history = new Map([[current.head.snapshotId, current]]);
+  const publishNext = () => {
+    current = snapshot("wall-2", 2);
+    current.selected.rows[0]!.result.value = 90;
+    history.set("wall-2", current);
+  };
   const calls: URL[] = [];
   const app = createService({
     now: () => Date.parse(at),
@@ -149,6 +155,10 @@ async function service(page: Page, readDelayMs = 0) {
     calls.push(url);
     if (url.pathname.endsWith("/health") && healthGate) await healthGate;
     const response = await app.inject({ method: "GET", url: url.pathname + url.search });
+    if (url.pathname.endsWith("/health") && publishAfterHealth) {
+      publishAfterHealth = false;
+      publishNext();
+    }
     await route.fulfill({ status: response.statusCode, headers: response.headers, body: response.body });
   });
   return {
@@ -157,10 +167,9 @@ async function service(page: Page, readDelayMs = 0) {
     delayReads(milliseconds: number) {
       readDelayMs = milliseconds;
     },
-    next() {
-      current = snapshot("wall-2", 2);
-      current.selected.rows[0]!.result.value = 90;
-      history.set("wall-2", current);
+    next: publishNext,
+    publishBetweenHealthAndContent() {
+      publishAfterHealth = true;
     },
     suppress() {
       current.controls.version = "privacy-2";
@@ -293,6 +302,34 @@ test("wall visits continued ties and every unranked contributor page before adop
   }
 });
 
+for (const stage of ["board", "contributors"] as const) {
+  test(`wall rejects a publication-head change between health and ${stage} content`, async ({ page }) => {
+    const api = await service(page);
+    try {
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      await page.goto(wall("cycle"));
+      await expect(page.getByRole("link", { name: "Wall contributor 01", exact: true })).toBeVisible();
+      if (stage === "contributors") {
+        await next(page);
+        await next(page);
+        await expect(page.getByRole("heading", { name: "Contributors in this scope", exact: true })).toBeVisible();
+      }
+      api.publishBetweenHealthAndContent();
+      await page.getByRole("button", { name: "Recheck current publication controls" }).click();
+      await expect(page.getByRole("alert")).toContainText("wall_publication_changed_during_read");
+      await expect(page.getByRole("link", { name: /Wall contributor/ })).toHaveCount(0);
+      await page.getByRole("button", { name: "Recheck current publication controls" }).click();
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      await expect(provenance(page)).toContainText("Snapshot wall-1");
+      await expect(page.getByText("Update held: wall-2. Applies after the full page cycle.")).toBeVisible();
+      await expect(page.getByRole("link", { name: "Wall contributor 01", exact: true })).toBeVisible();
+      await expect(page.locator(".api-wall-page")).toContainText("Page 1");
+    } finally {
+      await api.close();
+    }
+  });
+}
+
 test("frozen wall never advances its snapshot but still removes suppressed contributors and clears failed reads", async ({
   page,
 }) => {
@@ -357,6 +394,31 @@ test("automatic page timer survives privacy polls and obeys pause, focus and red
     await next(page);
     await expect(page.locator(".api-wall-page")).toContainText("Page 1");
   } finally {
+    await api.close();
+  }
+});
+
+test("a slow page read receives its full visible interval after the page loads", async ({ page }) => {
+  const api = await service(page);
+  let release: (() => void) | undefined;
+  try {
+    await page.clock.install();
+    await page.goto(wall("single").replace("interval=30", "interval=20"));
+    await expect(page.getByRole("link", { name: "Wall contributor 01", exact: true })).toBeVisible();
+    release = api.holdHealth();
+    await page.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeDisabled();
+    await page.clock.runFor(6_000);
+    await expect(page.locator(".api-wall-page")).toContainText("Page 1");
+    release();
+    await expect(page.locator(".api-wall-page")).toContainText("Page 2");
+    await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeEnabled();
+    await elapseWithReads(page, 14_010);
+    await expect(page.locator(".api-wall-page")).toContainText("Page 2");
+    await elapseWithReads(page, 6_100);
+    await expect(page.locator(".api-wall-page")).toContainText("Page 1");
+  } finally {
+    release?.();
     await api.close();
   }
 });

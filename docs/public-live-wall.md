@@ -37,7 +37,9 @@ the browser display usable.
 
 ## Safe boundaries and recovery
 
-Page speed is 20–300 seconds. Manual pause, keyboard focus or pointer interaction
+Page speed is 20–300 seconds, counted from when the requested page is successfully
+displayed; loading that page does not consume its visible interval. Manual pause,
+keyboard focus or pointer interaction
 with the content, reduced motion and background visibility hold automatic page
 changes. Manual next-page control remains available while paused or under reduced
 motion. One polite status region announces successfully displayed page changes,
@@ -50,8 +52,9 @@ the tab, moving manually or a read failure cancels that pending rotation. Resumi
 starts a full new interval; a delayed tick cannot jump past those holds.
 
 Every page uses one snapshot, computation revision, metric-definition version and
-current publication-policy version. Health and content must agree before content
-is displayed. The wall retains only the current bounded page and its cursor.
+current publication-policy version. Health and content must also agree on the
+current head's snapshot, revision and publication timestamp before content is
+displayed. The wall retains only the current bounded page and its cursor.
 The public client's existing eight-second deadline, decoded response limit,
 credential omission and redirect rejection apply to each request.
 
@@ -88,6 +91,12 @@ reproduces the lost-tick defect on the earlier implementation and verifies that 
 successful fresh read advances once, current suppression still applies, and pause
 cancels the deferred advance. The short real-clock check is not the eight-hour
 continuous-display acceptance run.
+
+Controlled regressions also delay a requested page for six seconds and verify
+that it receives the full configured visible interval. Separate board and
+contributor cases publish a new head between the actual health and content
+handlers; the mixed read clears the display, then a coherent recheck recovers
+under the existing pin with the current head held for the next safe boundary.
 
 These are synthetic implementation and automated accessibility checks. They do
 not establish a completed human assistive-technology journey, an eight-hour
