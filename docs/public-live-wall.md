@@ -24,8 +24,11 @@ without substituting another board.
 The URL chooses landscape, portrait or compact overlay presentation. Landscape
 and portrait request at most six rows per page; the overlay requests three.
 Ranks remain those supplied by the API, including a tie-continuation label across
-pages. The alphabetical contributor roll includes attributable public activity
-that does not qualify for a ranking. It does not assign new ranks. Values retain
+pages. The unranked contributor roll uses the directory's GitHub-login ordering,
+with unavailable logins first and stable public IDs breaking ties. Each row
+shows that login or its unavailable-login/public-ID fallback beneath the public
+display name. It includes attributable public activity that does not qualify
+for a ranking and does not assign new ranks. Values retain
 their unit, measurement/coverage state and pending-work distinction; ratio and
 elapsed-time summaries show their applicable diagnostics. Avatars are off.
 
@@ -64,7 +67,10 @@ reads and clear contributor content. A failed or inconsistent read also clears
 the contributor display until a successful reread; no cached contributor response
 or fixture replaces it. Successful same-page rechecks preserve surviving keyed
 contributor links and their keyboard focus. Suppressed contributors are removed
-even when their data snapshot was frozen.
+even when their data snapshot was frozen. If suppression removes the focused
+contributor, the wall reconciles its reading hold with the actual remaining DOM
+focus; a removed node cannot leave automatic rotation permanently paused. Other
+pause, pointer, reduced-motion and visibility holds still apply.
 
 Cursor expiry, cursor-policy invalidation and a publication change during a read
 restart the current stage at page one on the next bounded recheck, using the same
@@ -97,6 +103,14 @@ that it receives the full configured visible interval. Separate board and
 contributor cases publish a new head between the actual health and content
 handlers; the mixed read clears the display, then a coherent recheck recovers
 under the existing pin with the current head held for the next safe boundary.
+
+The focus-removal regression verifies that a surviving focused link stays held
+through an ordinary privacy poll, then its suppression releases the obsolete
+hold and starts a full new page interval. The roll-ordering regression traverses
+all pages with display names deliberately ordered differently from logins; the
+visible login keys preserve the API's complete ordering without sorting pages
+independently. Both board and roll layouts are checked and captured at all four
+target resolutions.
 
 These are synthetic implementation and automated accessibility checks. They do
 not establish a completed human assistive-technology journey, an eight-hour

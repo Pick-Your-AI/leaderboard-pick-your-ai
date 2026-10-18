@@ -367,6 +367,11 @@ function WallDisplay({
       });
     return () => controller.abort();
   }, [base, selected, options, mode, position, nonce, visible]);
+  useEffect(() => {
+    // Removing a focused contributor need not dispatch a bubbling blur event.
+    // Keep surviving focus intact, but release a hold whose node is gone.
+    if (focusInside && !region.current?.contains(document.activeElement)) setFocusInside(false);
+  }, [frame, focusInside]);
   const automatic = mode !== "frozen" && !paused && !reduced && visible && !pointerInside && !focusInside;
   const advance = () => {
     if (!frame || reading || document.visibilityState !== "visible") return;
@@ -578,7 +583,8 @@ function WallDisplay({
             <>
               <h1>Contributors in this scope</h1>
               <p className="api-wall-summary">
-                Alphabetical and unranked · includes attributable work that does not qualify for a ranking
+                Unranked · ordered by GitHub login; unavailable logins first. Includes attributable work that does not
+                qualify for a ranking.
               </p>
               <p className="api-wall-page">
                 Page {frame!.position.page} · {content.value.totalContributors} contributors
@@ -597,6 +603,9 @@ function WallDisplay({
                       >
                         {label}
                       </a>
+                      <span className="api-wall-detail">
+                        {entry.actor.login ? `@${entry.actor.login}` : `Login unavailable · ${entry.actorId}`}
+                      </span>
                     </li>
                   );
                 })}

@@ -171,6 +171,11 @@ async function service(page: Page, readDelayMs = 0) {
     publishBetweenHealthAndContent() {
       publishAfterHealth = true;
     },
+    reverseDisplayNames() {
+      current.selected.actors.forEach((entry, index) => {
+        entry.actor.displayName = `Wall name ${String(15 - index).padStart(2, "0")}`;
+      });
+    },
     suppress() {
       current.controls.version = "privacy-2";
       current.controls.suppressedActorIds = ["wall-01"];
@@ -302,6 +307,35 @@ test("wall visits continued ties and every unranked contributor page before adop
   }
 });
 
+test("the unranked roll exposes its login ordering across pages with differently ordered display names", async ({
+  page,
+}) => {
+  const api = await service(page);
+  try {
+    api.reverseDisplayNames();
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto(wall("cycle"));
+    await expect(page.getByRole("link", { name: "Wall name 15", exact: true })).toBeVisible();
+    await next(page);
+    await next(page);
+    await expect(page.getByRole("heading", { name: "Contributors in this scope", exact: true })).toBeVisible();
+    const logins: string[] = [];
+    const names: string[] = [];
+    for (let index = 0; index < 3; index++) {
+      await expect(page.locator(".api-wall-summary")).toContainText("ordered by GitHub login");
+      logins.push(...(await page.locator(".api-wall-roll .api-wall-detail").allTextContents()));
+      names.push(...(await page.locator(".api-wall-roll a").allTextContents()));
+      if (index < 2) await next(page);
+    }
+    expect(logins).toEqual(
+      Array.from({ length: 15 }, (_, index) => `@synthetic-wall-${String(index + 1).padStart(2, "0")}`),
+    );
+    expect(names).toEqual(Array.from({ length: 15 }, (_, index) => `Wall name ${String(15 - index).padStart(2, "0")}`));
+  } finally {
+    await api.close();
+  }
+});
+
 for (const stage of ["board", "contributors"] as const) {
   test(`wall rejects a publication-head change between health and ${stage} content`, async ({ page }) => {
     const api = await service(page);
@@ -393,6 +427,33 @@ test("automatic page timer survives privacy polls and obeys pause, focus and red
     await expect(page.locator(".api-wall-page")).toContainText("Page 2");
     await next(page);
     await expect(page.locator(".api-wall-page")).toContainText("Page 1");
+  } finally {
+    await api.close();
+  }
+});
+
+test("suppression of a focused contributor releases the stale reading hold", async ({ page }) => {
+  const api = await service(page);
+  try {
+    await page.clock.install();
+    await page.goto(wall("single").replace("interval=30", "interval=20"));
+    const first = page.getByRole("link", { name: "Wall contributor 01", exact: true });
+    await expect(first).toBeVisible();
+    await first.focus();
+    await page.mouse.move(0, 0);
+    await elapseWithReads(page, 21_000);
+    await expect(first).toBeFocused();
+    await expect(page.locator(".api-wall-state")).toContainText("Paused while reading");
+    api.suppress();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(first).toHaveCount(0);
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+    await expect(page.locator(".api-wall-state")).toContainText("Automatic page boundaries");
+    await elapseWithReads(page, 19_000);
+    await expect(page.locator(".api-wall-page")).toContainText("Page 1");
+    await elapseWithReads(page, 1_100);
+    await expect(page.locator(".api-wall-page")).toContainText("Page 2");
+    await expect(page.getByRole("link", { name: "Wall contributor 08", exact: true })).toBeVisible();
   } finally {
     await api.close();
   }
@@ -535,7 +596,7 @@ test("expired cursors recover at the same pin, while revoked snapshots recover o
   }
 });
 
-test("wall freshness and controls fit intended landscape, portrait and overlay displays", async ({ page }) => {
+test("wall freshness and controls fit intended landscape, portrait and overlay displays", async ({ page }, info) => {
   const api = await service(page);
   try {
     api.stale();
@@ -550,17 +611,25 @@ test("wall freshness and controls fit intended landscape, portrait and overlay d
       await page.goto(wall("cycle", `&format=${format}`));
       await expect(page.getByText("STALE OR DEGRADED DATA", { exact: true })).toBeVisible();
       await expect(page.getByRole("link", { name: "Wall contributor 01", exact: true })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Pause wall", exact: true })).toBeInViewport();
-      await expect(page.locator(".api-wall-scope")).toBeInViewport();
-      expect(
-        await page.evaluate(() => ({
-          width: document.documentElement.scrollWidth,
-          height: document.documentElement.scrollHeight,
-        })),
-      ).toEqual({ width, height });
-      expect(
-        (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
-      ).toEqual([]);
+      for (const view of ["board", "roll"]) {
+        if (view === "roll") {
+          for (let advance = 0; advance < 5 && (await page.locator(".api-wall-roll").count()) === 0; advance++)
+            await next(page);
+          await expect(page.getByRole("heading", { name: "Contributors in this scope", exact: true })).toBeVisible();
+        }
+        await expect(page.getByRole("button", { name: "Pause wall", exact: true })).toBeInViewport();
+        await expect(page.locator(".api-wall-scope")).toBeInViewport();
+        expect(
+          await page.evaluate(() => ({
+            width: document.documentElement.scrollWidth,
+            height: document.documentElement.scrollHeight,
+          })),
+        ).toEqual({ width, height });
+        expect(
+          (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
+        ).toEqual([]);
+        await page.screenshot({ path: info.outputPath(`wall-${view}-${format}-${width}x${height}.png`) });
+      }
     }
   } finally {
     await api.close();

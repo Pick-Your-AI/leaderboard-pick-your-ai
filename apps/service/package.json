@@ -3,6 +3,12 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "exports": {
+    "./live-client": {
+      "types": "./dist/live-client.d.ts",
+      "default": "./dist/live-client.js"
+    }
+  },
   "engines": {
     "node": ">=24 <25"
   },
