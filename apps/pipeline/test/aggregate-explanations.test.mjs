@@ -624,6 +624,27 @@ test("required explanation preserves only minimal provider identity hash binding
   assert.throws(() => buildAggregateExplanation(capture, binding), /aggregate_explanation_integrity_error/);
 });
 
+test("required explanations preserve bounded exact-source alias bindings without arbitrary metadata", () => {
+  const { capture, binding } = pureCapture();
+  const identityEvidence = {
+    schemaVersion: "pipeline-identity-evidence/v1",
+    normalizationHashes: ["c".repeat(64)],
+    normalizationSources: [{ factKey: "a".repeat(64), documentHash: "c".repeat(64) }],
+  };
+  capture.authorization.identityEvidence = identityEvidence;
+  assert.deepEqual(buildAggregateExplanation(capture, binding).authorization.identityEvidence, identityEvidence);
+  for (const sources of [
+    [{ factKey: "a".repeat(64), documentHash: "b".repeat(64) }],
+    [{ factKey: "invalid", documentHash: "c".repeat(64) }],
+    [...identityEvidence.normalizationSources, ...identityEvidence.normalizationSources],
+    [{ ...identityEvidence.normalizationSources[0], sourceLogin: "private-unbounded-label" }],
+    [],
+  ]) {
+    capture.authorization.identityEvidence = { ...identityEvidence, normalizationSources: sources };
+    assert.throws(() => buildAggregateExplanation(capture, binding), /aggregate_explanation_integrity_error/);
+  }
+});
+
 test("required private explanations revoke when reviewed recognition changes", async (t) => {
   const h = await harness(t);
   const config = structuredClone(h.options.config);
