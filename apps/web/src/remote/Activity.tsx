@@ -1,3 +1,4 @@
+import { Receipt } from "./Evidence.tsx";
 import React from "react";
 import {
   publicLink,
@@ -80,8 +81,9 @@ export function ActivityFeed({ value, selected }: { value: Activity; selected: S
         state-group counts must not be added.
       </p>
       <p>
-        Only retained public evidence is shown. Action kind, acceptance dates and correction history are not supplied by
-        this projection. Current publication corrections and privacy controls still apply.
+        Only retained public evidence is shown. Source proofs show supplied action metadata, independently evidenced
+        acceptance dates and explicitly public revision/correction records. History coverage is stated per proof;
+        missing records do not establish that no correction occurred. Current privacy controls still apply.
       </p>
       <ol className="directory" aria-label="Public activity groups">
         {value.groups.map((group) => (
@@ -140,18 +142,7 @@ export function ActivityProofs({ value, selected }: { value: ActivityDetail; sel
             <p>
               Canonical fact: <span className="mono">{proof.canonicalFactId}</span>
             </p>
-            <p>
-              {stateLabel(proof.activityState)} · Roles: {proof.contribution.roles.join(", ")}
-            </p>
-            <p>
-              Action time: <Clock value={proof.occurredAt} />. Collected at: <Clock value={proof.observedAt} />.
-            </p>
-            <p>
-              <a href={publicLink(proof.artifact.publicUrl)!} rel="noreferrer nofollow">
-                Open source {proof.artifact.stableId}
-              </a>
-            </p>
-            <p>Categories: {proof.contribution.metricIds.join(", ")}</p>
+            <Receipt value={proof} selected={selected} />
           </li>
         ))}
       </ol>
