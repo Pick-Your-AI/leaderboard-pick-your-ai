@@ -164,6 +164,10 @@ function instant(value: string): number {
     throw new Error("Invalid UTC instant");
   return ms;
 }
+function compareInstants(a: string | null, b: string | null): number {
+  if (a === null || b === null) return a === b ? 0 : a === null ? -1 : 1;
+  return instant(a) - instant(b);
+}
 function number(value: number, name: string): number {
   if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be finite and nonnegative`);
   return value;
@@ -437,7 +441,7 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
       reject(bucket, "ambiguous_canonical_action");
       continue;
     }
-    const fact = [...bucket].sort((a, b) => compare(a.observedAt, b.observedAt) || compare(a.id, b.id))[0]!;
+    const fact = [...bucket].sort((a, b) => compareInstants(a.observedAt, b.observedAt) || compare(a.id, b.id))[0]!;
     if (bucket.length > 1)
       reject(
         bucket.filter((item) => item !== fact),
@@ -554,7 +558,7 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
       (a, b) =>
         Number(!policy.rankedStates.includes(a.state as never)) -
           Number(!policy.rankedStates.includes(b.state as never)) ||
-        compare(a.occurredAt ?? "", b.occurredAt ?? "") ||
+        compareInstants(a.occurredAt ?? null, b.occurredAt ?? null) ||
         compare(a.id, b.id),
     );
     retained.push(ordered[0]!);
@@ -848,8 +852,12 @@ export function compareRankMovement(
       after.scope.from === null || item.effectiveAt === null || instant(item.effectiveAt) >= instant(after.scope.from)
     );
   });
+  const beforeRows = new Map<string, RankComparisonInput["rows"][number]>();
+  // Preserve the first matching row used by the previous lookup, including for
+  // callers that have not independently validated actor uniqueness.
+  for (const row of before.rows) if (!beforeRows.has(row.actorId)) beforeRows.set(row.actorId, row);
   return after.rows.map((row) => {
-    const previous = before.rows.find((item) => item.actorId === row.actorId);
+    const previous = beforeRows.get(row.actorId);
     if (reason || missingComparisonHistory || lateHistory || corrected || row.rank === null || previous?.rank === null)
       return {
         actorId: row.actorId,
@@ -986,7 +994,7 @@ export function participationView(
   return unique(current.map((fact) => fact.actorId!)).map((actorId) => {
     const historyFacts = all
       .filter((fact) => fact.actorId === actorId)
-      .sort((a, b) => compare(a[policy.dateBasis] ?? "", b[policy.dateBasis] ?? "") || compare(a.id, b.id));
+      .sort((a, b) => compareInstants(a[policy.dateBasis], b[policy.dateBasis]) || compare(a.id, b.id));
     const first = historyFacts[0];
     const activeWeeks = unique(
       current

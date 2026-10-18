@@ -9,6 +9,7 @@ import {
   stableJSON,
 } from "../../../packages/metrics/dist/index.js";
 import { createService } from "../dist/app.js";
+import { comparePublishedRanks } from "../dist/rank-comparison.js";
 const beforeAt = "2026-10-17T00:00:00.000Z",
   afterAt = "2026-10-18T00:00:00.000Z";
 const hash = (v) => createHash("sha256").update(v).digest("hex");
@@ -500,4 +501,78 @@ test("comparison coverage uses only evidenced selected-policy source and reposit
       result.json().rows.every((row) => row.movement.reason === "insufficient_history" && row.movement.delta === null),
     );
   }
+});
+
+test("large public cohorts validate retained rows and dense ranks without repeated scans", (t) => {
+  const size = 5_000;
+  const originalIndexOf = Array.prototype.indexOf;
+  let denseRankScans = 0;
+  t.after(() => {
+    Array.prototype.indexOf = originalIndexOf;
+  });
+  Array.prototype.indexOf = function (value, ...args) {
+    if (typeof value === "number" && this.length >= size / 2) {
+      denseRankScans++;
+      assert.fail("dense rank values must be indexed once");
+    }
+    return originalIndexOf.call(this, value, ...args);
+  };
+  for (const direction of ["ascending", "descending"]) {
+    let actorReads = 0;
+    const large = (id, revision, cutoff) => {
+      const item = published(id, revision, cutoff, oldFacts);
+      item.read.selected.ranking[0].direction = direction;
+      item.read.selected.evidence = [];
+      item.read.selected.rows = Array.from({ length: size }, (_, index) => ({
+        actorId: `synthetic-indexed-${index}`,
+        result: {
+          schemaVersion: "leaderboard/v1",
+          metricId: policy.metricId,
+          state: "measured",
+          value: Math.floor(index / 2) + 1,
+          coverage,
+        },
+        evidenceIds: [],
+      }));
+      item.history.metrics[0].rows = item.read.selected.rows.map((row) => ({
+        get actorId() {
+          assert.ok(++actorReads <= size * 12, "retained actor lookups must stay linear");
+          return row.actorId;
+        },
+        value: row.result.value,
+        rank: direction === "ascending" ? row.result.value : size / 2 - row.result.value + 1,
+        evidence: [],
+      }));
+      return item;
+    };
+    const before = large("synthetic-before", 1, beforeAt);
+    const after = large("synthetic-after", 2, afterAt);
+    const result = comparePublishedRanks(after.read, before.read, after.history, before.history, policy.metricId);
+    assert.equal(result.comparison.snapshotId, "synthetic-before");
+    assert.equal(result.movement.length, size);
+    assert.ok(result.movement.every((row) => row.state === "comparable" && row.delta === 0));
+    assert.ok(actorReads <= size * 12);
+  }
+  assert.equal(denseRankScans, 0);
+});
+
+test("duplicate retained actors cannot collapse into the visible cohort index", async (t) => {
+  for (const target of ["currentHistory", "previousHistory"])
+    for (const replace of [false, true]) {
+      const h = harness(t, (pair) => {
+        const rows = pair[target].metrics[0].rows;
+        if (replace) rows[1] = structuredClone(rows[0]);
+        else rows.push(structuredClone(rows[0]));
+      });
+      const response = await h.app.inject(h.url);
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.json().comparison.snapshotId, null);
+      assert.ok(
+        response
+          .json()
+          .rows.every(
+            (row) => row.movement.reason === "history_or_visible_cohort_changed" && row.movement.delta === null,
+          ),
+      );
+    }
 });

@@ -3,6 +3,7 @@ import test from "node:test";
 import { join } from "node:path";
 import { createPipeline } from "../src/index.mjs";
 import { aggregateExplanationHash } from "../src/aggregate-explanations.mjs";
+import { retainedRankHistory } from "../src/rank-history.mjs";
 import { harness, components, clock, ago, boardUrl } from "./harness.mjs";
 
 async function twoSnapshots(t, extra = {}) {
@@ -179,4 +180,38 @@ test("new comparison metadata is bound to publication confirmation even if its s
     .prepare("UPDATE pipeline_aggregate_explanations SET document=?,digest=? WHERE snapshot_id=?")
     .run(original.document, original.digest, h.first);
   unavailable(await h.runtime.app.inject(h.comparisonUrl), "insufficient_history");
+});
+
+test("accepted duplicate-source policy publishes canonical retained history across restart", async (t) => {
+  const h = await twoSnapshots(t, {
+    configure(config) {
+      const entry = config.policies[0];
+      entry.policy.sources.push(...entry.policy.sources);
+      components.metrics.validateMetricPolicy(entry.policy);
+      entry.signature = components.metrics.stableJSON(entry.policy);
+    },
+  });
+  assert.deepEqual(h.config.policies[0].policy.sources, ["github_rest", "github_rest"]);
+  const before = [stored(h, h.first), stored(h, h.second)];
+  for (const row of before) {
+    const document = JSON.parse(row.document);
+    assert.deepEqual(document.rankEvidence.metrics[0].sources, ["github_rest"]);
+    assert.deepEqual(retainedRankHistory(document).metrics[0].sources, ["github_rest"]);
+    // Canonicalization applies only to capture. A malformed retained receipt
+    // must still fail rather than being silently repaired on read.
+    document.rankEvidence.metrics[0].sources.push("github_rest");
+    assert.throws(() => retainedRankHistory(document), /rank_history_integrity_error/);
+  }
+  const response = await h.runtime.app.inject(h.comparisonUrl);
+  unavailable(response, "insufficient_history");
+  assert.equal(response.json().comparison.snapshotId, h.first);
+  const next = await restarted(h);
+  try {
+    const again = await next.runtime.app.inject(h.comparisonUrl);
+    unavailable(again, "insufficient_history");
+    assert.deepEqual(again.json(), response.json());
+    assert.deepEqual([stored(h, h.first), stored(h, h.second)], before);
+  } finally {
+    await next.close();
+  }
 });

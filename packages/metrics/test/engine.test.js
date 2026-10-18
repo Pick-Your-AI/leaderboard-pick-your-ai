@@ -208,6 +208,61 @@ test("newcomers remain unknown with incomplete organization history; active week
   assert.equal(participationView(input([older, ...facts]), policy(), scope(), { originAt: "2026-01-01T00:00:00Z", reviewReceipt: "synthetic-history-review" })[0].newcomer, false);
 });
 
+test("participation orders UTC instants rather than fractional timestamp spelling", () => {
+  const history = { originAt: "2026-01-01T00:00:00Z", reviewReceipt: "synthetic-history-review" };
+  for (const dateBasis of ["occurredAt", "acceptedAt"]) {
+    for (const [earlier, later, boundary] of [
+      ["2026-10-05T10:00:00Z", "2026-10-05T10:00:00.1Z", "2026-10-05T10:00:00.050Z"],
+      ["2026-10-05T10:00:00.1Z", "2026-10-05T10:00:00.11Z", "2026-10-05T10:00:00.105Z"],
+    ]) {
+      const facts = [
+        fact("z-earlier", { occurredAt: earlier, acceptedAt: earlier }),
+        fact("a-later", { occurredAt: later, acceptedAt: later }),
+      ];
+      const frozen = input(facts), original = stableJSON(frozen);
+      const selected = scope({ from: boundary });
+      const rows = participationView(frozen, policy({ dateBasis }), selected, history);
+      assert.equal(rows[0].firstContributionId, "z-earlier");
+      assert.equal(rows[0].firstContributionAt, earlier);
+      assert.equal(rows[0].newcomer, false);
+      assert.equal(rows[0].historyCoverage, "complete_known_history");
+      assert.deepEqual(participationView(input([...facts].reverse()), policy({ dateBasis }), selected, history), rows);
+      assert.equal(stableJSON(frozen), original);
+    }
+  }
+});
+
+test("equal participation instants use stable fact identity despite alternate UTC spelling", () => {
+  const facts = [
+    fact("z-fraction", { acceptedAt: "2026-10-05T10:00:00.000Z" }),
+    fact("a-whole", { acceptedAt: "2026-10-05T10:00:00Z" }),
+  ];
+  const history = { originAt: "2026-01-01T00:00:00Z", reviewReceipt: "synthetic-history-review" };
+  const rows = participationView(input(facts), policy(), scope(), history);
+  assert.equal(rows[0].firstContributionId, "a-whole");
+  assert.deepEqual(participationView(input([...facts].reverse()), policy(), scope(), history), rows);
+});
+
+test("duplicate observations retain the chronologically earliest receipt and stable equal-time identity", () => {
+  const original = fact("z-earliest", { observedAt: "2026-10-06T10:00:00Z" });
+  const later = { ...original, id: "a-later", observedAt: "2026-10-06T10:00:00.1Z" };
+  assert.deepEqual(board([later, original]).rows[0].evidenceIds, ["z-earliest"]);
+  assert.deepEqual(board([original, later]).rows[0].evidenceIds, ["z-earliest"]);
+  const equal = { ...original, id: "a-equal", observedAt: "2026-10-06T10:00:00.000Z" };
+  assert.deepEqual(board([original, equal]).rows[0].evidenceIds, ["a-equal"]);
+});
+
+test("repeated policy units retain the earliest action across UTC fractional spellings", () => {
+  const earlier = fact("z-earlier", { artifactId: "same-artifact", occurredAt: "2026-10-04T10:00:00Z" });
+  const later = fact("a-later", { artifactId: "same-artifact", occurredAt: "2026-10-04T10:00:00.1Z" });
+  for (const facts of [[later, earlier], [earlier, later]]) {
+    const result = board(facts);
+    assert.equal(result.rows[0].value, 1);
+    assert.deepEqual(result.rows[0].evidenceIds, ["z-earlier"]);
+    assert.ok(result.audit.some(entry => entry.reason === "repeated_policy_unit" && entry.factIds.includes("a-later")));
+  }
+});
+
 test("malformed policies, times, cutoffs and identities fail closed", () => {
   assert.throws(() => validateMetricPolicy(policy({ metricId: "universal_score" })), /Unknown metric/);
   assert.throws(() => validateMetricPolicy(policy({ unit: "points" })), /Unit/);
@@ -486,4 +541,51 @@ test("future observations and unknown ratio outcomes remain explicitly accounted
   const ratio = board([fact("unknown", { metricId: "pr_accepted_rate" }), fact("merged", { metricId: "pr_accepted_rate", outcome: "merged" })], { metricId: "pr_accepted_rate", aggregation: "ratio", rank: false });
   assert.deepEqual([ratio.rows[0].numerator, ratio.rows[0].denominator], [1, 1]);
   assert.ok(ratio.audit.some((entry) => entry.reason === "unknown_ratio_outcome" && entry.factIds.includes("unknown")));
+});
+
+
+test("rank movement indexes large prior cohorts and preserves first-match duplicate semantics", () => {
+  const size = 10_000;
+  const before = board([fact("indexed")]);
+  const after = { ...before };
+  let actorReads = 0;
+  before.rows = Array.from({ length: size }, (_, index) => ({
+    get actorId() {
+      assert.ok(++actorReads <= size * 3, "prior actor lookups must stay linear");
+      return `synthetic-indexed-${index}`;
+    },
+    value: size - index,
+    rank: index + 1,
+    evidence: [],
+  }));
+  after.rows = Array.from({ length: size }, (_, index) => ({
+    actorId: `synthetic-indexed-${index}`,
+    value: index + 1,
+    rank: size - index,
+    evidence: [],
+  }));
+  const movement = compareRankMovement(before, after);
+  assert.equal(movement.length, size);
+  for (let index = 0; index < size; index++)
+    assert.deepEqual(movement[index], {
+      actorId: `synthetic-indexed-${index}`,
+      state: "comparable",
+      delta: index + 1 - (size - index),
+      reason: null,
+    });
+  assert.ok(actorReads <= size * 3);
+
+  const row = { actorId: "synthetic-duplicate", value: 1, rank: 1, evidence: [] };
+  for (const firstRank of [1, null]) {
+    const result = compareRankMovement(
+      { ...before, rows: [{ ...row, rank: firstRank }, { ...row, rank: 9 }] },
+      { ...after, rows: [row] },
+    );
+    assert.deepEqual(result, [{
+      actorId: row.actorId,
+      state: firstRank === null ? "unavailable" : "comparable",
+      delta: firstRank === null ? null : 0,
+      reason: firstRank === null ? "unranked_metric" : null,
+    }]);
+  }
 });

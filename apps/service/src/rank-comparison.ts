@@ -66,10 +66,15 @@ function historyMetric(
   const values = [...new Set(rows.flatMap((row) => (row.result.value === undefined ? [] : [row.result.value])))].sort(
     (a, b) => (ranking.direction === "ascending" ? a - b : b - a),
   );
+  const ranks = new Map(values.map((value, index) => [value, index + 1]));
+  const savedRows = new Map<string, (typeof metric.rows)[number]>();
+  // Keep first-match semantics; the cohort multiset check above still detects
+  // duplicate retained rows against the validated, unique public cohort.
+  for (const row of metric.rows) if (!savedRows.has(row.actorId)) savedRows.set(row.actorId, row);
   const evidence = new Map(read.selected.evidence.map((entry) => [entry.contribution.contributionId, entry]));
   for (const row of rows) {
-    const saved = metric.rows.find((item) => item.actorId === row.actorId)!;
-    const rank = ranking.rank === false || row.result.value === undefined ? null : values.indexOf(row.result.value) + 1;
+    const saved = savedRows.get(row.actorId)!;
+    const rank = ranking.rank === false || row.result.value === undefined ? null : ranks.get(row.result.value);
     if (
       saved.value !== (row.result.value ?? null) ||
       saved.rank !== rank ||

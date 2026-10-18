@@ -16,7 +16,7 @@ export function captureRankEvidence(aggregates, policies) {
     schemaVersion: "private-rank-evidence/v1",
     metrics: aggregates.map((metric) => ({
       metricId: metric.metricId,
-      sources: [...policies.find((policy) => policy.metricId === metric.metricId).sources].sort(),
+      sources: [...new Set(policies.find((policy) => policy.metricId === metric.metricId).sources)].sort(),
       rows: metric.rows.map((row) => ({
         actorId: row.actorId,
         evidence: row.evidence.map((item) => {
@@ -65,6 +65,10 @@ export function retainedRankHistory(document) {
         )
       )
         fail();
+      // Index only after the multiset check, so duplicate retained actors cannot
+      // collapse into an apparently valid cohort. Keep the first matching row.
+      const historyRows = new Map();
+      for (const row of history.rows) if (!historyRows.has(row.actorId)) historyRows.set(row.actorId, row);
       return {
         metricId: metric.metricId,
         sources: [...history.sources],
@@ -78,7 +82,7 @@ export function retainedRankHistory(document) {
         backfillRevision: document.backfillRevision,
         coverage: metric.coverage,
         rows: metric.rows.map((row) => {
-          const source = history.rows.find((entry) => entry.actorId === row.actorId);
+          const source = historyRows.get(row.actorId);
           if (
             !Array.isArray(source.evidence) ||
             !same(
