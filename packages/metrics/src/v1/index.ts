@@ -22,14 +22,65 @@ export type CanonicalizationResult =
       observations: SourceEvent[];
     };
 
-function stableActorIdentity(event: SourceEvent): ["node", string] | ["database", number] | null {
-  if (event.actor.identityState !== "resolved") return null;
-  if (event.actor.githubNodeId !== undefined) return ["node", event.actor.githubNodeId];
-  return event.actor.githubDatabaseId === undefined ? null : ["database", event.actor.githubDatabaseId];
+type ProviderIdentity = ["node", string] | ["database", number];
+
+function actorIdentities(event: SourceEvent): ProviderIdentity[] {
+  if (event.actor.identityState !== "resolved") return [];
+  const identities: ProviderIdentity[] = [];
+  if (event.actor.githubNodeId !== undefined) identities.push(["node", event.actor.githubNodeId]);
+  if (event.actor.githubDatabaseId !== undefined) identities.push(["database", event.actor.githubDatabaseId]);
+  return identities;
+}
+
+/** Validate only explicit resolved bindings in this batch; never join event keys or create aliases. */
+function conflictingActorIdentities(events: readonly SourceEvent[]): Set<string> {
+  const bindings = new Map<
+    string,
+    { namespace: ProviderIdentity[0]; neighbors: Set<string>; kinds: Set<SourceEvent["actor"]["kind"]> }
+  >();
+  for (const event of events) {
+    const identities = actorIdentities(event);
+    for (const identity of identities) {
+      const key = JSON.stringify(identity);
+      const binding = bindings.get(key) ?? { namespace: identity[0], neighbors: new Set(), kinds: new Set() };
+      for (const peer of identities) {
+        const peerKey = JSON.stringify(peer);
+        if (peerKey !== key) binding.neighbors.add(peerKey);
+      }
+      if (event.actor.kind !== "unknown") binding.kinds.add(event.actor.kind);
+      bindings.set(key, binding);
+    }
+  }
+
+  const visited = new Set<string>();
+  const conflicting = new Set<string>();
+  for (const start of bindings.keys()) {
+    if (visited.has(start)) continue;
+    const pending = [start];
+    const component: string[] = [];
+    const kinds = new Set<SourceEvent["actor"]["kind"]>();
+    let nodeCount = 0;
+    let databaseCount = 0;
+    while (pending.length > 0) {
+      const key = pending.pop()!;
+      if (visited.has(key)) continue;
+      visited.add(key);
+      component.push(key);
+      const binding = bindings.get(key)!;
+      if (binding.namespace === "node") nodeCount += 1;
+      else databaseCount += 1;
+      for (const kind of binding.kinds) kinds.add(kind);
+      for (const neighbor of binding.neighbors) if (!visited.has(neighbor)) pending.push(neighbor);
+    }
+    if (nodeCount > 1 || databaseCount > 1 || kinds.size > 1) {
+      for (const key of component) conflicting.add(key);
+    }
+  }
+  return conflicting;
 }
 
 function semanticSignature(event: SourceEvent): string | null {
-  const actorId = stableActorIdentity(event);
+  const actorId = actorIdentities(event)[0];
   const subjectId = event.subject.stableId;
   if (!actorId || !subjectId || event.occurredAt === null) return null;
   return JSON.stringify([event.action, actorId, event.role, subjectId, event.occurredAt]);
@@ -40,6 +91,7 @@ function semanticSignature(event: SourceEvent): string | null {
  * identity. Missing keys remain unknown; conflicting matches remain ambiguous.
  */
 export function canonicalizeObservations(events: readonly SourceEvent[]): CanonicalizationResult[] {
+  const conflictingIdentities = conflictingActorIdentities(events);
   const keyed = new Map<string, SourceEvent[]>();
   const unkeyed: SourceEvent[] = [];
   for (const event of events) {
@@ -56,13 +108,12 @@ export function canonicalizeObservations(events: readonly SourceEvent[]): Canoni
   for (const [dedupeKey, group] of keyed) {
     const ordered = [...group].sort((a, b) => a.eventId.localeCompare(b.eventId));
     const signatures = ordered.map(semanticSignature);
-    // A matching primary node identity cannot override contradictory provider
-    // bindings. An absent optional database ID supplies no competing binding.
-    const databaseIds = new Set(
-      ordered.flatMap((event) => (event.actor.githubDatabaseId === undefined ? [] : [event.actor.githubDatabaseId])),
-    );
     const sameKnownSemantics =
-      signatures.every((signature) => signature !== null) && new Set(signatures).size === 1 && databaseIds.size <= 1;
+      signatures.every((signature) => signature !== null) &&
+      new Set(signatures).size === 1 &&
+      ordered.every((event) =>
+        actorIdentities(event).every((identity) => !conflictingIdentities.has(JSON.stringify(identity))),
+      );
     results.push({
       state: sameKnownSemantics ? "canonical" : "ambiguous",
       dedupeKey,
