@@ -250,3 +250,70 @@ Issues #99, #105, #106, #92 and #110 still require their applicable prerequisite
 and affected-owner acceptance, plus a reviewed public projection producer. Anonymous
 production readback additionally requires actual approved hosting/deployment. These
 facts must not be inferred from passing scaffold/runtime tests.
+
+## Bounded public activity feed (#121, partial delivery)
+
+`GET /api/v1/activity` reads the same authorized portfolio projection as the
+contributor directory, including observed-only and pending contributors with no
+ranked row. Its optional `category` is an enabled metric ID; repository, workstream
+and paired UTC action-date filters retain exact materialized-scope semantics.
+`metric`, username search and CSV are not feed filters. No collector, raw webhook
+inbox, live subscription, score or engagement count is introduced.
+
+The reversible display policy `actor-repository-state-utc-hour-v1` groups canonical
+facts by actor, repository, explicit activity state and fixed UTC occurrence hour.
+This is a presentation grouping, not a contribution measure. Groups are sorted by
+newest known occurrence, then stable group ID; unknown occurrence groups follow
+and are isolated by artifact, without inferring a burst or substituting collection
+time. Group identity does not depend on rank or page position. An observed,
+pending or independently accepted state is supplied by the authorized portfolio;
+legacy evidence remains acceptance-unknown. Missing occurrence and collection
+clocks remain null. A date-window selection excludes unknown occurrence dates.
+
+Canonical facts use source event, artifact and actor identity. Multiple metric
+representations of that same fact count once within each explicit work state,
+while every original contribution proof ID remains accessible. Acceptance belongs
+to the metric policy: a fact observed under one policy and accepted under another
+retains both states in separate groups with the same canonical-fact ID. State-group
+counts must not be added. Conflicting occurrence/artifact metadata within one state,
+or conflicting states for the same canonical fact and metric, fail closed with
+`activity_fact_conflict`; the feed does not choose a more flattering state.
+Category filtering precedes canonical conflict checks, so an unrelated category
+cannot make the selected category unavailable.
+Counts disclose distinct artifacts, canonical facts and proof representations,
+never a sum of unlike metrics. A category-filtered feed/detail pair retains only
+proofs in that category. Equal timestamps remain deterministically traversable.
+
+Each feed card has at most five artifact previews. A 1,000-artifact same-hour
+burst therefore occupies one card, retaining its counts and a proof-detail link.
+`GET /api/v1/activity/:groupId` paginates the group's complete source proofs,
+including separate representations of a canonical fact. Both endpoints accept
+1–100 items/page and signed cursors bound to route, group where applicable,
+grouping version, exact scope, category, page size, snapshot and current control
+version. Pages never accumulate in the browser. The shared 20,000-evidence source
+ceiling still applies. Entry JSON is capped at 1,000,000 UTF-8 bytes/page with a
+continuation cursor when bytes limit a page before the item count; an individual
+oversized item is explicitly unavailable. The whole activity response is capped
+at 1,500,000 bytes, below the browser's 2,000,000-byte read ceiling.
+
+Every page is reprojected under current actor/artifact suppression, metric
+allowlisting/disablement, public-URL checks and snapshot revocation before any
+conditional response. A current-control change invalidates cursors. Detail routes
+cannot recover a suppressed group, and a held historic snapshot is not a privacy
+cache. Existing source timeout/concurrency/query protections also apply.
+
+The API-backed `/activity` UI displays action and collection times separately,
+explains delayed collection, exposes category/repository/date controls, preserves
+snapshot/category through proof pages and Back navigation, and holds new heads
+while reading. Rechecks retain stable keyed DOM when content is unchanged; current
+privacy removals still take effect immediately. New data is applied through the
+existing explicit update control or opt-in safe-boundary follow behavior.
+
+Remaining #121 criteria: the projection does not retain an action discriminator,
+acceptance timestamp or correction-event history. The response explicitly declares
+`correctionHistory: "not_supplied"`; neither accepted work nor current privacy
+controls are invented correction events. Title/action/correction enrichment needs
+a reviewed public producer contract. Real source capability, deployed live
+refresh, human approval of the one-hour grouping default, assistive-technology
+journeys and affected-owner acceptance remain open. Synthetic tests alone do not
+close #121.

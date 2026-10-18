@@ -41,3 +41,22 @@ For #34, repository rules must require the actual planning/runtime/browser check
 For #128, two representative screen-reader walkthroughs, real-device touch testing, 400% browser zoom, target-size/manual contrast and visual-baseline review, protected-route checks once implemented, and participant review remain required. Emulated media and axe cannot prove screen-reader usability or WCAG conformance.
 
 For #129, owners must accept scale and budgets before pass/fail claims. Real API latency, ingest bursts, concurrent live clients, database/index/query cost, cold deployed starts, constrained mobile networking, sustained browser memory, source lag and safe overload behavior require the implemented production systems and documented test scale. One synthetic cold read does not prove any of those properties.
+
+## Public activity feed regression coverage (#121)
+
+The API-backed activity cases use the real service projection with synthetic
+observed-only, pending and accepted records. They assert that `/activity` no
+longer requests ranked boards, a 205-artifact burst has five previews plus bounded
+proof pages (100/100/5), delayed collection differs from action time, category and
+snapshot survive source drill-down and Back, and current suppression withdraws
+previously focused work. A narrow-screen case verifies held publications, focus
+and reading position during rechecks, no horizontal overflow and axe checks.
+Browser assertions require the matching installed Chromium and a successful run;
+TypeScript checks or collected tests are not execution evidence.
+
+Service/client tests additionally exercise 205 equal-time groups, 1,000-artifact
+and same-artifact bursts, 2,000 complete proof representations, canonical-fact
+deduplication, explicit unknown clocks and acceptance, malformed/conflicting
+facts, exact filters, current controls on pinned pages, cursor tampering/replay/
+expiry and byte-limited continuation. These prove bounded synthetic behavior,
+not source completeness, production load or a correction-event history.
