@@ -1,4 +1,7 @@
 import { useState } from "react";
+import { WindowBounds } from "../components/DisplayTimeZone.tsx";
+import { defaultDisplayTimeZone } from "../lib/display-time-zone.ts";
+import { PublicScopeProvenance } from "./PublicScope.tsx";
 import { selection, uiHref, type RankComparison, type RankMovement, type Selection } from "./client.ts";
 
 const reasons: Record<string, string> = {
@@ -56,10 +59,17 @@ export function RankComparisonControls({
     <section className="section" aria-label="Rank comparison">
       <h3>Rank comparison</h3>
       {value?.snapshotId && value.scope ? (
-        <p>
-          Baseline snapshot {value.snapshotId}. Generated {value.generatedAt}. Window{" "}
-          {value.scope.start ?? "unbounded start"} → {value.scope.end ?? "unbounded end"}.
-        </p>
+        <>
+          <p>
+            Baseline snapshot {value.snapshotId}. Generated {value.generatedAt}.
+          </p>
+          <WindowBounds
+            start={value.scope.start}
+            end={value.scope.end}
+            timeZone={selected.timeZone ?? defaultDisplayTimeZone}
+          />
+          <PublicScopeProvenance scope={value.scope} />
+        </>
       ) : value ? (
         <p>The requested baseline is unavailable under current publication controls.</p>
       ) : (
@@ -69,7 +79,8 @@ export function RankComparisonControls({
         <summary>Compare with a published snapshot</summary>
         <p>
           Enter an exact published snapshot ID. Leave both baseline date fields blank to reuse this board’s exact
-          window. The service checks period, policy, coverage and evidence compatibility.
+          window. The baseline keeps this board’s repository, workstream, membership basis, Projects and roles. The
+          service checks period, policy, coverage and evidence compatibility.
         </p>
         <form
           className="remote-filters"

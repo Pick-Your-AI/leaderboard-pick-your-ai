@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { request, ReadFailure, type Selection } from "./client.ts";
-import { achievements, cardHref, cardImageHref, recognitionParameters, spotlights } from "./recognition-client.ts";
+import {
+  achievements,
+  cardHref,
+  cardImageHref,
+  recognitionParameters,
+  spotlights,
+  supportsEditorialScope,
+} from "./recognition-client.ts";
 
 type Load<T> = { key: string; value?: T; error?: boolean };
 /** A new request clears old evidence; errors never retain a prior successful result. */
@@ -136,16 +143,7 @@ export function EditorialSpotlights({
   organization: string;
   selected: Selection;
 }) {
-  const supported =
-    (selected.actors ?? "all") === "all" &&
-    selected.organization === organization &&
-    !selected.repository &&
-    !selected.workstream &&
-    !selected.start &&
-    !selected.end &&
-    !selected.snapshot &&
-    !selected.category &&
-    !selected.search;
+  const supported = supportsEditorialScope(selected, organization);
   const key = JSON.stringify([controlsBase, organization, selected]);
   const state = useCurrentRead(key, async (signal) => {
     if (!supported) throw new ReadFailure(400, "editorial_scope_unavailable");

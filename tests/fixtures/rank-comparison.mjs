@@ -1,6 +1,7 @@
 // Synthetic retained engine inputs for Node and real-handler browser regressions.
 // Never import this fixture into a public runtime or seed it into real rankings.
 import { createHash } from "node:crypto";
+import { canonicalPublicScope, publicScopeParameters } from "../../packages/contracts/dist/index.js";
 import {
   aggregateMetric,
   getMetricDefinition,
@@ -83,16 +84,45 @@ const fresh = [
   fact("synthetic-b4", actorIds.b, "2026-10-17T12:00:00.000Z"),
   fact("synthetic-c1", actorIds.c, "2026-10-17T13:00:00.000Z"),
 ];
-function published(id, revision, cutoff, facts) {
+function published(id, revision, cutoff, facts, scopeFilters) {
+  const window = resolveMetricWindow("30d", cutoff);
+  const scope = canonicalPublicScope({
+    organization: "Pick-Your-AI",
+    repository: null,
+    workstream: null,
+    start: window.from,
+    end: window.to,
+    ...scopeFilters,
+  });
   const engineScope = {
-    ...resolveMetricWindow("30d", cutoff),
+    ...window,
     repos: ["synthetic-repo"],
-    projects: [],
-    workstreams: [],
-    roles: [],
+    projects: scope.projects ?? [],
+    workstreams: scope.workstream === null ? [] : [scope.workstream],
+    roles: scope.roles ?? [],
     actors: "all",
-    context: "event",
+    context: scope.context ?? "event",
   };
+  // Scoped cases use explicit synthetic membership evidence. The original
+  // legacy fixture and its facts remain unchanged. Current and event views
+  // deliberately have different Project memberships; no history is inferred.
+  const scopedFacts = scope.schemaVersion
+    ? facts.map((entry) => ({
+        ...entry,
+        eventContext: {
+          projects: ["PVT_PAST"],
+          workstreams: ["engineering"],
+          projectScope: ["PVT_A", "PVT_B=", "PVT_PAST"],
+          workstreamsKnown: true,
+        },
+        currentContext: {
+          projects: ["PVT_A", "PVT_B="],
+          workstreams: ["engineering"],
+          projectScope: ["PVT_A", "PVT_B=", "PVT_PAST"],
+          workstreamsKnown: true,
+        },
+      }))
+    : facts;
   const aggregate = aggregateMetric(
     {
       datasetId: `synthetic-dataset-${id}`,
@@ -100,19 +130,12 @@ function published(id, revision, cutoff, facts) {
       backfillRevision: "synthetic-backfill-1",
       repositoryIds: ["synthetic-repo"],
       actors,
-      facts,
+      facts: scopedFacts,
       coverage: [coverage],
     },
     policy,
     engineScope,
   );
-  const scope = {
-    organization: "Pick-Your-AI",
-    repository: null,
-    workstream: null,
-    start: engineScope.from,
-    end: engineScope.to,
-  };
   const history = {
     snapshotId: id,
     revision,
@@ -200,11 +223,11 @@ function published(id, revision, cutoff, facts) {
 /** Callers close app. The mutable pair contains only synthetic provider-private
  * inputs for adversarial tests; the actual service computes every public result.
  */
-export function createRankComparisonHarness() {
+export function createRankComparisonHarness(scopeFilters = {}) {
   const beforeId = "synthetic-before",
     afterId = "synthetic-after";
-  const before = published(beforeId, 1, beforeAt, oldFacts),
-    after = published(afterId, 2, afterAt, [...oldFacts, ...fresh]);
+  const before = published(beforeId, 1, beforeAt, oldFacts, scopeFilters),
+    after = published(afterId, 2, afterAt, [...oldFacts, ...fresh], scopeFilters);
   const pair = {
     current: after.read,
     previous: before.read,
@@ -277,6 +300,10 @@ export function createRankComparisonHarness() {
     compareStart: previousScope.start,
     compareEnd: previousScope.end,
   });
+  if (scope.schemaVersion) {
+    const filters = publicScopeParameters(scope);
+    for (const key of ["context", "project", "role"]) if (filters[key] !== undefined) params.set(key, filters[key]);
+  }
   return {
     app,
     pair,

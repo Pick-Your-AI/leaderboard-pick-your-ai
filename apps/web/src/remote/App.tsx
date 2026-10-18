@@ -1,15 +1,18 @@
 import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
+import { PublicScopeControls, PublicScopeProvenance } from "./PublicScope.tsx";
+import { selectionScope } from "./public-scope.ts";
 import { ContributorParticipation } from "./Participation.tsx";
 import { EvidenceDrawer, EvidenceProof, Receipt } from "./Evidence.tsx";
 import { isProofTransition, proofHref, readProof, withoutProof } from "./proof.ts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { actorFilterLabels, type MetricDefinition, type MetricRegistry } from "@pick-your-ai/contracts";
+import { actorFilterLabels, publicScopeKey, type MetricDefinition, type MetricRegistry } from "@pick-your-ai/contracts";
 import { startLiveUpdates, type LiveState } from "@pick-your-ai/service/live-client";
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
 import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
 import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
+import { TimeZoneOptions, WindowBounds } from "../components/DisplayTimeZone.tsx";
 import { RankComparisonControls, RankMovementValue } from "./RankComparison.tsx";
 import { LastVerifiedSnapshot, type SnapshotReference } from "./LastVerifiedSnapshot.tsx";
 import {
@@ -32,6 +35,8 @@ import {
   catalog,
   exportPage,
   health,
+  liveParameters,
+  metadata,
   parameters,
   profile,
   publicLink,
@@ -217,6 +222,8 @@ function Meta({ value, selected }: { value: Metadata; selected: Selection }) {
         {selected.workstream ? ` · workstream ${selected.workstream}` : ""}
         {` · ${actorFilterLabels[value.actorFilter ?? "all"]}`}
       </p>
+      <PublicScopeProvenance scope={value.scope} />
+      <WindowBounds start={selected.start} end={selected.end} timeZone={selected.timeZone ?? "UTC"} />
       <a data-api-nav href={uiHref(location.pathname, selected, { snapshot: value.snapshotId })}>
         Permalink to this snapshot
       </a>
@@ -248,6 +255,8 @@ function Filters({
             "organization",
             "repository",
             "workstream",
+            "context",
+            "project",
             "start",
             "end",
             "snapshot",
@@ -256,12 +265,28 @@ function Filters({
             "search",
             "category",
             "actors",
+            "tz",
             "compare",
             "compareStart",
             "compareEnd",
           ]) {
             const value = String(input.get(key) ?? "").trim();
             if (value) params.set(key, value);
+          }
+          const roles = input.getAll("role").map(String);
+          if (roles.length) params.set("role", roles.join(","));
+          // Existing pins and cursors identify one complete scope. An explicitly
+          // changed pin remains reviewable; an unchanged old pin is not reused.
+          try {
+            const next = selection(params.toString(), { comparison: rankComparisonPath(path) });
+            if (
+              publicScopeKey(selectionScope(next)) !== publicScopeKey(selectionScope(selected)) ||
+              (next.actors ?? "all") !== (selected.actors ?? "all")
+            ) {
+              if (next.snapshot === selected.snapshot) params.delete("snapshot");
+            }
+          } catch {
+            // The normal route boundary displays the bounded invalid selection.
           }
           if (isCatalogPath(path)) {
             if (selected.catalogQuery) params.set("q", selected.catalogQuery);
@@ -275,6 +300,7 @@ function Filters({
           Use one stable repository/workstream ID. Dates are paired canonical UTC timestamps; blank dates request an
           explicitly materialized all-time scope. Unsupported scopes remain unavailable.
         </p>
+        <input type="hidden" name="tz" value={selected.timeZone ?? "UTC"} />
         <label>
           Activity selection
           <select name="actors" defaultValue={selected.actors ?? "all"}>
@@ -288,6 +314,7 @@ function Filters({
           automated execution. These views may overlap. Account type and unknown execution do not certify manual work or
           detect AI assistance.
         </p>
+        <PublicScopeControls selected={selected} />
         {(["organization", "repository", "workstream", "start", "end", "snapshot", "limit", "metric"] as const).map(
           (key) => (
             <label key={key}>
@@ -461,11 +488,17 @@ export function RemoteApp() {
           throw new ReadFailure(400, "conflicting_metric_selection");
         selected.metric = id;
       }
-      return { selected, base: apiBase(import.meta.env.VITE_PUBLIC_API_BASE || "/api/v1"), error: null };
+      const base = apiBase(import.meta.env.VITE_PUBLIC_API_BASE || "/api/v1");
+      const liveScope =
+        isCatalogPath(url.pathname) || /^\/methodology\/[^/]+$/.test(url.pathname)
+          ? null
+          : liveParameters(base, selected).toString();
+      return { selected, base, liveScope, error: null };
     } catch (error) {
       return {
         selected: fallback,
         base: "",
+        liveScope: null,
         error: error instanceof ReadFailure ? error : new ReadFailure(400, "invalid_selection"),
       };
     }
@@ -479,10 +512,7 @@ export function RemoteApp() {
   }, []);
   // Registry-only pages do not require a source snapshot. Snapshot subscriptions
   // follow the current scope, never a historical pin, cursor or proof selection.
-  const liveScope =
-    parsed.error || isCatalogPath(url.pathname) || /^\/methodology\/[^/]+$/.test(url.pathname)
-      ? null
-      : parameters(selected, { snapshot: null }).toString();
+  const liveScope = parsed.liveScope;
   const liveState = live?.base === parsed.base && live.scope === liveScope ? live.value : unknownLiveState;
   useEffect(() => {
     if (liveScope === null) return;
@@ -494,6 +524,9 @@ export function RemoteApp() {
       // A notice invalidates the complete public projection even while a reader
       // holds an older snapshot. Existing hold/apply controls govern reordering.
       onSnapshot: refresh,
+      validateNotice: (body) => {
+        metadata(body, { ...selected, snapshot: null });
+      },
       validateHealth: (body) => {
         health(body, { ...selected, snapshot: null });
       },
@@ -786,6 +819,23 @@ export function RemoteApp() {
           <p>Evidence-backed public reads. Unknown values and unavailable scopes remain explicit.</p>
         </header>
         <Filters key={`${url.pathname}${url.search}`} selected={selected} path={url.pathname} navigate={navigate} />
+        <label>
+          Display timezone
+          <select
+            value={selected.timeZone ?? "UTC"}
+            onChange={(event) => {
+              const params = new URLSearchParams(url.search);
+              if (event.target.value === "UTC") params.delete("tz");
+              else params.set("tz", event.target.value);
+              // A clock-label change keeps the actual displayed page, including its cursor/proof.
+              if (meta && !params.has("snapshot")) params.set("snapshot", meta.snapshotId);
+              navigate(`${url.pathname}?${params}`);
+            }}
+          >
+            <TimeZoneOptions selected={selected.timeZone ?? "UTC"} />
+          </select>
+        </label>
+        <p className="small">Display timezone changes clock labels. Date inputs and counting boundaries use UTC.</p>
         <div className="visually-hidden" role="status" aria-live="polite">
           {announcement}
         </div>

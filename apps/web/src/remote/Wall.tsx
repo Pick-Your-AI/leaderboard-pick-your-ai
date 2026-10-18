@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import "../styles/wall.css";
 import { actorFilterLabels, type Actor, type MetricRegistry } from "@pick-your-ai/contracts";
 import { getLeadMetrics } from "@pick-your-ai/metrics";
+import { PublicScopeProvenance } from "./PublicScope.tsx";
+import { WindowBounds } from "../components/DisplayTimeZone.tsx";
 import { LastVerifiedSnapshot, type SnapshotReference } from "./LastVerifiedSnapshot.tsx";
 import {
   apiBase,
@@ -40,13 +42,17 @@ const oldestSync = (status: Health) => {
 };
 function Scope({ selected }: { selected: Selection }) {
   return (
-    <p className="api-wall-scope">
-      {selected.organization}
-      {selected.repository && ` · repository ${selected.repository}`}
-      {selected.workstream && ` · workstream ${selected.workstream}`} · {actorFilterLabels[selected.actors ?? "all"]}
-      <br />
-      {selected.start ? `${selected.start} to ${selected.end} (end exclusive)` : "All-time materialized scope"}
-    </p>
+    <div className="api-wall-scope">
+      <p>
+        {selected.organization}
+        {selected.repository && ` · repository ${selected.repository}`}
+        {selected.workstream && ` · workstream ${selected.workstream}`} · {actorFilterLabels[selected.actors ?? "all"]}
+        <br />
+        {selected.start ? `${selected.start} to ${selected.end} (end exclusive)` : "All-time materialized scope"}
+      </p>
+      <PublicScopeProvenance scope={selected} compact />
+      <WindowBounds start={selected.start} end={selected.end} timeZone={selected.timeZone ?? "UTC"} />
+    </div>
   );
 }
 function Failure({ error, previousSnapshot }: { error: ReadFailure; previousSnapshot?: SnapshotReference | null }) {
@@ -366,13 +372,7 @@ function WallDisplay({
           const problem = failure instanceof ReadFailure ? failure : new ReadFailure(503, "public_read_unavailable");
           // Expiring cursors do not revoke a frozen snapshot. Wait for the next
           // bounded recheck, then restart this stage under the same publication.
-          if (
-            [
-              "cursor_expired_refetch",
-              "cursor_policy_changed_refetch",
-              "wall_publication_changed_during_read",
-            ].includes(problem.code)
-          )
+          if (["cursor_expired_refetch", "cursor_policy_changed_refetch"].includes(problem.code))
             recovery.current = "page";
           else if (mode !== "frozen" && ["snapshot_expired_refetch", "snapshot_revoked_refetch"].includes(problem.code))
             recovery.current = "cycle";

@@ -585,6 +585,21 @@ fieldset {
   border: 1px solid var(--color-border-strong);
   font: inherit;
 }
+.public-role-options {
+  min-width: 0;
+  border: 1px solid var(--color-border-strong);
+  padding: var(--space-3);
+}
+.remote-filters .public-role-options label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+}
+.remote-filters .public-role-options input {
+  width: auto;
+  flex: 0 0 auto;
+}
 .board-table,
 .data-table,
 .wall-table {
@@ -1005,6 +1020,13 @@ tbody th {
 .controls-page label,
 .controls-page h3 {
   overflow-wrap: anywhere;
+}
+.operator-observation {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.operator-observation dd {
+  min-width: 0;
 }
 
 .policy-comparison {

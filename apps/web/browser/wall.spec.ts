@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { publicContributionRoles } from "@pick-your-ai/contracts";
 import { at, scope, snapshot } from "./wallFixture.ts";
 
 test.use({ storageState: { cookies: [], origins: [] } });
@@ -602,3 +603,93 @@ test("wall freshness and controls fit intended landscape, portrait and overlay d
     await api.close();
   }
 });
+
+for (const publicationRace of [false, true]) {
+  test(`wall preserves final contributor-page progress ${publicationRace ? "after a publication-head race" : "during a coherent recheck"}`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    const api = await service(page);
+    try {
+      await page.goto(wall("cycle"));
+      await expect(page.getByRole("link", { name: "Wall contributor 01", exact: true })).toBeVisible();
+      for (let step = 0; step < 4; step++) await next(page);
+      await expect(page.getByRole("heading", { name: "Contributors in this scope", exact: true })).toBeVisible();
+      await expect(page.locator(".api-wall-page")).toContainText("Page 3");
+      await expect(provenance(page)).toContainText("wall-1");
+      if (publicationRace) api.publishBetweenHealthAndContent();
+      await page.getByRole("button", { name: "Recheck current publication controls" }).click();
+      if (publicationRace) {
+        await expect(page.getByRole("alert")).toContainText("wall_publication_changed_during_read");
+        await expect(page.locator(".api-wall-table")).toHaveCount(0);
+        await expect(page.locator(".api-wall-roll")).toHaveCount(0);
+        await expect(page.getByRole("link", { name: /^Wall contributor/ })).toHaveCount(0);
+        await expect(provenance(page)).toHaveCount(0);
+        await page.getByRole("button", { name: "Recheck current publication controls" }).click();
+      }
+      await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeEnabled();
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      await expect(page.locator(".api-wall-page")).toContainText("Page 3");
+      await expect(provenance(page)).toContainText("wall-1");
+      await expect(page.getByRole("link", { name: "Wall contributor 13", exact: true })).toBeVisible();
+      if (!publicationRace) api.next();
+      await next(page);
+      await expect(page.getByRole("heading", { name: "PRs merged", exact: true })).toBeVisible();
+      await expect(page.locator(".api-wall-page")).toContainText("Page 1");
+      await expect(provenance(page)).toContainText("wall-2");
+      await expect(page.locator(".api-wall-table tbody tr").first()).toContainText("90");
+    } finally {
+      await api.close();
+    }
+  });
+}
+
+for (const projects of [[], ["PVT_A", "PVT_B="]]) {
+  test(`all contribution roles keep a populated overlay within its viewport with ${projects.length ? "short Projects" : "all Projects"}`, async ({
+    page,
+  }) => {
+    const api = await service(page);
+    try {
+      api.stale();
+      await page.setViewportSize({ width: 960, height: 540 });
+      await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+      const params = new URLSearchParams({
+        format: "overlay",
+        context: "current",
+        role: publicContributionRoles.join(","),
+      });
+      if (projects.length) params.set("project", projects.join(","));
+      await page.goto(wall("cycle", `&${params}`));
+      await expect(page.locator(".api-wall-table tbody tr")).toHaveCount(3);
+      await expect(page.getByText("STALE OR DEGRADED DATA", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Pause wall", exact: true })).toBeInViewport();
+      expect(
+        await page.evaluate(() => ({
+          width: document.documentElement.scrollWidth,
+          height: document.documentElement.scrollHeight,
+        })),
+      ).toEqual({ width: 960, height: 540 });
+      const summary = page.locator(".api-wall-scope summary");
+      await expect(summary).toContainText("Contribution roles: 9 selected");
+      await expect(summary).toContainText(
+        projects.length ? "GitHub Projects: 2 selected" : "GitHub Projects: all in this materialized scope",
+      );
+      await summary.focus();
+      await summary.press("Enter");
+      const complete = page.locator(".api-wall-scope .public-scope-provenance");
+      await expect(complete).toBeVisible();
+      for (const role of publicContributionRoles)
+        await expect(complete).toContainText(role[0]!.toUpperCase() + role.slice(1));
+      await expect(complete).toContainText(
+        `GitHub Projects: ${projects.length ? projects.join(", ") : "all in this materialized scope"}`,
+      );
+      await summary.press("Enter");
+      expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(540);
+      expect(
+        (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
+      ).toEqual([]);
+    } finally {
+      await api.close();
+    }
+  });
+}
