@@ -25,6 +25,15 @@ const policyDigest = (value) => createHash("sha256").update(value).digest("hex")
 const scopeKey = (scope) =>
   JSON.stringify([scope.organization, scope.repository, scope.workstream, scope.start, scope.end]);
 const copy = (value) => structuredClone(value);
+// Private preview records retain labels only. Provider bindings stay in the
+// restricted normalization store and are restored transiently before engine use.
+const previewActor = ({ id, login, kind, publicState, executionMode }) => ({
+  id,
+  login,
+  kind,
+  publicState,
+  ...(executionMode === undefined ? {} : { executionMode }),
+});
 const utc = (value) => {
   if (
     typeof value !== "string" ||
@@ -123,6 +132,62 @@ export async function createPipeline(options) {
         409,
         "Frozen input source authorization changed",
       );
+      const restoredActors = new Map();
+      for (const authorization of authorizations) {
+        const binding = authorization.identityEvidence;
+        // Legacy, non-service-account captures remain readable. The engine still
+        // rejects service accounts without their reviewed provider-bound evidence.
+        if (binding === undefined) continue;
+        requireThat(
+          binding?.schemaVersion === "pipeline-identity-evidence/v1" &&
+            Array.isArray(binding.normalizationHashes) &&
+            binding.normalizationHashes.length <= 10000 &&
+            binding.normalizationHashes.every((hash) => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash)) &&
+            new Set(binding.normalizationHashes).size === binding.normalizationHashes.length,
+          409,
+          "Frozen identity evidence binding unavailable",
+        );
+        const rows = (
+          await tx.query(
+            `SELECT n.document,n.document_hash FROM leaderboard_pipeline.normalizations AS n
+           JOIN leaderboard_ingestion.source_facts AS f ON f.fact_key=n.fact_key
+           WHERE n.document_hash=ANY($1::text[]) AND n.policy_signature=$2
+             AND f.repository_id=ANY($3::bigint[]) LIMIT 10001 FOR SHARE OF n`,
+            [
+              binding.normalizationHashes,
+              digest(["current-state-selection-v1", dataMode, config.policies.map((item) => item.signature)]),
+              authorization.sources.map((source) => source.repositoryId),
+            ],
+          )
+        ).rows;
+        requireThat(
+          rows.length <= 10000 &&
+            new Set(rows.map((row) => row.document_hash)).size === binding.normalizationHashes.length,
+          409,
+          "Frozen identity evidence unavailable",
+        );
+        const actors = new Map();
+        for (const row of rows) {
+          requireThat(
+            digest(row.document) === row.document_hash &&
+              row.document.isSynthetic === (dataMode === "synthetic") &&
+              Array.isArray(row.document.actors),
+            409,
+            "Frozen identity evidence integrity failure",
+          );
+          assertDataMode(row.document);
+          for (const actor of row.document.actors) {
+            const previous = actors.get(actor.id);
+            requireThat(
+              !previous || canonical(previous) === canonical(actor),
+              409,
+              "Frozen identity evidence conflict",
+            );
+            actors.set(actor.id, actor);
+          }
+        }
+        restoredActors.set(digest(authorization), actors);
+      }
       const removed = (
         await tx.query(
           "SELECT subject_id FROM leaderboard_ingestion.object_suppressions WHERE repository_id=ANY($1::bigint[])",
@@ -146,21 +211,49 @@ export async function createPipeline(options) {
           )
         )
           removed.push(correction.artifact_id);
-      return work(removed, {
-        refreshApproval: () => approved(tx),
-        isCurrent(session) {
-          // The host must atomically read its authoritative roster/configuration
-          // cache. Two independently awaited checks cannot establish this fence.
-          if (typeof options.policyComparisonAuthorityCurrent !== "function") return false;
-          const current = options.policyComparisonAuthorityCurrent({
-            configurationHash: digest(config),
-            actorId: session.actorId,
-            roleVersion: session.roleVersion,
-          });
-          if (current && typeof current.then === "function") void Promise.resolve(current).catch(() => undefined);
-          return current === true;
+      return work(
+        removed,
+        {
+          refreshApproval: () => approved(tx),
+          restoreInput(input, authorization) {
+            if (authorization.identityEvidence === undefined) return input;
+            const actors = restoredActors.get(digest(authorization));
+            requireThat(actors, 409, "Frozen identity evidence unavailable");
+            return {
+              ...input,
+              actors: input.actors.map((actor) => {
+                const source = actors.get(actor.id);
+                requireThat(
+                  source && canonical(previewActor({ ...source, publicState: actor.publicState })) === canonical(actor),
+                  409,
+                  "Frozen actor identity changed",
+                );
+                return {
+                  ...actor,
+                  ...(source.githubDatabaseId === undefined ? {} : { githubDatabaseId: source.githubDatabaseId }),
+                  ...(source.githubNodeId === undefined ? {} : { githubNodeId: source.githubNodeId }),
+                  ...(source.serviceAccountClassification === undefined
+                    ? {}
+                    : { serviceAccountClassification: copy(source.serviceAccountClassification) }),
+                };
+              }),
+            };
+          },
+          isCurrent(session) {
+            // The host must atomically read its authoritative roster/configuration
+            // cache. Two independently awaited checks cannot establish this fence.
+            if (typeof options.policyComparisonAuthorityCurrent !== "function") return false;
+            const current = options.policyComparisonAuthorityCurrent({
+              configurationHash: digest(config),
+              actorId: session.actorId,
+              roleVersion: session.roleVersion,
+            });
+            if (current && typeof current.then === "function") void Promise.resolve(current).catch(() => undefined);
+            return current === true;
+          },
         },
-      });
+        tx,
+      );
     });
   }
   const defaultSource = options.githubClient
@@ -791,6 +884,8 @@ export async function createPipeline(options) {
       observationCutoff,
       dispatch,
     );
+    // Only persisted provider normalizations can restore identity; recognition overlays are transient.
+    const normalizationHashes = [...new Set(outputs.map(digest))].sort();
     const suppressedArtifactIds = new Set(outputs.flatMap((output) => output.suppressArtifactIds ?? []));
     if (recognitionBindings.length) {
       const combined = {
@@ -840,7 +935,7 @@ export async function createPipeline(options) {
         const previous = actors.get(actor.id);
         if (previous && c.metrics.stableJSON(previous) !== c.metrics.stableJSON(actor))
           fail("conflicting_actor_metadata");
-        actors.set(actor.id, actor);
+        actors.set(actor.id, copy(actor));
       }
       for (const entry of output.evidence) {
         const id = entry.contribution.contributionId,
@@ -897,13 +992,8 @@ export async function createPipeline(options) {
       cutoff: observationCutoff,
       backfillRevision: digest(outputs),
       repositoryIds: repos.map((repo) => String(repo.id)),
-      actors: [...actors.values()].map(({ id, login, kind, publicState, executionMode }) => ({
-        id,
-        login,
-        kind,
-        publicState,
-        ...(executionMode === undefined ? {} : { executionMode }),
-      })),
+      // Validate all provider bindings before any privacy projection.
+      actors: [...actors.values()],
       facts: [...facts, ...corrections],
       coverage,
     };
@@ -1051,7 +1141,7 @@ export async function createPipeline(options) {
     const snapshotId = digest(content);
     if (priorPublication && priorPublication.snapshotId !== snapshotId) fail("dispatch_snapshot_replay_changed");
     const comparisonInputFor = (publication) => ({
-      input: frozen,
+      input: { ...frozen, actors: frozen.actors.map(previewActor) },
       scope: engineScope,
       policies: config.policies.map((item) => item.policy),
       aggregates,
@@ -1060,6 +1150,10 @@ export async function createPipeline(options) {
         configurationHash: digest(config),
         dataMode,
         controlsConfigurationRevision: runConfigurationRevision,
+        identityEvidence: {
+          schemaVersion: "pipeline-identity-evidence/v1",
+          normalizationHashes,
+        },
         sources: generations.map((row) => ({
           repositoryId: String(row.repository_id),
           generation: String(row.generation),
@@ -1178,7 +1272,13 @@ export async function createPipeline(options) {
         ON CONFLICT (scope_key) DO UPDATE SET snapshot_id=EXCLUDED.snapshot_id,revision=EXCLUDED.revision`,
           [scopeKey(scope), snapshotId, revision],
         );
-        const frozenDocument = { frozen, engineScope, scope, policies: config.policies };
+        const frozenDocument = {
+          frozen: { ...frozen, actors: frozen.actors.map(previewActor) },
+          identityAuthorization: comparisonInputFor({ snapshotId, revision }).authorization,
+          engineScope,
+          scope,
+          policies: config.policies,
+        };
         await tx.query(
           "INSERT INTO leaderboard_pipeline.frozen_inputs(snapshot_id,document,document_hash) VALUES($1,$2::jsonb,$3)",
           [snapshotId, JSON.stringify(frozenDocument), digest(frozenDocument)],
@@ -1528,7 +1628,17 @@ export async function createPipeline(options) {
       const guard = await policyInputGuard(snapshotId, saved.document);
       const previous = saved.document.policies.find((p) => p.policy.metricId === policy.metricId)?.policy;
       if (!previous) fail("policy_metric_not_in_snapshot");
-      const comparison = c.metrics.comparePolicies(saved.document.frozen, previous, policy, saved.document.engineScope);
+      const compare = (input) => c.metrics.comparePolicies(input, previous, policy, saved.document.engineScope);
+      const comparison = saved.document.identityAuthorization
+        ? await withAuthorizedComparisonInputs(
+            [saved.document.identityAuthorization],
+            async (_removed, authority, tx) => {
+              if (guard !== (await policyInputGuard(snapshotId, saved.document, tx))) fail("policy_input_changed");
+              const input = authority.restoreInput(saved.document.frozen, saved.document.identityAuthorization);
+              return compare(input);
+            },
+          )
+        : compare(saved.document.frozen);
       const document = { snapshotId, guard, comparison, previousPolicy: previous, targetPolicy: copy(policy) };
       const comparisonId = digest(document);
       await db.query(

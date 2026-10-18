@@ -23,7 +23,11 @@ export async function harness(t, extra = {}) {
   const directory = await mkdtemp(join(tmpdir(), "leaderboard-pipeline-"));
   let engine = new PGlite(join(directory, "postgres"));
   const db = {
-    query: (sql, params) => engine.query(sql, params),
+    query: async (sql, params) => {
+      const result = await engine.query(sql, params);
+      if (extra.reverseNormalizationRows && sql.includes("SELECT fact.*")) result.rows.reverse();
+      return result;
+    },
     transaction: (work) => engine.transaction((tx) => work({ query: (sql, params) => tx.query(sql, params) })),
   };
   for (const name of [
@@ -94,6 +98,7 @@ export async function harness(t, extra = {}) {
       user: { id: 102, node_id: "U_SYNTHETIC_B", login: "synthetic-bob", type: "User" },
     },
   ];
+  if (extra.transformPayloads) payloads = extra.transformPayloads(payloads);
   const githubClient = new components.github.GithubReadClient({
     apiOrigin: "https://api.synthetic.invalid",
     token: async () => "synthetic-test-token",
@@ -177,6 +182,7 @@ export async function harness(t, extra = {}) {
     reviewers: [{ actorId: "201", roleVersion: "1" }],
   });
   options.policyComparisonAuthorityCurrent ??= authority.isCurrent;
+  if (extra.normalizerFactory) options.normalizer = extra.normalizerFactory(options);
   const runtime = await createPipeline(options);
   t.after(async () => {
     await runtime.stop();
