@@ -575,7 +575,12 @@ test("default collection adapter rejects a revoked response before following its
       cursor: null,
       limit: 100,
     }),
-    /synthetic_source_revoked/,
+    (error) => {
+      assert.ok(error instanceof components.github.GithubClientError);
+      assert.equal(error.outcome.kind, "unsafe_request");
+      assert.equal(error.message, "GitHub source request failed: unsafe_request");
+      return true;
+    },
   );
   assert.equal(calls.length, 2);
   assert.equal(
