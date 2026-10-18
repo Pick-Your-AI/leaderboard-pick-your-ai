@@ -550,10 +550,14 @@ export function normalizeGithubObservation(
       if (previous && previous.kind !== parsed.kind) throw new Error("Conflicting observed actor kinds");
       // Retain a later evidenced node on the same database ID for cross-observation checks.
       if (previous && !previous.githubNodeId && parsed.githubNodeId) previous.githubNodeId = parsed.githubNodeId;
-      if (!previous) {
-        registeredActors.set(parsed.id, parsed);
-        out.actors.push(parsed);
+      if (previous) {
+        // One account may occupy several roles in the same observation. Unknown
+        // execution in another role must not erase positively evidenced automation.
+        if (parsed.executionMode === "automated") previous.executionMode = "automated";
+        return previous;
       }
+      registeredActors.set(parsed.id, parsed);
+      out.actors.push(parsed);
     }
     return parsed;
   };

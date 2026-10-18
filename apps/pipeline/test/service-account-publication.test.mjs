@@ -171,6 +171,124 @@ for (const recognition of [false, true])
     );
   });
 
+for (const legacyUnknown of [false, true])
+  for (const reverse of [false, true])
+    test(`mixed execution observations publish and replay one User; legacy=${legacyUnknown}, reverse=${reverse}`, async (t) => {
+      const { createPolicyComparisonManager } = await import("../../controls/src/policy-comparison.mjs");
+      const h = await harness(t, {
+        authorizePolicyPreview: async () => true,
+        reverseNormalizationRows: reverse,
+        transformPayloads: (payloads) => {
+          payloads[1].user = structuredClone(payloads[0].user);
+          payloads[1].sender = structuredClone(payloads[0].user);
+          payloads[1].execution_mode = "automated";
+          return payloads;
+        },
+        normalizerFactory: (options) => {
+          const normalize = components.github.createGithubEvidenceNormalizer({
+            client: options.githubClient,
+            source: options.sourceId,
+            allowedRepositoryIds: [2],
+            isSynthetic: true,
+          });
+          return async (input) => {
+            const output = await normalize(input);
+            if (legacyUnknown)
+              for (const actor of output.actors) if (actor.executionMode === "unknown") delete actor.executionMode;
+            return output;
+          };
+        },
+      });
+      const publication = (await h.runtime.runOnce()).publications[0];
+      const modes = (await h.db.query("SELECT document FROM leaderboard_pipeline.normalizations")).rows.flatMap((row) =>
+        row.document.actors.map((actor) => actor.executionMode ?? "legacy"),
+      );
+      assert.deepEqual(modes.sort(), ["automated", legacyUnknown ? "legacy" : "unknown"].sort());
+      assert.equal(publication.comparisonInput.state, "retained");
+      const record = h.runtime.policyComparisons.comparisons.input(publication.comparisonInput.inputId);
+      assert.equal(record.input.actors.length, 1);
+      assert.equal(record.input.actors[0].kind, "user");
+      assert.equal(record.input.actors[0].executionMode, "automated");
+      for (const filter of ["all", "user", "automation"]) {
+        const response = await h.runtime.app.inject(`${boardUrl}&actors=${filter}`);
+        assert.equal(response.statusCode, 200, response.body);
+        assert.deepEqual(
+          response.json().rows.map((row) => [row.actorId, row.result.value]),
+          [["101", 2]],
+        );
+        const exported = await h.runtime.app.inject(`/api/v1/exports?metric=issues_opened&actors=${filter}`);
+        assert.equal(exported.statusCode, 200, exported.body);
+        assert.deepEqual(
+          exported.json().rows.map((row) => [row.actorId, row.actorKind, row.executionMode]),
+          [["101", "user", "automated"]],
+        );
+      }
+      const sqlPreview = await h.runtime.previewPolicy({
+        snapshotId: publication.snapshotId,
+        policy: { ...record.policies[0], version: "synthetic-mixed-execution-sql-v2", rank: false },
+        operatorId: "201",
+      });
+      assert.deepEqual(
+        sqlPreview.comparison.before.rows.map((row) => [row.actorId, row.value]),
+        [["101", 2]],
+      );
+      const session = {
+        sid: "synthetic-mixed-execution-reviewer",
+        actorId: "201",
+        roles: ["reviewer"],
+        roleVersion: "1",
+        expires: Date.now() + 600_000,
+      };
+      h.controlsStore.transaction((state) => {
+        state.sessions[session.sid] = session;
+      });
+      const request = {
+        path: "/controls/policy-comparisons",
+        method: "POST",
+        session,
+        refreshSession: async () => session,
+        input: {
+          inputId: record.id,
+          candidatePolicy: { ...record.policies[0], version: "synthetic-mixed-execution-private-v2", rank: false },
+        },
+      };
+      const result = await createPolicyComparisonManager(h.runtime.policyComparisons)(request);
+      assert.equal(result.status, 200);
+      assert.deepEqual(
+        result.data.before.rows.map((row) => [row.actorId, row.value]),
+        [["101", 2]],
+      );
+      const restarted = await createPipeline(h.options);
+      t.after(() => restarted.stop());
+      assert.deepEqual(await createPolicyComparisonManager(restarted.policyComparisons)(request), result);
+      assert.deepEqual(
+        await restarted.previewPolicy({
+          snapshotId: publication.snapshotId,
+          policy: { ...record.policies[0], version: "synthetic-mixed-execution-sql-v2", rank: false },
+          operatorId: "201",
+        }),
+        sqlPreview,
+      );
+    });
+
+for (const conflict of ["login", "kind"])
+  test(`positive automation does not hide conflicting ${conflict} metadata`, async (t) => {
+    const h = await harness(t, {
+      transformPayloads: (payloads) => {
+        payloads[1].user = {
+          ...payloads[0].user,
+          ...(conflict === "login" ? { login: "synthetic-conflicting-login" } : { type: "Bot" }),
+        };
+        payloads[1].sender = structuredClone(payloads[1].user);
+        payloads[1].execution_mode = "automated";
+        return payloads;
+      },
+    });
+    await assert.rejects(h.runtime.runOnce(), /conflicting_actor_metadata/);
+    assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 0);
+    assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM policy_preview_inputs").get().n, 0);
+  });
+
 for (const conflict of ["shared_node", "shared_database_id"])
   for (const reverse of [false, true])
     test(`pipeline rejects cross-observation ${conflict} before publication in ${reverse ? "reverse" : "forward"} order`, async (t) => {
