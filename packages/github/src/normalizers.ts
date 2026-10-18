@@ -208,6 +208,8 @@ export interface GithubLineage {
 }
 export interface NormalizedGithubResult {
   isSynthetic: boolean;
+  /** Private provenance retained when the pipeline combines observation results. */
+  syntheticFactIds?: readonly string[];
   facts: NormalizedGithubFact[];
   actors: NormalizedGithubActor[];
   evidence: NormalizedPublicEvidence[];
@@ -1317,6 +1319,23 @@ export function applyRecognitionReceipt(
   ) {
     throw new Error("Independent verified recognition receipt is required");
   }
+  // A generic receipt cannot turn a PR, closing action or synthetic fixture into
+  // a confirmed report. The issue proof must identify this exact source fact.
+  if (
+    receipt.metricId === "confirmed_bugs" &&
+    (input.isSynthetic === true ||
+      input.syntheticFactIds?.includes(target.id) ||
+      target.metricId !== "issues_opened" ||
+      !target.artifactId ||
+      !targetEvidence ||
+      input.evidence.filter((entry) => entry.contribution.contributionId === target.id).length !== 1 ||
+      targetEvidence.artifact.kind !== "issue" ||
+      targetEvidence.artifact.stableId !== target.artifactId ||
+      targetEvidence.contribution.artifactId !== target.artifactId ||
+      targetEvidence.artifact.repositoryId !== target.repoId ||
+      targetEvidence.contribution.actorId !== target.actorId)
+  )
+    throw new Error("Confirmed bug recognition requires a nonsynthetic issue source");
   // Localization is one PR/language/category unit. A bulk changeset must never
   // collapse different languages or mint another unit for the same source fact.
   const unit = receipt.metricId === "localization" ? target.canonicalKey : (receipt.changesetId ?? target.canonicalKey);
