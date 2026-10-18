@@ -1,4 +1,5 @@
 export { actorFilterSchema, actorFilterLabels, matchesActorFilter, type ActorFilter } from "./actor-filter.js";
+export { compareSourceInstants } from "./v1/source-time.js";
 
 export {
   actorIdentityStateSchema,
