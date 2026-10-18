@@ -1245,14 +1245,16 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       throw new Error("Pipeline policy and observation time are required");
     if (input.family === "relationships" || input.family === "project_history") {
       const match = input.fact.sourceUrl.match(
-        new RegExp(`^https://github\\.com/${input.repository.slug.replaceAll(".", "\\.")}/issues/([1-9]\\d*)$`),
+        new RegExp(`^https://github\\.com/${input.repository.slug.replaceAll(".", "\\.")}/(issues|pull)/([1-9]\\d*)$`),
       );
-      if (!match) return none("typed_history_subject_url_unverified");
+      if (!match || (match[1] === "pull" && input.family !== "project_history"))
+        return none("typed_history_subject_url_unverified");
       const records = await readTypedIssueHistory({
         client: options.client,
         source: options.source,
         repository: input.repository,
-        number: Number(match[1]),
+        number: Number(match[2]),
+        subjectType: match[1] === "pull" ? "pull_request" : "issue",
         family: input.family,
         scanId: input.factKey,
         ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),

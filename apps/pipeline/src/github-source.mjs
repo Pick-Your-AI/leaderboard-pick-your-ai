@@ -133,19 +133,25 @@ export function createGithubCollectionSource({
           (!Array.isArray(repository.allowedProjectIds) || !repository.allowedProjectIds.length)
         )
           throw new Error("approved_project_scope_required");
-        const subjects = await scan(`${request.family}:subjects`, routes.issues, (items) =>
-          items.filter((item) => !item.pull_request),
+        // Old Project checkpoints contain filtered issue-only inventories; do not reuse them for PR coverage.
+        const subjects = await scan(
+          request.family === "project_history" ? "project_history:issue-and-pr-subjects" : "relationships:subjects",
+          routes.issues,
+          (items) => (request.family === "project_history" ? items : items.filter((item) => !item.pull_request)),
         );
         if (subjects.length > 10000) throw new Error("source_dataset_budget_exceeded");
         values = [];
+        const seen = new Set();
         for (const subject of subjects) {
-          if (!Number.isSafeInteger(subject.number) || subject.number < 1)
+          if (!Number.isSafeInteger(subject.number) || subject.number < 1 || seen.has(subject.number))
             throw new Error("history_subject_unverified");
+          seen.add(subject.number);
           const records = await readTypedIssueHistory({
             client,
             source: sourceId,
             repository,
             number: subject.number,
+            subjectType: subject.pull_request ? "pull_request" : "issue",
             family: request.family,
             scanId: request.runId,
             maxPages,

@@ -10,17 +10,28 @@ export interface TypedHistoryRecord {
 export const typedHistoryRevision = (value: TypedHistoryRecord): string =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
-/** Selected native histories only; no reconstruction from current Project/relationship fields. */
+/** Selected native issue/PR histories only; no reconstruction from current Project/relationship fields. */
 export async function readTypedIssueHistory(options: {
   client: GithubReadClient;
   source: string;
   repository: { id: number; slug: string; allowedProjectIds?: readonly string[] };
   number: number;
+  /** Project status history supports both subjects; native relationships remain issue-only. */
+  subjectType?: "issue" | "pull_request";
   family: "relationships" | "project_history";
   scanId: string;
   maxPages?: number;
   assertAuthorized?: () => void;
 }): Promise<TypedHistoryRecord[]> {
+  const subjectType = options.subjectType ?? "issue";
+  if (
+    !["issue", "pull_request"].includes(subjectType) ||
+    (options.family === "relationships" && subjectType !== "issue")
+  )
+    throw new Error("typed_history_subject_kind_unsupported");
+  const subjectField = subjectType === "pull_request" ? "pullRequest" : "issue";
+  const subjectPath = subjectType === "pull_request" ? "pull" : "issues";
+  const subjectKey = subjectType === "pull_request" ? `pull_request:${options.number}` : options.number;
   if (
     options.family === "project_history" &&
     (!Array.isArray(options.repository.allowedProjectIds) ||
@@ -55,9 +66,9 @@ export async function readTypedIssueHistory(options: {
       : "PROJECT_V2_ITEM_STATUS_CHANGED_EVENT";
   const records = await options.client.scanGraphql<TypedHistoryRecord>({
     source: options.source,
-    key: `typed-history:${options.repository.id}:${options.family}:${options.number}:${options.scanId}`,
+    key: `typed-history:${options.repository.id}:${options.family}:${subjectKey}:${options.scanId}`,
     query: `query($owner:String!, $name:String!, $number:Int!, $first:Int!, $after:String) {
-      repository(owner:$owner,name:$name) { databaseId isPrivate issue(number:$number) {
+      repository(owner:$owner,name:$name) { databaseId isPrivate ${subjectField}(number:$number) {
         id url timelineItems(first:$first,after:$after,itemTypes:[${types}]) {
           nodes { __typename ${fragments} } pageInfo { hasNextPage endCursor }
         }
@@ -68,26 +79,27 @@ export async function readTypedIssueHistory(options: {
     ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
     select(data) {
       const repo = object(data) && object(data.repository) ? data.repository : null;
+      const item = repo?.[subjectField];
       if (
         !repo ||
         repo.databaseId !== options.repository.id ||
         repo.isPrivate !== false ||
-        !object(repo.issue) ||
-        typeof repo.issue.id !== "string" ||
-        repo.issue.url !== `https://github.com/${options.repository.slug}/issues/${options.number}` ||
-        !object(repo.issue.timelineItems) ||
-        !Array.isArray(repo.issue.timelineItems.nodes) ||
-        !object(repo.issue.timelineItems.pageInfo)
+        !object(item) ||
+        typeof item.id !== "string" ||
+        item.url !== `https://github.com/${options.repository.slug}/${subjectPath}/${options.number}` ||
+        !object(item.timelineItems) ||
+        !Array.isArray(item.timelineItems.nodes) ||
+        !object(item.timelineItems.pageInfo)
       )
         throw new Error("typed_history_subject_unverified");
-      const subject = { id: repo.issue.id, url: repo.issue.url as string };
+      const subject = { id: item.id, url: item.url as string };
       return {
-        nodes: repo.issue.timelineItems.nodes.map((event): TypedHistoryRecord => {
+        nodes: item.timelineItems.nodes.map((event): TypedHistoryRecord => {
           if (!object(event) || typeof event.id !== "string" || typeof event.createdAt !== "string")
             throw new Error("typed_history_event_unverified");
           return { event, subject };
         }),
-        pageInfo: repo.issue.timelineItems.pageInfo as { hasNextPage: boolean; endCursor: string | null },
+        pageInfo: item.timelineItems.pageInfo as { hasNextPage: boolean; endCursor: string | null },
       };
     },
   });

@@ -206,8 +206,13 @@ async function getBoard(runtime, suffix = "") {
   return response.json();
 }
 
-for (const loss of ["private", "hidden", "controls_failure"])
-  test(`confirmed ${loss} Project revokes current and pinned publications until a new approved configuration`, async (t) => {
+for (const [loss, subjectType] of [
+  ["private", "issue"],
+  ["hidden", "issue"],
+  ["controls_failure", "issue"],
+  ["private", "pull_request"],
+])
+  test(`confirmed ${loss} Project revokes current and pinned ${subjectType} publications until a new approved configuration`, async (t) => {
     const h = await harness(t);
     const config = structuredClone(h.options.config);
     config.repositories[0].families = ["project_history"];
@@ -235,15 +240,23 @@ for (const loss of ["private", "hidden", "controls_failure"])
     const current = () => ({ ...stableEvent, project: { ...stableEvent.project, public: publicProject } });
     const client = {
       rest: async () => ({ id: 2, private: false }),
-      scanRest: async (o) => o.select([{ id: 1, node_id: "I_synthetic", number: 1 }]),
+      scanRest: async (o) =>
+        o.select([
+          {
+            id: 1,
+            node_id: subjectType === "pull_request" ? "PR_synthetic" : "I_synthetic",
+            number: 1,
+            ...(subjectType === "pull_request" ? { pull_request: {} } : {}),
+          },
+        ]),
       scanGraphql: async (o) =>
         o.select({
           repository: {
             databaseId: 2,
             isPrivate: false,
-            issue: {
-              id: "I_synthetic",
-              url: "https://github.com/synthetic-org/synthetic-repo/issues/1",
+            [subjectType === "pull_request" ? "pullRequest" : "issue"]: {
+              id: subjectType === "pull_request" ? "PR_synthetic" : "I_synthetic",
+              url: `https://github.com/synthetic-org/synthetic-repo/${subjectType === "pull_request" ? "pull" : "issues"}/1`,
               timelineItems: { nodes: [current()], pageInfo: { hasNextPage: false, endCursor: null } },
             },
           },
