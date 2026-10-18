@@ -188,6 +188,10 @@ test("mutable review and Discussion snapshots replace current credit while pinne
     entry.contribution.metricIds.includes("discussion_answers"),
   );
   assert.equal(initialAnswer.contribution.actorId, "404");
+  assert.equal(initialAnswer.evidenceMetadata.activityState, "observed");
+  assert.equal(initialAnswer.evidenceMetadata.acceptedAt, null);
+  assert.equal(initialAnswer.evidenceMetadata.sourceOccurredAt, at);
+  assert.equal(initialAnswer.evidenceMetadata.artifactTitle, null);
 
   // Neither REST submitted_at nor GraphQL updatedAt changes on these mutations.
   review = { ...review, state: "DISMISSED" };

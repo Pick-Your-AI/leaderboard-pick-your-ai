@@ -77,6 +77,7 @@ export async function harness(t, extra = {}) {
     {
       id: 1001,
       node_id: "SYNTHETIC_ISSUE_1",
+      title: "Synthetic collected issue title",
       number: 1,
       html_url: `https://github.com/${slug}/issues/1`,
       created_at: ago(2),

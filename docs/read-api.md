@@ -313,11 +313,6 @@ while reading. Rechecks retain stable keyed DOM when content is unchanged; curre
 privacy removals still take effect immediately. New data is applied through the
 existing explicit update control or opt-in safe-boundary follow behavior.
 
-Remaining #121 criteria: the projection does not retain an action discriminator,
-acceptance timestamp or correction-event history. The response explicitly declares
-`correctionHistory: "not_supplied"`; neither accepted work nor current privacy
-controls are invented correction events. Title/action/correction enrichment needs
-a reviewed public producer contract. Real source capability, deployed live
-refresh, human approval of the one-hour grouping default, assistive-technology
-journeys and affected-owner acceptance remain open. Synthetic tests alone do not
-close #121.
+Optional [versioned evidence metadata](public-evidence-metadata.md) carries credited-fact actions, as-collected titles, original source and collection clocks, independently receipted acceptance times and explicitly public partial revision/correction records. Activity detail uses the same permitted-evidence renderer as the drawer and permanent route. The envelope declares `correctionHistory: "per_proof"`; it does not assert a complete correction-event timeline. Missing metadata remains unknown and no current privacy-control change is invented as an activity event.
+
+Remaining #121 criteria include real source capability and public history provenance, deployed live refresh, human approval of the one-hour grouping default, assistive-technology journeys and affected-owner acceptance. Complete historical correction chronology and unavailable historic fields remain outside this partial implementation. Synthetic tests alone do not close #121.

@@ -27,6 +27,16 @@ test("actual source transport, collection, normalizer, metric engine and API pre
       ["102", 1, 1],
     ],
   );
+  const id = board.rows.find((row) => row.actorId === "101").evidenceIds[0];
+  const proof = (await h.runtime.app.inject(`/api/v1/evidence/${id}?snapshot=${board.snapshotId}`)).json();
+  assert.equal(proof.evidenceMetadata.schemaVersion, "leaderboard-evidence/v1");
+  assert.equal(proof.evidenceMetadata.artifactTitle.value, "Synthetic collected issue title");
+  assert.equal(proof.evidenceMetadata.artifactTitle.basis, "as_collected");
+  assert.equal(proof.evidenceMetadata.sourceAction, "artifact_created");
+  assert.equal(proof.evidenceMetadata.acceptedAt, null);
+  assert.equal(proof.evidenceMetadata.observedAt, proof.observedAt);
+  assert.equal(proof.evidenceMetadata.sourceOccurredAt, proof.occurredAt);
+  assert.deepEqual(proof.evidenceMetadata.history, { coverage: "not_supplied", records: [] });
   assert.equal(board.coverage[0].state, "partial");
   assert.match(board.computationVersion, /^synthetic-pipeline-/);
   assert.equal(board.methodology[0].policyVersion, "synthetic-policy-v1");
@@ -776,6 +786,13 @@ test("accepted controls receipt materializes a separate lens and withdrawal fenc
   const signal = new AbortController().signal;
   const visible = await runtime.source.read(publicScope, publication.snapshotId, signal);
   assert.equal(visible.selected.rows.find((r) => r.actorId === "101").result.value, 1);
+  const acceptedEvidence = visible.selected.evidence.find((entry) => entry.contribution.actorId === "101");
+  assert.equal(acceptedEvidence.evidenceMetadata.sourceAction, "recognition_accepted");
+  assert.equal(acceptedEvidence.evidenceMetadata.activityState, "accepted");
+  assert.equal(acceptedEvidence.evidenceMetadata.acceptedAt, new Date(event.at).toISOString());
+  assert.equal(acceptedEvidence.evidenceMetadata.artifactTitle.value, "Synthetic collected issue title");
+  assert.notEqual(acceptedEvidence.evidenceMetadata.sourceOccurredAt, acceptedEvidence.evidenceMetadata.acceptedAt);
+  assert.doesNotMatch(JSON.stringify(acceptedEvidence), /synthetic-receipt/);
   await assert.rejects(
     runtime.previewPolicy({
       snapshotId: publication.snapshotId,

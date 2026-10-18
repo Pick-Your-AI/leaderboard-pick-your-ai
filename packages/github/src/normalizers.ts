@@ -1,5 +1,13 @@
 import { classifyDocumentation, validateDocumentationPolicy, type DocumentationPathPolicy } from "./documentation.js";
 import { createHash } from "node:crypto";
+import {
+  publicEvidenceActionSchema,
+  publicEvidenceHistorySchema,
+  publicEvidenceMetadataSchema,
+  type PublicEvidenceMetadata,
+  type PublicEvidenceHistory,
+  type PublicEvidenceAction,
+} from "@pick-your-ai/contracts";
 import { GithubReadClient } from "./client.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
@@ -123,6 +131,7 @@ export interface NormalizedGithubActor {
   executionMode: "automated" | "unknown";
 }
 export interface NormalizedPublicEvidence {
+  evidenceMetadata?: PublicEvidenceMetadata;
   artifact: {
     schemaVersion: "leaderboard/v1";
     source: "github";
@@ -245,6 +254,9 @@ export interface GithubEvidenceEnvelope {
     decisionAt: string | null;
   };
   frozenCutoff?: string;
+  /** Protected host input: individually verified public, minimized records for this artifact.
+   * Never populate from private correction receipts, payload fields or a guessed revision log. */
+  publicHistory?: { approvedPublic: true; history: PublicEvidenceHistory };
 }
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -342,6 +354,61 @@ function resourceId(payload: Record<string, unknown>, kind: string, repoId: numb
   );
 }
 
+/** Names are bounded current-source labels, never historical titles or rendered Markdown. */
+function collectedTitle(resource: Record<string, unknown>, kind: string, observedAt: string) {
+  const raw = resource.title ?? (kind === "release" || kind === "other" ? resource.name : null);
+  if (typeof raw !== "string") return null;
+  const value = raw
+    .replace(/[\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200)
+    .trim();
+  return value ? { value, basis: "as_collected" as const, collectedAt: observedAt } : null;
+}
+function creditedAction(fact: NormalizedGithubFact, family: string, envelopeAction: string): PublicEvidenceAction {
+  if (fact.state === "unknown" || fact.state === "excluded") return "unknown";
+  const actions: Record<string, PublicEvidenceAction> = {
+    pr_opened: "artifact_created",
+    issues_opened: "artifact_created",
+    pr_ready: "pull_request_ready",
+    review_wait: "pull_request_ready",
+    pr_merged: "pull_request_merged",
+    maintainer_merges: "pull_request_merged",
+    issue_closure_stewardship: "issue_closed",
+    issue_answers: "comment_created",
+    prs_reviewed: "review_submitted",
+    review_rounds: "review_submitted",
+    first_reviews: "review_submitted",
+    review_feedback: "review_feedback_created",
+    commits_integrated: "default_branch_integrated",
+    direct_changes: "default_branch_integrated",
+    pr_lines_added: "default_branch_integrated",
+    pr_lines_removed: "default_branch_integrated",
+    pr_lines_changed: "default_branch_integrated",
+    files_changed: "default_branch_integrated",
+    release_stewardship: "release_published",
+    review_threads_resolved: "review_thread_resolved",
+    title_scope_edits: "title_or_body_edited",
+    issue_transfers: "issue_transferred",
+    reverted_delivery: "revert_observed",
+  };
+  if (fact.metricId === "review_wait" && !fact.readyAt) return "unknown";
+  if (fact.metricId === "pr_accepted_rate")
+    return fact.outcome === "merged"
+      ? "pull_request_merged"
+      : fact.outcome === "closed_unmerged"
+        ? "pull_request_closed_unmerged"
+        : "unknown";
+  if (fact.metricId === "pr_coauthored") return fact.state === "pending" ? "unknown" : "pull_request_merged";
+  if (family === "triage" || family === "field_change") {
+    const parsed = publicEvidenceActionSchema.safeParse(envelopeAction);
+    return parsed.success ? parsed.data : "unknown";
+  }
+  if (family === "relationship" && fact.metricId !== "issue_transfers") return "relationship_changed";
+  return actions[fact.metricId] ?? "unknown";
+}
+
 /** Normalize explicit public source facts. No field is taken from arbitrary user text. */
 export function normalizeGithubObservation(
   envelope: GithubEvidenceEnvelope,
@@ -412,6 +479,11 @@ export function normalizeGithubObservation(
   }
   const at = time(envelope.occurredAt);
   const sourceAction = envelope.action ?? text(payload.action) ?? "snapshot";
+  const history =
+    envelope.publicHistory?.approvedPublic === true
+      ? publicEvidenceHistorySchema.parse(envelope.publicHistory.history)
+      : { coverage: "not_supplied" as const, records: [] };
+  const artifactTitle = collectedTitle(resource, kind, observedAt);
   const observationId = proof.eventId
     ? stable("event", proof.eventId)
     : stable("observation", id, proof.source, proof.revision, sourceAction);
@@ -491,7 +563,19 @@ export function normalizeGithubObservation(
       },
       occurredAt: fact.occurredAt,
       sourceRevision: proof.revision,
-      sourceRevisionUrl: null,
+      sourceRevisionUrl:
+        kind === "commit" && resource.sha === proof.revision && pinnedSha(proof.revision) ? publicUrl : null,
+      evidenceMetadata: publicEvidenceMetadataSchema.parse({
+        schemaVersion: "leaderboard-evidence/v1",
+        artifactTitle,
+        sourceAction: creditedAction(fact, envelope.family, sourceAction),
+        sourceOccurredAt: fact.occurredAt,
+        observedAt,
+        activityState: fact.state === "observed" || fact.state === "pending" ? fact.state : "unknown",
+        // An observed ratio decision also has an internal acceptedAt clock. It is not recognition.
+        acceptedAt: null,
+        history: structuredClone(history),
+      }),
     });
     return fact;
   };
@@ -1012,13 +1096,23 @@ export function applyRecognitionReceipt(
     out.evidence.push({
       ...structuredClone(evidence),
       occurredAt: fact.acceptedAt,
+      ...(evidence.evidenceMetadata
+        ? {
+            evidenceMetadata: {
+              ...structuredClone(evidence.evidenceMetadata),
+              sourceAction: receipt.decision === "accepted" ? ("recognition_accepted" as const) : ("unknown" as const),
+              activityState: receipt.decision === "accepted" ? ("accepted" as const) : ("unknown" as const),
+              acceptedAt: receipt.decision === "accepted" ? fact.acceptedAt : null,
+            },
+          }
+        : {}),
       contribution: {
         ...evidence.contribution,
         contributionId: fact.id,
         canonicalEventId: fact.canonicalKey,
         metricIds: [fact.metricId],
         qualification: receipt.decision === "accepted" ? "eligible" : "ineligible",
-        reasonCodes: ["independent_recognition_receipt", receipt.id],
+        reasonCodes: ["independent_recognition_receipt"],
       },
     });
   return out;
