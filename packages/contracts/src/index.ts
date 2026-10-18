@@ -40,6 +40,17 @@ export {
   participationWeekDenominator,
   type PublicParticipation,
 } from "./v1/participation.js";
+export {
+  participationHistoryVersion,
+  participationHistoryResponseByteLimit,
+  participationHistoryBasisSchema,
+  participationHistoryUnknownReasonSchema,
+  publicParticipationHistorySchema,
+  participationHistoryPeriod,
+  type ParticipationHistoryBasis,
+  type ParticipationHistoryUnknownReason,
+  type PublicParticipationHistory,
+} from "./v1/participation-history.js";
 
 export {
   actorIdentityStateSchema,

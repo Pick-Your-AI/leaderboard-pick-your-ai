@@ -8,6 +8,7 @@ import {
   publicRoleScopeSchemaVersion,
   achievementMilestoneVersion,
   achievementMilestonesPageSchema,
+  participationHistoryResponseByteLimit,
   metricRegistrySchema,
   type ActorFilter,
   type MetricRegistry,
@@ -19,6 +20,7 @@ import { acceptedMilestones } from "./achievement-milestones.js";
 import { renderContributorCard, renderContributorCardImage } from "./cards.js";
 import { renderPublicExport } from "./exports.js";
 import { publicParticipation } from "./participation.js";
+import { publicOrganizationHistory, validateParticipationHistoryRead } from "./participation-history.js";
 import {
   activityGroupingVersion,
   activityIndex,
@@ -780,6 +782,63 @@ export function createService(options: ServiceOptions = {}) {
       evidenceIds: timeline.map((entry) => entry.contribution.contributionId),
     });
   });
+  async function participationHistory(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    actorId: string,
+    proof: { historyKey: string; contributionId: string } | null,
+  ) {
+    const q = query(request);
+    const params = new URL(request.url, "http://localhost").searchParams;
+    if (
+      !identifier.test(actorId) ||
+      actorId === "." ||
+      actorId === ".." ||
+      ["metric", "search", "cursor", "limit", "format"].some((key) => params.has(key))
+    )
+      fail(400, "invalid_history_query");
+    if (
+      proof &&
+      (!/^[a-f0-9]{64}$/.test(proof.historyKey) ||
+        !identifier.test(proof.contributionId) ||
+        proof.contributionId === "." ||
+        proof.contributionId === "..")
+    )
+      fail(400, "invalid_history_query");
+    const historyReader = source.readParticipationHistory?.bind(source);
+    const paired = historyReader
+      ? validateParticipationHistoryRead(
+          await boundedRead((signal) => historyReader(canonicalPublicScope(q.scope), q.snapshot, actorId, signal)),
+        )
+      : null;
+    const read = historyReader
+      ? project(paired?.current ?? null, q.scope, q.snapshot, q.actors)
+      : await load(q.scope, q.snapshot, q.actors);
+    if (!read.selected.actors.some((entry) => entry.actorId === actorId)) fail(404, "contributor_unavailable");
+    const history = publicOrganizationHistory(paired, read, actorId, q.category, registry.metrics);
+    if (
+      proof &&
+      (history.state !== "known" ||
+        history.historyKey !== proof.historyKey ||
+        history.firstProof.proof.contributionId !== proof.contributionId)
+    )
+      fail(409, "participation_history_changed_refetch");
+    const body = { ...meta(read), actorId, profileCategory: q.category, history };
+    if (Buffer.byteLength(JSON.stringify(body)) > participationHistoryResponseByteLimit)
+      fail(503, "participation_history_response_too_large");
+    return send(request, reply, body, "application/json; charset=utf-8", "no-store");
+  }
+  app.get<{ Params: { actorId: string } }>("/api/v1/contributors/:actorId/participation-history", (request, reply) =>
+    participationHistory(request, reply, request.params.actorId, null),
+  );
+  app.get<{ Params: { actorId: string; historyKey: string; contributionId: string } }>(
+    "/api/v1/contributors/:actorId/participation-history/:historyKey/evidence/:contributionId",
+    (request, reply) =>
+      participationHistory(request, reply, request.params.actorId, {
+        historyKey: request.params.historyKey,
+        contributionId: request.params.contributionId,
+      }),
+  );
   app.get<{ Params: { actorId: string } }>("/api/v1/contributors/:actorId/achievements", async (request, reply) => {
     const q = query(request);
     const version = options.approvedAchievementRuleVersion;

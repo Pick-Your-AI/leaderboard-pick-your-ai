@@ -1,4 +1,5 @@
 import type { RankSnapshotHistory } from "./rank-comparison.js";
+import type { ParticipationHistoryRead } from "./participation-history.js";
 import {
   canonicalPublicScope,
   publicScopeKey,
@@ -120,6 +121,17 @@ export interface PublicComparisonRead {
   previousHistory: RankSnapshotHistory | null;
 }
 export interface PublicSnapshotSource {
+  /** Optional trusted server capability. Read the selected input and full approved
+   * organization history under one protected admission/source-lock boundary and
+   * a final current privacy fence. Receipt strings are not authorization. Public
+   * requests cannot activate it; the stock pipeline intentionally omits it.
+   */
+  readParticipationHistory?(
+    scope: PublicScope,
+    snapshotId: string | null,
+    actorId: string,
+    signal: AbortSignal,
+  ): Promise<ParticipationHistoryRead | null>;
   /** Pair under one authorization/source-lock boundary and final current privacy fence. */
   readComparison?(
     scope: PublicScope,
