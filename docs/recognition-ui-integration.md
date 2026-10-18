@@ -16,6 +16,8 @@ On the current unfiltered organization overview, mount `EditorialSpotlights` onl
 
 Both components abort replaced requests, preserve existing same-selection DOM while revalidating so focused source links remain focused, clear evidence on hidden state, changed selection or error, and refresh every 30 seconds plus browser visibility changes. Responses are allowlisted and source URLs restricted to public GitHub locators. Text is rendered by React without HTML injection. Backend suppression checks remain authoritative when a card/source view is opened. Downloaded copies cannot be remotely withdrawn.
 
+A nonempty achievement response must include complete coverage for every declared source partition through the selected period end or exact snapshot cutoff. All-history awards additionally require coverage from each partition's known history start. The browser compares contract-valid source instants with their full fractional precision and rejects unverifiable supplied awards as `invalid_recognition_response`; this clears any previously displayed award and shows the existing unavailable state. Empty award lists remain valid with incomplete history. This enforces the existing candidate service rule and does not approve or activate it.
+
 ## Card measurement context
 
 Both actual card routes include the snapshot-compatible registry's exact unit,
