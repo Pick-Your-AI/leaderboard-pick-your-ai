@@ -1,5 +1,7 @@
 import {
   actorSchema,
+  actorKindSchema,
+  executionModeSchema,
   artifactSchema,
   contributionSchema,
   coverageSchema,
@@ -324,6 +326,10 @@ export function validateExport(value: unknown, selected: Selection): void {
     if (pageActors.has(actorId)) throw new ReadFailure(502, "invalid_export_response");
     pageActors.add(actorId);
     if (row.login !== null) string(row.login);
+    // Legacy v1 exports may omit these labels; present labels must never certify
+    // unsupported kinds or manual execution. Absence remains unknown.
+    if (Object.hasOwn(row, "actorKind")) actorKindSchema.parse(row.actorKind);
+    if (Object.hasOwn(row, "executionMode")) executionModeSchema.parse(row.executionMode);
     if (result.metricId !== metric.id || (row.rank !== null && (integer(row.rank) < 1 || ranking?.rank === false)))
       throw new ReadFailure(502, "invalid_export_response");
     if (row.pending !== undefined)

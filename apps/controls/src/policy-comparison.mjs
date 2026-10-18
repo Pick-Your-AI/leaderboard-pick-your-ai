@@ -382,7 +382,12 @@ export class PolicyComparisonStore {
     );
     return { document, resultHash: row.digest };
   }
-  compare(record, candidate) {
+  compare(record, candidate, restoreInput) {
+    requireThat(
+      record.authorization.identityEvidence === undefined || typeof restoreInput === "function",
+      409,
+      "Frozen identity verification unavailable",
+    );
     const before = record.policies.find((p) => p.metricId === candidate.metricId);
     requireThat(before, 400, "Metric absent from frozen input");
     const beforePolicyHash = this.approvedPolicyHash(before),
@@ -397,7 +402,15 @@ export class PolicyComparisonStore {
     );
     let result;
     try {
-      result = this.metrics.comparePolicies(copy(record.input), before, candidate, copy(record.scope));
+      const input = copy(record.input);
+      // The host restores exact private evidence only while its source locks and
+      // authority fences are held; this transaction cannot await asynchronous work.
+      const verifiedInput = restoreInput ? restoreInput(input, record.authorization) : input;
+      if (verifiedInput && typeof verifiedInput.then === "function") {
+        void Promise.resolve(verifiedInput).catch(() => undefined);
+        throw new ControlError(409, "Frozen identity verification must be synchronous");
+      }
+      result = this.metrics.comparePolicies(verifiedInput, before, candidate, copy(record.scope));
     } catch {
       throw new ControlError(400, "Policy comparison cannot be computed");
     }
@@ -524,6 +537,12 @@ export function createPolicyComparisonManager({ comparisons, withAuthorizedInput
             409,
             "Current preview authority fence unavailable",
           );
+          requireThat(
+            records.every((record) => record.authorization.identityEvidence === undefined) ||
+              typeof authority.restoreInput === "function",
+            409,
+            "Frozen identity verification unavailable",
+          );
           const refreshed = await refreshSession();
           requireThat(refreshed.roles.includes("reviewer"), 403, "Reviewer role required");
           requireThat((await authority.refreshApproval()) === true, 409, "Frozen input authorization unavailable");
@@ -547,7 +566,7 @@ export function createPolicyComparisonManager({ comparisons, withAuthorizedInput
           const data = store.transaction((state) => {
             current = records.map((record) => comparisons.input(record.id));
             assertCurrent(state, current);
-            const data = work(current, state, removed);
+            const data = work(current, state, removed, authority);
             // Calculation and redaction are synchronous but can cross a deadline.
             // Recheck before commit so preview and candidate writes roll back.
             assertCurrent(state, current);
@@ -582,8 +601,10 @@ export function createPolicyComparisonManager({ comparisons, withAuthorizedInput
       saved = comparisons.result(read[1]);
       record = comparisons.input(saved.document.inputId);
     }
-    return guarded([record], ([current], state, removed) => {
-      const result = candidate ? comparisons.compare(current, candidate) : comparisons.result(read[1]);
+    return guarded([record], ([current], state, removed, authority) => {
+      const result = candidate
+        ? comparisons.compare(current, candidate, authority.restoreInput)
+        : comparisons.result(read[1]);
       return comparisons.redact(result, current, state, removed);
     });
   }

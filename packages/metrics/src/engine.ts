@@ -2,6 +2,8 @@ import {
   actorKindSchema,
   contributionRoleSchema,
   executionModeSchema,
+  serviceAccountClassificationSchema,
+  type ServiceAccountClassification,
   type Actor,
   type Contribution,
   type Coverage,
@@ -42,8 +44,13 @@ export interface EngineActor {
   id: string;
   login: string | null;
   kind: Actor["kind"];
+  /** Preserve source bindings when available so combined observations cannot alias one node. */
+  githubDatabaseId?: number;
+  githubNodeId?: string;
   /** Literal source evidence only; omission means unknown, never manual work. */
   executionMode?: Actor["executionMode"];
+  /** Internal source-validated classification, never a public profile or a manual-execution claim. */
+  serviceAccountClassification?: ServiceAccountClassification;
   publicState: "visible" | "deleted" | "suppressed";
 }
 export interface MetricPolicy {
@@ -313,11 +320,35 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
   required(input.backfillRevision, "Backfill revision");
   if (new Set(input.actors.map((actor) => actor.id)).size !== input.actors.length)
     throw new Error("Actor IDs must be unique");
+  const actorNodes = new Map<string, string>();
   for (const actor of input.actors) {
     required(actor.id, "Actor ID");
+    if (
+      actor.githubDatabaseId !== undefined &&
+      (!Number.isSafeInteger(actor.githubDatabaseId) ||
+        actor.githubDatabaseId <= 0 ||
+        String(actor.githubDatabaseId) !== actor.id)
+    )
+      throw new Error("Actor database identity must match its canonical ID");
+    if (actor.githubNodeId !== undefined) {
+      required(actor.githubNodeId, "Actor node ID");
+      const previous = actorNodes.get(actor.githubNodeId);
+      if (previous !== undefined && previous !== actor.id) throw new Error("Conflicting actor node identity bindings");
+      actorNodes.set(actor.githubNodeId, actor.id);
+    }
     if (!knownKinds.includes(actor.kind) || !["visible", "deleted", "suppressed"].includes(actor.publicState))
       throw new Error("Unknown actor semantics");
     if (actor.executionMode !== undefined) executionModeSchema.parse(actor.executionMode);
+    if (actor.kind === "service_account" || actor.serviceAccountClassification !== undefined) {
+      const classification = serviceAccountClassificationSchema.parse(actor.serviceAccountClassification);
+      if (
+        actor.kind !== "service_account" ||
+        String(classification.githubDatabaseId) !== actor.id ||
+        (classification.githubNodeId !== undefined && classification.githubNodeId !== actor.githubNodeId) ||
+        Date.parse(classification.reviewedAt) > cutoff
+      )
+        throw new Error("Service-account evidence must match the actor and frozen cutoff");
+    }
   }
   for (const repo of input.repositoryIds) required(repo, "Allowed repository ID");
   const actors = new Map(input.actors.map((actor) => [actor.id, actor]));

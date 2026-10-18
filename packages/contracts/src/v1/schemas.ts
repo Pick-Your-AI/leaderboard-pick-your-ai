@@ -4,7 +4,35 @@ const nonEmpty = z.string().trim().min(1);
 const id = nonEmpty;
 const isoDateTime = z.string().datetime({ offset: true });
 
-export const actorKindSchema = z.enum(["user", "bot", "github_app", "organization", "system", "unknown"]);
+export const actorKindSchema = z.enum([
+  "user",
+  "service_account",
+  "bot",
+  "github_app",
+  "organization",
+  "system",
+  "unknown",
+]);
+/** Private reviewed classification evidence; not part of the public Actor projection. */
+export const serviceAccountClassificationSchema = z
+  .object({
+    schemaVersion: z.literal("leaderboard-service-account/v1"),
+    classificationId: id,
+    githubDatabaseId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    githubNodeId: id.optional(),
+    source: z.enum(["reviewed_source", "reviewed_configuration"]),
+    evidenceIds: z.array(id).min(1),
+    reviewerActorId: id,
+    reviewedAt: isoDateTime,
+  })
+  .strict()
+  .refine(
+    (classification) =>
+      classification.reviewerActorId !== String(classification.githubDatabaseId) &&
+      classification.reviewerActorId !== classification.githubNodeId,
+    { message: "Service-account classification requires an independent reviewer.", path: ["reviewerActorId"] },
+  );
+
 export const executionModeSchema = z.enum(["automated", "unknown"]);
 export const actorIdentityStateSchema = z.enum(["resolved", "unresolved", "deleted", "suspended", "unavailable"]);
 
@@ -418,3 +446,4 @@ export const pendingCountSchema = z
     }
   });
 export type PendingCount = z.infer<typeof pendingCountSchema>;
+export type ServiceAccountClassification = z.infer<typeof serviceAccountClassificationSchema>;

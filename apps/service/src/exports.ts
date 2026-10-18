@@ -129,6 +129,8 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     rows: board.rows.map((row) => ({
       actorId: row.actorId,
       login: row.actor?.login ?? null,
+      actorKind: row.actor?.kind ?? "unknown",
+      executionMode: row.actor?.executionMode ?? "unknown",
       rank: row.rank,
       result: row.result,
       evidenceIds: [...row.evidenceIds],
@@ -168,6 +170,8 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     "next_cursor",
     "actor_id",
     "actor",
+    "actor_kind",
+    "execution_mode",
     "rank",
     "state",
     "value",
@@ -216,25 +220,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     lines.push(serialized);
   }
   line(columns);
-  line([
-    "metadata",
-    ...metadata,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-    null,
-  ]);
+  line(["metadata", ...metadata, ...Array<string | null>(columns.length - metadata.length - 1).fill(null)]);
   const byId = new Map(evidence.map((entry) => [entry.evidenceId, entry]));
   for (const row of document.rows) {
     const diagnostic = document.diagnostics.find(
@@ -245,6 +231,8 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
       ...metadata,
       row.actorId,
       row.login,
+      row.actorKind,
+      row.executionMode,
       row.rank,
       row.result.state,
       row.result.value ?? null,

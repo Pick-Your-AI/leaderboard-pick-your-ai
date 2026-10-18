@@ -869,3 +869,20 @@ test("expiry crossed by commit withholds the response even after a valid calcula
   assert.equal(reply.status, 401);
   assert.deepEqual(reply.data, { error: "Reviewer session revoked" });
 });
+
+test("identity-bound private inputs require a host verifier and cannot use the legacy minimal-input path", async (t) => {
+  const input = capture();
+  input.authorization.identityEvidence = {
+    schemaVersion: "pipeline-identity-evidence/v1",
+    normalizationHashes: ["a".repeat(64)],
+  };
+  const h = await harness(t, { input });
+  const reply = await h.preview();
+  assert.equal(reply.status, 409);
+  assert.deepEqual(reply.data, { error: "Frozen identity verification unavailable" });
+  assert.equal((await h.call(prefix + "/inputs")).status, 409);
+  const record = h.comparisons.input(h.retained.inputId);
+  assert.throws(() => h.comparisons.compare(record, policy()), /identity verification unavailable/);
+  assert.throws(() => h.comparisons.compare(record, policy(), async () => record.input), /cannot be computed/);
+  assert.equal(h.store.db.prepare("SELECT count(*) AS n FROM policy_previews").get().n, 0);
+});

@@ -12,6 +12,16 @@ Only explicitly public repositories and safe GitHub artifact URLs produce public
 
 Public evidence uses contribution IDs matching fact IDs. `qualification: eligible` with `reasonCodes: [raw_observed_only]` means eligibility for a raw observation board, not acceptance of an outcome. Qualified recognition is a separate fact with independent receipt provenance. The API's evidence date is the effective raw/acceptance clock; original source dates remain on the fact and observation.
 
+## Reviewed service accounts
+
+See [service-account classification and migration](service-account-classification.md)
+for the protected `reviewedServiceAccounts` / `authorizedClassifierIds` inputs.
+The versioned review record classifies a source `User` account by stable IDs,
+never a login pattern or model trailer. Native Bot and App kinds remain
+separate. The internal `serviceAccountClassification` provenance survives
+normalization; public profiles and exports expose only the account kind and
+execution mode, never private classification receipts.
+
 ## Collection pipeline adapter
 
 ```ts

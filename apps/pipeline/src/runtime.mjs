@@ -23,6 +23,15 @@ const policyDigest = (value) => createHash("sha256").update(value).digest("hex")
 const scopeKey = (scope) =>
   JSON.stringify([scope.organization, scope.repository, scope.workstream, scope.start, scope.end]);
 const copy = (value) => structuredClone(value);
+// Private preview records retain labels only. Provider bindings stay in the
+// restricted normalization store and are restored transiently before engine use.
+const previewActor = ({ id, login, kind, publicState, executionMode }) => ({
+  id,
+  login,
+  kind,
+  publicState,
+  ...(executionMode === undefined ? {} : { executionMode }),
+});
 const utc = (value) => {
   if (
     typeof value !== "string" ||
@@ -119,6 +128,62 @@ export async function createPipeline(options) {
         409,
         "Frozen input source authorization changed",
       );
+      const restoredActors = new Map();
+      for (const authorization of authorizations) {
+        const binding = authorization.identityEvidence;
+        // Legacy, non-service-account captures remain readable. The engine still
+        // rejects service accounts without their reviewed provider-bound evidence.
+        if (binding === undefined) continue;
+        requireThat(
+          binding?.schemaVersion === "pipeline-identity-evidence/v1" &&
+            Array.isArray(binding.normalizationHashes) &&
+            binding.normalizationHashes.length <= 10000 &&
+            binding.normalizationHashes.every((hash) => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash)) &&
+            new Set(binding.normalizationHashes).size === binding.normalizationHashes.length,
+          409,
+          "Frozen identity evidence binding unavailable",
+        );
+        const rows = (
+          await tx.query(
+            `SELECT n.document,n.document_hash FROM leaderboard_pipeline.normalizations AS n
+           JOIN leaderboard_ingestion.source_facts AS f ON f.fact_key=n.fact_key
+           WHERE n.document_hash=ANY($1::text[]) AND n.policy_signature=$2
+             AND f.repository_id=ANY($3::bigint[]) LIMIT 10001 FOR SHARE OF n`,
+            [
+              binding.normalizationHashes,
+              digest([dataMode, config.policies.map((item) => item.signature)]),
+              authorization.sources.map((source) => source.repositoryId),
+            ],
+          )
+        ).rows;
+        requireThat(
+          rows.length <= 10000 &&
+            new Set(rows.map((row) => row.document_hash)).size === binding.normalizationHashes.length,
+          409,
+          "Frozen identity evidence unavailable",
+        );
+        const actors = new Map();
+        for (const row of rows) {
+          requireThat(
+            digest(row.document) === row.document_hash &&
+              row.document.isSynthetic === (dataMode === "synthetic") &&
+              Array.isArray(row.document.actors),
+            409,
+            "Frozen identity evidence integrity failure",
+          );
+          assertDataMode(row.document);
+          for (const actor of row.document.actors) {
+            const previous = actors.get(actor.id);
+            requireThat(
+              !previous || canonical(previous) === canonical(actor),
+              409,
+              "Frozen identity evidence conflict",
+            );
+            actors.set(actor.id, actor);
+          }
+        }
+        restoredActors.set(digest(authorization), actors);
+      }
       const removed = (
         await tx.query(
           "SELECT subject_id FROM leaderboard_ingestion.object_suppressions WHERE repository_id=ANY($1::bigint[])",
@@ -144,6 +209,30 @@ export async function createPipeline(options) {
           removed.push(correction.artifact_id);
       return work(removed, {
         refreshApproval: approved,
+        restoreInput(input, authorization) {
+          if (authorization.identityEvidence === undefined) return input;
+          const actors = restoredActors.get(digest(authorization));
+          requireThat(actors, 409, "Frozen identity evidence unavailable");
+          return {
+            ...input,
+            actors: input.actors.map((actor) => {
+              const source = actors.get(actor.id);
+              requireThat(
+                source && canonical(previewActor({ ...source, publicState: actor.publicState })) === canonical(actor),
+                409,
+                "Frozen actor identity changed",
+              );
+              return {
+                ...actor,
+                ...(source.githubDatabaseId === undefined ? {} : { githubDatabaseId: source.githubDatabaseId }),
+                ...(source.githubNodeId === undefined ? {} : { githubNodeId: source.githubNodeId }),
+                ...(source.serviceAccountClassification === undefined
+                  ? {}
+                  : { serviceAccountClassification: copy(source.serviceAccountClassification) }),
+              };
+            }),
+          };
+        },
         isCurrent(session) {
           // The host must atomically read its authoritative roster/configuration
           // cache. Two independently awaited checks cannot establish this fence.
@@ -721,7 +810,7 @@ export async function createPipeline(options) {
         const previous = actors.get(actor.id);
         if (previous && c.metrics.stableJSON(previous) !== c.metrics.stableJSON(actor))
           fail("conflicting_actor_metadata");
-        actors.set(actor.id, actor);
+        actors.set(actor.id, copy(actor));
       }
       for (const entry of output.evidence) {
         const id = entry.contribution.contributionId,
@@ -778,13 +867,8 @@ export async function createPipeline(options) {
       cutoff: observationCutoff,
       backfillRevision: digest(outputs),
       repositoryIds: repos.map((repo) => String(repo.id)),
-      actors: [...actors.values()].map(({ id, login, kind, publicState, executionMode }) => ({
-        id,
-        login,
-        kind,
-        publicState,
-        ...(executionMode === undefined ? {} : { executionMode }),
-      })),
+      // Validate all provider bindings before any privacy projection.
+      actors: [...actors.values()],
       facts: [...facts, ...corrections],
       coverage,
     };
@@ -928,7 +1012,7 @@ export async function createPipeline(options) {
     const snapshotId = digest(content);
     if (priorPublication && priorPublication.snapshotId !== snapshotId) fail("dispatch_snapshot_replay_changed");
     const comparisonInputFor = (publication) => ({
-      input: frozen,
+      input: { ...frozen, actors: frozen.actors.map(previewActor) },
       scope: engineScope,
       policies: config.policies.map((item) => item.policy),
       aggregates,
@@ -937,6 +1021,10 @@ export async function createPipeline(options) {
         configurationHash: digest(config),
         dataMode,
         controlsConfigurationRevision: runConfigurationRevision,
+        identityEvidence: {
+          schemaVersion: "pipeline-identity-evidence/v1",
+          normalizationHashes: [...new Set(outputs.map(digest))].sort(),
+        },
         sources: generations.map((row) => ({
           repositoryId: String(row.repository_id),
           generation: String(row.generation),
