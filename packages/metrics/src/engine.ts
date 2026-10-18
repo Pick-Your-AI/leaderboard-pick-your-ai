@@ -405,7 +405,7 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
         actor.kind !== "service_account" ||
         String(classification.githubDatabaseId) !== actor.id ||
         (classification.githubNodeId !== undefined && classification.githubNodeId !== actor.githubNodeId) ||
-        Date.parse(classification.reviewedAt) > cutoff
+        compareSourceInstants(classification.reviewedAt, input.cutoff) > 0
       )
         throw new Error("Service-account evidence must match the actor and frozen cutoff");
     }
