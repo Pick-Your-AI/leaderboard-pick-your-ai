@@ -101,7 +101,7 @@ function published(id, revision, cutoff, facts) {
   const history = {
     snapshotId: id,
     revision,
-    metrics: [{ ...aggregate, policySignature: hash(aggregate.policySignature) }],
+    metrics: [{ ...aggregate, sources: [...policy.sources], policySignature: hash(aggregate.policySignature) }],
   };
   const read = {
     head: { snapshotId: id, revision, publishedAt: cutoff },
@@ -462,4 +462,42 @@ test("invalid baseline queries cannot be silently ignored", async (t) => {
   ])
     assert.equal((await h.app.inject("/api/v1/boards?metric=pr_merged&" + query)).statusCode, 400);
   assert.equal((await h.app.inject("/api/v1/health?compare=x")).statusCode, 400);
+});
+
+test("comparison coverage uses only evidenced selected-policy source and repository pairs", async (t) => {
+  const h = harness(t, (p) => {
+    for (const read of [p.current, p.previous])
+      read.selected.snapshot.coverage.push(
+        { ...coverage, source: "github_graphql", state: "partial" },
+        { ...coverage, scopeId: "synthetic-unrelated", state: "partial" },
+      );
+  });
+  const response = await h.app.inject(h.url);
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().rows.find((row) => row.actorId === "b").movement.delta, 1);
+  for (const patch of [
+    (p) => {
+      p.current.selected.snapshot.coverage = [];
+    },
+    (p) => {
+      p.currentHistory.metrics[0].sources.push("github_graphql");
+    },
+    (p) => {
+      p.currentHistory.metrics[0].scope.repos.push("synthetic-missing");
+      p.previousHistory.metrics[0].scope.repos.push("synthetic-missing");
+    },
+    (p) => {
+      p.current.selected.snapshot.coverage.push({ ...coverage, state: "partial" });
+    },
+    (p) => {
+      delete p.currentHistory.metrics[0].sources;
+    },
+  ]) {
+    const denied = harness(t, patch);
+    const result = await denied.app.inject(denied.url);
+    assert.equal(result.statusCode, 200, result.body);
+    assert.ok(
+      result.json().rows.every((row) => row.movement.reason === "insufficient_history" && row.movement.delta === null),
+    );
+  }
 });

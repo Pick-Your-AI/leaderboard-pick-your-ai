@@ -1,3 +1,4 @@
+import { sourceAdapterSchema } from "@pick-your-ai/contracts";
 import { createHash } from "node:crypto";
 const fail = () => {
   throw new Error("rank_history_integrity_error");
@@ -10,11 +11,12 @@ const instant = (value) =>
 
 /** Add only clocks/signatures. Required receipt rows already retain exact ranks,
  * values, policy and scope. No identity/provider records are duplicated. */
-export function captureRankEvidence(aggregates) {
+export function captureRankEvidence(aggregates, policies) {
   return {
     schemaVersion: "private-rank-evidence/v1",
     metrics: aggregates.map((metric) => ({
       metricId: metric.metricId,
+      sources: [...policies.find((policy) => policy.metricId === metric.metricId).sources].sort(),
       rows: metric.rows.map((row) => ({
         actorId: row.actorId,
         evidence: row.evidence.map((item) => {
@@ -51,6 +53,11 @@ export function retainedRankHistory(document) {
     metrics: document.metrics.map((metric) => {
       const history = saved.metrics.find((entry) => entry.metricId === metric.metricId);
       if (
+        !Array.isArray(history.sources) ||
+        !history.sources.length ||
+        history.sources.length > sourceAdapterSchema.options.length ||
+        new Set(history.sources).size !== history.sources.length ||
+        history.sources.some((source) => !sourceAdapterSchema.safeParse(source).success) ||
         !Array.isArray(history.rows) ||
         !same(
           history.rows.map((row) => row.actorId),
@@ -60,6 +67,7 @@ export function retainedRankHistory(document) {
         fail();
       return {
         metricId: metric.metricId,
+        sources: [...history.sources],
         policyVersion: metric.policyVersion,
         policySignature: metric.policyHash,
         definitionVersion: metric.definitionVersion,

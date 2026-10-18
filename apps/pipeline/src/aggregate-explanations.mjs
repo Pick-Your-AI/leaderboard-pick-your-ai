@@ -372,7 +372,7 @@ export function buildAggregateExplanation(capture, binding) {
     },
     references,
     metrics,
-    rankEvidence: captureRankEvidence(aggregates),
+    rankEvidence: captureRankEvidence(aggregates, policies),
   };
   retainedRankHistory(document);
   check(Number.isSafeInteger(snapshot.revision) && snapshot.revision > 0);

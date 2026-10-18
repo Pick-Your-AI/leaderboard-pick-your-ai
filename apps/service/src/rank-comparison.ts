@@ -1,3 +1,4 @@
+import { sourceAdapterSchema } from "@pick-your-ai/contracts";
 import { compareRankMovement, resolveMetricWindow, stableJSON, type RankComparisonInput } from "@pick-your-ai/metrics";
 import { compareSourceInstants } from "./source-time.js";
 import type { PublicRead, PublicScope } from "./public-source.js";
@@ -6,7 +7,7 @@ import type { PublicRead, PublicScope } from "./public-source.js";
 export interface RankSnapshotHistory {
   snapshotId: string;
   revision: number;
-  metrics: RankComparisonInput[];
+  metrics: (RankComparisonInput & { sources: string[] })[];
 }
 export type RankMovement = ReturnType<typeof compareRankMovement>[number];
 export interface PublicRankComparison {
@@ -28,7 +29,7 @@ function historyMetric(
   read: PublicRead,
   history: RankSnapshotHistory | null,
   metricId: string,
-): RankComparisonInput | null {
+): RankSnapshotHistory["metrics"][number] | null {
   if (
     !history ||
     history.snapshotId !== read.selected.snapshot.snapshotId ||
@@ -82,27 +83,42 @@ function historyMetric(
   }
   return metric;
 }
-function completePublicCoverage(read: PublicRead, metric: RankComparisonInput): boolean {
-  const coverage = [
-    ...read.selected.snapshot.coverage,
-    ...read.selected.rows.filter((row) => row.result.metricId === metric.metricId).map((row) => row.result.coverage),
-  ];
+function completePublicCoverage(read: PublicRead, metric: RankSnapshotHistory["metrics"][number]): boolean {
+  if (
+    metric.scope.from === null ||
+    !metric.scope.repos.length ||
+    !Array.isArray(metric.sources) ||
+    !metric.sources.length ||
+    metric.sources.length > sourceAdapterSchema.options.length ||
+    new Set(metric.sources).size !== metric.sources.length ||
+    metric.sources.some((source) => !sourceAdapterSchema.safeParse(source).success)
+  )
+    return false;
+  const complete = (item: PublicRead["selected"]["snapshot"]["coverage"][number]) =>
+    item.state === "complete" &&
+    item.knownStart !== null &&
+    compareSourceInstants(item.knownStart, metric.scope.from!) <= 0 &&
+    item.windowStart !== null &&
+    compareSourceInstants(item.windowStart, metric.scope.from!) <= 0 &&
+    item.windowEnd !== null &&
+    compareSourceInstants(item.windowEnd, metric.scope.to) >= 0 &&
+    item.missingPages === 0 &&
+    item.permissionsMissing.length === 0 &&
+    item.sourceErrors.length === 0;
+  // Every required source/repository pair must be evidenced; unrelated policies
+  // and repositories cannot invalidate this metric or fill a missing pair.
   return (
-    metric.scope.from !== null &&
-    coverage.length > 0 &&
-    coverage.every(
-      (item) =>
-        item.state === "complete" &&
-        item.knownStart !== null &&
-        compareSourceInstants(item.knownStart, metric.scope.from!) <= 0 &&
-        item.windowStart !== null &&
-        compareSourceInstants(item.windowStart, metric.scope.from!) <= 0 &&
-        item.windowEnd !== null &&
-        compareSourceInstants(item.windowEnd, metric.scope.to) >= 0 &&
-        item.missingPages === 0 &&
-        item.permissionsMissing.length === 0 &&
-        item.sourceErrors.length === 0,
-    )
+    metric.scope.repos.every((repo) =>
+      metric.sources.every((source) => {
+        const records = read.selected.snapshot.coverage.filter(
+          (item) => item.scopeId === repo && item.source === source,
+        );
+        return records.length > 0 && records.every(complete);
+      }),
+    ) &&
+    read.selected.rows
+      .filter((row) => row.result.metricId === metric.metricId)
+      .every((row) => complete(row.result.coverage))
   );
 }
 

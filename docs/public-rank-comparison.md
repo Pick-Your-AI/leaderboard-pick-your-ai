@@ -25,7 +25,7 @@ Providers without atomic paired-read support return an unavailable comparison us
 
 ## Immutable private metadata
 
-New required aggregate explanations retain a `private-rank-evidence/v1` section containing only included evidence clocks and opaque comparison signatures. Existing receipt metrics already retain actual ranks, values, policy hashes, scope, cutoff and backfill identity, so no identity/provider records or raw inputs are copied into the new section. The complete required explanation remains covered by its immutable digest and publication confirmation.
+New required aggregate explanations retain a `private-rank-evidence/v1` section containing selected-policy source identities, included evidence clocks and opaque comparison signatures. Coverage checks require each selected source/repository pair and ignore unrelated snapshot coverage; missing or contradictory required coverage stays unavailable. Existing receipt metrics already retain actual ranks, values, policy hashes, scope, cutoff and backfill identity, so no identity/provider records or raw inputs are copied into the new section. The complete required explanation remains covered by its immutable digest and publication confirmation.
 
 Pre-extension explanations are never rewritten or upgraded in place. They remain valid for ordinary reads and repeated publication/restart; their comparison is explicitly `insufficient_evidence_history`. Optional policy-preview retention is not a comparison dependency.
 
@@ -37,7 +37,9 @@ Only `{actorId, state, delta, reason}` is added to visible rows. States are `com
 
 The pipeline currently publishes fixed custom scopes or all-time scopes with incomplete historical coverage. This change preserves those facts: it does not certify historical completeness, change publication-window semantics or produce artificial progress. Positive movement/new-entrant API tests use actual engine-generated synthetic named-period aggregates with complete synthetic coverage. The actual pipeline tests use two persisted fixed-window snapshots and assert `insufficient_history`.
 
-Named-period publication integration and remote Web presentation remain separate unfinished integration work under #91/#97. This backend slice alone does not close #97, and no production deployment requirement has been added to its automated-validation gate.
+The current publisher also uses a digest of normalized outputs as its conservative backfill revision, so ordinary new activity changes that marker. A truthful positive-movement pipeline needs a persisted reconciliation/coverage receipt whose epoch is stable across ordinary ingestion and changes at verified import/correction/rebuild boundaries. No such connected complete-coverage producer is claimed here; a constant or a renamed collection-run ID would not supply that evidence. Existing late-evidence and correction-signature checks remain required.
+
+Named-period publication integration, that authoritative reconciliation/coverage epoch, and remote Web presentation remain separate unfinished integration work under #75/#91/#97. This backend slice alone does not close #97, and no production deployment requirement has been added to its automated-validation gate.
 
 ## Validation
 
