@@ -293,14 +293,20 @@ test("category-filtered portfolios withhold broader achievements and do not requ
     await page.goto("/contributors/api-a?ui=api&snapshot=api-1");
     await expect(page.getByRole("link", { name: "Qualifying public artifact" })).toBeVisible();
     const before = api.calls();
-    await page.goto("/contributors/api-a?ui=api&snapshot=api-1&category=documentation");
+    await page.evaluate(() => {
+      history.pushState(null, "", "/contributors/api-a?ui=api&snapshot=api-1&category=documentation");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
     await expect(page.getByText(/Achievements are unavailable for category-filtered portfolios/)).toBeVisible();
     await expect(page.getByRole("link", { name: "Qualifying public artifact" })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "First accepted contribution in available scope" })).toHaveCount(0);
     await page.clock.fastForward(30_001);
     expect(api.calls()).toBe(before);
     await expect(page.getByRole("link", { name: "Open archived documentation card" })).toBeVisible();
-    await page.goto("/contributors/api-a?ui=api&snapshot=api-1");
+    await page.evaluate(() => {
+      history.pushState(null, "", "/contributors/api-a?ui=api&snapshot=api-1");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
     await expect(page.getByRole("link", { name: "Qualifying public artifact" })).toBeVisible();
     expect(api.calls()).toBeGreaterThan(before);
   } finally {
