@@ -1077,6 +1077,7 @@ export async function createPipeline(options) {
     )
       fail("dispatch_source_generation_changed");
     let priorPublication = null;
+    let replayedBackfillRevision;
     if (dispatch) {
       // A committed operation can be acknowledged after another publisher advances
       // the head. Never repoint the head to its historical immutable revision.
@@ -1123,6 +1124,22 @@ export async function createPipeline(options) {
         // An unconfirmed SQL commit has no private preview capture. Recompute
         // its exact frozen input before atomically confirming both; do not
         // manufacture a marker or move the SQL head to a historical operation.
+        const retained = (
+          await db.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
+            prior.snapshot_id,
+          ])
+        ).rows[0];
+        if (
+          !retained ||
+          digest(retained.document) !== retained.document_hash ||
+          retained.document.frozen?.cutoff !== observationCutoff ||
+          !/^[a-f0-9]{64}$/.test(retained.document.frozen?.backfillRevision)
+        )
+          fail("dispatch_frozen_input_unavailable");
+        // The committed operation owns its original marker format. Only that
+        // verified value is reused; the complete recomputed comparison input
+        // must still match the publication receipt before private confirmation.
+        replayedBackfillRevision = retained.document.frozen.backfillRevision;
       }
     }
     const normalized = await normalizeStored(
@@ -1216,15 +1233,17 @@ export async function createPipeline(options) {
     // the immutable facts actually introduced by explicit backfill/audit runs,
     // including committed pages of a later-failed run. Current-state refreshes
     // must not erase that lineage when they replace the selected normalization.
-    const importedHistory = (
-      await db.query(
-        `SELECT fact.first_run_id, fact.fact_key FROM leaderboard_ingestion.source_facts AS fact
+    const importedHistory = replayedBackfillRevision
+      ? []
+      : (
+          await db.query(
+            `SELECT fact.first_run_id, fact.fact_key FROM leaderboard_ingestion.source_facts AS fact
         JOIN leaderboard_ingestion.collection_runs AS run ON run.run_id=fact.first_run_id
         WHERE fact.repository_id=ANY($1::bigint[]) AND fact.observed_at <= $2
         AND run.mode IN ('backfill','audit') ORDER BY fact.first_run_id,fact.fact_key LIMIT 10001`,
-        [repos.map((repo) => repo.id), observationCutoff],
-      )
-    ).rows.map((row) => [row.first_run_id, row.fact_key]);
+            [repos.map((repo) => repo.id), observationCutoff],
+          )
+        ).rows.map((row) => [row.first_run_id, row.fact_key]);
     if (importedHistory.length > 10_000) fail("reconciliation_history_budget_exceeded");
     const window =
       scope.start === null
@@ -1262,17 +1281,19 @@ export async function createPipeline(options) {
     const frozen = {
       datasetId: digest([facts, corrections]),
       cutoff: observationCutoff,
-      backfillRevision: digest([
-        "pipeline-reconciliation/v1",
-        normalizationSignature,
-        importedHistory,
-        // Keep the complete captured corrections in frozen.facts for the existing
-        // dispatch input fence; only effective observations belong to this epoch.
-        corrections
-          .filter((fact) => Date.parse(fact.observedAt) <= Date.parse(observationCutoff))
-          .map(digest)
-          .sort(),
-      ]),
+      backfillRevision:
+        replayedBackfillRevision ??
+        digest([
+          "pipeline-reconciliation/v1",
+          normalizationSignature,
+          importedHistory,
+          // Keep the complete captured corrections in frozen.facts for the existing
+          // dispatch input fence; only effective observations belong to this epoch.
+          corrections
+            .filter((fact) => Date.parse(fact.observedAt) <= Date.parse(observationCutoff))
+            .map(digest)
+            .sort(),
+        ]),
       repositoryIds: repos.map((repo) => String(repo.id)),
       // Validate all provider bindings before any privacy projection.
       actors: [...actors.values()],
