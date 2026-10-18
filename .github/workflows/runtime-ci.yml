@@ -58,6 +58,12 @@ jobs:
       - run: npm run build
       - run: npm run typecheck
       - run: npm test
+      - name: Verify pipeline retirement with independent PostgreSQL connections
+        run: |
+          test -n "$PIPELINE_RETIREMENT_TEST_DATABASE_URL"
+          node --test --test-isolation=none apps/pipeline/test/derived-retirement-postgres.test.mjs
+        env:
+          PIPELINE_RETIREMENT_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
       - run: npm run db:validate
       - run: python scripts/validate_plan.py
       - run: python -m unittest discover -s tests -v
