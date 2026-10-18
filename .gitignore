@@ -16,3 +16,4 @@ infra/db/.state/
 
 playwright-report/
 test-results/
+.publication-state/
