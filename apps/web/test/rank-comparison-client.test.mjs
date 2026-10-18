@@ -376,6 +376,24 @@ const malformed = [
     },
   ],
   [
+    "missing ranking metric identity",
+    (value) => {
+      delete value.ranking.metricId;
+    },
+  ],
+  [
+    "foreign ranking metric identity",
+    (value) => {
+      value.ranking.metricId = "unrelated_metric";
+    },
+  ],
+  [
+    "non-string ranking direction",
+    (value) => {
+      value.ranking.direction = ["descending"];
+    },
+  ],
+  [
     "unknown value",
     (value) => {
       value.rows[0].result.state = "unknown";
@@ -403,6 +421,7 @@ for (const [name, mutate] of malformed) {
       [h.board, (value) => board(value, h.selected)],
       [h.json, (value) => validateExport(value, h.selected, metric)],
     ]) {
+      assert.doesNotThrow(() => validate(original), `${name}: intact service response`);
       const invalid = structuredClone(original);
       mutate(invalid);
       assert.throws(() => validate(invalid), name);

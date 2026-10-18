@@ -821,13 +821,15 @@ export function board(value: unknown, selected: Selection): Board {
   if (
     metric.id !== selected.metric ||
     (method &&
-      (!["ascending", "descending"].includes(String(method.direction)) ||
+      (typeof method.direction !== "string" ||
+        !["ascending", "descending"].includes(method.direction) ||
         typeof method.rank !== "boolean" ||
         (descriptiveMetric(metric) && method.rank !== false)))
   )
     throw new ReadFailure(502, "api_metric_mismatch");
   const meta = metadata(value, selected);
   const comparison = rankComparison(data.comparison, selected, meta.generatedAt);
+  if (comparison && method && method.metricId !== metric.id) invalidComparison();
   const seen = new Set<string>();
   return {
     ...meta,
