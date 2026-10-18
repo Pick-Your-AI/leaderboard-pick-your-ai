@@ -30,3 +30,16 @@ Synthetic rows are marked in the database. No production importer exists here, a
 ## CI boundary and open decisions
 
 The scoped workflow runs without repository secrets. It checks workspace build/typechecking/tests, a fresh PostgreSQL migration cycle, and the repository's required planning validation and generated-document check. Fork pull requests receive no privileged credentials. Dependabot opens weekly review pull requests for npm workspaces and workflow actions. Branch protection and required-check selection, architecture acceptance, package ownership, accessibility review, source permissions, deployment host, retention, and operations acceptance remain outside this local scaffold and need their own decisions and evidence.
+
+## Synthetic schema rollback recovery receipt
+
+The isolated recovery CI also exercises the actual `infra/db/migrations` schema
+and `tests/fixtures/synthetic-observations.json`: apply every forward migration,
+seed the explicitly fictional projects/actors/observations, encrypt a PostgreSQL
+dump, apply every rollback in reverse, verify that no application tables remain,
+and restore into the emptied disposable database. It compares every seeded row,
+clock, migration checksum, column, constraint and index against the pre-rollback
+state. `infra/recovery/test/schema-rollback.test.mjs` is skipped without the
+explicit dedicated test container; CI requires zero skipped recovery tests.
+This validates local fixture-schema rollback compatibility, not production
+recovery objectives, external data completeness or release acceptance.
