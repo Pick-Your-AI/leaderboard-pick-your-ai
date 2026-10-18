@@ -277,3 +277,226 @@ for (const concurrency of [1, 2]) {
     },
   );
 }
+
+function scanOnce(kind, context) {
+  const common = {
+    source: "scope:a",
+    key: "failure-boundary/v1",
+    maxPages: 1,
+    assertAuthorized: context.assertAuthorized,
+  };
+  return kind === "REST"
+    ? context.client.scanRest({ ...common, url: "/items", select: (body) => body })
+    : context.client.scanGraphql({ ...common, query: QUERY, select: (data) => data.items });
+}
+
+function scanEnvelope(kind) {
+  const nodes = [{ id: "synthetic-item" }];
+  return kind === "REST" ? nodes : { data: { items: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } } };
+}
+
+for (const kind of ["REST", "GraphQL"]) {
+  for (const failure of ["malformed", "oversized"]) {
+    test(`authorization fence: ${kind} revoked ${failure} successful body reports denial`, async () => {
+      let calls = 0;
+      const context = setup(
+        async () => {
+          calls++;
+          if (calls > 1) return json({ accessible: true });
+          return new Response(
+            new ReadableStream(
+              {
+                pull(controller) {
+                  context.revoke();
+                  controller.enqueue(new TextEncoder().encode(failure === "malformed" ? "{" : "x".repeat(128)));
+                  controller.close();
+                },
+              },
+              { highWaterMark: 0 },
+            ),
+          );
+        },
+        { maxResponseBytes: 64, maxRetries: 0 },
+      );
+      await assert.rejects(read(kind, context), denied);
+      assert.equal(calls, 1);
+      assert.equal(context.checkpoints.writes.length, 0);
+      assert.deepEqual(
+        await context.client.rest("scope:b", "/other"),
+        { accessible: true },
+        "failed body releases the request slot",
+      );
+    });
+  }
+
+  for (const checkpoint of ["corrupt", "future"]) {
+    test(`authorization fence: ${kind} revoked ${checkpoint} pause load stops before validation or waiting`, async () => {
+      let now = 1_000_000;
+      let fetches = 0;
+      let tokens = 0;
+      const sleeps = [];
+      const loads = [];
+      const context = setup(
+        async () => {
+          fetches++;
+          return json({});
+        },
+        {
+          now: () => now,
+          token: async () => {
+            tokens++;
+            return undefined;
+          },
+          sleep: async (ms) => {
+            sleeps.push(ms);
+            now += ms;
+          },
+        },
+      );
+      context.checkpoints.load = async (key) => {
+        loads.push(key.split(":", 1)[0]);
+        if (key.startsWith("pause:")) {
+          context.revoke();
+          return checkpoint === "corrupt" ? { version: 1, until: "invalid" } : { version: 1, until: now + 120_000 };
+        }
+        return undefined;
+      };
+      await assert.rejects(read(kind, context), denied);
+      assert.deepEqual(loads, ["pause"], "revoked initial load does not proceed to HTTP cache loading");
+      assert.deepEqual(sleeps, []);
+      assert.equal(tokens, 0);
+      assert.equal(fetches, 0);
+      assert.equal(context.checkpoints.writes.length, 0);
+    });
+  }
+
+  for (const operation of ["read", "scan"]) {
+    test(`authorization fence: ${kind} revoked rejected ${operation} checkpoint load is sanitized`, async () => {
+      let fetches = 0;
+      const context = setup(async () => {
+        fetches++;
+        return json(scanEnvelope(kind));
+      });
+      const prefix = operation === "scan" ? "scan:" : "pause:";
+      context.checkpoints.load = async (key) => {
+        if (key.startsWith(prefix)) {
+          context.revoke();
+          throw new Error("private checkpoint backend failure");
+        }
+        return undefined;
+      };
+      await assert.rejects(operation === "scan" ? scanOnce(kind, context) : read(kind, context), denied);
+      assert.equal(fetches, 0);
+      assert.equal(context.checkpoints.writes.length, 0);
+    });
+  }
+
+  test(`authorization fence: ${kind} revoked rejected scan save reports denial and releases scan ownership`, async () => {
+    const context = setup(async () => json(scanEnvelope(kind)));
+    context.checkpoints.onSave = async (key) => {
+      if (key.startsWith("scan:")) {
+        context.revoke();
+        throw new Error("private scan checkpoint failure");
+      }
+    };
+    await assert.rejects(scanOnce(kind, context), denied);
+    const saves = context.checkpoints.writes.filter(({ key }) => key.startsWith("scan:"));
+    assert.equal(saves.length, 1, "a save begun while authorized may already have persisted");
+    assert.equal(saves[0].value.complete, true);
+    // A second attempt must reach its authorization fence, not be rejected as
+    // another scan still owning the same key after the first failed save.
+    await assert.rejects(scanOnce(kind, context), denied);
+  });
+
+  test(`authorization fence: ${kind} revocation during the first quota sleep stops further chunks`, async () => {
+    let now = 1_000_000;
+    let fetches = 0;
+    let tokens = 0;
+    const sleeps = [];
+    const context = setup(
+      async () => {
+        fetches++;
+        return json({});
+      },
+      {
+        now: () => now,
+        token: async () => {
+          tokens++;
+          return undefined;
+        },
+        sleep: async (ms) => {
+          sleeps.push(ms);
+          now += ms;
+          context.revoke();
+        },
+      },
+    );
+    context.checkpoints.load = async (key) =>
+      key.startsWith("pause:") ? { version: 1, until: now + 180_000 } : undefined;
+    await assert.rejects(read(kind, context), denied);
+    assert.deepEqual(sleeps, [60_000], "the revoked source does not enter another quota wait chunk");
+    assert.equal(tokens, 0);
+    assert.equal(fetches, 0);
+    assert.equal(context.checkpoints.writes.length, 0);
+  });
+}
+
+for (const checkpoint of ["corrupt", "valid"]) {
+  test(`authorization fence: REST revoked ${checkpoint} HTTP cache load stops before waiting or fetch`, async () => {
+    let now = 1_000_000;
+    let fetches = 0;
+    let tokens = 0;
+    const sleeps = [];
+    const loads = [];
+    const context = setup(
+      async () => {
+        fetches++;
+        return json({});
+      },
+      {
+        now: () => now,
+        token: async () => {
+          tokens++;
+          return undefined;
+        },
+        sleep: async (ms) => {
+          sleeps.push(ms);
+          now += ms;
+        },
+      },
+    );
+    context.checkpoints.load = async (key) => {
+      loads.push(key.split(":", 1)[0]);
+      if (key.startsWith("pause:")) return { version: 1, until: now + 120_000 };
+      context.revoke();
+      return { version: 1, etag: checkpoint === "corrupt" ? 3 : '"saved"', link: null, body: [{ id: "private" }] };
+    };
+    await assert.rejects(read("REST", context), denied);
+    assert.deepEqual(loads, ["pause", "http"]);
+    assert.deepEqual(sleeps, []);
+    assert.equal(tokens, 0);
+    assert.equal(fetches, 0);
+    assert.equal(context.checkpoints.writes.length, 0);
+  });
+}
+
+test("authorization fence: REST revoked rejected HTTP cache save is not retried", async () => {
+  let fetches = 0;
+  const context = setup(
+    async () => {
+      fetches++;
+      return json([{ id: "private" }], { etag: '"private-v1"' });
+    },
+    { maxRetries: 0 },
+  );
+  context.checkpoints.onSave = async (key) => {
+    if (key.startsWith("http:")) {
+      context.revoke();
+      throw new Error("private HTTP checkpoint failure");
+    }
+  };
+  await assert.rejects(read("REST", context), denied);
+  assert.equal(fetches, 1);
+  assert.equal(context.checkpoints.writes.length, 1, "denial does not persist a new retry pause");
+  assert.ok(context.checkpoints.writes[0].key.startsWith("http:"));
+});
