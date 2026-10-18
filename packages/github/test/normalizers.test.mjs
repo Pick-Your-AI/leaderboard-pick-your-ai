@@ -1108,7 +1108,13 @@ test("review hydration proves first participation only from a complete consisten
     submitted_at: at,
     html_url: `${fixture.pull_request.html_url}#pullrequestreview-51`,
   };
-  const earlier = { ...review, id: 50, state: "COMMENTED", submitted_at: "2026-10-02T10:00:00Z" };
+  const earlier = {
+    ...review,
+    id: 50,
+    state: "COMMENTED",
+    submitted_at: "2026-10-02T10:00:00Z",
+    html_url: `${fixture.pull_request.html_url}#pullrequestreview-50`,
+  };
   const input = {
     repository: { id: 2, slug: "synthetic-owner/repository" },
     family: "reviews",

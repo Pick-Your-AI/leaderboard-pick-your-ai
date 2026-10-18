@@ -19,6 +19,7 @@ import {
   type PublicEvidenceAction,
 } from "@pick-your-ai/contracts";
 import { GithubReadClient } from "./client.js";
+import { consistentReviewCohortIdentities, reviewParentMatches, reviewSourceMatches } from "./review-cohort.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
@@ -39,17 +40,27 @@ import {
 /** Hash only explicit source fields; text contributes to revision identity but is never retained. */
 export function githubReviewRevision(value: Record<string, unknown>): string {
   const user = value.user !== null && typeof value.user === "object" ? (value.user as Record<string, unknown>) : {};
+  // Missing optional source identities are permitted; explicitly malformed ones
+  // are not. Preserve that distinction in the collected cache identity as well.
+  const supplied = (record: Record<string, unknown>, key: string) => [record[key] !== undefined, record[key] ?? null];
+  const links = object(value._links)
+    ? ["links", supplied(value._links, "html"), supplied(value._links, "pull_request")]
+    : supplied(value, "_links");
   return createHash("sha256")
     .update(
       JSON.stringify([
         value.id ?? null,
-        value.node_id ?? null,
+        supplied(value, "node_id"),
         value.state ?? null,
         value.submitted_at ?? null,
         value.commit_id ?? null,
         user.id ?? null,
         user.type ?? null,
         value.body ?? null,
+        value.html_url ?? null,
+        supplied(value, "pull_request_url"),
+        supplied(user, "node_id"),
+        links,
       ]),
     )
     .digest("hex");
@@ -1744,6 +1755,15 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         return revoked;
       }
       if (!object(payload)) return none("missing_hydrated_source_object");
+      if (family === "review" && pull) {
+        const parentApiUrl = `https://api.github.com/repos/${input.repository.slug}/pulls/${pull[1]}`;
+        if (
+          !reviewParentMatches(pullResource, sourceUrl, pull[1]!) ||
+          !reviewSourceMatches(payload, sourceUrl, parentApiUrl) ||
+          payload.html_url !== input.fact.sourceUrl
+        )
+          return none("review_parent_or_source_identity_unverified");
+      }
       const identities = [payload.node_id, payload.id, payload.sha].filter((value) => value !== undefined).map(String);
       if (!identities.includes(input.fact.subjectId)) return none("hydrated_subject_identity_mismatch");
       const revisionMatches = options.verifyRevision
@@ -1786,6 +1806,12 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         const ids = new Set<string>();
         const complete =
           cohort.length <= 10000 &&
+          consistentReviewCohortIdentities(
+            cohort,
+            payload,
+            sourceUrl,
+            `https://api.github.com/repos/${input.repository.slug}/pulls/${pull[1]}`,
+          ) &&
           cohort.every((review) => {
             if (!object(review)) return false;
             const reviewId = resourceId(review, "review", input.repository.id);
@@ -1811,6 +1837,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           current.state === payload.state &&
           current.submitted_at === payload.submitted_at &&
           current.commit_id === payload.commit_id &&
+          current.node_id === payload.node_id &&
           object(current.user) &&
           current.user.id === reviewerId &&
           Number.isSafeInteger(reviewerId)
