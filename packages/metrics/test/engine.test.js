@@ -25,6 +25,8 @@ test("accepted counts reconcile to evidence while pending stays outside dense ra
   assert.equal(result.rows[0].value, 14);
   assert.equal(result.rows[0].evidenceIds.length, 14);
   assert.equal(result.rows[0].pending, 3);
+  assert.deepEqual(result.rows[0].pendingEvidence.map((fact) => fact.id), ["pending-0", "pending-1", "pending-2"]);
+  assert.equal(result.audit.filter((entry) => entry.reason === "pending_not_ranked").length, 3);
   assert.equal(result.publicEnabled, false);
   assert.equal(result.policyVersion, "synthetic-policy/v1");
   assert.equal("totalScore" in result, false);
@@ -432,4 +434,33 @@ test("fresh accepted activity remains comparable and timestamp spelling does not
   const legacy = structuredClone(before);
   for (const row of legacy.rows) for (const evidence of row.evidence) delete evidence.comparisonSignature;
   assert.ok(compareRankMovement(legacy, after).every(row => row.reason === "insufficient_evidence_history" && row.delta === null));
+});
+
+test("pending provenance follows canonical deduplication, policy units, corrections and suppression", () => {
+  const pending = fact("pending", { state: "pending", acceptedAt: null });
+  const duplicate = { ...pending, id: "duplicate", observedAt: "2026-10-07T10:00:00Z" };
+  const repeated = { ...pending, id: "repeated", canonicalKey: "different-observation" };
+  const selected = board([pending, duplicate, repeated]).rows[0];
+  assert.equal(selected.pending, 1);
+  assert.equal(selected.pendingEvidence[0].id, "pending");
+  assert.equal(selected.value, null);
+  assert.equal(selected.rank, null);
+  const accepted = { ...pending, id: "accepted", canonicalKey: "acceptance-action", state: "qualified", acceptedAt: "2026-10-08T10:00:00Z" };
+  assert.equal(board([pending, accepted]).rows[0].pending, 0);
+  assert.deepEqual(board([pending, accepted]).rows[0].pendingEvidence, []);
+  const reversed = { ...pending, revision: 1, state: "excluded", correctionReceipt: "synthetic-correction", observedAt: "2026-10-09T00:00:00Z" };
+  assert.equal(board([pending, reversed]).rows.length, 0);
+  assert.equal(board([pending], {}, {}, { actors: [actor("a", { publicState: "suppressed" })] }).rows.length, 0);
+});
+
+
+test("ratio pending provenance stays outside decided numerator and denominator evidence", () => {
+  const result = board([
+    fact("merged", { metricId: "pr_accepted_rate", state: "observed", outcome: "merged" }),
+    fact("open", { metricId: "pr_accepted_rate", state: "observed", outcome: "pending", acceptedAt: null }),
+  ], { metricId: "pr_accepted_rate", aggregation: "ratio", rankedStates: ["observed"], rank: false });
+  assert.equal(result.rows[0].denominator, 1);
+  assert.equal(result.rows[0].pending, 1);
+  assert.deepEqual(result.rows[0].evidenceIds, ["merged"]);
+  assert.deepEqual(result.rows[0].pendingEvidence.map((fact) => fact.id), ["open"]);
 });
