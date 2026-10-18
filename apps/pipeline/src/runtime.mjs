@@ -213,16 +213,25 @@ export async function createPipeline(options) {
   const attributionNormalizationSignature = digest([normalizationDocumentVersion, normalizationPolicySignature]);
   // Earlier documentation projections lacked locale units, merge-clock bounds,
   // or substantive rename origins. Recompute every configured docs source.
-  const normalizationSignature = classificationPolicies.documentation.length
+  const documentationNormalizationSignature = classificationPolicies.documentation.length
     ? digest(["documentation-locales/v2", attributionNormalizationSignature])
     : attributionNormalizationSignature;
+  const normalizationSignature = digest(["verified-default-branch-merge-pins/v1", documentationNormalizationSignature]);
   const frozenNormalizationSignatures = [
     normalizationSignature,
+    documentationNormalizationSignature,
     attributionNormalizationSignature,
     normalizationPolicySignature,
   ];
-  if (classificationPolicies.documentation.length)
-    frozenNormalizationSignatures.push(digest(["documentation-locales/v1", attributionNormalizationSignature]));
+  if (classificationPolicies.documentation.length) {
+    const previousDocumentationSignature = digest(["documentation-locales/v1", attributionNormalizationSignature]);
+    // Both historical locale formats bind the complete active classification.
+    // Retain the earlier verified-merge wrapper without reclassifying old rows.
+    frozenNormalizationSignatures.push(
+      previousDocumentationSignature,
+      digest(["verified-default-branch-merge-pins/v1", previousDocumentationSignature]),
+    );
+  }
   // The standalone locale adapter already bound every documentation rule. Its
   // cache can authorize historical identities only when no research policy is
   // omitted from that format; unclassified legacy keys cannot supply the gap.
@@ -1140,6 +1149,7 @@ export async function createPipeline(options) {
         facts: outputs.flatMap((o) => o.facts),
         actors: outputs.flatMap((o) => o.actors),
         evidence: outputs.flatMap((o) => o.evidence),
+        syntheticFactIds: outputs.filter((o) => o.isSynthetic === true).flatMap((o) => o.facts.map((fact) => fact.id)),
         reasons: [],
       };
       combined.facts = [
@@ -1340,6 +1350,9 @@ export async function createPipeline(options) {
             reasonCodes: [
               `public_${activityState}_work`,
               ...c.contracts.publicDocumentationReasons(original.contribution),
+              ...(activityState === "accepted"
+                ? c.contracts.publicDocumentationRecognitionReasons(original.contribution)
+                : []),
             ],
           },
           occurredAt: fact.occurredAt,

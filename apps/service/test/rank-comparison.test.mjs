@@ -194,7 +194,7 @@ test("comparison receipts consume engine-validated clocks and never truncate fin
       /Expected an explicit UTC instant/,
     );
 });
-function harness(t, patch = () => {}) {
+function harness(t, patch = () => {}, registry = metricRegistryV1) {
   const before = published("synthetic-before", 1, beforeAt, oldFacts),
     after = published("synthetic-after", 2, afterAt, [...oldFacts, ...fresh]);
   const pair = {
@@ -206,6 +206,7 @@ function harness(t, patch = () => {}) {
   patch(pair);
   const calls = [];
   const app = createService({
+    registry,
     source: {
       async read() {
         calls.push("read");
@@ -233,6 +234,50 @@ function harness(t, patch = () => {}) {
   });
   return { app, pair, calls, params, url: `/api/v1/boards?${params}` };
 }
+test("paired current reads enforce the configured descriptive metric before boards and exports", async (t) => {
+  const registry = structuredClone(metricRegistryV1);
+  registry.metrics.find((metric) => metric.id === "pr_merged").definition.release_eligibility = "descriptive-only";
+  const h = harness(t, () => {}, registry);
+  for (const path of [h.url, `/api/v1/exports?${h.params}&format=json`, `/api/v1/exports?${h.params}&format=csv`]) {
+    const response = await h.app.inject(path);
+    assert.equal(response.statusCode, 503, response.body);
+    assert.equal(response.json().error, "public_projection_unavailable");
+    assert.equal(response.headers.etag, undefined);
+    assert.doesNotMatch(response.body, /synthetic-[abc]|private-acceptance-secret/);
+  }
+});
+
+test("a descriptive baseline violation withholds comparison while preserving valid current values", async (t) => {
+  const registry = structuredClone(metricRegistryV1);
+  registry.metrics.find((metric) => metric.id === "pr_merged").definition.release_eligibility = "descriptive-only";
+  const h = harness(
+    t,
+    (pair) => {
+      pair.current.selected.ranking[0].rank = false;
+    },
+    registry,
+  );
+  for (const path of [h.url, `/api/v1/exports?${h.params}&format=json`]) {
+    const response = await h.app.inject(path);
+    assert.equal(response.statusCode, 200, response.body);
+    const body = response.json();
+    assert.deepEqual(body.comparison, { snapshotId: null, scope: null, generatedAt: null });
+    assert.deepEqual(
+      body.rows.map((row) => row.result.value).sort((a, b) => a - b),
+      [1, 2, 3],
+    );
+    for (const row of body.rows) {
+      assert.equal(row.rank, null);
+      assert.deepEqual(row.movement, {
+        actorId: row.actorId,
+        state: "unavailable",
+        delta: null,
+        reason: "comparison_unavailable",
+      });
+    }
+  }
+});
+
 const safe = (body) => {
   for (const key of [
     "private-acceptance-secret",

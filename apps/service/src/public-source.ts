@@ -1,6 +1,7 @@
 import type { RankSnapshotHistory } from "./rank-comparison.js";
 import {
   publicDocumentationReasons,
+  publicDocumentationRecognitionReasons,
   matchesActorFilter,
   type ActorFilter,
   publicEvidenceMetadataSchema,
@@ -16,9 +17,11 @@ import {
   type Artifact,
   type Contribution,
   type MetricResult,
+  type MetricDefinition,
   type PendingCount,
   type Snapshot,
 } from "@pick-your-ai/contracts";
+import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { compareSourceInstants } from "./source-time.js";
 
 /** An exact materialized scope, never a request to sum overlapping aggregates. */
@@ -200,7 +203,12 @@ const date = (value: string | null) => sourceEventSchema.shape.occurredAt.safePa
 const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,200}$/.test(value);
 
 /** Validate and construct a fresh allowlisted public object. Never serialize provider objects. */
-export function projectRead(input: PublicRead, scope: PublicScope, pin: string | null): PublicRead {
+export function projectRead(
+  input: PublicRead,
+  scope: PublicScope,
+  pin: string | null,
+  definitions: readonly MetricDefinition[] = metricRegistryV1.metrics,
+): PublicRead {
   const reject = () => {
     throw new PublicReadError(503, "public_projection_unavailable");
   };
@@ -227,10 +235,15 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
   )
     return reject();
   const ranking = selected.ranking.map((entry) => {
+    const definition = definitions.find((metric) => metric.id === entry.metricId)?.definition;
+    const descriptive =
+      definition?.release_eligibility === "descriptive-only" ||
+      ["ratio", "median_and_p75_of_elapsed_hours"].includes(definition?.aggregation ?? "");
     if (
       !id(entry.metricId) ||
       !["ascending", "descending"].includes(entry.direction) ||
-      (entry.rank !== undefined && typeof entry.rank !== "boolean")
+      (entry.rank !== undefined && typeof entry.rank !== "boolean") ||
+      (descriptive && entry.rank !== false)
     )
       return reject();
     return { metricId: entry.metricId, direction: entry.direction, rank: entry.rank !== false };
@@ -380,6 +393,7 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
                     ].includes(reason),
                   ),
                   ...classification,
+                  ...publicDocumentationRecognitionReasons(parsed),
                 ],
               }
             : {}),
@@ -460,6 +474,9 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
         reasonCodes: [
           `public_${portfolioMetadata.get(entry.contribution.contributionId)!.activityState}_work`,
           ...publicDocumentationReasons(entry.contribution),
+          ...(portfolioMetadata.get(entry.contribution.contributionId)!.activityState === "accepted"
+            ? publicDocumentationRecognitionReasons(entry.contribution)
+            : []),
         ],
       },
     }))
