@@ -1484,3 +1484,34 @@ test("independent PostgreSQL outbox workers claim disjoint rows with SKIP LOCKED
   assert.equal(await outbox.complete(second, dispatchProof, async () => {}), true);
   assert.equal((await outbox.health()).completed, 2);
 });
+
+test("a current Project subject marker is retained only for matching native snapshot identity", async () => {
+  const collect = await collection();
+  await collect.start(scan("synthetic-native-current", { family: "project_current" }));
+  assert.equal(
+    await collect.step("synthetic-native-current", {
+      readPage: async () =>
+        page([fact("SYNTHETIC_ISSUE", { projectSubjectId: "SYNTHETIC_ISSUE", untrustedExtra: "discard" })]),
+    }),
+    "complete",
+  );
+  const saved = (await facts())[0].document;
+  assert.equal(saved.subjectId, "SYNTHETIC_ISSUE");
+  assert.equal(saved.projectSubjectId, "SYNTHETIC_ISSUE");
+  assert.equal(saved.untrustedExtra, undefined);
+  for (const [suffix, family, changes] of [
+    ["mismatch", "project_current", { projectSubjectId: "SYNTHETIC_OTHER" }],
+    ["invalid", "project_current", { projectSubjectId: "not a native ID" }],
+    ["history", "project_history", { projectSubjectId: "SYNTHETIC_ISSUE" }],
+    ["ordinary", "issues", { projectSubjectId: "SYNTHETIC_ISSUE" }],
+    ["transition", "project_current", { projectSubjectId: "SYNTHETIC_ISSUE", evidence: "observed_transition" }],
+  ]) {
+    const runId = "synthetic-marker-" + suffix;
+    await collect.start(scan(runId, { family }));
+    assert.equal(
+      await collect.step(runId, { readPage: async () => page([fact("SYNTHETIC_ISSUE", changes)]) }),
+      "failed",
+    );
+    assert.equal((await facts()).length, 1, "invalid identity is rejected before its transaction can retain any fact");
+  }
+});

@@ -21,6 +21,14 @@ import { GithubReadClient } from "./client.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
+  readPublicSubjectProjectSnapshot,
+  projectSubjectSnapshotRevision,
+  projectContextFromSnapshot,
+  validateProjectWorkstreamMapping,
+  type ProjectWorkstreamMapping,
+  type ProjectMembershipContext,
+} from "./project-context.js";
+import {
   classifyPhysicalDiff,
   pinnedSha,
   type PinnedPhysicalDiff,
@@ -122,8 +130,18 @@ export interface NormalizedGithubFact {
   acceptanceReceipt: string | null;
   acceptedBy: string | null;
   subjectActorId: string | null;
-  eventContext: { projects: string[]; workstreams: string[] } | null;
-  currentContext: { projects: string[]; workstreams: string[] } | null;
+  eventContext: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
+  currentContext: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
   quantity?: number;
   rawState?: string;
   outcome?: "merged" | "closed_unmerged" | "pending";
@@ -197,6 +215,8 @@ export interface NormalizedGithubResult {
   lineage: GithubLineage[];
   suppressArtifactIds: string[];
   physicalDiff?: ClassifiedPhysicalDiff;
+  /** Private current association; it never creates an action or historical attribution. */
+  projectContext?: NormalizedProjectContext;
   participation: Array<{
     artifactId: string;
     actorId: string;
@@ -241,8 +261,18 @@ export interface GithubEvidenceEnvelope {
   occurredAt?: string | null;
   action?: string;
   payload: unknown;
-  eventContext?: { projects: string[]; workstreams: string[] } | null;
-  currentContext?: { projects: string[]; workstreams: string[] } | null;
+  eventContext?: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
+  currentContext?: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
   verifiedCoauthors?: readonly { actor: unknown; verificationReceipt: string }[];
   /** Protected collector input, never copied from API payloads, trailers or public request bodies. */
   reviewedServiceAccounts?: readonly ServiceAccountClassification[];
@@ -1347,6 +1377,18 @@ export function applyRecognitionReceipt(
   return out;
 }
 
+export interface NormalizedProjectContext {
+  schemaVersion: "github-current-project-context/v1";
+  repositoryId: string;
+  subjectId: string;
+  subjectKind: "issue" | "pull_request";
+  sourceUrl: string;
+  sourceRevision: string;
+  observedAt: string;
+  mappingVersion: string | null;
+  context: ProjectMembershipContext & { projectScope: string[] };
+}
+
 export interface CollectionNormalizerInput {
   /** Trusted host selects the current subject revision at its frozen cutoff. */
   selectedCurrentState?: boolean;
@@ -1359,6 +1401,7 @@ export interface CollectionNormalizerInput {
     subjectId: string;
     /** Native issue/PR identity retained by the trusted Project-history collector. */
     historySubjectId?: string;
+    projectSubjectId?: string;
     sourceRevision: string;
     sourceUrl: string;
     evidence: "current_state" | "observed_transition";
@@ -1390,10 +1433,28 @@ export interface GithubEvidenceNormalizerOptions {
   maxReviewPages?: number;
   documentationPolicies?: readonly DocumentationPathPolicy[];
   researchPolicies?: readonly ResearchPathPolicy[];
+  projectWorkstreamMappings?: readonly (ProjectWorkstreamMapping & { repositoryId: number })[];
 }
 
 /** Read-only collection-to-metric adapter. Lossy snapshots are hydrated rather than guessed. */
 export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizerOptions) {
+  const projectMappings = structuredClone(options.projectWorkstreamMappings ?? []);
+  if (
+    !Array.isArray(projectMappings) ||
+    projectMappings.length > 1000 ||
+    projectMappings.some(
+      (mapping) =>
+        !object(mapping) ||
+        Object.keys(mapping).length !== 3 ||
+        !["repositoryId", "version", "projects"].every((key) => Object.hasOwn(mapping, key)) ||
+        typeof mapping.repositoryId !== "number" ||
+        !Number.isSafeInteger(mapping.repositoryId) ||
+        mapping.repositoryId < 1 ||
+        !options.allowedRepositoryIds.includes(mapping.repositoryId),
+    ) ||
+    new Set(projectMappings.map((mapping) => mapping.repositoryId)).size !== projectMappings.length
+  )
+    throw new Error("invalid_project_workstream_mapping");
   const documentationPolicies = structuredClone(options.documentationPolicies ?? []);
   for (const policy of documentationPolicies) validateDocumentationPolicy(policy);
   if (new Set(documentationPolicies.map((policy) => policy.repositoryId)).size !== documentationPolicies.length)
@@ -1453,7 +1514,16 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           : String(event.__typename).includes("Removed")
             ? "removed"
             : "added",
-        ...(project ? { eventContext: { projects: [String(project.id)], workstreams: [] } } : {}),
+        ...(project
+          ? {
+              eventContext: {
+                projects: [String(project.id)],
+                projectScope: [String(project.id)],
+                workstreams: [],
+                workstreamsKnown: false,
+              },
+            }
+          : {}),
         payload: isProject
           ? {
               id: event.id,
@@ -1475,6 +1545,53 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       });
     }
     if (input.family === "project_current") {
+      if (input.fact.projectSubjectId !== undefined) {
+        if (
+          input.fact.projectSubjectId !== input.fact.subjectId ||
+          input.fact.evidence !== "current_state" ||
+          input.selectedCurrentState !== true
+        )
+          return none("project_context_current_selection_unverified");
+        const configured = projectMappings.find((mapping) => mapping.repositoryId === input.repository.id);
+        const mapping = configured
+          ? validateProjectWorkstreamMapping(
+              { version: configured.version, projects: configured.projects },
+              input.repository.allowedProjectIds ?? [],
+            )
+          : undefined;
+        const snapshot = await readPublicSubjectProjectSnapshot({
+          client: options.client,
+          source: options.source,
+          repository: input.repository,
+          subjectId: input.fact.projectSubjectId,
+          sourceUrl: input.fact.sourceUrl,
+          allowedProjectIds: input.repository.allowedProjectIds ?? [],
+          scanId: input.factKey,
+          ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
+        });
+        if (!matchesSnapshotRevision(input.fact.sourceRevision, projectSubjectSnapshotRevision(snapshot)))
+          return none("project_snapshot_revision_or_subject_unverified");
+        if (snapshot.items.some((item) => Date.parse(item.updatedAt) > Date.parse(input.observedAt)))
+          return none("project_snapshot_after_observation_cutoff");
+        return {
+          ...result(),
+          isSynthetic: options.isSynthetic === true,
+          projectContext: {
+            schemaVersion: "github-current-project-context/v1",
+            repositoryId: String(snapshot.repositoryId),
+            subjectId: snapshot.subjectId,
+            subjectKind: snapshot.subjectKind,
+            sourceUrl: snapshot.sourceUrl,
+            sourceRevision: input.fact.sourceRevision,
+            observedAt: input.observedAt,
+            mappingVersion: mapping?.version ?? null,
+            context: {
+              ...projectContextFromSnapshot(snapshot, mapping),
+              projectScope: [...snapshot.allowedProjectIds],
+            },
+          },
+        };
+      }
       const snapshot = await readPublicProjectSnapshot({
         client: options.client,
         source: options.source,
