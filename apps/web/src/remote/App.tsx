@@ -370,22 +370,28 @@ export function RemoteApp() {
     focusOnLoad = useRef(false);
   const active = useRef<AbortController | null>(null);
   const activeExport = useRef<AbortController | null>(null);
-  const displayedPortfolio = useRef<{ location: string; href: string } | null>(null);
-  const navigate = useCallback((href: string) => {
+  const displayedPage = useRef<{ location: string; href: string } | null>(null);
+  const preserveDisplayedPage = useCallback(() => {
     // Make the previous page reproducible when Back is used after a new head arrives.
     // Store only the pin in the URL; no contributor response is kept in browser history.
-    if (displayedPortfolio.current?.location === `${location.pathname}${location.search}`)
-      history.replaceState(null, "", displayedPortfolio.current.href);
-    history.pushState(null, "", href);
-    active.current?.abort();
-    activeExport.current?.abort();
-    setState({ status: "loading" });
-    setHeldPin(null);
-    setFollow(false);
-    focusOnLoad.current = true;
-    setUrl({ pathname: location.pathname, search: location.search });
-    window.scrollTo(0, 0);
+    if (displayedPage.current?.location === `${location.pathname}${location.search}`)
+      history.replaceState(null, "", displayedPage.current.href);
   }, []);
+  const navigate = useCallback(
+    (href: string) => {
+      preserveDisplayedPage();
+      history.pushState(null, "", href);
+      active.current?.abort();
+      activeExport.current?.abort();
+      setState({ status: "loading" });
+      setHeldPin(null);
+      setFollow(false);
+      focusOnLoad.current = true;
+      setUrl({ pathname: location.pathname, search: location.search });
+      window.scrollTo(0, 0);
+    },
+    [preserveDisplayedPage],
+  );
   useEffect(() => () => activeExport.current?.abort(), []);
   useEffect(() => {
     const pop = () => {
@@ -579,17 +585,14 @@ export function RemoteApp() {
         if (data.kind === "catalog") discoverMetrics(registry, selected);
         if (data.kind === "board") verifyBoardDefinition(registry, data.value.metric);
         setChecking(false);
-        if (
-          data.kind === "directory" ||
-          data.kind === "profile" ||
-          data.kind === "activity" ||
-          data.kind === "activity-detail"
-        )
-          displayedPortfolio.current = {
+        // Explicit pins are already reproducible, including proof URLs and their
+        // drawer history marker. Only an implicit displayed selection needs pinning.
+        if ("value" in data && !selected.snapshot)
+          displayedPage.current = {
             location: `${url.pathname}${url.search}`,
             href: uiHref(url.pathname, selected, { snapshot: data.value.snapshotId, cursor: selected.cursor }),
           };
-        else displayedPortfolio.current = null;
+        else displayedPage.current = null;
         setState({ status: "ready", registry, data });
         if ("value" in data && !selected.snapshot && !heldPin) setHeldPin(data.value.snapshotId);
       })
@@ -634,16 +637,16 @@ export function RemoteApp() {
     )
       apply();
   }, [pending, selected.proof, follow, reduced, pointerInside, focusInside, apply]);
+  const pinned = { ...selected, snapshot: meta?.snapshotId ?? selected.snapshot };
   const link = (
     path: string,
     text: string,
     override: { snapshot?: string | null; cursor?: string | null; metric?: string } = {},
   ) => (
-    <a data-api-nav href={uiHref(path, selected, override)}>
+    <a data-api-nav href={uiHref(path, pinned, override)}>
       {text}
     </a>
   );
-  const pinned = { ...selected, snapshot: meta?.snapshotId ?? selected.snapshot };
   const closeProof = useCallback(() => {
     if (history.state?.apiProofDrawer === true) history.back();
     else {
@@ -699,7 +702,10 @@ export function RemoteApp() {
           return;
         // The display has its own bounded page lifecycle. A normal same-tab
         // navigation tears down this reader and its in-flight requests first.
-        if (new URL(target.href).pathname === "/live") return;
+        if (new URL(target.href).pathname === "/live") {
+          preserveDisplayedPage();
+          return;
+        }
         event.preventDefault();
         if (target.hasAttribute("data-api-proof")) {
           proofOpener.current = target;
@@ -720,7 +726,7 @@ export function RemoteApp() {
       </a>
       <header className="app-header">
         <div className="header-inner">
-          <a data-api-nav href={uiHref("/", selected)} className="wordmark">
+          <a data-api-nav href={uiHref("/", pinned)} className="wordmark">
             PickYour.AI Credits
           </a>
           <nav aria-label="Primary">
