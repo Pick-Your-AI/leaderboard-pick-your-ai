@@ -32,6 +32,7 @@ const policyKeys = [
   "roles",
   "groupBy",
   "groupingSeconds",
+  "groupingPolicyVersion",
   "sources",
   "minimumSamples",
   "rank",
@@ -48,6 +49,15 @@ function checkedPolicy(policy, metrics) {
         !/[\u0000-\u001f\u007f]/.test(policy[key]),
       400,
       "Invalid candidate policy",
+    );
+  if (policy.groupingPolicyVersion !== undefined)
+    requireThat(
+      typeof policy.groupingPolicyVersion === "string" &&
+        policy.groupingPolicyVersion.trim().length > 0 &&
+        policy.groupingPolicyVersion.length <= 100 &&
+        !/[\u0000-\u001f\u007f]/.test(policy.groupingPolicyVersion),
+      400,
+      "Invalid candidate grouping policy version",
     );
   for (const key of ["rankedStates", "roles", "sources"])
     requireThat(Array.isArray(policy[key]) && policy[key].length <= 20, 400, "Invalid candidate policy");

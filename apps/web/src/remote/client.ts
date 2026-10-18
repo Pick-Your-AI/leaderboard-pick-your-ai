@@ -31,7 +31,19 @@ export class ReadFailure extends Error {
 }
 const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
 const scopeKeys = ["organization", "repository", "workstream", "start", "end"] as const;
-const supported = new Set([...scopeKeys, "snapshot", "limit", "cursor", "metric", "ui", "search", "category", "proof"]);
+const supported = new Set([
+  ...scopeKeys,
+  "snapshot",
+  "limit",
+  "cursor",
+  "metric",
+  "ui",
+  "search",
+  "category",
+  "proof",
+  "q",
+  "department",
+]);
 export interface Selection {
   organization: string;
   repository: string | null;
@@ -45,6 +57,9 @@ export interface Selection {
   search: string | null;
   category: string | null;
   proof?: string | null;
+  /** Local catalog discovery only; never sent as a source-data filter. */
+  catalogQuery?: string | null;
+  department?: string | null;
 }
 export function selection(query: string): Selection {
   const params = new URLSearchParams(query);
@@ -79,9 +94,14 @@ export function selection(query: string): Selection {
   const cursor = params.get("cursor");
   if (cursor !== null && (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(cursor) || cursor.length > 2048))
     throw new ReadFailure(400, "invalid_cursor");
+  const catalogQuery = params.get("q");
+  if (catalogQuery !== null && (catalogQuery.length > 120 || /[\u0000-\u001f\u007f]/.test(catalogQuery)))
+    throw new ReadFailure(400, "invalid_catalog_query");
   const search = params.get("search");
   if (search !== null && !/^[A-Za-z0-9-]{1,39}$/.test(search)) throw new ReadFailure(400, "invalid_search");
   return {
+    catalogQuery: catalogQuery?.trim() || null,
+    department: id("department"),
     search: search?.toLowerCase() ?? null,
     category: id("category"),
     proof: id("proof"),
@@ -123,6 +143,10 @@ export function uiHref(
   if ((path.startsWith("/contributors") || path === "/activity" || path.startsWith("/activity/")) && value.category)
     params.set("category", value.category);
   if (path === "/contributors" && value.search) params.set("search", value.search);
+  if (path === "/leaderboards" || path === "/methodology" || path === "/methodology/changes") {
+    if (value.catalogQuery) params.set("q", value.catalogQuery);
+    if (value.department) params.set("department", value.department);
+  }
   if (extra.cursor) params.set("cursor", extra.cursor);
   return `${path}?${params}`;
 }
@@ -628,7 +652,11 @@ export function health(value: unknown, selected: Selection): Health {
     }),
   };
 }
-export const catalog = (value: unknown): MetricRegistry => metricRegistrySchema.parse(value);
+export function catalog(value: unknown): MetricRegistry {
+  const parsed = metricRegistrySchema.safeParse(value);
+  if (!parsed.success) throw new ReadFailure(502, "invalid_metric_registry");
+  return parsed.data;
+}
 
 export interface ActivityGroup {
   groupId: string;

@@ -381,29 +381,159 @@ export const metricDefinitionSchema = z
   })
   .strict();
 
+export const metricSelectionSchema = z
+  .object({
+    state: z.enum(["observed", "qualified", "reviewed"]),
+    date_basis: z.enum(["occurredAt", "acceptedAt"]),
+  })
+  .strict();
+
+export const metricUiEntrySchema = z
+  .object({
+    metric_id: id,
+    department: id,
+    synonyms: z.array(nonEmpty).min(1),
+    maturity: z.enum(["definition_only", "synthetic_verified", "deferred"]),
+    source_class: z.enum(["reconstructible", "since_installation", "evidence_reviewed", "conditional", "unsupported"]),
+    supported_states: z.array(metricSelectionSchema.shape.state),
+    supported_date_bases: z.array(metricSelectionSchema.shape.date_basis),
+    supported_combinations: z.array(metricSelectionSchema),
+    default_combination: metricSelectionSchema.nullable(),
+    lead_view: z
+      .object({ overview: z.boolean(), wall: z.boolean(), order: z.number().int().nonnegative().nullable() })
+      .strict(),
+    verification_cases: z.array(nonEmpty),
+    limitations: z.array(nonEmpty).min(1),
+  })
+  .strict();
+
+export const metricUiMetadataSchema = z
+  .object({
+    decision_state: z.literal("candidate"),
+    version: z.literal("leaderboard-ui/v1"),
+    public_enabled: z.literal(false),
+    note: nonEmpty,
+    departments: z.array(z.object({ id, label: nonEmpty, order: z.number().int().nonnegative() }).strict()).min(1),
+    metrics: z.array(metricUiEntrySchema).length(98),
+  })
+  .strict();
+
+export const metricGroupingPolicySchema = z
+  .object({
+    version: z.literal("triage-raw-state/v1"),
+    metric_id: z.literal("items_triaged"),
+    state: z.literal("observed"),
+    date_basis: z.literal("occurredAt"),
+    group_by: z.literal("actor_artifact_state_interval"),
+    grouping_seconds: z.literal(3600),
+    interval_origin: z.literal("1970-01-01T00:00:00Z"),
+    raw_state_rule: z.literal("exact_source_value"),
+    repeated_state_rule: z.literal("one_actor_artifact_raw_state_per_interval"),
+    missing_state_or_time: z.literal("exclude_unknown"),
+    semantic_classifier: z.literal("none"),
+    public_enabled: z.literal(false),
+  })
+  .strict();
+
 export const metricRegistrySchema = z
   .object({
     contract_version: z.literal("leaderboard-metrics/v1"),
     policy_version: id,
     source_plan: id,
     metrics: z.array(metricDefinitionSchema).length(98),
-    ui_metadata: z
-      .object({
-        decision_state: z.literal("unresolved"),
-        fields: z.array(id),
-        note: nonEmpty,
-      })
-      .strict(),
+    // Retain read compatibility with the earlier unresolved candidate. It has
+    // no selectable capability, and consumers must explicitly handle it.
+    ui_metadata: z.union([
+      metricUiMetadataSchema,
+      z
+        .object({
+          decision_state: z.literal("unresolved"),
+          fields: z.array(id),
+          note: nonEmpty,
+        })
+        .strict(),
+    ]),
+    grouping_policies: z.array(metricGroupingPolicySchema).optional(),
   })
   .strict()
   .superRefine((registry, ctx) => {
+    const problem = (message: string, path: (string | number)[]) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message, path });
     const ids = registry.metrics.map((metric) => metric.id);
-    if (new Set(ids).size !== ids.length) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Metric IDs must be unique within a registry version.",
-        path: ["metrics"],
-      });
+    if (new Set(ids).size !== ids.length) problem("Metric IDs must be unique within a registry version.", ["metrics"]);
+    if (
+      registry.grouping_policies &&
+      new Set(registry.grouping_policies.map((p) => p.metric_id)).size !== registry.grouping_policies.length
+    )
+      problem("Grouping policies must be unique per metric.", ["grouping_policies"]);
+    const ui = registry.ui_metadata;
+    if (ui.decision_state === "unresolved") return;
+    const departments = ui.departments.map((d) => d.id);
+    if (
+      new Set(departments).size !== departments.length ||
+      new Set(ui.departments.map((d) => d.order)).size !== departments.length
+    )
+      problem("Department IDs and ordering must be unique.", ["ui_metadata", "departments"]);
+    const mapped = ui.metrics.map((m) => m.metric_id);
+    if (new Set(mapped).size !== ids.length || mapped.some((id) => !ids.includes(id)))
+      problem("UI metadata must map every definition exactly once.", ["ui_metadata", "metrics"]);
+    const leadOrders = ui.metrics.filter((m) => m.lead_view.order !== null).map((m) => m.lead_view.order);
+    if (new Set(leadOrders).size !== leadOrders.length)
+      problem("Lead ordering must be unique.", ["ui_metadata", "metrics"]);
+    const leadDepartments = ui.metrics.filter((m) => m.lead_view.overview).map((m) => m.department);
+    if (new Set(leadDepartments).size !== leadDepartments.length)
+      problem("A department has at most one overview lead.", ["ui_metadata", "metrics"]);
+    for (const [index, entry] of ui.metrics.entries()) {
+      const path = ["ui_metadata", "metrics", index];
+      const metric = registry.metrics.find((m) => m.id === entry.metric_id);
+      if (!departments.includes(entry.department)) problem("Unknown department.", [...path, "department"]);
+      const combinations = entry.supported_combinations.map((c) => `${c.state}:${c.date_basis}`);
+      const selectable = combinations.length > 0;
+      const states = [...new Set(entry.supported_combinations.map((c) => c.state))].sort();
+      const dates = [...new Set(entry.supported_combinations.map((c) => c.date_basis))].sort();
+      if (
+        new Set(combinations).size !== combinations.length ||
+        JSON.stringify([...entry.supported_states].sort()) !== JSON.stringify(states) ||
+        JSON.stringify([...entry.supported_date_bases].sort()) !== JSON.stringify(dates)
+      )
+        problem("Supported state/date lists must exactly project unique combinations.", path);
+      if (
+        (entry.default_combination !== null) !== selectable ||
+        (entry.default_combination &&
+          !combinations.includes(`${entry.default_combination.state}:${entry.default_combination.date_basis}`))
+      )
+        problem("A default must be an explicitly supported combination; unavailable metrics have no default.", path);
+      if (
+        (entry.maturity === "synthetic_verified") !== selectable ||
+        (combinations.length && !entry.verification_cases.length)
+      )
+        problem(
+          "Selectable candidates require verification cases; definition-only and deferred metrics cannot select a view.",
+          path,
+        );
+      const lead = entry.lead_view;
+      if (
+        (lead.overview || lead.wall) !== (lead.order !== null) ||
+        ((lead.overview || lead.wall) && (!combinations.length || metric?.display !== "leaderboard"))
+      )
+        problem("Lead and wall choices require a supported ranked definition and explicit order.", path);
+      if (
+        (entry.source_class === "unsupported" ||
+          metric?.coverage_class === "disabled_currently" ||
+          metric?.definition.release_eligibility === "deferred advanced") &&
+        combinations.length
+      )
+        problem("Unsupported or deferred metrics cannot expose measured selections.", path);
+      if (entry.metric_id === "items_triaged" && selectable) {
+        const grouping = registry.grouping_policies?.find((policy) => policy.metric_id === entry.metric_id);
+        if (!grouping) problem("Triage selections require an explicit versioned grouping policy.", path);
+        else if (
+          entry.supported_combinations.some(
+            (pair) => pair.state !== grouping.state || pair.date_basis !== grouping.date_basis,
+          )
+        )
+          problem("Every triage selection must match its versioned grouping policy state and date basis.", path);
+      }
     }
   });
 
@@ -447,3 +577,6 @@ export const pendingCountSchema = z
   });
 export type PendingCount = z.infer<typeof pendingCountSchema>;
 export type ServiceAccountClassification = z.infer<typeof serviceAccountClassificationSchema>;
+export type MetricSelection = z.infer<typeof metricSelectionSchema>;
+export type MetricUiEntry = z.infer<typeof metricUiEntrySchema>;
+export type MetricUiMetadata = z.infer<typeof metricUiMetadataSchema>;

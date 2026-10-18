@@ -13,11 +13,13 @@ import {
   SnapshotNotices,
 } from "../components/status.tsx";
 import { familyLabel, getMetric, releaseEligibilityLabels } from "../data/registry.ts";
-import { buildBoard, type Board, type BoardRow } from "../data/source.ts";
+import type { Board, BoardRow } from "../data/source.ts";
 import { plural } from "../lib/format.ts";
 import { useLatestSnapshotId, useRead, useScope } from "../lib/hooks.ts";
 import { Link, useRouter, ScopedLink } from "../lib/router.tsx";
 import { serializeScope, mayFollowUpdates } from "../lib/scope.ts";
+
+import { buildSelectedBoard, validatePrototypeView } from "../data/metric-selection.ts";
 
 const PAGE_SIZE = 25;
 
@@ -70,6 +72,14 @@ export function BoardPage({ metricId }: { metricId: string }) {
   const { scope, params, hrefWith } = useScope();
   const { pathname, navigate } = useRouter();
   const latest = useLatestSnapshotId();
+  const selectionError = useMemo(() => {
+    try {
+      validatePrototypeView(metricId, params);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error : new Error("Unsupported metric view");
+    }
+  }, [metricId, params.state, params.date_basis]);
   const [shownLatest, setShownLatest] = useState(latest);
   const [follow, setFollow] = useState(false);
   const [pointerInside, setPointerInside] = useState(false);
@@ -77,7 +87,10 @@ export function BoardPage({ metricId }: { metricId: string }) {
   const [announcement, setAnnouncement] = useState("");
   const regionRef = useRef<HTMLDivElement>(null);
   const scopeKey = serializeScope(scope);
-  const state = useRead(() => buildBoard(metricId, scope, shownLatest), [metricId, scopeKey, shownLatest]);
+  const state = useRead(
+    () => buildSelectedBoard(metricId, scope, shownLatest, params),
+    [metricId, scopeKey, shownLatest, params.state, params.date_basis],
+  );
 
   const sort: BoardSort = params.sort === "name" ? "name" : "rank";
   const limit = Math.max(PAGE_SIZE, Number.parseInt(params.rows ?? "", 10) || PAGE_SIZE);
@@ -85,14 +98,15 @@ export function BoardPage({ metricId }: { metricId: string }) {
   const pendingId = !scope.snapshot && latest !== shownLatest ? latest : null;
 
   const apply = useCallback(() => {
-    const before = buildBoard(metricId, scope, shownLatest);
-    const after = buildBoard(metricId, scope, latest);
+    if (selectionError) return;
+    const before = buildSelectedBoard(metricId, scope, shownLatest, params);
+    const after = buildSelectedBoard(metricId, scope, latest, params);
     setShownLatest(latest);
     const changed = changedRows(before, after);
     setAnnouncement(
       `Updated to snapshot ${latest}. ${changed === 0 ? "No ranked values changed." : `${plural(changed, "row")} changed.`}`,
     );
-  }, [metricId, scope, shownLatest, latest]);
+  }, [metricId, scope, shownLatest, latest, params.state, params.date_basis, selectionError]);
 
   useEffect(() => {
     // Drawer cleanup restores focus before React processes its focus event.
@@ -116,6 +130,16 @@ export function BoardPage({ metricId }: { metricId: string }) {
   }, [state, proof]);
 
   if (!metric) return null;
+  // A changed URL must not display a previous successful table while the
+  // asynchronous read catches up with an unsupported selection.
+  if (selectionError)
+    return (
+      <>
+        <PageHeader title={metric.name} />
+        <ScopeBar metricId={metricId} timeWindow={null} />
+        <ErrorState error={selectionError} />
+      </>
+    );
 
   const engagement = {
     onFocus: () => setFocusInside(true),
@@ -135,7 +159,7 @@ export function BoardPage({ metricId }: { metricId: string }) {
           {releaseEligibilityLabels[metric.definition.release_eligibility] ?? metric.definition.release_eligibility}.
         </p>
       </PageHeader>
-      <ScopeBar timeWindow={state.status === "ready" && state.data ? state.data.window : null} />
+      <ScopeBar metricId={metricId} timeWindow={state.status === "ready" && state.data ? state.data.window : null} />
       <div className="visually-hidden" aria-live="polite" role="status">
         {announcement}
       </div>

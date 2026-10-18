@@ -9,6 +9,7 @@ import {
   type Coverage,
 } from "@pick-your-ai/contracts";
 import { getMetricDefinition } from "./v1/index.js";
+import { getMetricGroupingPolicy } from "./ui.js";
 
 export type EvidenceState = "observed" | "qualified" | "reviewed" | "pending" | "excluded" | "unknown";
 export type Role = Contribution["roles"][number];
@@ -65,6 +66,8 @@ export interface MetricPolicy {
   groupBy: "canonical" | "actor_artifact" | "actor_artifact_state_interval";
   /** Required for state-interval grouping. No interval is silently chosen. */
   groupingSeconds?: number;
+  /** Registry policy pin is required for raw triage grouping. */
+  groupingPolicyVersion?: string;
   sources: Coverage["source"][];
   minimumSamples: number;
   rank: boolean;
@@ -217,6 +220,18 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
     (!Number.isSafeInteger(policy.groupingSeconds) || policy.groupingSeconds! < 1)
   )
     throw new Error("State grouping requires an explicit positive interval");
+  const grouping = getMetricGroupingPolicy(policy.metricId);
+  if (
+    grouping &&
+    (policy.groupingPolicyVersion !== grouping.version ||
+      policy.groupBy !== grouping.group_by ||
+      policy.groupingSeconds !== grouping.grouping_seconds ||
+      policy.dateBasis !== grouping.date_basis ||
+      policy.rankedStates[0] !== grouping.state ||
+      policy.roles.length !== 1 ||
+      policy.roles[0] !== "triager")
+  )
+    throw new Error("Raw triage requires the exact versioned grouping policy, observed state and triager role");
   if (policy.aggregation === "ratio" && policy.dateBasis !== "acceptedAt")
     throw new Error("PR ratios use decision time, supplied as acceptedAt for merged and closed-unmerged decisions");
   if (
