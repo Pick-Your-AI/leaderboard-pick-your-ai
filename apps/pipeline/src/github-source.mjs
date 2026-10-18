@@ -133,19 +133,44 @@ export function createGithubCollectionSource({
           (!Array.isArray(repository.allowedProjectIds) || !repository.allowedProjectIds.length)
         )
           throw new Error("approved_project_scope_required");
-        const subjects = await scan(`${request.family}:subjects`, routes.issues, (items) =>
-          items.filter((item) => !item.pull_request),
+        // Old Project checkpoints contain filtered issue-only inventories; do not reuse them for PR coverage.
+        const subjects = await scan(
+          request.family === "project_history" ? "project_history:issue-and-pr-subjects" : "relationships:subjects",
+          routes.issues,
+          (items) => (request.family === "project_history" ? items : items.filter((item) => !item.pull_request)),
         );
         if (subjects.length > 10000) throw new Error("source_dataset_budget_exceeded");
         values = [];
+        const seen = new Set();
+        const seenIds = new Set();
         for (const subject of subjects) {
-          if (!Number.isSafeInteger(subject.number) || subject.number < 1)
-            throw new Error("history_subject_unverified");
+          if (
+            subject === null ||
+            typeof subject !== "object" ||
+            Array.isArray(subject) ||
+            !Number.isSafeInteger(subject.number) ||
+            subject.number < 1 ||
+            seen.has(subject.number) ||
+            typeof subject.node_id !== "string" ||
+            // Match collection identity validation before admitting history:
+            // Project identity loss must reach the durable publication gate.
+            !/^[A-Za-z0-9_=.:\-]{1,128}$/.test(subject.node_id) ||
+            seenIds.has(subject.node_id)
+          )
+            throw new Error(
+              request.family === "project_history"
+                ? "project_subject_identity_unverified"
+                : "history_subject_unverified",
+            );
+          seen.add(subject.number);
+          seenIds.add(subject.node_id);
           const records = await readTypedIssueHistory({
             client,
             source: sourceId,
             repository,
             number: subject.number,
+            subjectType: subject.pull_request ? "pull_request" : "issue",
+            subjectId: subject.node_id,
             family: request.family,
             scanId: request.runId,
             maxPages,
@@ -154,6 +179,7 @@ export function createGithubCollectionSource({
           values.push(
             ...records.map((record) => ({
               node_id: record.event.id,
+              ...(request.family === "project_history" ? { history_subject_id: record.subject.id } : {}),
               html_url: record.subject.url,
               source_revision: typedHistoryRevision(record),
               created_at: record.event.createdAt,
@@ -316,6 +342,7 @@ export function createGithubCollectionSource({
           throw new Error("source_identity_or_revision_unverified");
         return {
           subjectId,
+          ...(request.family === "project_history" ? { historySubjectId: value.history_subject_id } : {}),
           sourceRevision: revision,
           sourceUrl: value.html_url,
           evidence: ["timelines", "project_history", "relationships"].includes(request.family)
