@@ -8,6 +8,7 @@ import { startLiveUpdates, type LiveState } from "@pick-your-ai/service/live-cli
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
 import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
 import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
+import { MethodDefinition } from "./MethodDefinition.tsx";
 import {
   discoverMetrics,
   isCatalogPath,
@@ -310,27 +311,9 @@ function Methods({ metric, registry, meta }: { metric: MetricDefinition; registr
   return (
     <section className="section">
       <h2>{metric.name}</h2>
+      <p>Definition policy {registry.policy_version}. Definition details do not certify a published measurement.</p>
+      <MethodDefinition metric={metric} />
       <dl className="receipt">
-        <dt>Definition</dt>
-        <dd>{metric.counting_rule}</dd>
-        <dt>Unit and aggregation</dt>
-        <dd>
-          {metric.definition.unit}; {metric.definition.aggregation}
-        </dd>
-        <dt>Numerator</dt>
-        <dd>{metric.definition.numerator}</dd>
-        <dt>Source definition</dt>
-        <dd>{metric.source}</dd>
-        <dt>Event clock</dt>
-        <dd>{metric.event_clock}</dd>
-        <dt>Attribution</dt>
-        <dd>{metric.attribution}</dd>
-        <dt>Denominator</dt>
-        <dd>{metric.definition.denominator.definition}</dd>
-        <dt>Coverage</dt>
-        <dd>{metric.coverage_class}</dd>
-        <dt>Release eligibility</dt>
-        <dd>{metric.definition.release_eligibility}</dd>
         <dt>Published policy</dt>
         <dd>
           {method ? (
