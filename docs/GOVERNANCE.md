@@ -28,7 +28,7 @@ Distinct contribution roles can share an artifact, but a repeated event or impor
 
 ## Decision register
 
-The dedicated repository boundary has been selected. Other recommendations below remain proposals until their responsible roles accept them. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
+The dedicated repository boundary has been selected. The [metric and recognition decision](metric-recognition-policy.md) and its [definition review](metric-definition-review.md) specify this project's policy choices; review and merge record their acceptance. Each register entry retains its unresolved source, role or operating evidence. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
 
 **Id:** DEC-01
 
@@ -90,7 +90,13 @@ The dedicated repository boundary has been selected. Other recommendations below
 
 - LB-11.01
 
-**Status:** Proposed
+**Status:** Decision specified; review and merge of LB-01.02 record acceptance
+
+**Decision:** Use recognition-governance/v1: independent observed, qualified and reviewed views, dense ties, an inclusive unranked directory and no universal weighted contributor score. Descriptive ratios, wait times, context and editorial recognition remain unranked. The per-definition review preserves all 98 meanings and source limits; runtime policy configuration and public enablement remain separate.
+
+**Decision record:** docs/metric-recognition-policy.md
+
+**Definition review:** docs/metric-definition-review.md
 
 **Id:** DEC-04
 
@@ -110,7 +116,11 @@ The dedicated repository boundary has been selected. Other recommendations below
 - LB-10.03
 - LB-17.03
 
-**Status:** Needs role acceptance; no named assignment invented
+**Status:** Authority rules specified; actual runtime roster and operating acceptance remain required
+
+**Decision:** recognition-governance/v1 defines independent evidence review, source and receiving authority, conflict handling, appeal separation and versioned correction receipts. Repository engineering authorization accepts this project's policy decision; it does not create a runtime identity/role, a source observation, contributor consent or external receiving acceptance. No named assignment or response commitment is invented.
+
+**Decision record:** docs/metric-recognition-policy.md
 
 **Id:** DEC-05
 
@@ -172,7 +182,11 @@ The dedicated repository boundary has been selected. Other recommendations below
 - LB-19.06
 - LB-20.04
 
-**Status:** Proposed; explicit release manifest required
+**Status:** Initial presentation defaults specified; explicit enabled-capability release manifest still required
+
+**Decision:** Use the implemented, source-proven per-definition lens without substituting an unsupported state or source clock. Raw activity remains labeled; qualified/reviewed outcomes need their exact acceptance. Retained-line analysis stays deferred. Candidate UI metadata and the complete 98-definition catalog are discovery aids, not permission, live measurement or public activation. The release manifest must independently select enabled capabilities and record disabled reasons.
+
+**Decision record:** docs/metric-recognition-policy.md
 
 **Id:** DEC-08
 

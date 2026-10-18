@@ -4,6 +4,8 @@
 
 [Full definitions and ingestion policy](../planning/metrics-and-ingestion.json) · [Metric-to-package map](../planning/metric-backlog-coverage.json)
 
+The [metric and recognition policy decision](metric-recognition-policy.md) records default evidence lenses, ranking, eligibility, corrections and versions. Its [98-definition review](metric-definition-review.md) retains each source restriction; neither document enables a metric or supplies a live-source receipt.
+
 The catalog defines 98 possible measures across 10 families. A defined measure is not automatically available or safe to rank. Enable each measure only after its source, identity, eligibility, privacy and acceptance gates pass. Unsupported and incomplete data are explicit states; they must not be displayed as zero contribution.
 
 | Family | Definitions |

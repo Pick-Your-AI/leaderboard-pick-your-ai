@@ -185,6 +185,8 @@ Views organize the same issue set. Dependency views use genuine prerequisites; s
 
 [Full definitions and ingestion policy](../planning/metrics-and-ingestion.json) · [Metric-to-package map](../planning/metric-backlog-coverage.json)
 
+The [metric and recognition policy decision](metric-recognition-policy.md) records default evidence lenses, ranking, eligibility, corrections and versions. Its [98-definition review](metric-definition-review.md) retains each source restriction; neither document enables a metric or supplies a live-source receipt.
+
 The catalog defines {len(metrics['metrics'])} possible measures across {len(families)} families. A defined measure is not automatically available or safe to rank. Enable each measure only after its source, identity, eligibility, privacy and acceptance gates pass. Unsupported and incomplete data are explicit states; they must not be displayed as zero contribution.
 
 {table(['Family', 'Definitions'], sorted(families.items()))}
@@ -401,7 +403,7 @@ Distinct contribution roles can share an artifact, but a repeated event or impor
 
 ## Decision register
 
-The dedicated repository boundary has been selected. Other recommendations below remain proposals until their responsible roles accept them. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
+The dedicated repository boundary has been selected. The [metric and recognition decision](metric-recognition-policy.md) and its [definition review](metric-definition-review.md) specify this project's policy choices; review and merge record their acceptance. Each register entry retains its unresolved source, role or operating evidence. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
 
 {json_detail(decisions)}
 
