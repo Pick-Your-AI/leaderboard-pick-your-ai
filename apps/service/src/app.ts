@@ -277,6 +277,7 @@ export function createService(options: ServiceOptions = {}) {
         actor: actors.get(row.actorId),
         result: row.result,
         evidenceIds: row.evidenceIds,
+        ...(row.pending === undefined ? {} : { pending: row.pending }),
       };
     });
   }
@@ -571,9 +572,11 @@ export function createService(options: ServiceOptions = {}) {
   app.get<{ Params: { contributionId: string } }>("/api/v1/evidence/:contributionId", async (request, reply) => {
     const q = query(request);
     const read = await load(q.scope, q.snapshot);
-    const evidence = [...(read.selected.portfolioEvidence ?? []), ...read.selected.evidence].find(
-      (entry) => entry.contribution.contributionId === request.params.contributionId,
-    );
+    const evidence = [
+      ...(read.selected.pendingEvidence ?? []),
+      ...(read.selected.portfolioEvidence ?? []),
+      ...read.selected.evidence,
+    ].find((entry) => entry.contribution.contributionId === request.params.contributionId);
     if (!evidence) fail(404, "evidence_unavailable");
     return send(request, reply, { ...meta(read), ...evidence });
   });

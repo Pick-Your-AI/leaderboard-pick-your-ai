@@ -393,3 +393,28 @@ export type MetricResult = z.infer<typeof metricResultSchema>;
 export type Snapshot = z.infer<typeof snapshotSchema>;
 export type MetricDefinition = z.infer<typeof metricDefinitionSchema>;
 export type MetricRegistry = z.infer<typeof metricRegistrySchema>;
+
+/** Separate, bounded policy-unit counts; never added to a ranked value. */
+export const pendingCountSchema = z
+  .object({
+    schemaVersion: z.literal("leaderboard-pending/v1"),
+    state: z.enum(["measured", "partial", "unknown"]),
+    valueClass: z.enum(["observed", "qualified", "reviewed"]),
+    count: z.number().int().min(0).max(10000).nullable(),
+    evidenceIds: z.array(z.string().regex(/^[A-Za-z0-9_.:-]{1,200}$/)).max(10000),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      new Set(value.evidenceIds).size !== value.evidenceIds.length ||
+      (value.state === "unknown"
+        ? value.count !== null || value.evidenceIds.length !== 0
+        : value.count !== value.evidenceIds.length || (value.state === "partial" && value.count === 0))
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Pending counts require exact distinct evidence; unknown is not zero.",
+      });
+    }
+  });
+export type PendingCount = z.infer<typeof pendingCountSchema>;
