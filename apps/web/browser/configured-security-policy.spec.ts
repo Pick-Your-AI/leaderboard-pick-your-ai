@@ -11,6 +11,10 @@ import { preview } from "vite";
 import { buildConfiguredApp, webRoot } from "../test/securityBuild.ts";
 import { documentPolicyForApiBase } from "../security-policy.ts";
 
+// Playwright Test owns tracing for every context, including our certificate-scoped
+// browser. Retain its combined trace without starting or stopping a second recorder.
+test.use({ trace: "on" });
+
 async function cleanUp(actions: (() => Promise<unknown>)[]): Promise<unknown[]> {
   const errors: unknown[] = [];
   for (const action of actions) {
@@ -23,7 +27,7 @@ async function cleanUp(actions: (() => Promise<unknown>)[]): Promise<unknown[]> 
   return errors;
 }
 
-test("configured HTTPS reads and events survive preview env changes while other origins remain blocked", async ({}, testInfo) => {
+test("configured HTTPS reads and events survive preview env changes while other origins remain blocked", async () => {
   const directory = await mkdtemp(join(tmpdir(), "pyai-csp-browser-"));
   let browser: Browser | undefined;
   const registry = JSON.parse(
@@ -136,7 +140,6 @@ test("configured HTTPS reads and events survive preview env changes while other 
       const caseErrors: unknown[] = [];
       try {
         context = await browser.newContext();
-        await context.tracing.start({ screenshots: true, snapshots: true });
         expect(server.config.env.VITE_PUBLIC_API_BASE).toBe(
           scenario === "missing" ? undefined : "https://unconfigured.example.invalid/api/v1",
         );
@@ -209,9 +212,6 @@ test("configured HTTPS reads and events survive preview env changes while other 
       } finally {
         caseErrors.push(
           ...(await cleanUp([
-            async () => {
-              await context?.tracing.stop({ path: testInfo.outputPath(`configured-api-${scenario}.zip`) });
-            },
             async () => {
               await context?.close();
             },
