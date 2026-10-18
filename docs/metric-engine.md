@@ -34,6 +34,30 @@ The reconciled `sourceWatermark` must reach the selected exclusive end. Its comp
 
 For pending work on an acceptance-clock board, the separate pending column uses occurrence time because acceptance has not occurred. It is an observed pending cohort, not part of the decided or accepted denominator. Rebuilding a frozen input never substitutes ingestion time for a ranked metric's occurrence/acceptance clock.
 
+## Aggregate lookup and tie bounds
+
+Actor lookup uses one identity index after the existing source-identity validation.
+Tie membership uses a count for each assigned dense rank. Both operations take
+linear work in their respective input sizes; they do not repeatedly scan the
+whole cohort for every output row. Sorting, source preparation and evidence
+validation retain their own costs. The additional indexes are bounded by the
+supplied actor count and the number of distinct assigned ranks.
+
+The synthetic [aggregate scale cases](../packages/metrics/test/aggregate-scale.test.mjs)
+exercise 10,000 contributors with distinct eligible line totals and verify every
+actor, value, dense rank, evidence count and untied state. Source-property access
+counts provide a reproducible work bound independent of host speed. The same
+case required **50,035,000 identity reads** before indexing and **40,000** after
+indexing. A second case preserves shared ranks, complete zeroes, missing values,
+and the absence of ranks and ties when ranking is disabled.
+
+Build the metrics workspace, then run
+`node --test --test-reporter=tap packages/metrics/test/aggregate-scale.test.mjs`.
+These are bounded synthetic calculation checks for [#129](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/129)
+and [#97](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/97).
+They do not certify service latency, database throughput, live source completeness,
+or the full performance acceptance gate.
+
 ## Ranking, diagnostics and participation
 
 The public profile now presents [participation in its selected snapshot](public-participation.md),
