@@ -24,13 +24,22 @@ step when its scope is rejected. Failed cleanup also withholds identity, and a
 rejected callback consumes only its login state while retaining an existing
 session and private/public data.
 
-Nonempty successful identity-provider responses require well-formed UTF-8 before
+Nonempty 2xx identity-provider response bodies require well-formed UTF-8 before
 JSON parsing. This applies to the token exchange, account lookup and any nonempty
 revocation response. Malformed bytes cannot become replacement text and allow a
 session to be created. A known token is still revoked after a failed account
 lookup; malformed UTF-8 in a token response supplies no trusted token to use or revoke.
-An empty successful response remains valid for the documented
-[204 token-revocation result](https://docs.github.com/en/rest/apps/oauth-applications#delete-an-app-token).
+Only the documented
+[204 token-revocation result](https://docs.github.com/en/rest/apps/oauth-applications#delete-an-app-token)
+confirms cleanup before identity returns. Other 2xx revocation responses,
+including 200 and 202, fail with `502 Identity provider unavailable` under this
+GitHub adapter's response contract. A
+[202 response](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.3.3) accepts work
+without confirming completion; this does not assert that every HTTP DELETE
+endpoint requires 204.
+Nonempty unexpected 2xx bodies still pass through the existing bounded decoder
+and JSON parser before the final acknowledgment check, retaining their original
+malformed-body error classification.
 The existing 65,536-byte limit, HTTP error classification and leading-BOM
 rejection remain in force. Failed callbacks retain the existing fixed error and
 consume their one-time login state without rotating an existing session.
@@ -137,6 +146,16 @@ known-token cleanup including a failed cleanup response. Its disposable HTTP and
 SQLite cases verify nonce consumption, replay denial, unchanged private/public
 data and the existing session, then successful fresh login with session rotation.
 These injected responses establish no actual GitHub grant or deployed identity.
+
+`node --test apps/controls/test/oauth-revocation.test.mjs` checks that only the
+documented 204 acknowledgment permits identity to return. Empty or well-formed
+200/202 responses and other unexpected 2xx statuses withhold identity. The real
+disposable HTTP/SQLite callback cases preserve the complete serialized private
+state and a populated public projection, consume only the login nonce, deny
+replay and keep the old session usable. A fresh 204 exchange then rotates the
+session successfully. The encoding suite retains its malformed-response cases;
+its two valid revoke200 bodies now reach the fixed acknowledgment failure after
+successful decoding. All provider responses are synthetic.
 
 Remaining release evidence includes approved OAuth registration/credentials and exact callback, accepted reviewer/privacy/operator roster, real source/identity probes, production private storage ACL/retention/recovery controls, staffed private alternative verification/destination, accessible UI and real participant journeys, policy recalculation preview/activation, all-public-surface suppression propagation, actual deployed correction readback and affected-owner acceptance. Neither an account role nor a response commitment is accepted by broad repository coding authorization.
 
