@@ -1,6 +1,6 @@
 # Contributing
 
-This repository owns the Pick Your AI contributor-recognition delivery plan and future service. Read the [product scope](docs/PRODUCT.md), [delivery plan](docs/DELIVERY_PLAN.md) and your issue before starting. The repository currently contains planning and validation tools; runtime delivery remains tracked work.
+This repository owns the Pick Your AI contributor-recognition delivery plan and service implementation. Read the [product scope](docs/PRODUCT.md), [delivery plan](docs/DELIVERY_PLAN.md) and your issue before starting. The repository contains planning tools, source and metric packages, public and protected services, and a browser application. Remaining implementation, source authorization and public release remain tracked work.
 
 ## Choose and own work
 

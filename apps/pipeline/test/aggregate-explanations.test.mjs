@@ -623,3 +623,64 @@ test("required explanation preserves only minimal provider identity hash binding
   capture.authorization.identityEvidence.normalizationHashes.push("invalid-hash");
   assert.throws(() => buildAggregateExplanation(capture, binding), /aggregate_explanation_integrity_error/);
 });
+
+test("required private explanations revoke when reviewed recognition changes", async (t) => {
+  const h = await harness(t);
+  const config = structuredClone(h.options.config);
+  const policy = {
+    ...config.policies[0].policy,
+    version: "synthetic-accepted-v1",
+    dateBasis: "acceptedAt",
+    rankedStates: ["qualified"],
+  };
+  config.policies = [
+    { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-approval" },
+  ];
+  config.recognitionBindings = [
+    {
+      category: "finding",
+      scope: "repository:2",
+      policyVersion: policy.version,
+      metricId: "issues_opened",
+      sourceMetricId: "issues_opened",
+      repositoryId: "2",
+      reviewerIds: ["202"],
+    },
+  ];
+  const event = {
+    id: "synthetic-receipt",
+    actor: "202",
+    action: "accepted",
+    at: Date.parse(ago(1)),
+    policyVersion: policy.version,
+  };
+  h.controlsStore.transaction((state) => {
+    state.requests.claim = {
+      id: "claim",
+      kind: "evidence",
+      status: "accepted",
+      owner: "101",
+      category: "finding",
+      scope: "repository:2",
+      policyVersion: policy.version,
+      locator: "https://github.com/synthetic-org/synthetic-repo/issues/1",
+      collaborators: {},
+      history: [event],
+    };
+    state.audit.push(event);
+  });
+  const runtime = await createPipeline({ ...h.options, config });
+  t.after(() => runtime.stop());
+  const publication = (await runtime.runOnce()).publications[0];
+  assert.equal(
+    (await runtime.aggregateExplanations.read(publication.snapshotId)).document.snapshot.snapshotId,
+    publication.snapshotId,
+  );
+  h.controlsStore.transaction((state) => {
+    state.requests.claim.status = "withdrawn";
+  });
+  await assert.rejects(
+    runtime.aggregateExplanations.read(publication.snapshotId),
+    /aggregate_explanation_authorization_changed/,
+  );
+});

@@ -63,6 +63,8 @@ async function harness(t, options = {}) {
     store,
     provider,
     origin,
+    loginSuccessPath: options.loginSuccessPath,
+    spotlightEligibility: options.spotlightEligibility,
     approvedPolicyVersions: options.approvedPolicyVersions || ["test-1"],
     knownMetricIds: ["pr_merged", "prs_reviewed"],
     sourceVerifier: options.sourceVerifier ? (input) => options.sourceVerifier(input, timestamp) : undefined,
@@ -1028,6 +1030,8 @@ test("configuration preview, independent approval and fresh activation are durab
     digest: proposal.digest,
     approvalReceipt: approved.approval.id,
     allowedRepositoryIds: ["101"],
+    allowedRepositories: h.store.read().configuration.active.document.repositories,
+    allowedProjectIds: h.store.read().configuration.active.document.projects.map((project) => project.id),
     disabledMetricIds: [],
     disabledMetrics: [],
   });
@@ -1358,4 +1362,103 @@ test("source receipt that expires during activation authority lookup cannot acti
   });
   assert.equal(result.status, 409);
   assert.equal(configurationOverlay(h.store.read()).revision, 0);
+});
+
+test("own-profile reads require authentication and return only editable fields", async (t) => {
+  const h = await harness(t);
+  assert.equal((await h.call("/controls/profile")).status, 401);
+  const owner = await h.login("1");
+  const other = await h.login("2");
+  assert.deepEqual((await h.call("/controls/profile", { user: owner })).data, {
+    public: false,
+    bio: "",
+    highlights: [],
+    suppressed: false,
+  });
+  await h.call("/controls/profile", {
+    user: owner,
+    method: "POST",
+    input: { public: true, bio: "Opt-in text", highlights: [] },
+  });
+  assert.equal((await h.call("/controls/profile", { user: owner })).data.bio, "Opt-in text");
+  assert.equal((await h.call("/controls/profile", { user: other })).data.bio, "");
+  assert.equal((await h.call("/controls/profile", { user: owner })).response.headers.get("cache-control"), "no-store");
+});
+
+test("OAuth may land only on the configured same-origin account page", async (t) => {
+  const h = await harness(t, { loginSuccessPath: "/account" });
+  const started = await h.begin();
+  const callback = await h.call("/controls/auth/callback?" + new URLSearchParams({ state: started.state, code: "1" }), {
+    headers: { cookie: started.cookie },
+  });
+  assert.equal(callback.status, 303);
+  assert.equal(callback.response.headers.get("location"), origin + "/account");
+});
+
+test("editorial HTTP workflow preserves session CSRF, independent approval, durable withdrawal and current evidence", async (t) => {
+  const h = await harness(t, { spotlightEligibility: () => true });
+  const owner = await h.login("1");
+  const reviewer = await h.login("2");
+  let receipt = (await h.call("/controls/requests", { user: owner, method: "POST", input: fixture() })).data;
+  receipt = (
+    await h.call(`/controls/requests/${receipt.id}/review`, {
+      user: reviewer,
+      method: "POST",
+      input: {
+        version: receipt.version,
+        decision: "accept",
+        conflict: false,
+        reason: "Verified synthetic source",
+        sourceReviewedPublic: true,
+        policyVersion: "test-1",
+      },
+    })
+  ).data;
+  const input = { claimId: receipt.id, consent: true };
+  assert.equal(
+    (await h.call("/controls/spotlights", { user: owner, method: "POST", input, headers: { "x-csrf-token": "bad" } }))
+      .status,
+    403,
+  );
+  const nominated = await h.call("/controls/spotlights", { user: owner, method: "POST", input });
+  assert.equal(nominated.status, 201);
+  const id = nominated.data.nomination.id;
+  assert.equal((await h.call("/controls/spotlights/queue")).status, 401);
+  assert.equal((await h.call("/controls/spotlights/queue", { user: reviewer })).data.nominations.length, 1);
+  const stranger = await h.login("6");
+  assert.deepEqual((await h.call("/controls/spotlights/queue", { user: stranger })).data.nominations, []);
+  const selection = {
+    version: 1,
+    action: "accept",
+    conflict: false,
+    reason: "Private selection audit",
+    publicExplanation: "Public selection explanation",
+  };
+  assert.equal(
+    (await h.call(`/controls/spotlights/${id}`, { user: owner, method: "POST", input: selection })).status,
+    403,
+  );
+  assert.equal(
+    (await h.call(`/controls/spotlights/${id}`, { user: reviewer, method: "POST", input: selection })).status,
+    200,
+  );
+  let read = await h.call("/controls/spotlights");
+  assert.equal(read.data.spotlights.length, 1);
+  assert.equal(JSON.stringify(read.data).includes("Private selection audit"), false);
+  assert.equal(read.response.headers.get("cache-control"), "no-store");
+  assert.equal(JSON.stringify(read.data).includes("Synthetic private verification detail"), false);
+  const reopened = new ControlStore(h.filename);
+  assert.equal(reopened.read().spotlights[id].status, "accepted");
+  reopened.close();
+  assert.equal(
+    (
+      await h.call(`/controls/spotlights/${id}`, {
+        user: owner,
+        method: "POST",
+        input: { version: 2, action: "withdraw", reason: "Remove spotlight" },
+      })
+    ).status,
+    200,
+  );
+  assert.deepEqual((await h.call("/controls/spotlights")).data.spotlights, []);
 });

@@ -10,7 +10,7 @@ Install dependencies with `npm ci`. Build and check all workspaces with `npm run
 
 ## Local startup
 
-Copy `.env.example` to `.env` and start PostgreSQL with `docker compose up -d db`. Apply migrations with `npm run db:migrate`. In separate terminals run `npm run dev:service`, `npm run dev:web`, and `npm run dev:worker`. The service binds to `127.0.0.1:3001`, the web development server uses `127.0.0.1:5173`, and the worker currently reports that source collection is not configured. The web page labels itself as a scaffold and does not show rankings.
+Copy `.env.example` to `.env` and start PostgreSQL with `docker compose up -d db`. Apply migrations with `npm run db:migrate`. In separate terminals run `npm run dev:service`, `npm run dev:web`, and `npm run dev:worker`. The service binds to `127.0.0.1:3001`, the web development server uses `127.0.0.1:5173`, and the worker requires an explicit protected host module before it can collect. See [the worker entrypoint](worker-entrypoint.md) for bounded invocation and shutdown behavior. The web page labels itself as a scaffold and does not show rankings.
 
 The sample database credentials are for loopback development only. Database commands reject non-local hosts and names that do not end in `_dev` or `_test`. No production connection string is supported by this scaffold.
 
