@@ -61,6 +61,8 @@ bounded filtered GraphQL timelineItems connection and retain exact event IDs,
 actors and creation clocks. Distinct native events in the same second remain
 distinct; replaying one event does not create another unit. Status details are
 hydrated only after the event's public Project matches repository.allowedProjectIds.
+The native wasAutomated flag is bound into event revision proof; automated or
+unknown automation states receive no human status-update credit.
 Parent/blocker endpoints must both be public in the approved repository; foreign
 or hidden endpoints remain unavailable. Current parent or blocker fields never
 stand in for missing history. This adapter currently covers issue timelines;

@@ -1051,6 +1051,8 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       const project = object(event.project) ? event.project : null;
       const target = object(event.parent) ? event.parent : object(event.blockingIssue) ? event.blockingIssue : null;
       const isProject = input.family === "project_history";
+      if (isProject && event.wasAutomated !== false)
+        return none("automated_or_unknown_project_status_not_human_credit");
       return normalizeGithubObservation({
         repository: { ...input.repository, visibility: "public" },
         proof: {

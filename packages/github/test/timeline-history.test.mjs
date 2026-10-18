@@ -84,6 +84,7 @@ test("Project status values are hydrated only after explicit public Project appr
   const event = {
     id: "E_project",
     __typename: "ProjectV2ItemStatusChangedEvent",
+    wasAutomated: false,
     actor,
     createdAt: baseEvent.createdAt,
     project: { id: "PVT_other", public: true },
@@ -125,4 +126,24 @@ test("Project status values are hydrated only after explicit public Project appr
   assert.equal(out.facts[0].metricId, "project_status_updates");
   assert.equal(out.facts[0].actorId, "3");
   assert.deepEqual(out.facts[0].eventContext.projects, ["PVT_allowed"]);
+  event.wasAutomated = true;
+  const [automated] = await readTypedIssueHistory(options(client, "project_history"));
+  const automatedOutput = await normalize({
+    repository,
+    family: "project_history",
+    factKey: "synthetic-auto",
+    observedAt: "2026-10-02T00:00:00Z",
+    policyVersion: "synthetic/v1",
+    fact: {
+      subjectId: automated.event.id,
+      sourceRevision: typedHistoryRevision(automated),
+      sourceUrl: subject.url,
+      evidence: "observed_transition",
+      actorId: "3",
+      occurredAt: event.createdAt,
+      state: "present",
+    },
+  });
+  assert.equal(automatedOutput.facts.length, 0);
+  assert.match(automatedOutput.reasons[0], /not_human_credit/);
 });

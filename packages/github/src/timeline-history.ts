@@ -33,7 +33,7 @@ export async function readTypedIssueHistory(options: {
     ... on BlockedByAddedEvent { id createdAt ${actor} blockingIssue { ${endpoints} } }
     ... on BlockedByRemovedEvent { id createdAt ${actor} blockingIssue { ${endpoints} } }
   `
-      : `... on ProjectV2ItemStatusChangedEvent { id createdAt ${actor} project { id public } }`;
+      : `... on ProjectV2ItemStatusChangedEvent { id createdAt wasAutomated ${actor} project { id public } }`;
   const types =
     options.family === "relationships"
       ? "PARENT_ISSUE_ADDED_EVENT,PARENT_ISSUE_REMOVED_EVENT,BLOCKED_BY_ADDED_EVENT,BLOCKED_BY_REMOVED_EVENT"
@@ -101,7 +101,7 @@ export async function readTypedIssueHistory(options: {
       if (project.public !== true) throw new Error("project_public_scope_unverified");
       const data = await options.client.graphql<{ node?: Record<string, unknown> }>(
         options.source,
-        `query($id:ID!) { node(id:$id) { ... on ProjectV2ItemStatusChangedEvent { id createdAt ${actor} previousStatus status project { id public } } } }`,
+        `query($id:ID!) { node(id:$id) { ... on ProjectV2ItemStatusChangedEvent { id createdAt wasAutomated ${actor} previousStatus status project { id public } } } }`,
         { id: record.event.id },
         options.assertAuthorized,
       );
@@ -110,6 +110,8 @@ export async function readTypedIssueHistory(options: {
         !detail ||
         detail.id !== record.event.id ||
         detail.createdAt !== record.event.createdAt ||
+        detail.wasAutomated !== record.event.wasAutomated ||
+        typeof detail.wasAutomated !== "boolean" ||
         !object(detail.project) ||
         detail.project.id !== project.id ||
         detail.project.public !== true ||
