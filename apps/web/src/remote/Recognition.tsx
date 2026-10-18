@@ -56,14 +56,15 @@ export function ContributorRecognition({
 }) {
   const pinned = { ...selected, snapshot: snapshotId };
   const params = recognitionParameters(selected, snapshotId);
-  const key = JSON.stringify([base, actorId, params.toString()]);
-  const state = useCurrentRead(key, async (signal) =>
-    achievements(
+  const key = JSON.stringify([base, actorId, params.toString(), selected.category]);
+  const state = useCurrentRead(key, async (signal) => {
+    if (selected.category) throw new ReadFailure(400, "achievement_category_unavailable");
+    return achievements(
       await request(base, `contributors/${encodeURIComponent(actorId)}/achievements`, params, signal),
       pinned,
       actorId,
-    ),
-  );
+    );
+  });
   return (
     <section aria-labelledby="recognition-title">
       <h2 id="recognition-title">Sharing and accepted achievements</h2>
@@ -89,7 +90,12 @@ export function ContributorRecognition({
         ))}
       </ul>
       <div aria-live="polite">
-        {state.error ? (
+        {selected.category ? (
+          <p>
+            Achievements are unavailable for category-filtered portfolios. Clear the category filter to view
+            achievements for the full selected scope.
+          </p>
+        ) : state.error ? (
           <p>Achievements are unavailable. No award or policy approval is implied.</p>
         ) : !state.value ? (
           <p>Checking accepted achievements…</p>
