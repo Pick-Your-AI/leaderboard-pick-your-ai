@@ -1,3 +1,4 @@
+import { syntheticRepositoryClient } from "../../github/test/synthetic-client.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -96,7 +97,7 @@ for (const [index, [sourceCase]] of cases.entries()) {
     const input = envelope(index);
     const reads = [];
     const repository = { ...input.repository, installationId: 1, families: ["issues"], allowedProjectIds: [] };
-    const client = {
+    const client = syntheticRepositoryClient(repository.id, {
       rest: async (_source, path) => {
         reads.push(path);
         return path === `/repos/${repository.slug}` ? { id: repository.id, private: false } : input.payload;
@@ -106,7 +107,7 @@ for (const [index, [sourceCase]] of cases.entries()) {
           input.payload,
           { ...input.payload, node_id: "PR_synthetic", number: 999, pull_request: { url: "synthetic-pr-marker" } },
         ]),
-    };
+    });
     const source = createGithubCollectionSource({
       client,
       sourceId: "synthetic",

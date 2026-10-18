@@ -1,3 +1,4 @@
+import { syntheticRepositoryClient } from "../../../packages/github/test/synthetic-client.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createGithubCollectionSource, isProjectSourceScopeFailure } from "../src/github-source.mjs";
@@ -16,7 +17,7 @@ const harness = (scan) =>
     sourceId: "synthetic",
     repositories: [repository],
     isSynthetic: true,
-    client: { rest: async () => ({ id: 2, private: false }), scanRest: scan },
+    client: syntheticRepositoryClient(2, { rest: async () => ({ id: 2, private: false }), scanRest: scan }),
   });
 
 test("reviews traverse every pull and nested review list before exposing complete count", async () => {
@@ -62,7 +63,7 @@ test("Discussion source distinguishes disabled capability from an empty complete
     sourceId: "synthetic",
     repositories: [{ ...repository, families: ["discussions"] }],
     isSynthetic: true,
-    client: {
+    client: syntheticRepositoryClient(2, {
       rest: async () => ({ id: 2, private: false }),
       scanRest: async () => [],
       scanGraphql: async (options) =>
@@ -74,7 +75,7 @@ test("Discussion source distinguishes disabled capability from an empty complete
             discussions: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
           },
         }).nodes,
-    },
+    }),
   });
   await assert.rejects(source.readPage({ ...request, family: "discussions" }), /discussions_source_unavailable/);
   enabled = true;
@@ -121,7 +122,10 @@ test("timeline source retains actual event identity, actor and occurrence time",
   const source = createGithubCollectionSource({
     sourceId: "synthetic",
     repositories: [{ ...repository, families: ["timelines"] }],
-    client: { rest: async () => ({ id: 2, private: false }), scanRest: async (scan) => scan.select([event]) },
+    client: syntheticRepositoryClient(2, {
+      rest: async () => ({ id: 2, private: false }),
+      scanRest: async (scan) => scan.select([event]),
+    }),
   });
   const page = await source.readPage({ ...request, family: "timelines" });
   assert.equal(page.facts[0].subjectId, "901");
@@ -160,7 +164,10 @@ test("timeline collection leaves unqualified source occurrence times unknown", a
     const source = createGithubCollectionSource({
       sourceId: "synthetic",
       repositories: [{ ...repository, families: ["timelines"] }],
-      client: { rest: async () => ({ id: 2, private: false }), scanRest: async (scan) => scan.select([event]) },
+      client: syntheticRepositoryClient(repository.id, {
+        rest: async () => ({ id: 2, private: false }),
+        scanRest: async (scan) => scan.select([event]),
+      }),
     });
     const page = await source.readPage({ ...request, family: "timelines" });
     assert.equal(page.facts[0].occurredAt, null, JSON.stringify(created_at));
@@ -187,7 +194,10 @@ test("collection preserves calendar-valid UTC source instants at supported preci
     const source = createGithubCollectionSource({
       sourceId: "synthetic",
       repositories: [{ ...repository, families: ["timelines"] }],
-      client: { rest: async () => ({ id: 2, private: false }), scanRest: async (scan) => scan.select([event]) },
+      client: syntheticRepositoryClient(repository.id, {
+        rest: async () => ({ id: 2, private: false }),
+        scanRest: async (scan) => scan.select([event]),
+      }),
     });
     assert.equal((await source.readPage({ ...request, family: "timelines" })).facts[0].occurredAt, expected);
   }
@@ -204,7 +214,10 @@ test("unqualified timestamps cannot invent a current-state source revision", asy
     const source = createGithubCollectionSource({
       sourceId: "synthetic",
       repositories: [{ ...repository, families: ["issues"] }],
-      client: { rest: async () => ({ id: 2, private: false }), scanRest: async (scan) => scan.select([issue]) },
+      client: syntheticRepositoryClient(repository.id, {
+        rest: async () => ({ id: 2, private: false }),
+        scanRest: async (scan) => scan.select([issue]),
+      }),
     });
     await assert.rejects(source.readPage({ ...request, family: "issues" }), /source_identity_or_revision_unverified/);
   }
@@ -215,7 +228,7 @@ test("Project collector traverses subject memberships and current field snapshot
   const source = createGithubCollectionSource({
     sourceId: "synthetic",
     repositories: [{ ...repository, families: ["project_current"], allowedProjectIds: ["PVT_synthetic"] }],
-    client: {
+    client: syntheticRepositoryClient(2, {
       graphql: async (_source, query) =>
         query.includes("... on ProjectV2 {")
           ? { node: { id: "PVT_synthetic", public: true } }
@@ -246,7 +259,7 @@ test("Project collector traverses subject memberships and current field snapshot
             };
         return scan.select({ node }).nodes;
       },
-    },
+    }),
   });
   const page = await source.readPage({ ...request, family: "project_current" });
   assert.equal(calls.length, 2);
@@ -261,7 +274,7 @@ test("selected relationship history enters collection as timestamped native tran
   const source = createGithubCollectionSource({
     sourceId: "synthetic",
     repositories: [{ ...repository, families: ["relationships"] }],
-    client: {
+    client: syntheticRepositoryClient(2, {
       rest: async () => ({ id: 2, private: false }),
       scanRest: async () => [{ number: 1, node_id: "I_synthetic" }],
       scanGraphql: async (scan) =>
@@ -291,7 +304,7 @@ test("selected relationship history enters collection as timestamped native tran
             },
           },
         }).nodes,
-    },
+    }),
   });
   const page = await source.readPage({ ...request, family: "relationships" });
   assert.equal(page.facts[0].subjectId, "E_synthetic");
@@ -304,7 +317,7 @@ test("Project history requires approved IDs even when repository inventory is em
   const source = createGithubCollectionSource({
     sourceId: "synthetic",
     repositories: [{ ...repository, families: ["project_history"] }],
-    client: { rest: async () => ({ id: 2, private: false }), scanRest: async () => [] },
+    client: syntheticRepositoryClient(2, { rest: async () => ({ id: 2, private: false }), scanRest: async () => [] }),
   });
   await assert.rejects(source.readPage({ ...request, family: "project_history" }), /approved_project_scope_required/);
 });
