@@ -32,7 +32,7 @@ test("API drawer and permanent route have identical proof, retain cursor/scope a
     await expect.poll(() => api.calls.length).toBeGreaterThan(calls);
     await expect(page.getByText("Rechecking…")).toHaveCount(0);
     await expect(source).toBeFocused();
-    await expect(dialog.locator("[data-proof-projection]")).toHaveText(projection.replaceAll(/\s+/g, " "));
+    await expect(dialog.locator("[data-proof-projection]")).toHaveText(projection, { useInnerText: true });
     const fullPage = await dialog.getByRole("link", { name: "Open as a full page" }).getAttribute("href");
     await dialog.getByRole("button", { name: "Close evidence panel" }).click();
     await expect(dialog).toHaveCount(0);
