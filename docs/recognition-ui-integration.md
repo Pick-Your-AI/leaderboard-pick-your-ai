@@ -16,6 +16,27 @@ On the current unfiltered organization overview, mount `EditorialSpotlights` onl
 
 Both components abort replaced requests, preserve existing same-selection DOM while revalidating so focused source links remain focused, clear evidence on hidden state, changed selection or error, and refresh every 30 seconds plus browser visibility changes. Responses are allowlisted and source URLs restricted to public GitHub locators. Text is rendered by React without HTML injection. Backend suppression checks remain authoritative when a card/source view is opened. Downloaded copies cannot be remotely withdrawn.
 
+## Card measurement context
+
+Both actual card routes include the snapshot-compatible registry's exact unit,
+aggregation and definition event clock. These fields describe the definition;
+they do not establish a new source observation or convert the numeric value. A
+recorded proportion remains a proportion, and elapsed hours do not become seconds.
+
+The cards show supplied numerator, denominator, sample count, censored count,
+missing-readiness count and p75 from the exact actor/metric diagnostic. Missing
+diagnostics and null values remain explicitly unknown; they are not reconstructed
+from the result or the number of source links. Supplied zeros remain zero. Pending
+count, coverage state and value class come from the already projected row, so
+current suppression can make a pinned pending count unknown before rendering.
+
+HTML uses semantic definition terms and descriptions. Passive SVG images include
+the same context in visible text and their accessible description; the canvas
+height includes every added line. Existing text/output bounds, escaping, dated
+snapshot labels, no-store responses, framing restrictions and current privacy
+checks remain in force. This presentation does not supply missing denominator
+evidence, authorize ranking a descriptive measure or establish a live service.
+
 ## Validation and remaining browser integration
 
 Client tests cover exact scope/pin binding, dropped pagination/search filters, mismatched actor/policy/snapshot rejection, unsafe URLs, bounded evidence, private-field omission and unapproved-policy failures without fallback. Web TypeScript validation passes.
