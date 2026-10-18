@@ -959,7 +959,7 @@ export function normalizeGithubObservation(
       project_status_changed: "project_status_updates",
       project_progress_published: "project_updates",
     };
-    const metric = mapping[sourceAction];
+    const metric = Object.hasOwn(mapping, sourceAction) ? mapping[sourceAction] : undefined;
     if (
       !metric ||
       !proof.eventId ||
@@ -996,7 +996,7 @@ export function normalizeGithubObservation(
       locked: "public_moderation",
       unlocked: "public_moderation",
     };
-    const metric = mapping[sourceAction];
+    const metric = Object.hasOwn(mapping, sourceAction) ? mapping[sourceAction] : undefined;
     // Resolve the action's own target, never another field or the issue's current
     // metadata snapshot. Removal and type transitions need the same identity
     // proof as additions before they can participate in raw-state grouping.
@@ -1055,12 +1055,17 @@ export function normalizeGithubObservation(
         reference: "reference_links",
         duplicate: "duplicate_resolution",
       };
+      const relationshipKind = relationship?.kind;
+      const metric =
+        typeof relationshipKind === "string" && Object.hasOwn(mapping, relationshipKind)
+          ? mapping[relationshipKind]
+          : undefined;
       if (
         !relationship ||
         relationship.intentional !== true ||
         !text(relationship.from) ||
         !text(relationship.to) ||
-        !mapping[String(relationship.kind)] ||
+        !metric ||
         !proof.eventId
       ) {
         out.reasons.push("automatic_reference_or_relationship_actor_unverified");
@@ -1068,14 +1073,14 @@ export function normalizeGithubObservation(
         out.reasons.push("relationship_endpoint_visibility_unverified");
       } else {
         const endpoints = [String(relationship.from), String(relationship.to)];
-        if (["related", "duplicate"].includes(String(relationship.kind))) endpoints.sort();
+        if (["related", "duplicate"].includes(String(relationshipKind))) endpoints.sort();
         emit(
-          mapping[String(relationship.kind)]!,
+          metric,
           sender,
           "triager",
           at,
-          stable(relationship.kind, endpoints, sourceAction, at, sender?.id, nativeEventId),
-          { rawState: String(relationship.kind) },
+          stable(relationshipKind, endpoints, sourceAction, at, sender?.id, nativeEventId),
+          { rawState: String(relationshipKind) },
         );
       }
     }
