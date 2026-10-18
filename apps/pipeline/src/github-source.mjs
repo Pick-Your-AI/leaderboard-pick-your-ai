@@ -1,3 +1,4 @@
+import { GithubClientError } from "../../../packages/github/dist/client.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "../../../packages/github/dist/timeline-history.js";
 import {
   assertPublicProjects,
@@ -12,7 +13,13 @@ import {
 } from "../../../packages/github/dist/normalizers.js";
 
 /** Conservative scope-loss codes emitted by the trusted Project adapters. */
-export function isProjectSourceScopeFailure(error) {
+export function isProjectSourceScopeFailure(error, family) {
+  if (
+    ["project_current", "project_history"].includes(family) &&
+    error instanceof GithubClientError &&
+    ["authentication_required", "permission_denied", "not_found_or_hidden"].includes(error.outcome.kind)
+  )
+    return true;
   return (
     error instanceof Error &&
     [
@@ -350,7 +357,7 @@ export function createGithubCollectionSource({
         return await adapter.readPage(request);
       } catch (error) {
         const repository = approved.get(request.repositoryId);
-        if (repository && isProjectSourceScopeFailure(error))
+        if (repository && isProjectSourceScopeFailure(error, request.family))
           await onUnavailable?.(repository, "project_scope_unavailable");
         throw error;
       }

@@ -96,6 +96,8 @@ export interface AggregateRow {
   value: number | null;
   state: "measured" | "partial" | "zero" | "unknown" | "insufficient_sample";
   pending: number;
+  /** Exact prepared policy units, after correction and duplicate selection. */
+  pendingEvidence: MetricFact[];
   numerator: number | null;
   denominator: number | null;
   sampleCount: number;
@@ -551,7 +553,14 @@ export function aggregateMetric(
   for (const [actorId, facts] of byActor) {
     const actor = input.actors.find((candidate) => candidate.id === actorId)!;
     const eligible = facts.filter((fact) => policy.rankedStates.includes(fact.state as never));
-    const pending = facts.filter((fact) => fact.state === "pending").length;
+    const pendingEvidence = facts.filter(
+      (fact) =>
+        fact.state === "pending" ||
+        (policy.aggregation === "ratio" &&
+          policy.rankedStates.includes(fact.state as never) &&
+          fact.outcome === "pending"),
+    );
+    const pending = pendingEvidence.length;
     const unknown = facts.some(
       (fact) => fact.state === "unknown" || (policy.aggregation === "ratio" && fact.outcome === undefined),
     );
@@ -561,6 +570,7 @@ export function aggregateMetric(
       value: null,
       state: "unknown",
       pending,
+      pendingEvidence,
       numerator: null,
       denominator: null,
       sampleCount: 0,
@@ -573,8 +583,12 @@ export function aggregateMetric(
       rank: null,
       tied: false,
     };
-    row.evidenceIds = eligible.map((fact) => fact.id);
-    row.evidence = eligible.map((fact) => ({
+    const valueEvidence =
+      policy.aggregation === "ratio"
+        ? eligible.filter((fact) => fact.outcome === "merged" || fact.outcome === "closed_unmerged")
+        : eligible;
+    row.evidenceIds = valueEvidence.map((fact) => fact.id);
+    row.evidence = valueEvidence.map((fact) => ({
       id: fact.id,
       effectiveAt: policy.aggregation === "duration" ? (fact.readyAt ?? null) : fact[policy.dateBasis],
       observedAt: fact.observedAt,
@@ -594,7 +608,6 @@ export function aggregateMetric(
       row.numerator = decided.filter((fact) => fact.outcome === "merged").length;
       row.denominator = decided.length;
       row.sampleCount = decided.length;
-      row.pending += eligible.filter((fact) => fact.outcome === "pending").length;
       if (decided.length >= policy.minimumSamples) row.value = row.numerator / row.denominator;
       else row.state = "insufficient_sample";
     } else {
@@ -646,6 +659,9 @@ export function aggregateMetric(
     row.tied = row.rank !== null && rows.some((other) => other !== row && other.rank === row.rank);
   const audit = [
     ...prepared.audit,
+    ...rows.flatMap((row) =>
+      row.pendingEvidence.map((fact) => ({ factIds: [fact.id], actorId: row.actorId, reason: "pending_not_ranked" })),
+    ),
     ...rows.flatMap((row) =>
       row.evidenceIds.map((id) => ({
         factIds: [id],

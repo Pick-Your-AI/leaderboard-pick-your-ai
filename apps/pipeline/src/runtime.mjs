@@ -227,11 +227,11 @@ export async function createPipeline(options) {
     operation = pending.catch(() => undefined);
     return pending;
   };
-  async function approved() {
+  async function approved(transaction = db) {
     authorized = Boolean(await verifyConfig(copy(config)));
     if (!authorized) return false;
     assertDataMode(config);
-    const persistedDenials = await db.query(
+    const persistedDenials = await transaction.query(
       "SELECT operation_key FROM leaderboard_pipeline.receipts WHERE kind='project_scope_denial' AND operation_key=ANY($1::text[])",
       [config.repositories.map(projectDenialKey)],
     );
@@ -485,7 +485,7 @@ export async function createPipeline(options) {
         assertRunConfiguration();
         monitorSuccess(monitorSource(repository.id), "normalization", normalizationStarted);
       } catch (error) {
-        if (isProjectSourceScopeFailure(error))
+        if (isProjectSourceScopeFailure(error, row.family))
           await denyRepository(repository, "project_scope_unavailable", utc(now()));
         monitorFailure(monitorSource(repository.id), "normalization", "schema_changed");
         if (dispatch) {
@@ -773,6 +773,13 @@ export async function createPipeline(options) {
       }
     }
     const aggregates = config.policies.map((item) => c.metrics.aggregateMetric(frozen, item.policy, engineScope));
+    const pendingFor = (aggregate, row) => ({
+      schemaVersion: "leaderboard-pending/v1",
+      state: aggregate.coverage === "complete" ? "measured" : row.pending > 0 ? "partial" : "unknown",
+      valueClass: config.policies.find((item) => item.policy.metricId === aggregate.metricId).policy.rankedStates[0],
+      count: row.pending > 0 || aggregate.coverage === "complete" ? row.pending : null,
+      evidenceIds: row.pendingEvidence.map((fact) => fact.id),
+    });
     const diagnostics = aggregates.flatMap((aggregate) =>
       aggregate.rows.map((row) => ({
         metricId: aggregate.metricId,
@@ -783,6 +790,7 @@ export async function createPipeline(options) {
         censored: row.censored,
         missingReadiness: row.missingReadiness,
         p75: row.p75,
+        pending: pendingFor(aggregate, row),
       })),
     );
     const rows = aggregates.flatMap((aggregate) =>
@@ -796,7 +804,36 @@ export async function createPipeline(options) {
           coverage: { ...coverage[0], scopeId: scopeKey(scope) },
         },
         evidenceIds: row.evidenceIds,
+        pending: pendingFor(aggregate, row),
       })),
+    );
+    // Dependency receipts use the exact aggregate selection, not portfolio grouping.
+    // If any receipt is absent or no longer public, projection withholds the pending count.
+    const pendingEvidence = aggregates.flatMap((aggregate) =>
+      aggregate.rows.flatMap((row) =>
+        row.pendingEvidence.flatMap((fact) => {
+          const original = evidence.get(fact.id);
+          if (!original) return [];
+          return [
+            {
+              artifact: copy(original.artifact),
+              contribution: {
+                ...copy(original.contribution),
+                actorId: fact.actorId,
+                roles: [fact.role],
+                qualification: "eligible",
+                metricIds: [fact.metricId],
+                reasonCodes: ["public_pending_work"],
+              },
+              occurredAt: fact.occurredAt,
+              observedAt: fact.observedAt,
+              activityState: "pending",
+              sourceRevision: original.sourceRevision,
+              sourceRevisionUrl: original.sourceRevisionUrl,
+            },
+          ];
+        }),
+      ),
     );
     // Descriptive public work is not conditional on earning a ranked outcome.
     // Selection reuses existing corrections, source/role/context checks and receipt validation.
@@ -842,6 +879,7 @@ export async function createPipeline(options) {
       rows,
       evidence: publicEvidence,
       portfolioEvidence,
+      pendingEvidence,
       ranking: config.policies.map((item) => ({
         metricId: item.policy.metricId,
         direction: "descending",
@@ -921,6 +959,7 @@ export async function createPipeline(options) {
           rows,
           evidence: publicEvidence,
           portfolioEvidence,
+          pendingEvidence,
           ranking: content.ranking,
           dataMode,
           diagnostics,
@@ -986,7 +1025,7 @@ export async function createPipeline(options) {
   }
   const source = {
     async read(scope, pin, signal, transaction) {
-      if (signal.aborted || !(await approved()) || !configuredScope(scope)) return null;
+      if (signal.aborted || !(await approved(transaction ?? db)) || !configuredScope(scope)) return null;
       const readTransaction = transaction ? (work) => work(transaction) : (work) => db.transaction(work);
       return readTransaction(async (tx) => {
         const result = await tx.query(

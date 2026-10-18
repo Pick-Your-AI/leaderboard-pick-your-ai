@@ -692,7 +692,14 @@ for (const boundary of [
       h.controlsStore.transaction(
         (state) => {
           state.configuration.revision++;
-          state.configuration.active.document.repositories = [{ id: "2" }];
+          // Restore every original source grant so the revision fence, rather than
+          // an invalid authority fixture, rejects the interrupted run.
+          state.configuration.active.document.repositories = h.options.config.repositories.map((repo) => ({
+            id: String(repo.id),
+            installationId: String(repo.installationId),
+            slug: repo.slug,
+            capabilities: [...repo.families],
+          }));
         },
         { publish: true },
       );
@@ -889,45 +896,49 @@ test("public observed work survives accepted-only rankings without granting assi
   assert.equal((await runtime.app.inject(`/api/v1/contributors/103?snapshot=${directory.snapshotId}`)).statusCode, 404);
 });
 
-test("policy previews persist exact frozen inputs and require independent host release authorization", async (t) => {
-  const h = await harness(t, {
-    authorizePolicyPreview: async ({ operatorId }) => operatorId === "201",
-    authorizePolicyRelease: async ({ operatorId, approvalReceipt }) =>
-      operatorId === "202" && approvalReceipt === "synthetic-policy-review",
-    policyApproverIds: ["202"],
-  });
-  const publication = (await h.runtime.runOnce()).publications[0];
-  const policy = {
-    ...h.options.config.policies[0].policy,
-    version: "synthetic-policy-v2",
-    rankedStates: ["qualified"],
-  };
-  await assert.rejects(
-    h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "999" }),
-    /not_authorized/,
-  );
-  const preview = await h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "201" });
-  assert.equal(preview.comparison.before.datasetId, preview.comparison.after.datasetId);
-  assert.equal(preview.comparison.changes.length > 0, true);
-  assert.deepEqual(
-    await h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "201" }),
-    preview,
-  );
-  await assert.rejects(
-    h.runtime.approvePolicyComparison({ comparisonId: preview.comparisonId, operatorId: "201" }),
-    /not_authorized/,
-  );
-  const release = await h.runtime.approvePolicyComparison({
-    comparisonId: preview.comparisonId,
-    operatorId: "202",
-    approvalReceipt: "synthetic-policy-review",
-    releaseNotes: "Require accepted outcomes",
-  });
-  assert.equal(release.manifest.publicEnabled, false);
-  assert.equal(release.manifest.targetVersion, policy.version);
-  const head = (await h.db.query("SELECT snapshot_id FROM leaderboard_pipeline.heads")).rows[0];
-  assert.equal(head.snapshot_id, publication.snapshotId);
-});
+test(
+  "policy previews persist exact frozen inputs and require independent host release authorization",
+  { timeout: 30_000 },
+  async (t) => {
+    const h = await harness(t, {
+      authorizePolicyPreview: async ({ operatorId }) => operatorId === "201",
+      authorizePolicyRelease: async ({ operatorId, approvalReceipt }) =>
+        operatorId === "202" && approvalReceipt === "synthetic-policy-review",
+      policyApproverIds: ["202"],
+    });
+    const publication = (await h.runtime.runOnce()).publications[0];
+    const policy = {
+      ...h.options.config.policies[0].policy,
+      version: "synthetic-policy-v2",
+      rankedStates: ["qualified"],
+    };
+    await assert.rejects(
+      h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "999" }),
+      /not_authorized/,
+    );
+    const preview = await h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "201" });
+    assert.equal(preview.comparison.before.datasetId, preview.comparison.after.datasetId);
+    assert.equal(preview.comparison.changes.length > 0, true);
+    assert.deepEqual(
+      await h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "201" }),
+      preview,
+    );
+    await assert.rejects(
+      h.runtime.approvePolicyComparison({ comparisonId: preview.comparisonId, operatorId: "201" }),
+      /not_authorized/,
+    );
+    const release = await h.runtime.approvePolicyComparison({
+      comparisonId: preview.comparisonId,
+      operatorId: "202",
+      approvalReceipt: "synthetic-policy-review",
+      releaseNotes: "Require accepted outcomes",
+    });
+    assert.equal(release.manifest.publicEnabled, false);
+    assert.equal(release.manifest.targetVersion, policy.version);
+    const head = (await h.db.query("SELECT snapshot_id FROM leaderboard_pipeline.heads")).rows[0];
+    assert.equal(head.snapshot_id, publication.snapshotId);
+  },
+);
 
 test("accepted controls receipt materializes a separate lens and withdrawal fences pinned snapshots", async (t) => {
   const h = await harness(t);
@@ -1262,3 +1273,60 @@ for (const narrowing of ["capability", "project", "installation", "slug"]) {
     assert.equal(sourceReads, priorReads);
   });
 }
+test("materialization retains separate pending provenance through replay and reviewed corrections", async (t) => {
+  const { normalized, configuration } = await import("../../../tests/fixtures/pending-metric.mjs");
+  const h = await harness(t, { config: configuration, normalizer: async () => normalized() });
+  await h.runtime.runOnce();
+  const url = "/api/v1/boards?metric=pr_merged";
+  const response = await h.runtime.app.inject(url);
+  assert.equal(response.statusCode, 200, response.body);
+  const before = response.json(),
+    row = before.rows.find((entry) => entry.actorId === "101");
+  assert.equal(row.result.value, 14);
+  assert.equal(row.pending.count, 3);
+  assert.equal(row.pending.state, "partial");
+  assert.equal(row.pending.evidenceIds.length, 3);
+  assert.equal(row.rank, 2);
+  assert.equal(before.rows.find((entry) => entry.actorId === "102").pending.count, null);
+  h.duplicate();
+  await h.runtime.runOnce();
+  const replay = (await h.runtime.app.inject(url)).json().rows.find((entry) => entry.actorId === "101");
+  assert.equal(replay.pending.count, 3);
+  assert.equal(replay.result.value, 14);
+  const factId = row.pending.evidenceIds[0],
+    requestId = fixtureId(91);
+  h.controlsStore.transaction((state) => {
+    state.requests[requestId] = {
+      id: requestId,
+      kind: "correction",
+      owner: "101",
+      locator: "https://github.com/synthetic-org/synthetic-repo/pull/15",
+      status: "pending",
+      version: 1,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      history: [],
+    };
+  });
+  await h.runtime.applyCorrection({
+    requestId,
+    expectedVersion: 1,
+    factId,
+    operatorId: "201",
+    approvalReceipt: "synthetic-correction-approval",
+  });
+  const pinned = (await h.runtime.app.inject(`${url}&snapshot=${before.snapshotId}`))
+    .json()
+    .rows.find((entry) => entry.actorId === "101");
+  assert.equal(pinned.pending.count, null);
+  assert.deepEqual(pinned.pending.evidenceIds, []);
+  assert.equal(pinned.result.value, 14);
+  await h.runtime.runOnce();
+  const corrected = (await h.runtime.app.inject(url)).json().rows.find((entry) => entry.actorId === "101");
+  assert.equal(corrected.pending.count, 2);
+  assert.equal(corrected.result.value, 14);
+  assert.equal(corrected.rank, 2);
+  const exported = (await h.runtime.app.inject("/api/v1/exports?metric=pr_merged&format=json")).json();
+  assert.equal(exported.pendingEvidence.length, 2);
+  assert.equal(exported.rows.find((entry) => entry.actorId === "101").pending.count, 2);
+});

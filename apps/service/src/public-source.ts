@@ -3,12 +3,14 @@ import {
   artifactSchema,
   contributionSchema,
   metricResultSchema,
+  pendingCountSchema,
   snapshotSchema,
   sourceEventSchema,
   type Actor,
   type Artifact,
   type Contribution,
   type MetricResult,
+  type PendingCount,
   type Snapshot,
 } from "@pick-your-ai/contracts";
 
@@ -40,8 +42,10 @@ export interface PublicRow {
   actorId: string;
   result: MetricResult;
   evidenceIds: string[];
+  pending?: PendingCount;
 }
 export interface PublicDiagnostic {
+  pending?: PendingCount;
   metricId: string;
   actorId: string;
   numerator: number | null;
@@ -59,6 +63,8 @@ export interface PublishedSnapshot {
   rows: PublicRow[];
   evidence: PublicEvidence[];
   portfolioEvidence?: PortfolioEvidence[];
+  /** Exact pending policy-unit receipts, separate from accepted and portfolio evidence. */
+  pendingEvidence?: PortfolioEvidence[];
   /** Approved per-metric direction; the API does not infer comparability or scoring. */
   ranking: { metricId: string; direction: "ascending" | "descending"; rank?: boolean }[];
   disabledMetrics?: { id: string; reason: string; policyVersion: string; policyLink: string | null }[];
@@ -136,6 +142,9 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
     (selected.portfolioEvidence !== undefined &&
       (!Array.isArray(selected.portfolioEvidence) ||
         selected.portfolioEvidence.length + selected.evidence.length > 20000)) ||
+    (selected.pendingEvidence !== undefined && !Array.isArray(selected.pendingEvidence)) ||
+    selected.evidence.length + (selected.portfolioEvidence?.length ?? 0) + (selected.pendingEvidence?.length ?? 0) >
+      20000 ||
     !Array.isArray(selected.ranking) ||
     selected.ranking.length > 98
   )
@@ -285,6 +294,57 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
       },
     }))
     .filter((entry) => entry.contribution.metricIds.length > 0);
+  const pendingInput = selected.pendingEvidence ?? [];
+  for (const entry of pendingInput) {
+    if (
+      entry.activityState !== "pending" ||
+      entry.observedAt === null ||
+      !date(entry.observedAt) ||
+      entry.occurredAt === null ||
+      entry.contribution.roles.includes("unknown")
+    )
+      return reject();
+  }
+  const pendingMetadata = new Map(pendingInput.map((entry) => [entry.contribution.contributionId, entry.observedAt]));
+  if (pendingMetadata.size !== pendingInput.length) return reject();
+  const pendingEvidence = projectEvidence(pendingInput).map((entry) => ({
+    ...entry,
+    activityState: "pending" as const,
+    observedAt: pendingMetadata.get(entry.contribution.contributionId)!,
+    contribution: { ...entry.contribution, reasonCodes: ["public_pending_work"] },
+  }));
+  const pendingEvidenceMap = new Map(pendingEvidence.map((entry) => [entry.contribution.contributionId, entry]));
+  function pendingProjection(entry: PublicRow, result: MetricResult): PendingCount | undefined {
+    if (entry.pending === undefined) return undefined; // Legacy is unknown, never inferred zero.
+    const parsed = pendingCountSchema.parse(entry.pending);
+    evidenceReferenceCount += parsed.evidenceIds.length;
+    const unknown = { ...parsed, state: "unknown" as const, count: null, evidenceIds: [] };
+    if (
+      !parsed.evidenceIds.every((id) => {
+        const evidence = pendingEvidenceMap.get(id);
+        return (
+          evidence?.contribution.actorId === entry.actorId && evidence.contribution.metricIds.includes(result.metricId)
+        );
+      })
+    )
+      return unknown;
+    const coverage = result.coverage;
+    const complete =
+      scope.start !== null &&
+      scope.end !== null &&
+      coverage.state === "complete" &&
+      coverage.knownStart !== null &&
+      Date.parse(coverage.knownStart) <= Date.parse(scope.start) &&
+      coverage.windowStart !== null &&
+      Date.parse(coverage.windowStart) <= Date.parse(scope.start) &&
+      coverage.windowEnd !== null &&
+      Date.parse(coverage.windowEnd) >= Date.parse(scope.end) &&
+      coverage.missingPages === 0 &&
+      coverage.permissionsMissing.length === 0 &&
+      coverage.sourceErrors.length === 0;
+    if (parsed.state === "measured" && !complete) return parsed.count === 0 ? unknown : { ...parsed, state: "partial" };
+    return parsed;
+  }
   const evidenceMap = new Map(evidence.map((entry) => [entry.contribution.contributionId, entry]));
   if (evidenceMap.size !== evidence.length) return reject();
   let evidenceReferenceCount = 0;
@@ -300,9 +360,15 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
         return reject();
       evidenceReferenceCount += entry.evidenceIds.length;
       const result = metricResultSchema.parse(entry.result);
+      const pending = pendingProjection(entry, result);
       if (evidenceReferenceCount > 40000 || !ranking.some((entry) => entry.metricId === result.metricId))
         return reject();
-      return { actorId: entry.actorId, result, evidenceIds: [...entry.evidenceIds] };
+      return {
+        actorId: entry.actorId,
+        result,
+        evidenceIds: [...entry.evidenceIds],
+        ...(pending === undefined ? {} : { pending }),
+      };
     })
     .filter(
       (entry) =>
@@ -325,9 +391,13 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
     (!Array.isArray(selected.diagnostics) || selected.diagnostics.length > 10000)
   )
     return reject();
-  const visibleRows = new Set(rows.map((row) => JSON.stringify([row.actorId, row.result.metricId])));
+  const rowByKey = new Map(rows.map((row) => [JSON.stringify([row.actorId, row.result.metricId]), row]));
+  const visibleRows = new Set(rowByKey.keys());
+  const retainedPendingIds = new Set(rows.flatMap((row) => row.pending?.evidenceIds ?? []));
   const diagnostics = (selected.diagnostics ?? [])
     .map((entry) => {
+      if (entry.pending !== undefined) pendingCountSchema.parse(entry.pending);
+      const pending = rowByKey.get(JSON.stringify([entry.actorId, entry.metricId]))?.pending;
       if (
         !id(entry.metricId) ||
         !id(entry.actorId) ||
@@ -348,6 +418,8 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
         censored: entry.censored,
         missingReadiness: entry.missingReadiness,
         p75: entry.p75,
+        // Use the projected row dependency, never an unchecked duplicate diagnostic count.
+        ...(pending === undefined ? {} : { pending }),
       };
     })
     .filter((entry) => visibleRows.has(JSON.stringify([entry.actorId, entry.metricId])));
@@ -370,6 +442,13 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
       rows: rows.map((row) => ({ ...row, result: { ...row.result, coverage: coverage(row.result.coverage) } })),
       evidence,
       ...(selected.portfolioEvidence === undefined ? {} : { portfolioEvidence }),
+      ...(selected.pendingEvidence === undefined
+        ? {}
+        : {
+            pendingEvidence: pendingEvidence.filter((entry) =>
+              retainedPendingIds.has(entry.contribution.contributionId),
+            ),
+          }),
       ranking: ranking.filter((entry) => !disabled.has(entry.metricId)),
       disabledMetrics,
       methodology,

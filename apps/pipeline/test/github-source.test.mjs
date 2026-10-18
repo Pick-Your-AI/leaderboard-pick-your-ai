@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createGithubCollectionSource } from "../src/github-source.mjs";
+import { createGithubCollectionSource, isProjectSourceScopeFailure } from "../src/github-source.mjs";
 
 const repository = { id: 2, installationId: 1, slug: "synthetic-owner/repository", families: ["reviews"] };
 const request = { repositoryId: 2, runId: "synthetic", family: "reviews", cursor: null, limit: 1 };
@@ -227,4 +227,19 @@ test("Project history requires approved IDs even when repository inventory is em
     client: { rest: async () => ({ id: 2, private: false }), scanRest: async () => [] },
   });
   await assert.rejects(source.readPage({ ...request, family: "project_history" }), /approved_project_scope_required/);
+});
+
+test("Project authorization errors fence publications without treating transient retries as privacy loss", async () => {
+  const { GithubClientError } = await import("../../../packages/github/dist/client.js");
+  const denied = new GithubClientError({ kind: "permission_denied", visibility: "unknown", status: 403 }, "synthetic");
+  assert.equal(isProjectSourceScopeFailure(denied, "project_current"), true);
+  assert.equal(isProjectSourceScopeFailure(denied, "project_history"), true);
+  assert.equal(isProjectSourceScopeFailure(denied, "issues"), false);
+  assert.equal(
+    isProjectSourceScopeFailure(
+      new GithubClientError({ kind: "transient_failure", visibility: "unknown" }, "synthetic"),
+      "project_current",
+    ),
+    false,
+  );
 });

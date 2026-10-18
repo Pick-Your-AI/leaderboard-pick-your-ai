@@ -79,6 +79,7 @@ export function encryptBackup({
 /** Authenticate before any restore mutation; expiry and expected revisions fail closed. */
 export function decryptBackup(envelope, { key, now, expectedDumpSha256, allowExpired = false } = {}) {
   validateKey(key);
+  now = timestamp(now);
   const { iv, tag, ciphertext, ...metadata } = envelope;
   if (metadata.format !== format) throw new Error("Unsupported backup format");
   if (!allowExpired && Date.parse(timestamp(now)) >= Date.parse(timestamp(metadata.expiresAt)))
@@ -173,16 +174,23 @@ export async function restoreBackup({
   observedSourceCutoff,
 }) {
   const started = performance.now();
+  for (const callback of [assertEmptyTarget, restoreDatabase, inspectRestoredState, reapplySuppressions]) {
+    if (typeof callback !== "function") throw new Error("All isolated restore and suppression callbacks are required");
+  }
+  if (!expectedState || typeof expectedState !== "object") throw new Error("Expected restored state is required");
+  // Validate the comparison target before any database mutation.
+  const expectedCanonical = canonical(expectedState);
   const decoded = decryptBackup(envelope, { key, now, expectedDumpSha256 });
   const observed = Date.parse(timestamp(observedSourceCutoff));
   const cutoff = Date.parse(decoded.metadata.sourceCutoff);
+  if (observed > Date.parse(now)) throw new Error("Observed source cutoff is from the future");
   if (observed < cutoff) throw new Error("Observed source cutoff precedes backup cutoff");
   await assertEmptyTarget();
   await restoreDatabase(decoded.databaseDump);
   // Current deletion/opt-out tombstones must be applied before any restored data is public.
   await reapplySuppressions();
   const state = await inspectRestoredState();
-  if (canonical(state) !== canonical(expectedState))
+  if (canonical(state) !== expectedCanonical)
     throw new Error("Restored state does not match the expected snapshot/correction state");
   return {
     format: "restore-drill-receipt/v1",
