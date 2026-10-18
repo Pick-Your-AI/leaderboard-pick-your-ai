@@ -23,5 +23,24 @@ export type {
 } from "./outbox.js";
 export { OperatorInbox } from "./operator.js";
 export type { OperatorAuthorize, ReplayWindow, ReplayWindowRequest } from "./operator.js";
+export type {
+  OperatorReplayResult,
+  OperatorReplayResultOptions,
+  ReplayPublicationBinding,
+  VerifyReplayPublications,
+} from "./replay-results.js";
+export {
+  operationTime,
+  parseDispatchOperation,
+  parseDispatchPublications,
+  parseDispatchGenerations,
+} from "./replay-results.js";
+export type {
+  OperatorHealth,
+  OperatorReadScope,
+  OperatorReadAuthority,
+  OperatorReadObserver,
+  ReadOperatorHealth,
+} from "./operator-health.js";
 export { RepositoryRetirementStore } from "./retirement.js";
 export type { RepositoryRetirement, RetirementAuthorize } from "./retirement.js";

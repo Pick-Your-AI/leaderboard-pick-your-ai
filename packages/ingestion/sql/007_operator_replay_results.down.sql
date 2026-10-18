@@ -1,0 +1,7 @@
+ALTER TABLE leaderboard_ingestion.inbox
+  DROP CONSTRAINT inbox_operator_replay_identity,
+  DROP COLUMN operator_replay_receipt_id;
+DROP TABLE leaderboard_ingestion.replay_processing_results;
+DROP FUNCTION leaderboard_ingestion.reject_replay_processing_change();
+ALTER TABLE leaderboard_ingestion.attempt_history DROP CONSTRAINT replay_attempt_delivery_identity;
+ALTER TABLE leaderboard_ingestion.replay_receipts DROP CONSTRAINT replay_receipt_delivery_identity;
