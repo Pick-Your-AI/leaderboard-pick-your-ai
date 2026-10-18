@@ -1,7 +1,8 @@
 import React from "react";
 import { RankCell } from "../components/BoardTable.tsx";
+import { CountLink } from "../components/CountLink.tsx";
 import { PageHeader } from "../components/Layout.tsx";
-import { PersonName, ReceiptRow } from "../components/Receipt.tsx";
+import { PersonName, publicPersonLabel, ReceiptRow } from "../components/Receipt.tsx";
 import { ReferenceScope, ScopeBar } from "../components/ScopeBar.tsx";
 import {
   CoverageLabel,
@@ -104,7 +105,17 @@ export function OverviewPage() {
                                 </span>
                                 <PersonName person={row.person} />
                                 <span className="numeric">
-                                  {formatNumber(row.value)} <span className="unit">{board.metric.definition.unit}</span>
+                                  <CountLink
+                                    to={hrefWith(
+                                      `/leaderboards/${board.metric.id}`,
+                                      { proof: row.person.login, ui: "prototype" },
+                                      { ...board.scope, snapshot: board.snapshot.served.id },
+                                    )}
+                                    label={`${formatNumber(row.value)} ${board.metric.definition.unit}, ${publicPersonLabel(row.person)}, ${board.metric.name}`}
+                                  >
+                                    {formatNumber(row.value)}{" "}
+                                    <span className="unit">{board.metric.definition.unit}</span>
+                                  </CountLink>
                                 </span>
                               </li>
                             ))}
