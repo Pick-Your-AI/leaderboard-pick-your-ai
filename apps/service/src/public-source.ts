@@ -1,5 +1,9 @@
 import type { RankSnapshotHistory } from "./rank-comparison.js";
 import {
+  canonicalPublicScope,
+  publicScopeKey,
+  publicScopeSchemaVersion,
+  type PublicScope,
   publicDocumentationReasons,
   publicDocumentationRecognitionReasons,
   matchesActorFilter,
@@ -24,14 +28,7 @@ import {
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { compareSourceInstants } from "./source-time.js";
 
-/** An exact materialized scope, never a request to sum overlapping aggregates. */
-export interface PublicScope {
-  organization: string;
-  repository: string | null;
-  workstream: string | null;
-  start: string | null;
-  end: string | null;
-}
+export type { PublicScope } from "@pick-your-ai/contracts";
 export interface PublicEvidence {
   evidenceMetadata?: PublicEvidenceMetadata;
   artifact: Artifact;
@@ -214,10 +211,21 @@ export function projectRead(
   };
   if (!input || !input.selected || !input.controls || !input.head) return reject();
   const selected = input.selected;
+  try {
+    scope = canonicalPublicScope(scope);
+    const providerScope = canonicalPublicScope(selected.scope);
+    if (
+      publicScopeKey(scope) !== publicScopeKey(providerScope) ||
+      (providerScope.schemaVersion === publicScopeSchemaVersion &&
+        selected.scope.schemaVersion !== publicScopeSchemaVersion)
+    )
+      return reject();
+  } catch {
+    return reject();
+  }
   if (
     selected.approvedPublic !== true ||
     !selected.scope ||
-    !Object.keys(scope).every((key) => selected.scope[key as keyof PublicScope] === scope[key as keyof PublicScope]) ||
     !Array.isArray(selected.rows) ||
     selected.rows.length > 10000 ||
     !Array.isArray(selected.actors) ||

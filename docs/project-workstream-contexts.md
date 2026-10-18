@@ -73,7 +73,7 @@ The metric engine's explicit `context: "current"` mode can filter these frozen c
 
 Historical filtering continues to use `eventContext`. A missing event context emits `unknown_membership_context`. A native Project event proves only its named Project scope and leaves `workstreamsKnown: false`. For either context basis, a positive proved match remains usable; an unmatched request outside the proved Project scope or with incomplete workstream knowledge is unknown, rather than a known zero.
 
-The public pipeline's existing query basis remains event context. Selecting and explaining a public current-versus-event view remains [#91](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/91). The new current context is available to the engine and retained private frozen inputs; this change does not silently reinterpret existing workstream-filtered public URLs.
+The public pipeline's existing query basis remains event context. The bounded [public membership scope contract](public-membership-scopes.md) adds explicit, separately materialized current-context and Project-filter selections for [#91](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/91). These selections use versioned scopes and responses; existing workstream-filtered public URLs keep their event semantics. Browser exposure and the remaining full #91 acceptance retain their separate delivery gates.
 
 ## Repository lifecycle and inherited history
 
