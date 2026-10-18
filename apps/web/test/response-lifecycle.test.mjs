@@ -178,7 +178,17 @@ test("bounded server errors expose only the controlled code and release the read
 });
 
 test("a public CSV download preserves UTF-8 and releases the shared reader", async (t) => {
-  const csv = "metric,value\nsynthetic,€\n";
+  const { createService } = await import("../../service/dist/app.js");
+  const { readFixture } = await import("../../../tests/fixtures/pending-metric.mjs");
+  const input = readFixture();
+  input.selected.actors[0].actor.login = "synthetic-€";
+  const app = createService({ source: { read: async () => structuredClone(input) } });
+  t.after(() => app.close());
+  const query = `?snapshot=${input.selected.snapshot.snapshotId}&metric=pr_merged`;
+  const response = await app.inject(`/api/v1/exports${query}&format=csv`);
+  assert.equal(response.statusCode, 200, response.body);
+  const csv = response.body;
+  assert.match(csv, /synthetic-€/);
   const { body } = source([new TextEncoder().encode(csv)]);
   t.mock.method(
     globalThis,
@@ -187,10 +197,10 @@ test("a public CSV download preserves UTF-8 and releases the shared reader", asy
   );
   const blob = await exportPage(
     "/api/v1",
-    selection("?snapshot=s1"),
+    selection(query),
     "csv",
     new AbortController().signal,
-    metricRegistryV1.metrics.find((metric) => metric.id === "pr_opened"),
+    metricRegistryV1.metrics.find((metric) => metric.id === "pr_merged"),
   );
   assert.equal(await blob.text(), csv);
   assert.equal(body.locked, false);
