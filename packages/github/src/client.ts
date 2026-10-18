@@ -80,6 +80,26 @@ function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+/** Omit structured identity emails; free-text source content is not sanitized here. */
+function minimizeIdentityEmails(value: unknown, identity = false): unknown {
+  if (Array.isArray(value)) {
+    const items = value.map((item) => minimizeIdentityEmails(item, identity));
+    return items.some((item, index) => item !== value[index]) ? items : value;
+  }
+  if (!object(value)) return value;
+  let changed = false;
+  const entries = Object.entries(value).flatMap(([key, item]) => {
+    if (identity && key === "email") {
+      changed = true;
+      return [];
+    }
+    const minimized = minimizeIdentityEmails(item, key === "author" || key === "committer");
+    if (minimized !== item) changed = true;
+    return [[key, minimized]];
+  });
+  return changed ? Object.fromEntries(entries) : value;
+}
+
 function readOnlyQuery(query: string): boolean {
   // Remove GraphQL strings and comments before examining operation tokens.
   const tokens = query.replace(/"""(?:\\[\s\S]|(?!""")[\s\S])*"""|"(?:\\.|[^"\\])*"|#[^\r\n]*/g, " ");
@@ -255,6 +275,14 @@ export class GithubReadClient {
       throw new GithubClientError({ kind: "invalid_checkpoint" }, source);
     }
     const cache = cached as CachedResponse | undefined;
+    if (cache) {
+      const body = minimizeIdentityEmails(cache.body);
+      if (body !== cache.body) {
+        cache.body = body;
+        // Migrate legacy values before any request or conditional cache reuse.
+        await this.options.checkpoints.save(cacheKey, cache);
+      }
+    }
     for (let attempt = 0; ; attempt += 1) {
       await this.wait(source);
       const release = await this.acquire();
@@ -303,7 +331,7 @@ export class GithubReadClient {
         }
         let body: unknown;
         try {
-          body = await this.body(response, source);
+          body = minimizeIdentityEmails(await this.body(response, source));
         } catch (error) {
           // Error responses may be empty/non-JSON (for example proxy outages).
           // Their HTTP status still determines authorization/retry behavior.
@@ -432,6 +460,12 @@ export class GithubReadClient {
         items: [],
         complete: false,
       };
+      const items = minimizeIdentityEmails(state.items) as unknown[];
+      if (items !== state.items) {
+        state.items = items;
+        // Completed and interrupted legacy scans both migrate before reuse.
+        await this.options.checkpoints.save(storageKey, state);
+      }
       while (state.next !== null) {
         if (state.visited.length >= maxPages)
           throw new Error("Source pagination exceeded maxPages; checkpoint retained");
@@ -440,7 +474,7 @@ export class GithubReadClient {
         const next = state.next;
         const page = await fetchPage(next);
         if (!Array.isArray(page.items)) throw new GithubClientError({ kind: "invalid_response" }, source);
-        state.items.push(...page.items);
+        state.items.push(...(minimizeIdentityEmails(page.items) as unknown[]));
         state.visited.push(next);
         state.next = page.next;
         state.complete = page.next === null;
