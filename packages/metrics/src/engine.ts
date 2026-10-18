@@ -271,7 +271,8 @@ export function resolveMetricWindow(
   if (["7d", "30d", "90d"].includes(preset)) start = end - Number.parseInt(preset, 10) * 86400000;
   else if (preset === "all") start = null;
   else if (preset === "month" || preset === "quarter" || preset === "year") {
-    const month = preset === "year" ? 0 : preset === "quarter" ? Math.floor(date.getUTCMonth() / 3) * 3 : date.getUTCMonth();
+    const month =
+      preset === "year" ? 0 : preset === "quarter" ? Math.floor(date.getUTCMonth() / 3) * 3 : date.getUTCMonth();
     // Preserve the validated year: Date.UTC remaps years 0–99 to 1900–1999.
     date.setUTCMonth(month, 1);
     date.setUTCHours(0, 0, 0, 0);
