@@ -2,6 +2,8 @@ import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { metricRegistrySchema, type MetricRegistry } from "@pick-your-ai/contracts";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
+import { acceptedAchievements, ACHIEVEMENT_RULE_VERSION } from "./achievements.js";
+import { renderContributorCard, renderContributorCardImage } from "./cards.js";
 import { renderPublicExport } from "./exports.js";
 import {
   activityGroupingVersion,
@@ -29,6 +31,7 @@ export interface ServiceOptions {
   maxConcurrentStreams?: number;
   cursorSecret?: string;
   serviceVersion?: string;
+  approvedAchievementRuleVersion?: typeof ACHIEVEMENT_RULE_VERSION;
 }
 const allowed = new Set([
   "organization",
@@ -416,6 +419,9 @@ export function createService(options: ServiceOptions = {}) {
         "boards",
         "contributors",
         "contributors/:actorId",
+        "cards/:actorId",
+        "cards/:actorId/image",
+        "contributors/:actorId/achievements",
         "activity",
         "activity/:groupId",
         "evidence/:contributionId",
@@ -568,6 +574,56 @@ export function createService(options: ServiceOptions = {}) {
       evidenceCount: evidence.length,
       evidenceIds: timeline.map((entry) => entry.contribution.contributionId),
     });
+  });
+  app.get<{ Params: { actorId: string } }>("/api/v1/contributors/:actorId/achievements", async (request, reply) => {
+    const q = query(request);
+    if (q.metric || q.category || q.cursor || q.search || q.format !== "json") fail(400, "unsupported_filter");
+    if (options.approvedAchievementRuleVersion !== ACHIEVEMENT_RULE_VERSION) fail(503, "achievement_policy_unapproved");
+    const read = await load(q.scope, q.snapshot);
+    if (!read.selected.actors.some((actor) => actor.actorId === request.params.actorId))
+      fail(404, "profile_unavailable");
+    return send(
+      request,
+      reply,
+      {
+        ...meta(read),
+        actorId: request.params.actorId,
+        ruleVersion: ACHIEVEMENT_RULE_VERSION,
+        achievements: acceptedAchievements(read, request.params.actorId),
+      },
+      "application/json; charset=utf-8",
+      "no-store",
+    );
+  });
+  app.get<{ Params: { actorId: string } }>("/api/v1/cards/:actorId/image", async (request, reply) => {
+    const q = query(request);
+    if (!q.metric || q.category || q.cursor || q.search || q.format !== "json")
+      fail(400, "card_requires_single_metric");
+    const metric = registry.metrics.find((entry) => entry.id === q.metric);
+    if (!metric) fail(404, "metric_unavailable");
+    const read = await load(q.scope, q.snapshot);
+    const svg = renderContributorCardImage(read, request.params.actorId, metric, q.snapshot !== null);
+    reply
+      .header("Content-Security-Policy", "default-src 'none'; sandbox; frame-ancestors 'none'")
+      .header("Referrer-Policy", "no-referrer");
+    return send(request, reply, svg, "image/svg+xml; charset=utf-8", "no-store");
+  });
+  app.get<{ Params: { actorId: string } }>("/api/v1/cards/:actorId", async (request, reply) => {
+    const q = query(request);
+    if (!q.metric || q.category || q.cursor || q.search || q.format !== "json")
+      fail(400, "card_requires_single_metric");
+    const metric = registry.metrics.find((entry) => entry.id === q.metric);
+    if (!metric) fail(404, "metric_unavailable");
+    const read = await load(q.scope, q.snapshot);
+    const html = renderContributorCard(read, request.params.actorId, metric, q.snapshot !== null);
+    reply
+      .header(
+        "Content-Security-Policy",
+        "default-src 'none'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'",
+      )
+      .header("Referrer-Policy", "no-referrer")
+      .header("X-Frame-Options", "SAMEORIGIN");
+    return send(request, reply, html, "text/html; charset=utf-8", "no-store");
   });
   app.get<{ Params: { contributionId: string } }>("/api/v1/evidence/:contributionId", async (request, reply) => {
     const q = query(request);

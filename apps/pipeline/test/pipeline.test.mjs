@@ -502,7 +502,14 @@ for (const boundary of [
       h.controlsStore.transaction(
         (state) => {
           state.configuration.revision++;
-          state.configuration.active.document.repositories = [{ id: "2" }];
+          // Restore every original source grant so the revision fence, rather than
+          // an invalid authority fixture, rejects the interrupted run.
+          state.configuration.active.document.repositories = h.options.config.repositories.map((repo) => ({
+            id: String(repo.id),
+            installationId: String(repo.installationId),
+            slug: repo.slug,
+            capabilities: [...repo.families],
+          }));
         },
         { publish: true },
       );
@@ -675,6 +682,390 @@ test("public observed work survives accepted-only rankings without granting assi
   assert.equal((await runtime.app.inject(`/api/v1/contributors/103?snapshot=${directory.snapshotId}`)).statusCode, 404);
 });
 
+test(
+  "policy previews persist exact frozen inputs and require independent host release authorization",
+  { timeout: 30_000 },
+  async (t) => {
+    const h = await harness(t, {
+      authorizePolicyPreview: async ({ operatorId }) => operatorId === "201",
+      authorizePolicyRelease: async ({ operatorId, approvalReceipt }) =>
+        operatorId === "202" && approvalReceipt === "synthetic-policy-review",
+      policyApproverIds: ["202"],
+    });
+    const publication = (await h.runtime.runOnce()).publications[0];
+    const policy = {
+      ...h.options.config.policies[0].policy,
+      version: "synthetic-policy-v2",
+      rankedStates: ["qualified"],
+    };
+    await assert.rejects(
+      h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "999" }),
+      /not_authorized/,
+    );
+    const preview = await h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "201" });
+    assert.equal(preview.comparison.before.datasetId, preview.comparison.after.datasetId);
+    assert.equal(preview.comparison.changes.length > 0, true);
+    assert.deepEqual(
+      await h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "201" }),
+      preview,
+    );
+    await assert.rejects(
+      h.runtime.approvePolicyComparison({ comparisonId: preview.comparisonId, operatorId: "201" }),
+      /not_authorized/,
+    );
+    const release = await h.runtime.approvePolicyComparison({
+      comparisonId: preview.comparisonId,
+      operatorId: "202",
+      approvalReceipt: "synthetic-policy-review",
+      releaseNotes: "Require accepted outcomes",
+    });
+    assert.equal(release.manifest.publicEnabled, false);
+    assert.equal(release.manifest.targetVersion, policy.version);
+    const head = (await h.db.query("SELECT snapshot_id FROM leaderboard_pipeline.heads")).rows[0];
+    assert.equal(head.snapshot_id, publication.snapshotId);
+  },
+);
+
+test("accepted controls receipt materializes a separate lens and withdrawal fences pinned snapshots", async (t) => {
+  const h = await harness(t);
+  const config = structuredClone(h.options.config);
+  const policy = {
+    ...config.policies[0].policy,
+    version: "synthetic-accepted-v1",
+    dateBasis: "acceptedAt",
+    rankedStates: ["qualified"],
+  };
+  config.policies = [
+    { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-approval" },
+  ];
+  config.recognitionBindings = [
+    {
+      category: "finding",
+      scope: "repository:2",
+      policyVersion: policy.version,
+      metricId: "issues_opened",
+      sourceMetricId: "issues_opened",
+      repositoryId: "2",
+      reviewerIds: ["202"],
+    },
+  ];
+  const event = {
+    id: "synthetic-receipt",
+    actor: "202",
+    action: "accepted",
+    at: Date.parse(ago(1)),
+    policyVersion: policy.version,
+  };
+  h.controlsStore.transaction((s) => {
+    s.requests.claim = {
+      id: "claim",
+      kind: "evidence",
+      status: "accepted",
+      owner: "101",
+      category: "finding",
+      scope: "repository:2",
+      policyVersion: policy.version,
+      locator: "https://github.com/synthetic-org/synthetic-repo/issues/1",
+      collaborators: {},
+      history: [event],
+    };
+    s.audit.push(event);
+  });
+  const runtime = await createPipeline({
+    ...h.options,
+    config,
+    authorizePolicyPreview: async () => {
+      h.controlsStore.transaction((s) => {
+        s.requests.claim.status = "withdrawn";
+      });
+      return true;
+    },
+  });
+  t.after(() => runtime.stop());
+  const publication = (await runtime.runOnce()).publications[0];
+  const signal = new AbortController().signal;
+  const visible = await runtime.source.read(publicScope, publication.snapshotId, signal);
+  assert.equal(visible.selected.rows.find((r) => r.actorId === "101").result.value, 1);
+  const acceptedEvidence = visible.selected.evidence.find((entry) => entry.contribution.actorId === "101");
+  assert.equal(acceptedEvidence.evidenceMetadata.sourceAction, "recognition_accepted");
+  assert.equal(acceptedEvidence.evidenceMetadata.activityState, "accepted");
+  assert.equal(acceptedEvidence.evidenceMetadata.acceptedAt, new Date(event.at).toISOString());
+  assert.equal(acceptedEvidence.evidenceMetadata.artifactTitle.value, "Synthetic collected issue title");
+  assert.notEqual(acceptedEvidence.evidenceMetadata.sourceOccurredAt, acceptedEvidence.evidenceMetadata.acceptedAt);
+  assert.doesNotMatch(JSON.stringify(acceptedEvidence), /synthetic-receipt/);
+  await assert.rejects(
+    runtime.previewPolicy({
+      snapshotId: publication.snapshotId,
+      policy: { ...policy, version: "synthetic-accepted-v2" },
+      operatorId: "202",
+    }),
+    /policy_input_revoked/,
+  );
+  assert.equal(await runtime.source.read(publicScope, publication.snapshotId, signal), null);
+  const next = (await runtime.runOnce()).publications[0];
+  const after = await runtime.source.read(publicScope, next.snapshotId, signal);
+  assert.equal(
+    after.selected.rows.some((r) => r.result.value > 0),
+    false,
+  );
+});
+
+for (const action of ["contributor suppression", "source revocation"])
+  test(`policy preview fences ${action} during asynchronous authorization`, async (t) => {
+    let revoke;
+    const h = await harness(t, {
+      authorizePolicyPreview: async () => {
+        await revoke();
+        return true;
+      },
+    });
+    const publication = (await h.runtime.runOnce()).publications[0];
+    revoke =
+      action === "contributor suppression"
+        ? async () =>
+            h.controlsStore.transaction((s) => {
+              s.profiles["101"] = { suppressed: true };
+            })
+        : async () => h.setPrivate(true);
+    if (action === "source revocation")
+      revoke = async () => {
+        await h.db.query(
+          "UPDATE leaderboard_ingestion.repository_access SET state='unavailable' WHERE repository_id=2",
+        );
+      };
+    await assert.rejects(
+      h.runtime.previewPolicy({
+        snapshotId: publication.snapshotId,
+        policy: { ...h.options.config.policies[0].policy, version: "v2" },
+        operatorId: "201",
+      }),
+      /policy_input_revoked/,
+    );
+  });
+test("policy approval rejects a frozen comparison after contributor suppression", async (t) => {
+  const h = await harness(t, {
+    authorizePolicyPreview: async () => true,
+    authorizePolicyRelease: async () => true,
+    policyApproverIds: ["202"],
+  });
+  const publication = (await h.runtime.runOnce()).publications[0];
+  const preview = await h.runtime.previewPolicy({
+    snapshotId: publication.snapshotId,
+    policy: { ...h.options.config.policies[0].policy, version: "v2" },
+    operatorId: "201",
+  });
+  h.controlsStore.transaction((s) => {
+    s.profiles["101"] = { suppressed: true };
+  });
+  await assert.rejects(
+    h.runtime.approvePolicyComparison({
+      comparisonId: preview.comparisonId,
+      operatorId: "202",
+      approvalReceipt: "review",
+      releaseNotes: "Reviewed",
+    }),
+    /policy_input_revoked|policy_input_changed/,
+  );
+});
+
+test("real controls HTTP acceptance and withdrawal feed pipeline recognition without handcrafted receipts", async (t) => {
+  const h = await harness(t);
+  const config = structuredClone(h.options.config);
+  const policy = {
+    ...config.policies[0].policy,
+    version: "synthetic-controls-v1",
+    dateBasis: "acceptedAt",
+    rankedStates: ["qualified"],
+  };
+  config.policies = [
+    { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-reviewed-policy" },
+  ];
+  config.recognitionBindings = [
+    {
+      category: "governance",
+      scope: "repository:2",
+      policyVersion: policy.version,
+      metricId: "issues_opened",
+      sourceMetricId: "issues_opened",
+      repositoryId: "2",
+      reviewerIds: ["202"],
+    },
+  ];
+  const origin = "https://controls.example.test";
+  const server = components.controls.createControlsServer({
+    store: h.controlsStore,
+    origin,
+    approvedPolicyVersions: [policy.version],
+    rolesForActor: (actorId) => ({ roles: actorId === "202" ? ["reviewer"] : [], version: "v1" }),
+    provider: {
+      authorizationURL: ({ state }) => `https://github.com/login/oauth/authorize?state=${state}`,
+      exchange: async ({ code }) => ({ actorId: code }),
+    },
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  async function call(path, user, body) {
+    const response = await fetch(base + path, {
+      method: body ? "POST" : "GET",
+      redirect: "manual",
+      headers: {
+        ...(user ? { cookie: user.cookie, origin, "x-csrf-token": user.csrf } : {}),
+        ...(body ? { "content-type": "application/json" } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    return {
+      response,
+      data: response.headers.get("content-type")?.includes("application/json") ? await response.json() : null,
+    };
+  }
+  async function login(actorId) {
+    const start = await call("/controls/auth/login");
+    const state = new URL(start.response.headers.get("location")).searchParams.get("state");
+    const result = await call(`/controls/auth/callback?state=${state}&code=${actorId}`, {
+      cookie: start.response.headers.getSetCookie()[0].split(";")[0],
+    });
+    assert.equal(result.response.status, 303);
+    const cookie = result.response.headers
+      .getSetCookie()
+      .find((value) => value.startsWith("__Host-controls_session="))
+      .split(";")[0];
+    const session = await call("/controls/session", { cookie });
+    assert.equal(session.response.status, 200);
+    return { cookie, csrf: session.data.csrf };
+  }
+  const owner = await login("101"),
+    reviewer = await login("202");
+  const submitted = await call("/controls/requests", owner, {
+    kind: "evidence",
+    locator: "https://github.com/synthetic-org/synthetic-repo/issues/1",
+    category: "governance",
+    collaborators: [],
+    consent: true,
+    detail: "Private synthetic review detail",
+    scope: "repository:2",
+  });
+  assert.equal(submitted.response.status, 201);
+  const reviewed = await call(`/controls/requests/${submitted.data.id}/review`, reviewer, {
+    version: submitted.data.version,
+    decision: "accept",
+    reason: "Private synthetic decision",
+    conflict: false,
+    policyVersion: policy.version,
+    sourceReviewedPublic: true,
+  });
+  assert.equal(reviewed.response.status, 200);
+  const runtime = await createPipeline({ ...h.options, config });
+  t.after(() => runtime.stop());
+  const publication = (await runtime.runOnce()).publications[0];
+  const read = await runtime.source.read(publicScope, publication.snapshotId, new AbortController().signal);
+  assert.equal(read.selected.rows.find((row) => row.actorId === "101").result.value, 1);
+  assert.equal(JSON.stringify(read).includes("Private synthetic"), false);
+  const withdrawn = await call(`/controls/requests/${submitted.data.id}/withdraw`, owner, {
+    version: reviewed.data.version,
+  });
+  assert.equal(withdrawn.response.status, 200);
+  assert.equal(await runtime.source.read(publicScope, publication.snapshotId, new AbortController().signal), null);
+});
+
+test("policy approval rolls back its durable receipt when privacy changes during persistence", async (t) => {
+  const h = await harness(t, {
+    authorizePolicyPreview: async () => true,
+    authorizePolicyRelease: async () => true,
+    policyApproverIds: ["202"],
+  });
+  const publication = (await h.runtime.runOnce()).publications[0];
+  const preview = await h.runtime.previewPolicy({
+    snapshotId: publication.snapshotId,
+    policy: { ...h.options.config.policies[0].policy, version: "v2" },
+    operatorId: "201",
+  });
+  const transact = h.db.transaction;
+  h.db.transaction = (work) =>
+    transact((tx) =>
+      work({
+        query: async (sql, params) => {
+          const result = await tx.query(sql, params);
+          if (sql.includes("INSERT INTO leaderboard_pipeline.receipts") && params?.includes("policy_release_reviewed"))
+            h.controlsStore.transaction((s) => {
+              s.profiles["101"] = { suppressed: true };
+            });
+          return result;
+        },
+      }),
+    );
+  await assert.rejects(
+    h.runtime.approvePolicyComparison({
+      comparisonId: preview.comparisonId,
+      operatorId: "202",
+      approvalReceipt: "review",
+      releaseNotes: "Reviewed",
+    }),
+    /policy_input_revoked|policy_input_changed/,
+  );
+  assert.equal(
+    (await h.runtime.receipts()).some((r) => r.kind === "policy_release_reviewed"),
+    false,
+  );
+});
+
+for (const narrowing of ["capability", "project", "installation", "slug"]) {
+  test(`activated ${narrowing} narrowing fences historical reads and new collection`, async (t) => {
+    const h = await harness(t);
+    const config = structuredClone(h.options.config);
+    config.repositories[0].allowedProjectIds = ["PVT_syntheticAllowed"];
+    let sourceReads = 0;
+    const runtime = await createPipeline({
+      ...h.options,
+      config,
+      source: {
+        readPage: async (request) => {
+          sourceReads++;
+          return h.options.source.readPage(request);
+        },
+      },
+    });
+    t.after(() => runtime.stop());
+    const publication = (await runtime.runOnce()).publications[0];
+    const active = {
+      repositories: [{ id: "2", installationId: "1", slug: config.repositories[0].slug, capabilities: ["issues"] }],
+      projects: [{ id: "PVT_syntheticAllowed", fields: [] }],
+      metrics: [],
+    };
+    h.controlsStore.transaction(
+      (state) => {
+        state.configuration = {
+          revision: 1,
+          active: {
+            version: "synthetic-control",
+            digest: "a".repeat(64),
+            approval: { id: "synthetic-approval" },
+            document: active,
+          },
+        };
+      },
+      { publish: true },
+    );
+    assert.equal((await runtime.app.inject(`${boardUrl}&snapshot=${publication.snapshotId}`)).statusCode, 200);
+    h.controlsStore.transaction(
+      (state) => {
+        state.configuration.revision++;
+        const document = state.configuration.active.document;
+        if (narrowing === "capability") document.repositories[0].capabilities = ["reviews"];
+        if (narrowing === "project") document.projects = [];
+        if (narrowing === "installation") document.repositories[0].installationId = "9";
+        if (narrowing === "slug") document.repositories[0].slug = "synthetic-org/other";
+      },
+      { publish: true },
+    );
+    const priorReads = sourceReads;
+    assert.equal((await runtime.app.inject(`${boardUrl}&snapshot=${publication.snapshotId}`)).statusCode, 503);
+    assert.equal((await runtime.app.inject(boardUrl)).statusCode, 503);
+    await assert.rejects(runtime.runOnce(), /active_configuration_/);
+    assert.equal(sourceReads, priorReads);
+  });
+}
 test("materialization retains separate pending provenance through replay and reviewed corrections", async (t) => {
   const { normalized, configuration } = await import("../../../tests/fixtures/pending-metric.mjs");
   const h = await harness(t, { config: configuration, normalizer: async () => normalized() });

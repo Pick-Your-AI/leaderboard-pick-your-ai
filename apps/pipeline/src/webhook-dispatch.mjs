@@ -71,7 +71,15 @@ export function createWebhookDispatcher({
       const code = error instanceof Error ? error.message : "";
       if (code === "dispatch_lease_lost") return "lease_lost";
       const unsupported = code === "unsupported_dispatch_observation";
-      const configurationChanged = /configuration_(?:changed|revoked_source)/.test(code);
+      const configurationChanged = [
+        "dispatch_configuration_changed",
+        "active_configuration_changed",
+        "active_configuration_revoked_source",
+        "active_configuration_source_scope_unavailable",
+        "active_configuration_repository_binding_changed",
+        "active_configuration_revoked_capability",
+        "active_configuration_revoked_project",
+      ].includes(code);
       const reason = unsupported
         ? "unsupported_observation"
         : configurationChanged
