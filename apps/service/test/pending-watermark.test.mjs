@@ -1,6 +1,7 @@
 // Synthetic publication inputs only; these tests establish no live source authority.
 import assert from "node:assert/strict";
 import test from "node:test";
+import { canonicalPublicScope, publicScopeParameters } from "@pick-your-ai/contracts";
 import { createService } from "../dist/app.js";
 import { board, selection, validateExport } from "../../web/src/remote/client.ts";
 import { parseCSVExport } from "../../web/src/remote/csv-export.ts";
@@ -195,4 +196,65 @@ test("a newer incomplete publication invalidates measured validators and preserv
       assertRow(pinned.json(), expectedPending(prior, true));
     }
   }
+});
+
+test("versioned current and Project scopes retain corrected pending counts in both export formats", async (t) => {
+  for (const membership of [
+    { context: "current", projects: [] },
+    { context: "current", projects: ["PVT_B=", "PVT_A"] },
+    { context: "event", projects: ["PVT_A"] },
+  ])
+    for (const watermark of [null, "2026-10-17T23:59:59.999999999Z", end])
+      for (const count of [0, 3]) {
+        const input = fixture(count, watermark);
+        const scope = canonicalPublicScope({ ...input.selected.scope, ...membership });
+        input.selected.scope = scope;
+        const original = structuredClone(input);
+        const app = harness(t, input);
+        const expected = expectedPending(input, watermark === end);
+        for (const pin of [null, input.head.snapshotId]) {
+          const params = new URLSearchParams({ ...publicScopeParameters(scope), metric: "pr_merged" });
+          if (pin !== null) params.set("snapshot", pin);
+          const response = await app.inject(`/api/v1/boards?${params}`);
+          assert.equal(response.statusCode, 200, response.body);
+          const result = response.json();
+          assert.equal(result.schemaVersion, "public-read/v2");
+          assert.deepEqual(result.scope, scope);
+          assertRow(result, expected);
+          assert.deepEqual(result.diagnostics.find((entry) => entry.actorId === "101").pending, expected);
+          const exported = await app.inject(`/api/v1/exports?${params}&format=json`);
+          assert.equal(exported.statusCode, 200, exported.body);
+          const json = exported.json();
+          assert.equal(json.exportSchemaVersion, "public-export/v2");
+          assert.deepEqual(json.scope, scope);
+          assertRow(json, expected);
+          assert.deepEqual(json.diagnostics.find((entry) => entry.actorId === "101").pending, expected);
+          const csv = await app.inject(`/api/v1/exports?${params}&format=csv`);
+          assert.equal(csv.statusCode, 200, csv.body);
+          // These fictional fields contain no line breaks. Read the quoted v2
+          // records independently of the separately owned browser v2 integration.
+          const [header, ...rows] = csv.body
+            .trimEnd()
+            .split("\r\n")
+            .map((line) =>
+              [...line.matchAll(/"((?:[^"]|"")*)"(?:,|$)/g)].map((match) => match[1].replaceAll('""', '"')),
+            );
+          const field = (row, key) => row[header.indexOf(key)];
+          assert.equal(rows.length, 3);
+          for (const row of rows) {
+            assert.equal(row.length, header.length);
+            assert.equal(field(row, "export_schema_version"), "public-export/v2");
+            assert.equal(field(row, "scope_schema_version"), "public-scope/v2");
+            assert.equal(field(row, "context"), scope.context);
+            assert.deepEqual(JSON.parse(field(row, "projects")), scope.projects);
+            assert.equal(field(row, "snapshot"), input.head.snapshotId);
+          }
+          const row = rows.find((entry) => field(entry, "actor_id") === "101");
+          assert.equal(field(row, "value"), "14");
+          assert.equal(field(row, "rank"), "2");
+          assert.deepEqual(JSON.parse(field(row, "pending")), expected);
+          assert.deepEqual(JSON.parse(field(row, "pending_evidence")), json.pendingEvidence);
+        }
+        assert.deepEqual(input, original);
+      }
 });

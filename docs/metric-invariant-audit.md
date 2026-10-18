@@ -92,13 +92,19 @@ unknown and preserves an observed positive pending count as partial. The
 existing source comparator accepts equivalent offsets without discarding
 fractional precision.
 
-The fifteen [pending watermark tests](../apps/service/test/pending-watermark.test.mjs)
+The sixteen [pending watermark tests](../apps/service/test/pending-watermark.test.mjs)
 exercise the actual service with synthetic publication inputs. They cover null,
 twelve-hour-short and one-nanosecond-short watermarks, exact and equivalent-offset
 endpoints, and later collection. Current and pinned boards, diagnostics, the web
 client validator, and JSON/CSV exports agree on the projected pending state.
 Fourteen accepted units and rank two remain unchanged, including when three
 pending units remain visible as partial.
+
+An additional interaction matrix applies the same completeness rule to explicit
+current-context scopes and current/event Project selections. Their current and
+pinned boards and versioned JSON/CSV exports retain the full scope and corrected
+pending count. Legacy web validation remains separate from the independently
+owned browser v2 integration.
 
 Additional cases retain incomplete source bounds and known gaps despite a
 complete watermark, reject missing or malformed fields, and publish a distinct

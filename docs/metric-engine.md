@@ -32,6 +32,18 @@ Complete coverage requires every requested allowed repository and every policy s
 
 The reconciled `sourceWatermark` must reach the selected exclusive end. Its comparison preserves fractional precision and equivalent source offsets; an absent or unparseable watermark cannot establish completeness. `hasCompleteSourceCoverage` exposes that necessary source check for retained consumers, independently of qualification and public release authority. Positive partial results keep their observed values, evidence and within-snapshot ranks; they cannot certify zero, complete newcomer history or rank movement. The existing frozen `input.cutoff` check separately rejects a selected window extending past that cutoff.
 
+Source coverage retains the timestamp forms accepted by the versioned `Coverage`
+contract. Its enclosing `windowStart`/`windowEnd` and `knownStart` comparisons also
+preserve source offsets and fractional precision. Equivalent source spellings do
+not change a complete result; a fractionally late start or short end leaves the
+observations partial. Matching coverage must pass that contract before it can
+support completeness, including for direct engine callers. Invalid or absent
+source bounds cannot certify zero, newcomer history or historical movement.
+Normalized metric scopes, frozen cutoffs, fact clocks and reviewed history origins
+keep their separate explicit UTC millisecond requirements. This comparison does
+not normalize or rewrite retained source timestamps, join disjoint intervals, or
+establish actual source completeness or public release authority.
+
 For pending work on an acceptance-clock board, the separate pending column uses occurrence time because acceptance has not occurred. It is an observed pending cohort, not part of the decided or accepted denominator. Rebuilding a frozen input never substitutes ingestion time for a ranked metric's occurrence/acceptance clock.
 
 ## Aggregate lookup and tie bounds
