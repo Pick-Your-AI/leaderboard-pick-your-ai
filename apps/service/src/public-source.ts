@@ -1,5 +1,6 @@
 import {
   publicDocumentationReasons,
+  publicDocumentationRecognitionReasons,
   matchesActorFilter,
   type ActorFilter,
   publicEvidenceMetadataSchema,
@@ -361,6 +362,7 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
                     ].includes(reason),
                   ),
                   ...classification,
+                  ...publicDocumentationRecognitionReasons(parsed),
                 ],
               }
             : {}),
@@ -441,6 +443,9 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
         reasonCodes: [
           `public_${portfolioMetadata.get(entry.contribution.contributionId)!.activityState}_work`,
           ...publicDocumentationReasons(entry.contribution),
+          ...(portfolioMetadata.get(entry.contribution.contributionId)!.activityState === "accepted"
+            ? publicDocumentationRecognitionReasons(entry.contribution)
+            : []),
         ],
       },
     }))
