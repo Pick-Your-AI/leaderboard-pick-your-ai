@@ -372,13 +372,7 @@ function WallDisplay({
           const problem = failure instanceof ReadFailure ? failure : new ReadFailure(503, "public_read_unavailable");
           // Expiring cursors do not revoke a frozen snapshot. Wait for the next
           // bounded recheck, then restart this stage under the same publication.
-          if (
-            [
-              "cursor_expired_refetch",
-              "cursor_policy_changed_refetch",
-              "wall_publication_changed_during_read",
-            ].includes(problem.code)
-          )
+          if (["cursor_expired_refetch", "cursor_policy_changed_refetch"].includes(problem.code))
             recovery.current = "page";
           else if (mode !== "frozen" && ["snapshot_expired_refetch", "snapshot_revoked_refetch"].includes(problem.code))
             recovery.current = "cycle";
