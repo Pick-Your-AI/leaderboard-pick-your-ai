@@ -7,7 +7,8 @@ import { harness, components, ago, clock } from "./harness.mjs";
 
 const artifactId = "SYNTHETIC_PR_ASSISTED";
 const boardUrl = "/api/v1/boards?metric=pr_merged";
-const privateFields = /assistance|participation|Claude|5\.5|synthetic-model|example\.invalid|manual/;
+// Match the whole private version without treating ISO timestamp seconds as attribution.
+const privateFields = /assistance|participation|Claude|(?<![\d.])5\.5(?![\d.])|synthetic-model|example\.invalid|manual/;
 
 async function assistedHarness(t) {
   let enrichCalls = 0;
