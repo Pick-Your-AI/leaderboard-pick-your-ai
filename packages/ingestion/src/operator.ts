@@ -4,6 +4,25 @@ import type { SqlDatabase, SqlSession } from "./store.js";
 
 type Authority = { policyVersion: string; revision: string };
 export type OperatorAuthorize = (repositoryId: number) => Promise<Authority>;
+/** Receive-time bounds are UTC ISO instants, inclusive since and exclusive until. */
+export interface ReplayWindow {
+  repositoryId: number;
+  receivedSince: string;
+  receivedUntil: string;
+  limit: number;
+  policyVersion: string;
+}
+export interface ReplayWindowRequest extends ReplayWindow {
+  expectedRevision: string;
+  reason: string;
+  operatorId: string;
+}
+const maxReplayWindowMs = 31 * 24 * 60 * 60 * 1_000;
+const timestamp = (v: unknown): v is string =>
+  typeof v === "string" &&
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(v) &&
+  Number.isFinite(Date.parse(v)) &&
+  new Date(v).toISOString() === v;
 const identity = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(v);
 const reasons = ["source_recovered", "normalization_corrected", "operator_reviewed"];
 const failure = (v: unknown) =>
@@ -27,7 +46,7 @@ async function access(tx: SqlSession, repositoryId: number) {
 async function authority(authorize: OperatorAuthorize, repositoryId: number) {
   const a = await authorize(repositoryId);
   if (!a || !identity(a.policyVersion) || !identity(a.revision)) throw new Error("operation_not_authorized");
-  return a;
+  return { policyVersion: a.policyVersion, revision: a.revision };
 }
 const revision = (repositoryId: number, generation: string, a: Authority, row: Record<string, unknown>) =>
   digest([
@@ -41,6 +60,70 @@ const revision = (repositoryId: number, generation: string, a: Authority, row: R
     row.reason_code,
     row.attempt_revision,
   ]);
+function replayWindow(input: ReplayWindow): ReplayWindow {
+  const { repositoryId, receivedSince, receivedUntil, limit, policyVersion } = input;
+  scope(repositoryId);
+  if (
+    !timestamp(receivedSince) ||
+    !timestamp(receivedUntil) ||
+    Date.parse(receivedUntil) <= Date.parse(receivedSince) ||
+    Date.parse(receivedUntil) - Date.parse(receivedSince) > maxReplayWindowMs ||
+    !Number.isSafeInteger(limit) ||
+    limit < 1 ||
+    limit > 50 ||
+    !identity(policyVersion)
+  )
+    throw new Error("invalid_replay_window");
+  return { repositoryId, receivedSince, receivedUntil, limit, policyVersion };
+}
+async function selectWindow(tx: SqlSession, window: ReplayWindow, installationId: string, lock: boolean) {
+  const rows = (
+    await tx.query(
+      `SELECT delivery_id,body_hash,attempts,reason_code,available_at::text AS attempt_revision,
+      received_at::text AS receive_revision FROM leaderboard_ingestion.inbox
+    WHERE envelope->>'repositoryId'=$1 AND envelope->>'installationId'=$2 AND state='quarantined'
+      AND received_at >= $3::timestamptz AND received_at < $4::timestamptz
+    ORDER BY received_at,delivery_id LIMIT $5${lock ? " FOR UPDATE" : ""}`,
+      [String(window.repositoryId), installationId, window.receivedSince, window.receivedUntil, window.limit + 1],
+    )
+  ).rows;
+  // Never replay a truncated prefix and imply the selected window was repaired.
+  if (rows.length > window.limit) throw new Error("replay_window_limit_exceeded");
+  return rows;
+}
+function windowRevision(window: ReplayWindow, generation: string, a: Authority, rows: Record<string, unknown>[]) {
+  return digest([
+    "inbox-replay-window/v1",
+    window,
+    generation,
+    a,
+    rows.map((row) => [revision(window.repositoryId, generation, a, row), row.receive_revision]),
+  ]);
+}
+function batchAudit(audit: Record<string, unknown>) {
+  if (
+    typeof audit.batchId !== "string" ||
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(audit.batchId) ||
+    typeof audit.selectionRevision !== "string" ||
+    !/^[a-f0-9]{64}$/.test(audit.selectionRevision) ||
+    !Number.isSafeInteger(audit.batchSize) ||
+    Number(audit.batchSize) < 1 ||
+    Number(audit.batchSize) > 50
+  )
+    return null;
+  try {
+    const window = replayWindow(audit.window as ReplayWindow);
+    if (
+      window.repositoryId !== audit.repositoryId ||
+      window.policyVersion !== audit.policyVersion ||
+      Number(audit.batchSize) > window.limit
+    )
+      return null;
+    return { id: audit.batchId, size: audit.batchSize, selectionRevision: audit.selectionRevision, window };
+  } catch {
+    return null;
+  }
+}
 /** Privileged host adapter. Authorization must recheck the current session and explicit repository grant on every call. */
 export class OperatorInbox {
   constructor(readonly db: SqlDatabase) {}
@@ -115,11 +198,98 @@ export class OperatorInbox {
             beforeRevision: /^[a-f0-9]{64}$/.test(String(audit.beforeRevision)) ? audit.beforeRevision : null,
             queuedRevision: /^[a-f0-9]{64}$/.test(String(audit.queuedRevision)) ? audit.queuedRevision : null,
             resultingPublicationRevision: null,
+            batch: batchAudit(audit),
           };
         }),
         truncated: { quarantined: quarantined.length > 50, runs: runs.length > 50, receipts: receipts.length > 50 },
         meaning:
           "Retained inbox processing and bounded collection runs; not proof of source connectivity or successful publication.",
+      };
+    });
+  }
+  /** Read-only selection for a protected host to review before explicitly committing it. */
+  async previewReplayWindow(input: ReplayWindow, authorize: OperatorAuthorize) {
+    const window = replayWindow(input);
+    return this.db.transaction(async (tx) => {
+      const a = await authority(authorize, window.repositoryId);
+      if (a.policyVersion !== window.policyVersion) throw new Error("operation_authority_changed");
+      const { generation, installationId } = await access(tx, window.repositoryId);
+      const rows = await selectWindow(tx, window, installationId, false);
+      if (JSON.stringify(a) !== JSON.stringify(await authority(authorize, window.repositoryId)))
+        throw new Error("operation_authority_changed");
+      return {
+        window,
+        sourceGeneration: generation,
+        authorityRevision: a.revision,
+        revision: windowRevision(window, generation, a, rows),
+        deliveries: rows.map((row) => ({
+          deliveryId: String(row.delivery_id),
+          attempts: count(row.attempts),
+          reason: failure(row.reason_code),
+          revision: revision(window.repositoryId, generation, a, row),
+        })),
+        meaning: "Quarantined retained deliveries in the receive-time window; not complete source-event coverage.",
+      };
+    });
+  }
+  /** No HTTP route or scheduler calls this. The protected host supplies the authenticated operator identity. */
+  async replayWindow(input: ReplayWindowRequest, authorize: OperatorAuthorize) {
+    const window = replayWindow(input);
+    const { expectedRevision, operatorId, reason } = input;
+    if (!/^[a-f0-9]{64}$/.test(expectedRevision) || !identity(operatorId) || !reasons.includes(reason))
+      throw new Error("invalid_replay_request");
+    return this.db.transaction(async (tx) => {
+      const a = await authority(authorize, window.repositoryId);
+      if (a.policyVersion !== window.policyVersion) throw new Error("operation_authority_changed");
+      const { generation, installationId } = await access(tx, window.repositoryId);
+      const rows = await selectWindow(tx, window, installationId, true);
+      if (windowRevision(window, generation, a, rows) !== expectedRevision) throw new Error("replay_selection_changed");
+      if (!rows.length) throw new Error("replay_selection_empty");
+      if (JSON.stringify(a) !== JSON.stringify(await authority(authorize, window.repositoryId)))
+        throw new Error("operation_authority_changed");
+      const batchId = randomUUID();
+      const receipts = [];
+      for (const row of rows) {
+        const receiptId = randomUUID();
+        const beforeRevision = revision(window.repositoryId, generation, a, row);
+        const queuedRevision = digest([beforeRevision, receiptId, "pending", 0]);
+        const audit = {
+          operatorId,
+          reason,
+          policyVersion: a.policyVersion,
+          repositoryId: window.repositoryId,
+          sourceGeneration: generation,
+          authorityRevision: a.revision,
+          beforeRevision,
+          queuedRevision,
+          resultingRevision: null,
+          batchId,
+          batchSize: rows.length,
+          selectionRevision: expectedRevision,
+          window,
+        };
+        await tx.query(
+          `INSERT INTO leaderboard_ingestion.replay_receipts(receipt_id,delivery_id,prior_attempts,prior_reason_code,audit) VALUES($1,$2,$3,$4,$5::jsonb)`,
+          [receiptId, row.delivery_id, row.attempts, row.reason_code, JSON.stringify(audit)],
+        );
+        await tx.query(
+          `UPDATE leaderboard_ingestion.inbox SET state='pending',attempts=0,available_at=clock_timestamp(),reason_code=NULL WHERE delivery_id=$1`,
+          [row.delivery_id],
+        );
+        receipts.push({ id: receiptId, deliveryId: String(row.delivery_id), beforeRevision, queuedRevision });
+      }
+      // Recheck after all writes; an authorization failure rolls back the entire batch.
+      if (JSON.stringify(a) !== JSON.stringify(await authority(authorize, window.repositoryId)))
+        throw new Error("operation_authority_changed");
+      return {
+        id: batchId,
+        window,
+        sourceGeneration: generation,
+        status: "queued",
+        receipts,
+        beforeRevision: expectedRevision,
+        queuedRevision: digest([expectedRevision, batchId, receipts.map((receipt) => receipt.queuedRevision)]),
+        resultingPublicationRevision: null,
       };
     });
   }

@@ -13,6 +13,11 @@ Refs #83. This implementation is synthetic-test evidence for one acceptance scen
 
 The engine returns pending selection provenance separately and adds `pending_not_ranked` audit entries. Pipeline publication persists a separate `pendingEvidence` collection. The public projector applies the same allowlisted URLs, current actor/artifact controls, repository/window restrictions and enabled policy checks used by other evidence. A count with any missing or suppressed dependency becomes unknown; its dependency IDs and orphaned pending receipts are withheld. It does not subtract one from an immutable count or corrupt the unaffected accepted aggregate. Source revocation and disabled-policy checks still apply to pinned snapshots.
 
+The public projector compares source coverage instants with their complete fractional
+precision. A known-history or coverage start even a fraction of a millisecond after
+the requested start cannot certify a measured zero; that result remains unknown.
+Equivalent timestamp encodings retain the same meaning.
+
 JSON and CSV exports preserve the separate versioned count and minimized pending provenance. Public detail routes can read the approved pending receipt. Diagnostics derive their pending data from the projected row, never an unchecked duplicate count. The browser validates the versioned schema and displays the accepted value and pending count separately, with pending explicitly unranked.
 
 ## Verification

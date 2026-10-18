@@ -22,4 +22,4 @@ export type {
   DispatchStatus,
 } from "./outbox.js";
 export { OperatorInbox } from "./operator.js";
-export type { OperatorAuthorize } from "./operator.js";
+export type { OperatorAuthorize, ReplayWindow, ReplayWindowRequest } from "./operator.js";

@@ -1,4 +1,10 @@
 import { classifyDocumentation, validateDocumentationPolicy, type DocumentationPathPolicy } from "./documentation.js";
+import {
+  classifyResearchRecords,
+  validateResearchPolicy,
+  type ResearchPathPolicy,
+  type VerifiedResearchRecord,
+} from "./research.js";
 import { createHash } from "node:crypto";
 import {
   serviceAccountClassificationSchema,
@@ -264,6 +270,8 @@ export interface GithubEvidenceEnvelope {
   /** Protected host input: individually verified public, minimized records for this artifact.
    * Never populate from private correction receipts, payload fields or a guessed revision log. */
   publicHistory?: { approvedPublic: true; history: PublicEvidenceHistory };
+  /** Protected exact-blob identities; never copy these from PR or note text. */
+  researchRecords?: readonly VerifiedResearchRecord[];
 }
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -425,6 +433,7 @@ function creditedAction(fact: NormalizedGithubFact, family: string, envelopeActi
 export function normalizeGithubObservation(
   envelope: GithubEvidenceEnvelope,
   documentationPolicy?: DocumentationPathPolicy,
+  researchPolicy?: ResearchPathPolicy,
 ): NormalizedGithubResult {
   const out = result();
   const { repository, proof } = envelope;
@@ -1085,6 +1094,58 @@ export function normalizeGithubObservation(
       }
     }
   }
+  if (researchPolicy && envelope.family === "pull_request") {
+    validateResearchPolicy(researchPolicy);
+    const mergedAt = time(resource.merged_at);
+    if (
+      researchPolicy.repositoryId !== repository.id ||
+      !integration?.diff ||
+      resource.merged !== true ||
+      !mergedAt ||
+      Date.parse(mergedAt) > Date.parse(observedAt) ||
+      resource.merge_commit_sha !== integration.after ||
+      !object(resource.base) ||
+      !text(resource.base.ref) ||
+      !text(integration.targetBranch) ||
+      !text(integration.defaultBranch) ||
+      !text(repository.defaultBranch) ||
+      resource.base.ref !== integration.targetBranch ||
+      integration.targetBranch !== integration.defaultBranch ||
+      repository.defaultBranch !== integration.defaultBranch ||
+      integration.diff.before !== integration.before ||
+      integration.diff.after !== integration.after ||
+      !text(integration.canonicalChangeId)
+    ) {
+      out.reasons.push("research_merged_revision_unverified");
+    } else {
+      const classification = classifyResearchRecords(integration.diff, envelope.researchRecords ?? [], researchPolicy);
+      out.reasons.push(...classification.reasons);
+      for (const record of classification.records) {
+        const recordId = stable("research-record", repository.id, record.path, record.blobSha);
+        const fact = emit("decision_records", author, "author", mergedAt, recordId, {
+          artifactId: recordId,
+          state: author ? "pending" : "unknown",
+          rawState: "research_record_version_pending_independent_review",
+        });
+        const evidence = out.evidence.find((entry) => entry.contribution.contributionId === fact.id)!;
+        evidence.artifact = {
+          ...evidence.artifact,
+          kind: "other",
+          stableId: recordId,
+          publicUrl: `https://github.com/${repository.slug}/blob/${record.sourceRevision}/${record.path}`,
+        };
+        evidence.contribution.artifactId = recordId;
+        evidence.contribution.reasonCodes = [
+          "research_record_not_accepted",
+          `research_path_policy:${researchPolicy.version}`,
+        ];
+        evidence.sourceRevision = record.sourceRevision;
+        evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${record.sourceRevision}`;
+        // The PR title and its history describe a different artifact.
+        delete evidence.evidenceMetadata;
+      }
+    }
+  }
   for (const link of envelope.lineage ?? []) {
     if (link.sourceIds.length && link.evidenceIds.length && text(link.targetId))
       out.lineage.push(structuredClone(link));
@@ -1236,6 +1297,7 @@ export interface GithubEvidenceNormalizerOptions {
   /** Bound the complete review cohort scan; exhaustion never establishes participation. */
   maxReviewPages?: number;
   documentationPolicies?: readonly DocumentationPathPolicy[];
+  researchPolicies?: readonly ResearchPathPolicy[];
 }
 
 /** Read-only collection-to-metric adapter. Lossy snapshots are hydrated rather than guessed. */
@@ -1244,6 +1306,10 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
   for (const policy of documentationPolicies) validateDocumentationPolicy(policy);
   if (new Set(documentationPolicies.map((policy) => policy.repositoryId)).size !== documentationPolicies.length)
     throw new Error("Ambiguous documentation repository policy");
+  const researchPolicies = structuredClone(options.researchPolicies ?? []);
+  for (const policy of researchPolicies) validateResearchPolicy(policy);
+  if (new Set(researchPolicies.map((policy) => policy.repositoryId)).size !== researchPolicies.length)
+    throw new Error("Ambiguous research repository policy");
   return async (input: CollectionNormalizerInput): Promise<NormalizedGithubResult> => {
     const none = (reason: string) => ({ ...result(), isSynthetic: options.isSynthetic === true, reasons: [reason] });
     if (!options.allowedRepositoryIds.includes(input.repository.id))
@@ -1371,6 +1437,9 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         },
         input.family === "pull_requests"
           ? documentationPolicies.find((policy) => policy.repositoryId === input.repository.id)
+          : undefined,
+        input.family === "pull_requests"
+          ? researchPolicies.find((policy) => policy.repositoryId === input.repository.id)
           : undefined,
       );
     } else {
