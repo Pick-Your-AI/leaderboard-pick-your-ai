@@ -1,4 +1,5 @@
 import React from "react";
+import { prototypeNavigation } from "../lib/prototype-url.ts";
 import { PageHeader } from "../components/Layout.tsx";
 import { ReferenceScope } from "../components/ScopeBar.tsx";
 import { CoverageLabel, EmptyState, StateLabel, evidenceLabels } from "../components/status.tsx";
@@ -17,7 +18,6 @@ import { coverage, projects, repositories, snapshots } from "../data/source.ts";
 import { fixtureMetrics, SYNTHETIC_DATASET_ID } from "../data/synthetic.ts";
 import { formatDate, formatDateTime } from "../lib/format.ts";
 import { useScope } from "../lib/hooks.ts";
-import { prototypeNavigation } from "../lib/prototype-url.ts";
 import { Link, ScopedLink } from "../lib/router.tsx";
 
 export function MethodologyPage() {
@@ -429,7 +429,7 @@ export function PrototypeGuidePage() {
         <h2 id="required-states">Required states</h2>
         <ul>
           {requiredStates.map(([label, path]) => {
-            const href = prototypeNavigation(path).href;
+            const { href } = prototypeNavigation(path);
             return (
               <li key={label}>
                 <Link to={href}>{label}</Link> <span className="mono muted small">{href}</span>
