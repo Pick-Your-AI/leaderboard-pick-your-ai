@@ -1,0 +1,44 @@
+name: Public contribution correction
+description: Report an error using public evidence only
+title: 'Contribution correction: '
+body:
+- type: markdown
+  attributes:
+    value: This is a public issue. Do not include tokens, cookies, email addresses, private source payloads, personal
+      evidence or exploit details. Follow SECURITY.md for sensitive reports. Check existing issues first; small
+      steps belong in the existing work-package checklist. Native ownership and relationships are set during triage,
+      not inferred from this form. For identity disputes, opt-out or sensitive evidence, use the protected contributor
+      controls described in docs/protected-controls-ui.md or a verified private maintainer route; do not disclose
+      those details here.
+- type: textarea
+  id: public_reference
+  attributes:
+    label: Affected public result
+    description: Link the public result/source and available snapshot, metric version, scope and date. Do not paste
+      private records or identity evidence.
+  validations:
+    required: true
+- type: textarea
+  id: discrepancy
+  attributes:
+    label: Observed discrepancy
+    description: Explain the incorrect count, role, date, source or eligibility. Keep facts distinct from an allegation
+      about a contributor.
+  validations:
+    required: true
+- type: textarea
+  id: proposed_change
+  attributes:
+    label: Proposed correction and verification
+    description: Describe the bounded expected result and public evidence or a synthetic reproduction. State uncertainty
+      explicitly.
+  validations:
+    required: true
+- type: textarea
+  id: history
+  attributes:
+    label: Historical impact
+    description: Identify affected snapshots or downstream views when known, and whether a replay or comparison
+      is needed. A public issue does not authorize a data or identity mutation.
+  validations:
+    required: true
