@@ -82,6 +82,49 @@ These are synthetic adapter-to-engine assertions, not a real localization review
 or a claim of public recognition authority. Run `npm run build`, then
 `node --test packages/metrics/test/localization-portfolio.test.js`.
 
+## Source watermarks for pending counts
+
+A requested coverage window does not prove that collection reached its end.
+The service's pending-count projection requires a non-null source watermark and
+the selected snapshot's generation time at or beyond that endpoint, alongside
+the existing complete state, source bounds and absence of known collection gaps.
+A missing or short watermark, or a selected snapshot created before the endpoint,
+leaves zero unknown and preserves an observed positive pending count as partial.
+A later head publication or source watermark cannot give the frozen selected
+snapshot coverage of future time. The existing source comparator accepts
+equivalent offsets without discarding fractional precision.
+
+The twenty-four [pending watermark tests](../apps/service/test/pending-watermark.test.mjs)
+exercise the actual service with synthetic publication inputs. They cover null,
+twelve-hour-short and one-nanosecond-short watermarks, exact and equivalent-offset
+endpoints, and later collection. Current and pinned boards, diagnostics, the web
+client validator, and JSON/CSV exports agree on the projected pending state.
+Fourteen accepted units and rank two remain unchanged, including when three
+pending units remain visible as partial. Selected-snapshot cases retain a later
+head publication and a complete watermark while independently checking a
+one-nanosecond-short generation time, exact and equivalent-offset endpoints,
+and a later generation time.
+
+An additional interaction matrix applies the same completeness rule to explicit
+current-context scopes and current/event Project selections. Their current and
+pinned boards and versioned JSON/CSV exports retain the full scope and corrected
+pending count across 36 scope, watermark, selected-snapshot and count
+combinations. Legacy web validation remains separate from the independently
+owned browser v2 integration.
+
+Additional cases retain incomplete source bounds and known gaps despite a
+complete watermark, reject missing or malformed fields, and publish a distinct
+newer incomplete snapshot. Conditional reads return its corrected state while
+the older complete snapshot remains available at its own pin. The tests preserve
+frozen inputs and do not rewrite the earlier snapshot or establish live source
+authority. The existing [pending count suite](../apps/service/test/pending-counts.test.mjs)
+continues to check current privacy controls, receipt identities and revocation.
+Its complete-coverage controls now explicitly include a watermark and a selected
+snapshot at the end, with the publication and test clock set consistently.
+
+Run `npm run build`, then
+`node --test apps/service/test/pending-counts.test.mjs apps/service/test/pending-watermark.test.mjs`.
+
 ## Reproduction
 
 Run from the repository root after dependency installation:

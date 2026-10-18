@@ -1265,6 +1265,7 @@ const receiptMetrics = new Set([
   "assumptions_resolved",
   "market_research",
   "evidence_manifests",
+  "data_quality",
   "documentation",
   "tests",
   "regressions_prevented",
