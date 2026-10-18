@@ -405,6 +405,119 @@ test("health sanitizes operational failures and preserves unknown lag", async (t
   assert.doesNotMatch(degraded.body, /SECRET|internal-host|admin-private|stack trace/);
 });
 
+test("current repository health overrides fresh status without rewriting frozen coverage or publication", async (t) => {
+  const h = harness(t);
+  const current = {
+    scopeId: coverage.scopeId,
+    state: "reconciled",
+    lastAttemptAt: at,
+    lastSuccessfulSync: at,
+    reconciledThrough: at,
+    webhookLagSeconds: null,
+    webhookState: "unknown",
+    exception: "SECRET internal-host stack trace",
+    installationId: "private-installation",
+  };
+  h.data.currentSourceHealth = [current];
+  const first = await h.app.inject("/api/v1/health");
+  assert.equal(first.json().status, "recently_reconciled");
+  assert.equal(first.json().sources[0].currentCollection.scope, "repository");
+  assert.doesNotMatch(first.body, /SECRET|internal-host|exception|installationId|private-installation/);
+  for (const change of [
+    { state: "degraded" },
+    { state: "collecting" },
+    { state: "unknown" },
+    { webhookLagSeconds: 301, webhookState: "pending" },
+    { webhookLagSeconds: 1, webhookState: "degraded" },
+    { lastSuccessfulSync: "2026-10-17T11:00:00.000Z" },
+    { lastSuccessfulSync: "2026-10-17T12:01:00.000Z" },
+    { reconciledThrough: "2026-10-17T11:00:00.000Z" },
+    { reconciledThrough: null },
+  ]) {
+    h.data.currentSourceHealth = [{ ...current, ...change }];
+    const result = await h.app.inject({
+      url: "/api/v1/health?snapshot=public-1",
+      headers: { "if-none-match": first.headers.etag },
+    });
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.json().status, "stale_or_degraded");
+    assert.deepEqual(result.json().coverage, first.json().coverage);
+    assert.deepEqual(result.json().lastSuccessfulPublish, first.json().lastSuccessfulPublish);
+    assert.equal(result.json().sources[0].state, "complete");
+    assert.equal(result.json().sources[0].lastSuccessfulSync, at);
+  }
+  h.data.currentSourceHealth = [
+    { ...current, state: "no_activity_in_window", webhookLagSeconds: 0, webhookState: "idle" },
+  ];
+  assert.equal((await h.app.inject("/api/v1/health")).json().status, "recently_reconciled");
+  h.data.selected.snapshot.coverage[0].state = "partial";
+  assert.equal((await h.app.inject("/api/v1/health")).json().status, "stale_or_degraded");
+});
+
+test("current health rejects unbound scopes, malformed clocks, unbounded lag and duplicate sources", async (t) => {
+  const h = harness(t);
+  const current = {
+    scopeId: coverage.scopeId,
+    state: "unknown",
+    lastAttemptAt: null,
+    lastSuccessfulSync: null,
+    reconciledThrough: null,
+    webhookLagSeconds: null,
+    webhookState: "unknown",
+  };
+  for (const change of [
+    { scopeId: "private-repository" },
+    { state: "SECRET" },
+    { lastAttemptAt: "SECRET" },
+    { lastSuccessfulSync: undefined },
+    { webhookLagSeconds: -1 },
+    { webhookLagSeconds: Infinity },
+    { webhookLagSeconds: 1.5 },
+    { webhookLagSeconds: 0 },
+    { webhookState: "SECRET" },
+  ]) {
+    h.data.currentSourceHealth = [{ ...current, ...change }];
+    const result = await h.app.inject("/api/v1/health");
+    assert.equal(result.statusCode, 503, JSON.stringify(change));
+    assert.doesNotMatch(result.body, /SECRET|private-repository/);
+  }
+  h.data.currentSourceHealth = [current, current];
+  assert.equal((await h.app.inject("/api/v1/health")).statusCode, 503);
+  h.data.currentSourceHealth = Array(101).fill(current);
+  assert.equal((await h.app.inject("/api/v1/health")).statusCode, 503);
+});
+
+test("optional health reads retain the normal source boundary and leave ordinary reads unchanged", async (t) => {
+  let reads = 0,
+    healthReads = 0;
+  const source = {
+    async read() {
+      reads++;
+      return fixture();
+    },
+    async readHealth(_scope, _pin, signal) {
+      healthReads++;
+      assert.equal(signal.aborted, false);
+      throw new Error("SECRET health storage failure");
+    },
+  };
+  const app = createService({ source, now: () => Date.parse(at) });
+  t.after(() => app.close());
+  assert.equal((await app.inject(boardUrl)).statusCode, 200);
+  const response = await app.inject("/api/v1/health");
+  assert.equal(response.statusCode, 503);
+  assert.doesNotMatch(response.body, /SECRET|storage/);
+  assert.equal(reads, 1);
+  assert.equal(healthReads, 1);
+  source.readHealth = async () => {
+    healthReads++;
+    const data = fixture();
+    data.controls.revokedSnapshotIds = ["public-1"];
+    return data;
+  };
+  assert.equal((await app.inject("/api/v1/health")).statusCode, 410);
+});
+
 test("missing sources and exceptions fail closed without secrets or fabricated zero/live data", async (t) => {
   const none = createService();
   t.after(() => none.close());

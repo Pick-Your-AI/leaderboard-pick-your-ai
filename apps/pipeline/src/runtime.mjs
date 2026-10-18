@@ -6,6 +6,7 @@ import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
+import { readCurrentSourceHealth } from "./source-health.mjs";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -1347,7 +1348,10 @@ export async function createPipeline(options) {
     }
   }
   const source = {
-    async read(scope, pin, signal, transaction) {
+    async readHealth(scope, pin, signal) {
+      return source.read(scope, pin, signal, undefined, true);
+    },
+    async read(scope, pin, signal, transaction, health = false) {
       if (signal.aborted || !(await approved(transaction ?? db)) || !configuredScope(scope)) return null;
       // The SQL head allocates revisions, not visibility. Only this private
       // authority advances after confirmation. Bound retries if another runtime
@@ -1398,14 +1402,21 @@ export async function createPipeline(options) {
             return null;
           const access = (
             await tx.query(
-              "SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE",
+              "SELECT repository_id,installation_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE",
               [selected.repository_ids],
             )
           ).rows;
           if (
             signal.aborted ||
             access.length !== selected.repository_ids.length ||
-            access.some((row) => row.state !== "public")
+            access.some(
+              (row) =>
+                row.state !== "public" ||
+                String(row.installation_id) !==
+                  String(
+                    config.repositories.find((repo) => String(repo.id) === String(row.repository_id))?.installationId,
+                  ),
+            )
           )
             return null;
           const removed = (
@@ -1415,6 +1426,17 @@ export async function createPipeline(options) {
               [selected.repository_ids],
             )
           ).rows.map((row) => row.subject_id);
+          const currentSourceHealth = health
+            ? await readCurrentSourceHealth(
+                tx,
+                repositoriesFor(scope).filter((repo) =>
+                  selected.document.snapshot.coverage.some(
+                    (coverage) => coverage.scopeId === String(repo.id) && coverage.source.startsWith("github_"),
+                  ),
+                ),
+                utc(now()),
+              )
+            : undefined;
           if (!(await approved(tx)) || signal.aborted) return null;
           // Read current private controls after all awaited I/O, even for pinned historical snapshots.
           const controls = controlsStore.read();
@@ -1467,6 +1489,7 @@ export async function createPipeline(options) {
           const evidenceIds = new Set(document.rows.flatMap((row) => row.evidenceIds));
           document.evidence = document.evidence.filter((entry) => evidenceIds.has(entry.contribution.contributionId));
           return {
+            ...(currentSourceHealth === undefined ? {} : { currentSourceHealth }),
             head: {
               snapshotId: selected.head_id,
               revision: Number(selected.revision),
