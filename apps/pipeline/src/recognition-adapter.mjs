@@ -22,9 +22,11 @@ export function recognitionFingerprint(state, bindings = []) {
     .sort();
   // Version the target/clock authority and include exact current bindings. An old
   // unbound locale publication cannot remain authorized after this correction.
-  return createHash("sha256")
-    .update(JSON.stringify(["localization-review-target/v1", requests, suppressed, audit, bindings]))
-    .digest("hex");
+  const authority = ["localization-review-target/v1", requests, suppressed, audit, bindings];
+  // Earlier generic data-quality receipts did not qualify correction provenance.
+  // Retire their publication authority without changing unaffected bindings.
+  if (bindings.some((binding) => binding.metricId === "data_quality")) authority.push("data-quality-recognition/v1");
+  return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
 export function materializeRecognition(
