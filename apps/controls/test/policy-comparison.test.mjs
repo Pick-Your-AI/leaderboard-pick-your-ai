@@ -8,7 +8,7 @@ import { ControlStore } from "../src/store.mjs";
 import { createControlsServer } from "../src/server.mjs";
 import { PolicyComparisonStore, comparisonHash, comparisonLimitsV1 } from "../src/policy-comparison.mjs";
 import * as metrics from "../../../packages/metrics/dist/index.js";
-import { coverageSchema } from "@pick-your-ai/contracts";
+import { canonicalPublicScope, coverageSchema, publicScopeKey } from "@pick-your-ai/contracts";
 
 // Entirely synthetic, including reviewer identities and source authorizations.
 const prefix = "/controls/policy-comparisons";
@@ -729,6 +729,7 @@ async function runtimePreviewHarness(t, { verifyConfiguration, fence, correction
   };
   const components = {
     metrics,
+    contracts: { canonicalPublicScope, publicScopeKey },
     ingestion: { CollectionStore: class {}, InboxStore: class {}, OutboxStore: class {}, sourceFamilies: ["issues"] },
     controls: { configurationOverlay },
     service: { createService: () => ({ close: async () => {} }) },
