@@ -150,7 +150,7 @@ async function service(page: Page, roles = ["reviewer"]) {
 async function selectInput(page: Page, api: Awaited<ReturnType<typeof service>>) {
   await page.goto("/admin");
   await page.getByRole("button", { name: "Load retained policy inputs" }).click();
-  await page.getByLabel("Frozen input", { exact: true }).selectOption(api.inputId);
+  await page.getByRole("combobox", { name: "Frozen input", exact: true }).selectOption(api.inputId);
   await page.getByLabel("Complete candidate policy JSON").fill(JSON.stringify(api.candidate));
 }
 test("reviewer compares actual frozen engine input, rereads current privacy, and never changes public policy", async ({
@@ -236,7 +236,7 @@ test("hidden tabs discard pending private previews and do not restore them after
     });
     await expect(page.getByRole("button", { name: "Load retained policy inputs" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Candidate preview result" })).toHaveCount(0);
-    await expect(page.getByLabel("Frozen input", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "Frozen input", exact: true })).toHaveCount(0);
   } finally {
     release?.();
     await api.close();
