@@ -22,12 +22,41 @@ The zero boundary is tested with one representative sum definition and each diag
 | --- | --- | --- |
 | Each public metric has meaningful inclusion/exclusion | Each implemented candidate aggregation now has named boundary tests; every result asserts `publicEnabled: false` | Reviewed enabled-policy inventory and metric-specific source inclusion/exclusion mapping before any enablement; these generic tests do not fulfill semantic acceptance for all 98 definitions |
 | Incorrect actor, count or coverage fails | Independent two-actor values, duplicate exclusion, review rejection and zero/unknown assertions | Independent review of tests and the final integrated implementation |
-| Sanitized 107 merged-PR entries / 92 unique SHAs; default-branch delivery only | Not represented by this suite; fabricated data with matching counts would not be evidence | Research-owned sanitized evidence with source identity, default-branch integration facts and safe provenance, then adapter/integration assertions |
-| REST/GraphQL automation alias mismatch despite `wasAutomated=false` | Engine tests cover positive automation account evidence, but do not establish cross-API alias normalization | Sanitized alias fixture and adapter assertions against both API identities |
-| Member assignment without earned work and all four unboarded issue cases | Not established by generic aggregate facts | Identified four source cases, reviewed normalized evidence and end-to-end exclusion/context assertions |
+| Sanitized 107 merged-PR entries / 92 unique SHAs; default-branch delivery only | The later [historical stack fixture](historical-stack-fixture.md) and its four adapter cases retain the sanitized source identity relationships, unknown integration times and explicitly synthetic diff overlays | Those source-linked tests do not establish actual eligible historical LOC or an installed source |
+| REST/GraphQL automation alias mismatch despite `wasAutomated=false` | [Source boundary tests](../packages/metrics/test/source-boundaries.test.js) join the two synthetic typed Bot aliases by stable identity and exclude both from the user view; login alone remains unresolved | The historical case shape is tested, without claiming a fresh live Project event read or source permission |
+| Member assignment without earned work and all four unboarded issue cases | Each historical case label now has an actual synthetic collector → hydration → engine assertion: repository-wide inclusion, PR exclusion, creator attribution, no assignee outcome, and explicit unknown Project context | Payloads and identities are synthetic overlays; current membership and real accepted findings are not asserted |
 | Source deletion and policy changes | New deletion/cutoff reversal and existing policy comparison/replay tests | Authenticated correction and policy approval integration evidence |
 
-Issue #72 remains open pending these criteria and its evidence review. No research fixture, external consent, metric-owner approval, production coverage or deployment is claimed.
+Issue #72 remains open pending these criteria and its evidence review. These tests do not establish new live source observations, external consent, metric-owner approval, production coverage or deployment.
+
+## Repeated source observations
+
+The [source boundary suite](../packages/metrics/test/source-boundaries.test.js)
+also reproduces a calculation defect: two observations of the same fact ID and
+revision, differing only in `observedAt`, were quarantined as a conflicting
+revision. The four expected source units disappeared from both the aggregate
+and the portfolio. The same mismatch affected reobserved correction receipts.
+
+The engine now compares the full semantic fact without its collection timestamp
+and retains the earliest observation of the highest eligible revision. Equal
+instants with different UTC spellings have a deterministic tie break. Every
+other field still participates in conflict detection. The frozen observation
+cutoff, independent correction receipt requirement and exclusion state are
+unchanged. The pipeline's existing normalization combiner already separates
+collection time from fact semantics; this change supplies the same boundary to
+the exported engine and portfolio selector.
+
+The ten source boundary cases include three failures before the correction and
+ten passes afterward. They test all four historical unboarded case labels,
+input ordering, retained first observation, genuine actor/role/artifact/repository/
+time/state/receipt/context conflicts, reobserved reviewed corrections, historical
+cutoffs, unreviewed revision rejection and typed automation aliases. These
+tests do not alter the registry, qualification policy or source allowlist.
+
+Run `npm run build` followed by
+`node --test packages/metrics/test/source-boundaries.test.js`. The root and
+metrics workspace test commands discover the new `.test.js` file. The earlier
+101-test aggregation inventory below remains a separate suite.
 
 ## Reproduction
 
