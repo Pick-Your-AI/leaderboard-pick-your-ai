@@ -943,18 +943,22 @@ export function comparePolicies(
     throw new Error("Changed policy semantics require a new policy version");
   const before = aggregateMetric(input, beforePolicy, scope),
     after = aggregateMetric(input, afterPolicy, scope);
-  const changes = unique([...before.rows.map((row) => row.actorId), ...after.rows.map((row) => row.actorId)])
+  const beforeByActor = new Map(before.rows.map((row) => [row.actorId, row]));
+  const afterByActor = new Map(after.rows.map((row) => [row.actorId, row]));
+  const changes = unique([...beforeByActor.keys(), ...afterByActor.keys()])
     .map((actorId) => {
-      const old = before.rows.find((row) => row.actorId === actorId),
-        next = after.rows.find((row) => row.actorId === actorId);
+      const old = beforeByActor.get(actorId),
+        next = afterByActor.get(actorId);
+      const beforeEvidence = new Set(old?.evidenceIds ?? []);
+      const afterEvidence = new Set(next?.evidenceIds ?? []);
       return {
         actorId,
         beforeValue: old?.value ?? null,
         afterValue: next?.value ?? null,
         beforeRank: old?.rank ?? null,
         afterRank: next?.rank ?? null,
-        included: (next?.evidenceIds ?? []).filter((id) => !old?.evidenceIds.includes(id)),
-        excluded: (old?.evidenceIds ?? []).filter((id) => !next?.evidenceIds.includes(id)),
+        included: (next?.evidenceIds ?? []).filter((id) => !beforeEvidence.has(id)),
+        excluded: (old?.evidenceIds ?? []).filter((id) => !afterEvidence.has(id)),
       };
     })
     .filter(
