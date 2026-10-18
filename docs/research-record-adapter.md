@@ -107,7 +107,11 @@ classification policies whenever either is present. A newly reviewed path or
 provenance configuration therefore recomputes its source normalization even if
 metric arithmetic is unchanged. Private frozen identity restoration uses the same
 cache signature; old configuration cannot silently certify the new classification.
-Existing configurations without these source policies retain their earlier key.
+Existing configurations without these source policies retain their earlier policy
+signature. The private-attribution document version wraps that signature into a
+new normalization cache key. Frozen identity restoration admits a legacy document
+only when its original classification-bound signature and recorded digest match;
+an unclassified signature cannot restore a classified record.
 
 ## Verification and remaining acceptance
 
