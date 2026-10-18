@@ -10,6 +10,8 @@ An event observation does not itself create a contribution. Contributions name o
 
 Identity alias, merge and split corrections carry evidence and review fields; an accepted correction cannot validate without a reviewer and evidence. Artifact lineage records same-change, squash, cherry-pick, mirror or imported relationships as evidence-bearing facts. These primitives do not themselves allocate fractional credit or count imported copies as new work.
 
+The separately versioned private [verified identity correction definition](verified-identity-corrections.md) specifies account control, consent, exact contribution scope, independent review, appeals and reversal. Its strict proposal and decision schemas preserve the existing wire contract. Parsing these records does not authenticate their evidence or authorize their application.
+
 The versioned registry copies all 98 canonical metric definitions from `planning/metrics-and-ingestion.json` without rewriting their meanings. It marks policy version `candidate-0.1.1`; registry presence does not enable a metric. This revision corrects the triage definition’s former daily-unit text to match the unchanged `triage-raw-state/v1` hourly/raw-state grouping. Existing snapshots retain their original version and must not be relabeled. The separately versioned `leaderboard-ui/v1` metadata supplies conservative navigation defaults, maturity, synonyms and explicit selectable state/date pairs for every definition. These engineering defaults are implemented; they do not authorize source collection or public recognition. See [UI registry policy](../packages/metrics/UI_REGISTRY.md) for capability boundaries and the deterministic triage policy.
 
 ## Candidate compatibility rules
