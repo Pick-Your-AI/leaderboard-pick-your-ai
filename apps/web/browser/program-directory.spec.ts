@@ -193,11 +193,15 @@ test("configured but unapproved programs and malformed directories never become 
   try {
     await page.goto("/programs/unapproved?ui=api");
     await directory(page).getByRole("link", { name: "Contributors with event-time membership", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("Public record unavailable");
+    const unavailable = page.getByRole("alert");
+    await expect(unavailable.getByRole("heading", { name: "Public read unavailable", exact: true })).toBeVisible();
+    await expect(unavailable.getByText("public_snapshot_unavailable", { exact: true })).toBeVisible();
     await expect(page.getByText("0 contributors with public evidence", { exact: false })).toHaveCount(0);
     await page.goto("/programs/unknown?ui=api");
     await expect(page.getByRole("alert")).toContainText("unknown_program");
-    await expect(directory(page)).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Program discovery", exact: true, includeHidden: true })).toHaveCount(
+      0,
+    );
     await page.unroute("**/program-directory.json");
     await page.route("**/program-directory.json", (route) =>
       route.fulfill({
@@ -207,7 +211,9 @@ test("configured but unapproved programs and malformed directories never become 
     );
     await page.goto("/programs?ui=api");
     await expect(page.getByRole("alert")).toContainText("invalid_program_directory");
-    await expect(directory(page)).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Program discovery", exact: true, includeHidden: true })).toHaveCount(
+      0,
+    );
     await expect(page.getByText("SYNTHETIC Android program", { exact: true })).toHaveCount(0);
   } finally {
     await api.close();
