@@ -4,6 +4,7 @@ import { appendFile, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, type Page } from "@playwright/test";
 import { soakTest as test, cleanupOwned, compiledOutputs } from "./runtime.ts";
+import { responseClassification, WallCycleTracker } from "./assertions.ts";
 import { scope, snapshot } from "../browser/wallFixture.ts";
 
 const minutes = Number(process.env.WALL_SOAK_MINUTES ?? "480");
@@ -28,6 +29,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
   const record = async (event: string, detail: unknown = null) =>
     appendFile(eventsPath, JSON.stringify({ at: new Date().toISOString(), event, detail }) + "\n");
   const checks: Record<string, boolean> = {};
+  const cycles = new WallCycleTracker();
   const counters = {
     requests: 0,
     bytes: 0,
@@ -98,8 +100,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         const url = new URL(route.request().url());
         const response = await app.inject({ method: "GET", url: url.pathname + url.search });
         counters.bytes += Buffer.byteLength(response.body);
-        let code = String(response.statusCode);
-        if (response.statusCode >= 400) code += `:${response.json().error?.code ?? response.json().code ?? "unknown"}`;
+        const code = responseClassification(response.statusCode, response.statusCode >= 400 ? response.json() : null);
         counters.responses[code] = (counters.responses[code] ?? 0) + 1;
         await route.fulfill({ status: response.statusCode, headers: response.headers, body: response.body });
       } catch (error) {
@@ -152,6 +153,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
       await page.mouse.move(0, 0);
     };
     const pause = async () => {
+      cycles.interrupt();
       const button = page.getByRole("button", { name: "Pause wall", exact: true });
       if (await button.count()) await button.click();
     };
@@ -198,6 +200,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         at: full ? 30 * 60_000 : 20_000,
         name: "network-loss",
         run: async () => {
+          cycles.interrupt();
           networkFailed = true;
         },
       },
@@ -226,6 +229,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
           at: 60 * 60_000,
           name: "source-exception",
           run: async () => {
+            cycles.interrupt();
             sourceFailed = true;
           },
         },
@@ -397,6 +401,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         at: full ? 150 * 60_000 : 100_000,
         name: "real-tab-background",
         run: async () => {
+          cycles.interrupt();
           background.page = await context.newPage();
           const hiddenCdp = await context.newCDPSession(background.page);
           await hiddenCdp.send("Emulation.setFocusEmulationEnabled", { enabled: false });
@@ -551,6 +556,14 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
           );
         wasAutomatic = automatic;
         lastPage = identity;
+        cycles.observe({
+          elapsed: performance.now() - start,
+          automatic,
+          snapshot: state.snapshot,
+          view: state.heading,
+          page: state.page.split(" · ")[0]!,
+          actorIDs: state.links.map((link) => link.id),
+        });
         if (full && elapsed > 180_000 && elapsed < 30 * 60_000)
           assert(seen.size >= 5, "The initial healthy cycle must visit all pages within three real minutes");
         if (state.timezone === previousZone && previousDay && previousDay !== state.localDay) naturalRollover = true;
@@ -572,6 +585,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             resource,
             requestCount: counters.requests,
             retainedSnapshots: history.size,
+            cycles: cycles.summary(),
           }) + "\n",
         );
         if (elapsed - lastProgress >= 60_000) {
@@ -591,6 +605,10 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
       if (full) {
         assert(naturalRollover, "The unmodified real clock must cross a local midnight during the run");
         assert(seen.size >= 5, "The full board and unranked roll must continue cycling");
+        assert(
+          cycles.summary().completeCycles > 0,
+          "At least one whole pinned board and contributor cycle must complete",
+        );
         for (const name of [
           "sourceCleared",
           "sourceRecovered",
@@ -639,6 +657,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             naturalRollover,
             sampleCount,
             pagesSeen: [...seen],
+            cycles: cycles.summary(),
             counters,
             baseline,
             maxRetainedGrowth,

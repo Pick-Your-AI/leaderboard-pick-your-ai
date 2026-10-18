@@ -30,7 +30,7 @@
     "db:seed:synthetic": "node --env-file-if-exists=.env infra/db/seed-synthetic.mjs",
     "db:validate": "node --env-file-if-exists=.env infra/db/validate.mjs",
     "test:browser": "tsc --noEmit -p apps/web/tsconfig.browser.json && playwright test --config apps/web/playwright.config.ts",
-    "test:wall-soak": "tsc --noEmit -p apps/web/tsconfig.soak.json && playwright test --config apps/web/playwright.soak.config.ts",
+    "test:wall-soak": "node --test apps/web/test/wall-soak-assertions.test.mjs && tsc --noEmit -p apps/web/tsconfig.soak.json && playwright test --config apps/web/playwright.soak.config.ts",
     "pretest:wall-soak": "npm run build"
   },
   "devDependencies": {
