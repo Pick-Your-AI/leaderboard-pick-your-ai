@@ -923,7 +923,9 @@ function compatibleScopes(before: RankComparisonInput, after: RankComparisonInpu
     before.scope.period === "custom"
   )
     return false;
-  if (instant(beforeTo) !== instant(before.cutoff) || instant(afterTo) !== instant(after.cutoff)) return false;
+  // A collection can observe facts after its event-window boundary. Retain that
+  // clock separately; it must cover, rather than equal, the selected window.
+  if (instant(beforeTo) > instant(before.cutoff) || instant(afterTo) > instant(after.cutoff)) return false;
   if (["month", "quarter", "year"].includes(before.scope.period)) return beforeFrom === afterFrom;
   return true; // Validated rolling/all-time bounds of the same named preset.
 }
@@ -952,12 +954,14 @@ export function compareRankMovement(
               ? "backfill_or_reconciliation"
               : instant(before.cutoff) > instant(after.cutoff)
                 ? "reversed_snapshots"
-                : null;
+                : instant(before.scope.to) > instant(after.scope.to)
+                  ? "reversed_snapshots"
+                  : null;
   const beforeEvidence = new Map(before.rows.flatMap((row) => row.evidence.map((item) => [item.id, item] as const)));
   const afterEvidence = new Map(after.rows.flatMap((row) => row.evidence.map((item) => [item.id, item] as const)));
   const lateHistory = [...afterEvidence.values()].some(
     (item) =>
-      !beforeEvidence.has(item.id) && item.effectiveAt !== null && instant(item.effectiveAt) < instant(before.cutoff),
+      !beforeEvidence.has(item.id) && item.effectiveAt !== null && instant(item.effectiveAt) < instant(before.scope.to),
   );
   const missingComparisonHistory = [...beforeEvidence.values(), ...afterEvidence.values()].some(
     (item) => !item.comparisonSignature,

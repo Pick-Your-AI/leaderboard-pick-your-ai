@@ -10,6 +10,7 @@ import { startLiveUpdates, type LiveState } from "@pick-your-ai/service/live-cli
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
 import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
 import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
+import { OverviewNavigation } from "./Overview.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
 import { RankComparisonControls, RankMovementValue } from "./RankComparison.tsx";
@@ -914,6 +915,9 @@ export function RemoteApp() {
             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusInside(false);
           }}
         >
+          {data?.kind === "health" && url.pathname === "/" && state.status === "ready" && (
+            <OverviewNavigation registry={state.registry} selected={pinned} />
+          )}
           {data?.kind === "catalog" && state.status === "ready" && (
             <RegistryCatalog
               key={`${url.pathname}${url.search}`}

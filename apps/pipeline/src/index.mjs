@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 export { createGithubCollectionSource } from "./github-source.mjs";
 export { createPipeline, migratePipeline } from "./runtime.mjs";
+export { PipelineDerivedRetirementStore, migratePipelineDerivedRetirement } from "./derived-retirement.mjs";
 
 /** Dist boundaries are explicit; production defaults always use this checkout. */
 export async function loadPipelineComponents(roots = {}) {

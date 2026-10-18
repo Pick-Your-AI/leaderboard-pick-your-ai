@@ -8,7 +8,7 @@ The root workspace must include `packages/ingestion` explicitly alongside contra
 
 The production host performs these steps:
 
-1. Provision an approved private Postgres database and apply ingestion SQL migrations `001_ingestion`, `002_snapshots`, `003_collection` and `004_outbox_dispatch`, using the ingestion migration procedure. Call `migratePipeline(db)` to add only the pipeline schema.
+1. Provision an approved private Postgres database and apply ingestion SQL migrations `001_ingestion`, `002_snapshots`, `003_collection`, `004_outbox_dispatch` and `006_delivery_payload_expiry`, using the ingestion migration procedure. The [delivery expiry migration](delivery-payload-expiry.md) supports explicit unavailable replay and durable operator counts without enabling an expiry job. Call `migratePipeline(db)` to add only the pipeline schema.
 2. Open the real `ControlStore` at an absolute private SQLite path with suitable directory ACLs. Configure its authenticated provider/roles separately. It is not a mock or public JSON file.
 3. Construct `GithubReadClient` with a protected installation-token provider and a private `FileCheckpointStore` or transactional replacement. Bind `sourceId` to that authorization/quota pool; absent/invalid installation credentials must not silently inherit another pool's scope. A production token provider must fail when its configured authorization is unavailable.
 4. Supply protected approved configuration and `verifyConfiguration`, which checks the actual source/metric/configuration approval receipts and policy signatures. This callback defaults to denial. It must not trust a public request or repository text to approve itself.

@@ -138,6 +138,7 @@ export class SnapshotStore {
       const currentRevision = prior ? String(prior.revision) : "0";
       if (currentRevision !== expectedRevision) throw new Error("snapshot_revision_conflict");
       const source = await readObjectReplay(tx, repositoryId, subjectId);
+      if (source.replay === null) throw new Error("snapshot_replay_unavailable_payload_expired");
       if (source.sourceObservationCount === 0) throw new Error("snapshot_no_observations");
       const document = makeDocument(repositoryId, subjectId, definitionVersion, source);
       const snapshotId = digest(document);

@@ -12,8 +12,8 @@ import {
 } from "../src/controls/policy-comparison-client.ts";
 import { control, type Session } from "../src/controls/client.ts";
 
-async function example() {
-  const { privatePolicyFixture } = await import(
+async function example(auditFixture = false) {
+  const { privatePolicyFixture, privatePolicyAuditFixture } = await import(
     new URL("../../../tests/fixtures/private-policy-preview.mjs", import.meta.url).href
   );
   const { ControlStore } = await import(new URL("../../controls/src/store.mjs", import.meta.url).href);
@@ -24,7 +24,7 @@ async function example() {
   const directory = mkdtempSync(join(tmpdir(), "synthetic-preview-client-"));
   const store = new ControlStore(join(directory, "controls.sqlite"));
   const comparisons = new PolicyComparisonStore(store, metrics);
-  const fixture = privatePolicyFixture();
+  const fixture = auditFixture ? privatePolicyAuditFixture() : privatePolicyFixture();
   fixture.policies[0].unit = metrics.getMetricDefinition("issues_opened").definition.unit;
   const retained = store.transaction((state: unknown) => comparisons.capture(state, fixture));
   const record = comparisons.input(retained.inputId);
@@ -120,6 +120,91 @@ test("comparison routes retain same-origin CSRF and reject public, activation an
     await assert.rejects(() => rereadPolicy(e.input, "f".repeat(64)));
   } finally {
     globalThis.fetch = old;
+    e.close();
+  }
+});
+
+test("audit inspection retains actual grouped, corrected, unreviewed and unresolved engine entries", async () => {
+  const e = await example(true);
+  try {
+    const original = JSON.stringify(e.result);
+    const value = checkedPolicyPreview(e.result, e.input, e.candidate);
+    assert.equal(value.before.audit.length, 61);
+    assert.equal(value.before.audit.filter((entry) => entry.reason === "included_count_observed").length, 28);
+    assert.equal(value.before.audit.filter((entry) => entry.reason === "repeated_policy_unit").length, 28);
+    assert.equal(value.before.audit.find((entry) => entry.factIds.length === 40)?.reason, "repeated_policy_unit");
+    assert.equal(value.after.audit.length, 100);
+    assert.equal(value.after.audit.filter((entry) => entry.reason === "included_count_observed").length, 95);
+    assert.deepEqual(
+      value.after.audit
+        .filter((entry) => entry.reason !== "included_count_observed")
+        .map((entry) => entry.reason)
+        .sort(),
+      [
+        "conflicting_revision",
+        "excluded_by_policy_or_correction",
+        "missing_independent_acceptance",
+        "unknown_actor",
+        "unreviewed_revision",
+      ],
+    );
+    assert.equal(value.before.audit.find((entry) => entry.reason === "unknown_actor")?.actorId, null);
+    assert.equal(JSON.stringify(e.result), original);
+    e.store.transaction((s: any) => {
+      s.profiles["101"] = { suppressed: true };
+    });
+    const redacted = checkedPolicyPreview(
+      e.comparisons.redact(e.saved, e.record, e.store.read(), []),
+      e.input,
+      e.candidate,
+    );
+    assert.deepEqual(redacted.before.audit, []);
+    assert.deepEqual(redacted.after.audit, []);
+    assert.equal(redacted.redactionsApplied, true);
+    assert.ok(!JSON.stringify(redacted).includes("synthetic-audit-"));
+  } finally {
+    e.close();
+  }
+});
+
+test("audit parser rejects malformed identities, ambiguous fields and payloads beyond the frozen input budget", async () => {
+  const e = await example();
+  try {
+    const entry = e.result.before.audit[0];
+    const invalid = [
+      undefined,
+      null,
+      {},
+      [null],
+      [{ ...entry, actorId: true }],
+      [{ ...entry, actorId: "" }],
+      [{ ...entry, factIds: [] }],
+      [{ ...entry, factIds: ["same", "same"] }],
+      [{ ...entry, factIds: [true] }],
+      [{ ...entry, reason: "" }],
+      [{ ...entry, reason: "unreviewed correction" }],
+      [{ ...entry, reason: "unknown\ncondition" }],
+      [{ ...entry, privateSource: "unclassified extra field" }],
+      Array.from({ length: 10_001 }, () => entry),
+      [
+        { ...entry, factIds: Array.from({ length: 5001 }, (_, n) => "first-" + n) },
+        { ...entry, factIds: Array.from({ length: 5000 }, (_, n) => "second-" + n) },
+      ],
+    ];
+    for (const side of ["before", "after"] as const)
+      for (const audit of invalid)
+        assert.throws(
+          () => checkedPolicyPreview({ ...e.result, [side]: { ...e.result[side], audit } }, e.input, e.candidate),
+          /Invalid private policy comparison response/,
+        );
+    const future = { actorId: null, factIds: ["synthetic-unknown-condition"], reason: "future_calculation_condition" };
+    const value = checkedPolicyPreview(
+      { ...e.result, before: { ...e.result.before, audit: [future] } },
+      e.input,
+      e.candidate,
+    );
+    assert.deepEqual(value.before.audit, [future]);
+  } finally {
     e.close();
   }
 });

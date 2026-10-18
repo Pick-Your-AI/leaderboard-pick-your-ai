@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { BoardTable, MethodDisclosure, type BoardSort } from "../components/BoardTable.tsx";
 import { PageHeader } from "../components/Layout.tsx";
 import { ReceiptDrawer, ReceiptRow } from "../components/Receipt.tsx";
@@ -15,13 +15,18 @@ import {
 import { familyLabel, getMetric, releaseEligibilityLabels } from "../data/registry.ts";
 import type { Board, BoardRow } from "../data/source.ts";
 import { plural } from "../lib/format.ts";
-import { useLatestSnapshotId, useRead, useScope } from "../lib/hooks.ts";
+import { useLatestSnapshotId, usePrefersReducedMotion, useRead, useScope } from "../lib/hooks.ts";
 import { Link, useRouter, ScopedLink } from "../lib/router.tsx";
 import { serializeScope, mayFollowUpdates } from "../lib/scope.ts";
 
 import { buildSelectedBoard, validatePrototypeView } from "../data/metric-selection.ts";
 
 const PAGE_SIZE = 25;
+
+function subscribeVisibility(listener: () => void) {
+  document.addEventListener("visibilitychange", listener);
+  return () => document.removeEventListener("visibilitychange", listener);
+}
 
 function changedRows(before: Board | null, after: Board | null): number {
   if (!before || !after) return 0;
@@ -36,11 +41,13 @@ function changedRows(before: Board | null, after: Board | null): number {
 function UpdateControl({
   pendingId,
   follow,
+  reducedMotion,
   onFollow,
   onApply,
 }: {
   pendingId: string | null;
   follow: boolean;
+  reducedMotion: boolean;
   onFollow: (follow: boolean) => void;
   onApply: () => void;
 }) {
@@ -60,8 +67,16 @@ function UpdateControl({
         <p className="muted">Showing the latest snapshot. New snapshots are held until you apply them.</p>
       )}
       <label className="checkbox">
-        <input type="checkbox" checked={follow} onChange={(event) => onFollow(event.target.checked)} />
-        <span>Follow updates automatically when I am not reading the table</span>
+        <input
+          type="checkbox"
+          checked={follow}
+          disabled={reducedMotion}
+          onChange={(event) => onFollow(event.target.checked)}
+        />
+        <span>
+          Follow updates automatically when I am not reading the table
+          {reducedMotion ? " (disabled for reduced motion)" : ""}
+        </span>
       </label>
     </div>
   );
@@ -72,6 +87,12 @@ export function BoardPage({ metricId }: { metricId: string }) {
   const { scope, params, hrefWith } = useScope();
   const { pathname, navigate } = useRouter();
   const latest = useLatestSnapshotId();
+  const reducedMotion = usePrefersReducedMotion();
+  const visible = useSyncExternalStore(
+    subscribeVisibility,
+    () => document.visibilityState === "visible",
+    () => false,
+  );
   const selectionError = useMemo(() => {
     try {
       validatePrototypeView(metricId, params);
@@ -112,9 +133,15 @@ export function BoardPage({ metricId }: { metricId: string }) {
     // Drawer cleanup restores focus before React processes its focus event.
     // Consult the DOM as well so closing proof cannot apply an update in that gap.
     const focusReturnedToTable = regionRef.current?.contains(document.activeElement) ?? false;
-    if (pendingId && follow && mayFollowUpdates(pointerInside, focusInside || focusReturnedToTable, Boolean(proof)))
+    if (
+      pendingId &&
+      follow &&
+      !reducedMotion &&
+      visible &&
+      mayFollowUpdates(pointerInside, focusInside || focusReturnedToTable, Boolean(proof))
+    )
       apply();
-  }, [pendingId, follow, pointerInside, focusInside, proof, apply]);
+  }, [pendingId, follow, reducedMotion, visible, pointerInside, focusInside, proof, apply]);
 
   const routeHref = useCallback(
     (extra: Record<string, string | null>) => hrefWith(pathname, { ...params, ...extra }),
@@ -178,7 +205,13 @@ export function BoardPage({ metricId }: { metricId: string }) {
             scope.snapshot ? (
               <p className="muted">This link pins snapshot {scope.snapshot}. It never changes.</p>
             ) : (
-              <UpdateControl pendingId={pendingId} follow={follow} onFollow={setFollow} onApply={apply} />
+              <UpdateControl
+                pendingId={pendingId}
+                follow={follow}
+                reducedMotion={reducedMotion}
+                onFollow={setFollow}
+                onApply={apply}
+              />
             )
           }
         />

@@ -29,6 +29,9 @@ export interface DispatchPublication {
   snapshotId: string;
   revision: number;
 }
+/** Bounds retained references while admitting canonical scopes with all 100
+ * maximum-length Project identities, all roles and maximum-length base fields. */
+export const dispatchPublicationScopeKeyLimit = 16_384;
 export type DispatchFailure =
   | "unsupported_observation"
   | "configuration_changed"
@@ -225,7 +228,7 @@ export class OutboxStore {
       publications.some(
         (item) =>
           typeof item.scopeKey !== "string" ||
-          item.scopeKey.length > 2000 ||
+          item.scopeKey.length > dispatchPublicationScopeKeyLimit ||
           !/^[a-f0-9]{64}$/.test(item.snapshotId) ||
           !Number.isSafeInteger(item.revision) ||
           item.revision < 1,
