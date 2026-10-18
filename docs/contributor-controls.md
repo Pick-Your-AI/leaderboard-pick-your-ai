@@ -16,6 +16,17 @@ GitHub authorization requests an empty OAuth scope, single-use state bound to a 
 
 Sessions use random 256-bit identifiers stored only as SHA-256 hashes. Reauthentication deletes the presented old session and creates a new identifier. `__Host-controls_session` has `Secure`, `HttpOnly`, `Path=/`, `SameSite=Lax`, no Domain attribute and a maximum lifetime of fifteen minutes. Mutation requires exact same-origin `Origin`, JSON and a per-session CSRF header. Duplicate cookies, duplicate callback parameters and unexpected fields are rejected. No CORS enablement is supplied. Public reading stays anonymous. All responses use `no-store`, JSON content type, `nosniff` and a restrictive CSP.
 
+Protected JSON mutation bodies require well-formed UTF-8 within the existing
+encoded-byte limit. Damaged bytes are rejected with the fixed `400 Invalid JSON`
+response before profile, request, audit or public-projection state can change;
+they are never replaced with different text and persisted. Authentication,
+origin and CSRF checks still precede body parsing, and successful parsing still
+rechecks the session before mutation. Valid multilingual text, combining marks,
+emoji and a literal replacement character retain their original spelling even
+when a client writes the bytes separately. Leading UTF-8 BOMs retain the previous
+JSON-parser rejection behavior. This boundary neither changes the stored schema
+nor reconstructs original bytes from older already-decoded records.
+
 ## Routes
 
 | Route | Behavior |
@@ -78,6 +89,16 @@ An optional `transactionalPublisher({ database, snapshot })` hook can update dep
 ## Validation and remaining acceptance
 
 Run `node --test apps/controls/test/controls.test.mjs` or the root test command. `npm run build --workspace @pick-your-ai/controls` checks JavaScript syntax; no TypeScript typecheck is claimed. Tests exercise actual loopback HTTP requests and SQLite files with fictional identities/provider responses: callback/state/PKCE/replay, fixation/expiry/revocation, direct role/CSRF bypass attempts, ownership and private receipt boundaries, collaborator declines, independent review/appeal/rollback/duplicate handling, withdrawal, suppression, reopened storage and transactional publisher failure. Provider tests assert exact endpoints, no requested scope, rejection of broader returned scopes, bounded responses, redirect policy and token revocation. Synthetic reviews do not establish real source rights or metric approval.
+
+`node --test apps/controls/test/request-encoding.test.mjs` exercises the protected
+UTF-8 boundary with real disposable HTTP listeners and SQLite stores. Its
+synthetic pre-authorized sessions test mutation handling, not a live OAuth login.
+Six malformed byte families are rejected for both profiles and private requests
+without changing the complete private state or public projection. The same
+session then accepts valid Unicode. Controls cover separate one-byte writes,
+BOM and JSON syntax rejection, authentication/CSRF ordering and the request-byte
+limit. These checks do not establish the remaining accessible product journey,
+deployed identity or production-storage acceptance for #119/#53.
 
 Remaining release evidence includes approved OAuth registration/credentials and exact callback, accepted reviewer/privacy/operator roster, real source/identity probes, production private storage ACL/retention/recovery controls, staffed private alternative verification/destination, accessible UI and real participant journeys, policy recalculation preview/activation, all-public-surface suppression propagation, actual deployed correction readback and affected-owner acceptance. Neither an account role nor a response commitment is accepted by broad repository coding authorization.
 
