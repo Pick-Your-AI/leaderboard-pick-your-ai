@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useId, useState } from "react";
 import { type PolicyAuditEntry, type PolicyPreview } from "./policy-comparison-client.ts";
 
 const pageSize = 25;
@@ -41,6 +41,7 @@ const describe = (reason: string): [string, string] => {
 
 /** Renders only the already-authorized, redacted audit supplied with this preview. */
 export function PolicyAudit({ result }: { result: PolicyPreview }) {
+  const auditId = useId();
   const [side, setSide] = useState<"before" | "after">("before");
   const [condition, setCondition] = useState("");
   const [page, setPage] = useState(0);
@@ -74,9 +75,10 @@ export function PolicyAudit({ result }: { result: PolicyPreview }) {
         review; they do not establish contributor intent or authorize a penalty. The visible list follows the current
         access restrictions.
       </p>
-      <label className="control-field">
-        Audit policy
+      <div className="control-field">
+        <label htmlFor={auditId + "-policy"}>Audit policy</label>
         <select
+          id={auditId + "-policy"}
           value={side}
           onChange={(event) => {
             setSide(event.target.value as "before" | "after");
@@ -87,10 +89,11 @@ export function PolicyAudit({ result }: { result: PolicyPreview }) {
           <option value="before">Baseline · {result.before.policyVersion}</option>
           <option value="after">Candidate · {result.after.policyVersion}</option>
         </select>
-      </label>
-      <label className="control-field">
-        Audit condition
+      </div>
+      <div className="control-field">
+        <label htmlFor={auditId + "-condition"}>Audit condition</label>
         <select
+          id={auditId + "-condition"}
           value={condition}
           onChange={(event) => {
             setCondition(event.target.value);
@@ -104,7 +107,7 @@ export function PolicyAudit({ result }: { result: PolicyPreview }) {
             </option>
           ))}
         </select>
-      </label>
+      </div>
       <p role="status">{entries.length} visible audit entries for this selection.</p>
       {entries.length === 0 ? (
         <p>
