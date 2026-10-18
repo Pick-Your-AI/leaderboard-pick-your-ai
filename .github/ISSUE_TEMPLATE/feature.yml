@@ -1,0 +1,41 @@
+name: Feature proposal
+description: Propose a bounded contributor-recognition capability
+title: 'Feature: '
+body:
+- type: markdown
+  attributes:
+    value: This is a public issue. Do not include tokens, cookies, email addresses, private source payloads, personal
+      evidence or exploit details. Follow SECURITY.md for sensitive reports. Check existing issues first; small
+      steps belong in the existing work-package checklist. Native ownership and relationships are set during triage,
+      not inferred from this form.
+- type: textarea
+  id: journey
+  attributes:
+    label: Audience and journey
+    description: Describe who benefits, the task they need to complete and the current limitation.
+  validations:
+    required: true
+- type: textarea
+  id: scope
+  attributes:
+    label: Scope and existing work
+    description: Link related work packages and state what is in and out. Explain why this is independently reviewable
+      rather than a checklist step.
+  validations:
+    required: true
+- type: textarea
+  id: evidence
+  attributes:
+    label: Acceptance and evidence
+    description: Give observable acceptance criteria, synthetic test scenarios, source limitations and any required
+      operational or human review.
+  validations:
+    required: true
+- type: textarea
+  id: safety
+  attributes:
+    label: Privacy, access and compatibility
+    description: Describe source/permission needs, accessibility, resource bounds, migration and rollback. State
+      unknown decisions; do not imply new permissions or spending are approved.
+  validations:
+    required: true
