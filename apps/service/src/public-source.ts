@@ -525,7 +525,14 @@ export function projectRead(
     )
       return reject();
   }
-  const pendingMetadata = new Map(pendingInput.map((entry) => [entry.contribution.contributionId, entry.observedAt]));
+  // Bind clocks and detect duplicates using the same parsed IDs as public proof,
+  // before privacy filtering can discard any of the supplied pending entries.
+  const pendingMetadata = new Map(
+    pendingInput.map((entry) => [
+      contributionSchema.shape.contributionId.parse(entry.contribution.contributionId),
+      entry.observedAt,
+    ]),
+  );
   if (pendingMetadata.size !== pendingInput.length) return reject();
   const pendingEvidence = projectEvidence(pendingInput).map((entry) => ({
     ...entry,
