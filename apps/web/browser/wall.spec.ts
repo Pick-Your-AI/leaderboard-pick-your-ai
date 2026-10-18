@@ -372,9 +372,9 @@ test("automatic page timer survives privacy polls and obeys pause, focus and red
     await page.clock.install();
     await page.goto(wall("single"));
     await expect(page.getByRole("link", { name: "Wall contributor 01", exact: true })).toBeVisible();
-    await page.clock.runFor(20_010);
+    await elapseWithReads(page, 20_010);
     await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeEnabled();
-    await page.clock.runFor(10_010);
+    await elapseWithReads(page, 10_010);
     await expect(page.locator(".api-wall-page")).toContainText("Page 2");
     const actor = page.getByRole("link", { name: "Wall contributor 07", exact: true });
     await actor.focus();
