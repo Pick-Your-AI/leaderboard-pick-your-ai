@@ -21,6 +21,14 @@ Rollback 003 before 002/001 on disposable databases only.
 Apply 004 after 003; rollback 004 before 003 on disposable databases only.
 Existing notices remain pending. No production source is enabled automatically.
 
+[Permanent collection retirement](../../docs/collection-retirement.md) adds the
+explicit optional migration `005_collection_retirement.up.sql` and the protected
+`RepositoryRetirementStore`. Its durable repository fence survives fresh probes,
+and its bounded deletion function records actual collected-fact removal or a
+retryable dependency block. Ordinary source mutations stay forbidden. This does
+not purge pipeline, controls, checkpoint or backup copies; rollback refuses to
+discard an existing permanent retirement.
+
 [Completed delivery payload expiry](../../docs/delivery-payload-expiry.md) adds
 `006_delivery_payload_expiry.up.sql` after 001–004. Apply it before using the
 updated object replay and operator readers. The protected host supplies every
