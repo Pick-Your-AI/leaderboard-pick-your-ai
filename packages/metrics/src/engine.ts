@@ -389,7 +389,10 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
     )
       throw new Error("Unknown fact semantics");
     instant(fact.observedAt);
-    if (instant(fact.observedAt) > cutoff) continue;
+    if (instant(fact.observedAt) > cutoff) {
+      reject([fact], "observation_after_cutoff");
+      continue;
+    }
     if (!Number.isSafeInteger(fact.revision) || fact.revision < 0) throw new Error("Invalid fact revision");
     if (fact.revision > 0 && !fact.correctionReceipt?.trim()) {
       reject([fact], "unreviewed_revision");
@@ -724,6 +727,17 @@ export function aggregateMetric(
     row.tied = row.rank !== null && rows.some((other) => other !== row && other.rank === row.rank);
   const audit = [
     ...prepared.audit,
+    ...prepared.facts
+      .filter((fact) => fact.state !== "pending" && !policy.rankedStates.includes(fact.state as never))
+      .map((fact) => ({ factIds: [fact.id], actorId: fact.actorId, reason: "evidence_class_not_ranked" })),
+    ...prepared.facts
+      .filter(
+        (fact) =>
+          policy.aggregation === "ratio" &&
+          policy.rankedStates.includes(fact.state as never) &&
+          !["merged", "closed_unmerged", "pending"].includes(fact.outcome ?? ""),
+      )
+      .map((fact) => ({ factIds: [fact.id], actorId: fact.actorId, reason: "unknown_ratio_outcome" })),
     ...rows.flatMap((row) =>
       row.pendingEvidence.map((fact) => ({ factIds: [fact.id], actorId: row.actorId, reason: "pending_not_ranked" })),
     ),
