@@ -1,0 +1,23 @@
+title = "Leaderboard credential scanning"
+
+[extend]
+useDefault = true
+
+# Exact, visibly synthetic values used by the real in-process test harnesses.
+# These exceptions apply only to the generic heuristic and the named test files.
+# They do not exclude those files or suppress provider-specific credential rules.
+[[allowlists]]
+description = "Fictional cursor-signing fixture in the pipeline harnesses"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(?:^|/)apps/pipeline/test/(?:harness\.mjs|(?:pipeline|project-privacy|webhook-dispatch)\.test\.mjs)$''']
+regexTarget = "secret"
+regexes = ['''^synthetic-cursor-secret-is-at-least-32-characters$''']
+
+[[allowlists]]
+description = "Fictional webhook secret and policy identifiers in ingestion regressions"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(?:^|/)packages/ingestion/test/store\.test\.mjs$''']
+regexTarget = "secret"
+regexes = ['''^synthetic-integration-secret-of-32-characters$''', '''^synthetic-policy-v[12]$''']

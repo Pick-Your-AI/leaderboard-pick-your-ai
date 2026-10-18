@@ -1,4 +1,5 @@
 import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
+import { ContributorParticipation } from "./Participation.tsx";
 import { EvidenceDrawer, EvidenceProof, Receipt } from "./Evidence.tsx";
 import { isProofTransition, proofHref, readProof, withoutProof } from "./proof.ts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -7,6 +8,8 @@ import { startLiveUpdates, type LiveState } from "@pick-your-ai/service/live-cli
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
 import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
 import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
+import { MethodDefinition } from "./MethodDefinition.tsx";
+import { SnapshotCoverage } from "./Coverage.tsx";
 import {
   discoverMetrics,
   isCatalogPath,
@@ -309,27 +312,9 @@ function Methods({ metric, registry, meta }: { metric: MetricDefinition; registr
   return (
     <section className="section">
       <h2>{metric.name}</h2>
+      <p>Definition policy {registry.policy_version}. Definition details do not certify a published measurement.</p>
+      <MethodDefinition metric={metric} />
       <dl className="receipt">
-        <dt>Definition</dt>
-        <dd>{metric.counting_rule}</dd>
-        <dt>Unit and aggregation</dt>
-        <dd>
-          {metric.definition.unit}; {metric.definition.aggregation}
-        </dd>
-        <dt>Numerator</dt>
-        <dd>{metric.definition.numerator}</dd>
-        <dt>Source definition</dt>
-        <dd>{metric.source}</dd>
-        <dt>Event clock</dt>
-        <dd>{metric.event_clock}</dd>
-        <dt>Attribution</dt>
-        <dd>{metric.attribution}</dd>
-        <dt>Denominator</dt>
-        <dd>{metric.definition.denominator.definition}</dd>
-        <dt>Coverage</dt>
-        <dd>{metric.coverage_class}</dd>
-        <dt>Release eligibility</dt>
-        <dd>{metric.definition.release_eligibility}</dd>
         <dt>Published policy</dt>
         <dd>
           {method ? (
@@ -385,22 +370,28 @@ export function RemoteApp() {
     focusOnLoad = useRef(false);
   const active = useRef<AbortController | null>(null);
   const activeExport = useRef<AbortController | null>(null);
-  const displayedPortfolio = useRef<{ location: string; href: string } | null>(null);
-  const navigate = useCallback((href: string) => {
+  const displayedPage = useRef<{ location: string; href: string } | null>(null);
+  const preserveDisplayedPage = useCallback(() => {
     // Make the previous page reproducible when Back is used after a new head arrives.
     // Store only the pin in the URL; no contributor response is kept in browser history.
-    if (displayedPortfolio.current?.location === `${location.pathname}${location.search}`)
-      history.replaceState(null, "", displayedPortfolio.current.href);
-    history.pushState(null, "", href);
-    active.current?.abort();
-    activeExport.current?.abort();
-    setState({ status: "loading" });
-    setHeldPin(null);
-    setFollow(false);
-    focusOnLoad.current = true;
-    setUrl({ pathname: location.pathname, search: location.search });
-    window.scrollTo(0, 0);
+    if (displayedPage.current?.location === `${location.pathname}${location.search}`)
+      history.replaceState(null, "", displayedPage.current.href);
   }, []);
+  const navigate = useCallback(
+    (href: string) => {
+      preserveDisplayedPage();
+      history.pushState(null, "", href);
+      active.current?.abort();
+      activeExport.current?.abort();
+      setState({ status: "loading" });
+      setHeldPin(null);
+      setFollow(false);
+      focusOnLoad.current = true;
+      setUrl({ pathname: location.pathname, search: location.search });
+      window.scrollTo(0, 0);
+    },
+    [preserveDisplayedPage],
+  );
   useEffect(() => () => activeExport.current?.abort(), []);
   useEffect(() => {
     const pop = () => {
@@ -594,17 +585,14 @@ export function RemoteApp() {
         if (data.kind === "catalog") discoverMetrics(registry, selected);
         if (data.kind === "board") verifyBoardDefinition(registry, data.value.metric);
         setChecking(false);
-        if (
-          data.kind === "directory" ||
-          data.kind === "profile" ||
-          data.kind === "activity" ||
-          data.kind === "activity-detail"
-        )
-          displayedPortfolio.current = {
+        // Explicit pins are already reproducible, including proof URLs and their
+        // drawer history marker. Only an implicit displayed selection needs pinning.
+        if ("value" in data && !selected.snapshot)
+          displayedPage.current = {
             location: `${url.pathname}${url.search}`,
             href: uiHref(url.pathname, selected, { snapshot: data.value.snapshotId, cursor: selected.cursor }),
           };
-        else displayedPortfolio.current = null;
+        else displayedPage.current = null;
         setState({ status: "ready", registry, data });
         if ("value" in data && !selected.snapshot && !heldPin) setHeldPin(data.value.snapshotId);
       })
@@ -649,16 +637,16 @@ export function RemoteApp() {
     )
       apply();
   }, [pending, selected.proof, follow, reduced, pointerInside, focusInside, apply]);
+  const pinned = { ...selected, snapshot: meta?.snapshotId ?? selected.snapshot };
   const link = (
     path: string,
     text: string,
     override: { snapshot?: string | null; cursor?: string | null; metric?: string } = {},
   ) => (
-    <a data-api-nav href={uiHref(path, selected, override)}>
+    <a data-api-nav href={uiHref(path, pinned, override)}>
       {text}
     </a>
   );
-  const pinned = { ...selected, snapshot: meta?.snapshotId ?? selected.snapshot };
   const closeProof = useCallback(() => {
     if (history.state?.apiProofDrawer === true) history.back();
     else {
@@ -671,7 +659,14 @@ export function RemoteApp() {
     const controller = new AbortController();
     activeExport.current = controller;
     try {
-      const blob = await exportPage(parsed.base, pinned, format, controller.signal);
+      if (state.status !== "ready") throw new ReadFailure(503, "export_unavailable");
+      const blob = await exportPage(
+        parsed.base,
+        pinned,
+        format,
+        controller.signal,
+        registryMetric(state.registry, pinned.metric),
+      );
       const href = URL.createObjectURL(blob),
         anchor = document.createElement("a");
       anchor.href = href;
@@ -705,6 +700,12 @@ export function RemoteApp() {
           event.altKey
         )
           return;
+        // The display has its own bounded page lifecycle. A normal same-tab
+        // navigation tears down this reader and its in-flight requests first.
+        if (new URL(target.href).pathname === "/live") {
+          preserveDisplayedPage();
+          return;
+        }
         event.preventDefault();
         if (target.hasAttribute("data-api-proof")) {
           proofOpener.current = target;
@@ -725,7 +726,7 @@ export function RemoteApp() {
       </a>
       <header className="app-header">
         <div className="header-inner">
-          <a data-api-nav href={uiHref("/", selected)} className="wordmark">
+          <a data-api-nav href={uiHref("/", pinned)} className="wordmark">
             PickYour.AI Credits
           </a>
           <nav aria-label="Primary">
@@ -788,6 +789,15 @@ export function RemoteApp() {
           </section>
         )}
         {meta && <Meta value={meta} selected={selected} />}
+        {meta && (
+          <SnapshotCoverage
+            key={meta.snapshotId}
+            coverage={meta.coverage}
+            snapshotId={meta.snapshotId}
+            expanded={data?.kind === "health"}
+            correctionHref={uiHref("/corrections", pinned)}
+          />
+        )}
         {meta && (
           <section aria-label="Publication updates" className="update-control">
             <p>
@@ -1086,6 +1096,7 @@ export function RemoteApp() {
                   </li>
                 ))}
               </ul>
+              <ContributorParticipation value={data.value.activitySummary} selected={pinned} metrics={catalogEntries} />
               <ContributorRecognition
                 key={`${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
                 base={parsed.base}

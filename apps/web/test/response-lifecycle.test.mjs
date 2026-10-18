@@ -1,3 +1,4 @@
+import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { exportPage, ReadFailure, request, selection } from "../src/remote/client.ts";
@@ -177,14 +178,30 @@ test("bounded server errors expose only the controlled code and release the read
 });
 
 test("a public CSV download preserves UTF-8 and releases the shared reader", async (t) => {
-  const csv = "metric,value\nsynthetic,€\n";
+  const { createService } = await import("../../service/dist/app.js");
+  const { readFixture } = await import("../../../tests/fixtures/pending-metric.mjs");
+  const input = readFixture();
+  input.selected.actors[0].actor.login = "synthetic-€";
+  const app = createService({ source: { read: async () => structuredClone(input) } });
+  t.after(() => app.close());
+  const query = `?snapshot=${input.selected.snapshot.snapshotId}&metric=pr_merged`;
+  const response = await app.inject(`/api/v1/exports${query}&format=csv`);
+  assert.equal(response.statusCode, 200, response.body);
+  const csv = response.body;
+  assert.match(csv, /synthetic-€/);
   const { body } = source([new TextEncoder().encode(csv)]);
   t.mock.method(
     globalThis,
     "fetch",
     async () => new Response(body, { headers: { "content-type": "text/csv; charset=utf-8" } }),
   );
-  const blob = await exportPage("/api/v1", selection("?snapshot=s1"), "csv", new AbortController().signal);
+  const blob = await exportPage(
+    "/api/v1",
+    selection(query),
+    "csv",
+    new AbortController().signal,
+    metricRegistryV1.metrics.find((metric) => metric.id === "pr_merged"),
+  );
   assert.equal(await blob.text(), csv);
   assert.equal(body.locked, false);
 });
@@ -205,7 +222,14 @@ for (const invalid of ["server", "media_type", "actor_scope"]) {
         }),
     );
     await assert.rejects(
-      () => exportPage("/api/v1", selection("?snapshot=s1&actors=user"), "csv", new AbortController().signal),
+      () =>
+        exportPage(
+          "/api/v1",
+          selection("?snapshot=s1&actors=user"),
+          "csv",
+          new AbortController().signal,
+          metricRegistryV1.metrics.find((metric) => metric.id === "pr_opened"),
+        ),
       failure(
         invalid === "server"
           ? "export_http_503"
@@ -224,7 +248,14 @@ test("a CSV download rejects corrupt UTF-8 instead of offering changed bytes", a
   const { body } = source([new Uint8Array([0x63, 0x2c, 0xc3, 0x28])]);
   t.mock.method(globalThis, "fetch", async () => new Response(body, { headers: { "content-type": "text/csv" } }));
   await assert.rejects(
-    () => exportPage("/api/v1", selection("?snapshot=s1"), "csv", new AbortController().signal),
+    () =>
+      exportPage(
+        "/api/v1",
+        selection("?snapshot=s1"),
+        "csv",
+        new AbortController().signal,
+        metricRegistryV1.metrics.find((metric) => metric.id === "pr_opened"),
+      ),
     failure("invalid_export_response"),
   );
   assert.equal(body.locked, false);

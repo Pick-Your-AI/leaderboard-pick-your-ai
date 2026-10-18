@@ -1,10 +1,12 @@
 import { Operations } from "./Operations.tsx";
+import { PolicyComparison } from "./PolicyComparison.tsx";
 import React, { useEffect, useRef, useState } from "react";
 import { canReview, control, ControlsFailure, verifiedSession, type Receipt, type Session } from "./client.ts";
 
 import { Amendment } from "./Amendment.tsx";
 import { Configuration, type ConfigurationState } from "./Configuration.tsx";
 import { Spotlights, type Nomination } from "./Spotlights.tsx";
+import { LocaleReviewFields, localizationReviewInput } from "./LocaleReviewFields.tsx";
 
 type Run = (path: string, input: unknown) => Promise<boolean>;
 const categories = [
@@ -253,7 +255,11 @@ function ReceiptCard({
               reason: d.get("reason"),
               conflict: false,
               ...(decision === "accept"
-                ? { policyVersion: d.get("policy"), sourceReviewedPublic: d.get("source") === "on" }
+                ? {
+                    policyVersion: d.get("policy"),
+                    sourceReviewedPublic: d.get("source") === "on",
+                    ...localizationReviewInput(d),
+                  }
                 : {}),
               ...(decision === "merge" ? { duplicateOf: d.get("duplicate") } : {}),
             });
@@ -272,6 +278,7 @@ function ReceiptCard({
           </Field>
           {decision === "accept" && (
             <>
+              <LocaleReviewFields />
               <Field label="Approved policy version">
                 <input name="policy" required maxLength={100} />
               </Field>
@@ -521,6 +528,17 @@ export function ControlsApp() {
                   ))}
               </section>
               <Spotlights nominations={nominations} session={session} run={run} admin={admin} />
+              {admin && session.roles.includes("reviewer") && (
+                <PolicyComparison
+                  session={session}
+                  onAuthorityLost={() => {
+                    ++generation.current;
+                    setBusy(false);
+                    clear();
+                    setError("Your reviewer authority or session changed. Reload your account before continuing.");
+                  }}
+                />
+              )}
               {admin && session.roles.includes("operator") && (
                 <>
                   <Operations session={session} />

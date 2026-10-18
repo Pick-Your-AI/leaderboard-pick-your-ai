@@ -37,10 +37,10 @@ test("named periods persist exact public scopes, partial history and precise obs
   });
   const next = (await h.runtime.runOnce({ cutoff: nextEnd })).publications[0];
   const before = [saved(h, first.snapshotId), saved(h, next.snapshotId)];
-  assert.notEqual(
+  assert.equal(
     JSON.parse(before[0].document).backfillRevision,
     JSON.parse(before[1].document).backfillRevision,
-    "current digest(outputs) is conservative even for ordinary fresh activity; no stable live epoch is claimed",
+    "ordinary fresh activity retains the accepted reconciliation lineage across named windows",
   );
   for (const [i, publication] of [first, next].entries()) {
     const end = [firstEnd, nextEnd][i],

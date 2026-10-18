@@ -17,6 +17,8 @@ These files are the versioned source for generated documentation. GitHub issues 
 | [decision-register.json](decision-register.json) | Proposed decisions, accountable roles and prerequisites |
 | [release-manifest.json](release-manifest.json) | Mandatory foundations, product journey, conditional modules and live readback |
 | [source-audit.json](source-audit.json) | Historical public organization inventory and explicit limits |
+| [organization-inventory-2026-10-18.json](organization-inventory-2026-10-18.json) | Dated complete public repository/issue/PR inventory, six Project identities, all configured field IDs and existing owner roles |
+| [project-configuration-readback-2026-10-18.json](project-configuration-readback-2026-10-18.json) | Complete dated Project membership, field options, saved views, native hierarchy and delivery prerequisites, and preserved contextual references |
 | [metric-api-evidence.json](metric-api-evidence.json) | Time-bounded official API references and source capability findings |
 | [plan-review-resolution.json](plan-review-resolution.json) | Review findings and their planned resolutions |
 

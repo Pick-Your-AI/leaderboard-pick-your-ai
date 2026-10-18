@@ -54,7 +54,7 @@ export interface RestScan<T> {
   select: (body: unknown) => readonly T[];
   /** A deliberate refresh replaces a finished scan; interrupted scans resume by default. */
   refresh?: boolean;
-  /** Optional synchronous host authorization check, also run immediately before each HTTP attempt. */
+  /** Optional synchronous host authorization check, repeated before HTTP, page acceptance and result delivery. */
   assertAuthorized?: () => void;
 }
 
@@ -68,7 +68,7 @@ export interface GraphqlScan<T> {
   /** Select one connection, including connections nested under repository/node. */
   select: (data: unknown) => GraphqlPage<T>;
   refresh?: boolean;
-  /** Optional synchronous host authorization check, also run immediately before each HTTP attempt. */
+  /** Optional synchronous host authorization check, repeated before HTTP, page acceptance and result delivery. */
   assertAuthorized?: () => void;
 }
 
@@ -202,10 +202,12 @@ export class GithubReadClient {
     await write;
   }
 
-  private async wait(source: string): Promise<void> {
+  private async wait(source: string, assertAuthorized?: () => void): Promise<void> {
+    checkAuthorization(source, assertAuthorized);
     while ((this.pauses.get(source) ?? 0) > this.options.now()) {
       // Timer values above signed 32-bit overflow in Node. Recheck after chunks.
       await this.options.sleep(Math.min(60_000, this.pauses.get(source)! - this.options.now()));
+      checkAuthorization(source, assertAuthorized);
     }
   }
 
@@ -228,7 +230,8 @@ export class GithubReadClient {
         bytes.set(chunk, offset);
         offset += chunk.length;
       }
-      return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+      // Damaged source bytes must not become replacement characters in stored identities.
+      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
     } catch (error) {
       if (error instanceof GithubClientError) throw error;
       if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) {
@@ -251,6 +254,7 @@ export class GithubReadClient {
     authorize();
     const url = this.trustedUrl(rawUrl, source);
     const persistedPause = await this.options.checkpoints.load(`pause:${hash(source)}`);
+    authorize();
     if (persistedPause !== undefined) {
       if (
         !object(persistedPause) ||
@@ -264,6 +268,7 @@ export class GithubReadClient {
     }
     const cacheKey = `http:${hash([source, this.options.apiVersion, url])}`;
     const cached = query ? undefined : await this.options.checkpoints.load(cacheKey);
+    authorize();
     if (
       cached !== undefined &&
       (!object(cached) ||
@@ -281,13 +286,17 @@ export class GithubReadClient {
         cache.body = body;
         // Migrate legacy values before any request or conditional cache reuse.
         await this.options.checkpoints.save(cacheKey, cache);
+        authorize();
       }
     }
     for (let attempt = 0; ; attempt += 1) {
-      await this.wait(source);
+      await this.wait(source, assertAuthorized);
+      authorize();
       const release = await this.acquire();
       let outcome: EndpointOutcome | undefined;
+      let response: Response | undefined;
       try {
+        authorize();
         // Another request may have paused this source while this one queued.
         if ((this.pauses.get(source) ?? 0) > this.options.now()) {
           attempt -= 1;
@@ -304,13 +313,15 @@ export class GithubReadClient {
         if (query) headers.set("Content-Type", "application/json");
         // Recheck after checkpoint, quota, concurrency and token awaits, on every retry.
         authorize();
-        const response = await this.options.fetch(url, {
+        response = await this.options.fetch(url, {
           method: query ? "POST" : "GET",
           headers,
           redirect: "manual",
           signal: AbortSignal.timeout(this.options.timeoutMs),
           ...(query ? { body: JSON.stringify(query) } : {}),
         });
+        // Access can change while fetch is pending, before any response is consumed.
+        authorize();
         if (response.status >= 300 && response.status < 400 && response.status !== 304) {
           await response.body?.cancel();
           throw new GithubClientError({ kind: "unsafe_request" }, source);
@@ -324,8 +335,10 @@ export class GithubReadClient {
             Number.isFinite(reset) && reset > this.options.now() ? reset : this.options.now() + 60_000,
           );
         }
+        authorize();
         if (response.status === 304) {
           await response.body?.cancel();
+          authorize();
           if (!cache) throw new GithubClientError({ kind: "invalid_response" }, source);
           return { body: cache.body, link: cache.link };
         }
@@ -338,6 +351,7 @@ export class GithubReadClient {
           if (response.ok) throw error;
           body = {};
         }
+        authorize();
         if (response.ok && !(query && object(body) && Array.isArray(body.errors) && body.errors.length)) {
           const link = response.headers.get("link");
           if (!query && response.headers.get("etag")) {
@@ -348,6 +362,7 @@ export class GithubReadClient {
               link,
             });
           }
+          authorize();
           return { body, link };
         }
         const errors = object(body) && Array.isArray(body.errors) ? body.errors : [];
@@ -378,6 +393,9 @@ export class GithubReadClient {
         if (response.ok && !rateError && graphqlStatus === undefined)
           throw new GithubClientError({ kind: "invalid_response" }, source);
       } catch (error) {
+        // Revocation takes precedence when an awaited transport/body operation
+        // rejects, just as it does when that operation returns a response.
+        authorize();
         if (error instanceof GithubClientError) {
           if (error.outcome.kind !== "transient_failure") throw error;
           outcome = error.outcome;
@@ -386,6 +404,9 @@ export class GithubReadClient {
           outcome = { kind: "transient_failure", visibility: "unknown" };
         }
       } finally {
+        // Rejected headers can leave an unread stream. Cleanup must not keep a
+        // request slot occupied if an injected transport has a slow cancel hook.
+        if (response?.body && !response.body.locked) void response.body.cancel().catch(() => undefined);
         release();
       }
       if (!outcome) throw new GithubClientError({ kind: "invalid_response" }, source);
@@ -398,13 +419,19 @@ export class GithubReadClient {
             ? Math.max(this.options.now() + backoff, Date.parse(outcome.retryAt))
             : this.options.now() + backoff;
         await this.pause(source, retryAt + jitter);
+        authorize();
       }
       if (!retryable || attempt >= this.options.maxRetries) throw new GithubClientError(outcome, source);
     }
   }
 
   async rest<T = unknown>(source: string, url: string, assertAuthorized?: () => void): Promise<T> {
-    return (await this.request(source, url, undefined, assertAuthorized)).body as T;
+    try {
+      const { body } = await this.request(source, url, undefined, assertAuthorized);
+      return body as T;
+    } finally {
+      checkAuthorization(source, assertAuthorized);
+    }
   }
 
   async graphql<T = unknown>(
@@ -414,10 +441,14 @@ export class GithubReadClient {
     assertAuthorized?: () => void,
   ): Promise<T> {
     if (!readOnlyQuery(query)) throw new GithubClientError({ kind: "unsafe_request" }, source);
-    const { body } = await this.request(source, this.options.graphqlPath, { query, variables }, assertAuthorized);
-    if (!object(body) || !("data" in body) || body.data === null)
-      throw new GithubClientError({ kind: "invalid_response" }, source);
-    return body.data as T;
+    try {
+      const { body } = await this.request(source, this.options.graphqlPath, { query, variables }, assertAuthorized);
+      if (!object(body) || !("data" in body) || body.data === null)
+        throw new GithubClientError({ kind: "invalid_response" }, source);
+      return body.data as T;
+    } finally {
+      checkAuthorization(source, assertAuthorized);
+    }
   }
 
   private async scan<T>(
@@ -467,12 +498,14 @@ export class GithubReadClient {
         await this.options.checkpoints.save(storageKey, state);
       }
       while (state.next !== null) {
+        checkAuthorization(source, assertAuthorized);
         if (state.visited.length >= maxPages)
           throw new Error("Source pagination exceeded maxPages; checkpoint retained");
         if (state.visited.includes(state.next))
           throw new Error("Source pagination repeated a page; checkpoint retained");
         const next = state.next;
         const page = await fetchPage(next);
+        checkAuthorization(source, assertAuthorized);
         if (!Array.isArray(page.items)) throw new GithubClientError({ kind: "invalid_response" }, source);
         state.items.push(...(minimizeIdentityEmails(page.items) as unknown[]));
         state.visited.push(next);
@@ -482,10 +515,10 @@ export class GithubReadClient {
         // callers receive results only after the durable checkpoint succeeds.
         await this.options.checkpoints.save(storageKey, state);
       }
-      checkAuthorization(source, assertAuthorized);
       return state.items as T[];
     } finally {
       this.scans.delete(storageKey);
+      checkAuthorization(source, assertAuthorized);
     }
   }
 
@@ -501,6 +534,7 @@ export class GithubReadClient {
       options.refresh,
       async (url) => {
         const page = await this.request(options.source, url, undefined, options.assertAuthorized);
+        checkAuthorization(options.source, options.assertAuthorized);
         const link = nextRestLink(page.link);
         return { items: options.select(page.body), next: link ? this.trustedUrl(link, options.source) : null };
       },
@@ -542,6 +576,7 @@ export class GithubReadClient {
           },
           options.assertAuthorized,
         );
+        checkAuthorization(options.source, options.assertAuthorized);
         const page = options.select(data);
         if (
           !object(page) ||
@@ -564,12 +599,15 @@ export class GithubReadClient {
     child: (parent: P) => GraphqlScan<T>,
   ): Promise<Array<{ parent: P; items: T[] }>> {
     const result: Array<{ parent: P; items: T[] }> = new Array(parents.length);
+    const authorizations: Array<{ source: string; assertAuthorized: (() => void) | undefined }> = [];
     let index = 0;
     const worker = async () => {
       while (index < parents.length) {
         const current = index++;
         const parent = parents[current]!;
-        result[current] = { parent, items: await this.scanGraphql(child(parent)) };
+        const options = child(parent);
+        authorizations.push({ source: options.source, assertAuthorized: options.assertAuthorized });
+        result[current] = { parent, items: await this.scanGraphql(options) };
       }
     };
     const settled = await Promise.allSettled(
@@ -577,6 +615,9 @@ export class GithubReadClient {
     );
     const failure = settled.find((outcome) => outcome.status === "rejected");
     if (failure?.status === "rejected") throw failure.reason;
+    // An earlier child can lose access while a later child is still pending.
+    for (const authorization of authorizations)
+      checkAuthorization(authorization.source, authorization.assertAuthorized);
     return result;
   }
 }

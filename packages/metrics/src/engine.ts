@@ -1,5 +1,6 @@
 import {
   actorKindSchema,
+  compareSourceInstants,
   contributionRoleSchema,
   executionModeSchema,
   serviceAccountClassificationSchema,
@@ -32,14 +33,26 @@ export interface MetricFact {
   acceptanceReceipt: string | null;
   acceptedBy: string | null;
   subjectActorId: string | null;
-  eventContext: { projects: string[]; workstreams: string[] } | null;
-  currentContext: { projects: string[]; workstreams: string[] } | null;
+  eventContext: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
+  currentContext: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
   quantity?: number;
   /** Literal source state, never an inferred classification. */
   rawState?: string;
   outcome?: "merged" | "closed_unmerged" | "pending";
   readyAt?: string | null;
   firstReviewAt?: string | null;
+  /** Exact observed locale fact whose accepted representation replaces current portfolio display. */
+  recognitionSourceFactId?: string;
 }
 export interface EngineActor {
   id: string;
@@ -217,6 +230,13 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
   )
     throw new Error("Exactly one evidence class is required; observed, qualified and reviewed values stay separate");
   if (
+    policy.metricId === "localization" &&
+    (policy.rankedStates[0] === "observed" || policy.groupBy !== "canonical" || policy.dateBasis !== "occurredAt")
+  )
+    throw new Error(
+      "Localization accepted units require independent acceptance, canonical language/category grouping and the source merge clock",
+    );
+  if (
     !policy.roles.length ||
     policy.roles.some((role) => !knownRoles.includes(role) || role === "unknown") ||
     !policy.sources.length ||
@@ -250,6 +270,7 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
     policy.rank &&
     (policy.aggregation === "ratio" ||
       policy.aggregation === "duration" ||
+      metric.definition.display_policy === "spotlight" ||
       metric.definition.release_eligibility === "descriptive-only")
   )
     throw new Error("Descriptive metrics cannot rank contributors");
@@ -274,10 +295,14 @@ export function resolveMetricWindow(
   let start: number | null;
   if (["7d", "30d", "90d"].includes(preset)) start = end - Number.parseInt(preset, 10) * 86400000;
   else if (preset === "all") start = null;
-  else if (preset === "month") start = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1);
-  else if (preset === "quarter") start = Date.UTC(date.getUTCFullYear(), Math.floor(date.getUTCMonth() / 3) * 3, 1);
-  else if (preset === "year") start = Date.UTC(date.getUTCFullYear(), 0, 1);
-  else if (preset === "custom" && custom) {
+  else if (preset === "month" || preset === "quarter" || preset === "year") {
+    const month =
+      preset === "year" ? 0 : preset === "quarter" ? Math.floor(date.getUTCMonth() / 3) * 3 : date.getUTCMonth();
+    // Preserve the validated year: Date.UTC remaps years 0–99 to 1900–1999.
+    date.setUTCMonth(month, 1);
+    date.setUTCHours(0, 0, 0, 0);
+    start = date.getTime();
+  } else if (preset === "custom" && custom) {
     start = instant(custom.from);
     const to = instant(custom.to);
     if (start >= to || to > end) throw new Error("Custom window must precede cutoff and have from < to");
@@ -291,7 +316,8 @@ export function resolveMetricWindow(
   };
 }
 
-function coverageComplete(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): boolean {
+/** Necessary source coverage only; qualification and release authority remain separate. */
+export function hasCompleteSourceCoverage(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): boolean {
   if (scope.from === null) return false; // Known history is not proof of complete all-time history.
   const repos = scope.repos.length ? scope.repos : input.repositoryIds;
   if (!repos.length) return false;
@@ -308,6 +334,8 @@ function coverageComplete(input: FrozenInput, policy: MetricPolicy, scope: Metri
             instant(item.windowStart) <= instant(scope.from!) &&
             item.windowEnd !== null &&
             instant(item.windowEnd) >= instant(scope.to) &&
+            typeof item.sourceWatermark === "string" &&
+            compareSourceInstants(item.sourceWatermark, scope.to) >= 0 &&
             item.knownStart !== null &&
             instant(item.knownStart) <= instant(scope.from!) &&
             item.missingPages === 0 &&
@@ -385,6 +413,21 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
   const versions = new Map<string, MetricFact[]>();
   for (const fact of input.facts) {
     if (fact.metricId !== policy.metricId) continue;
+    for (const context of [fact.eventContext, fact.currentContext]) {
+      if (context == null) continue;
+      if (
+        !context ||
+        !Array.isArray(context.projects) ||
+        !Array.isArray(context.workstreams) ||
+        (context.workstreamsKnown !== undefined && typeof context.workstreamsKnown !== "boolean") ||
+        (context.projectScope !== undefined && !Array.isArray(context.projectScope)) ||
+        [context.projects, context.workstreams, context.projectScope ?? []].some(
+          (ids) => ids.some((id) => typeof id !== "string" || !id.trim()) || new Set(ids).size !== ids.length,
+        ) ||
+        (context.projectScope !== undefined && context.projects.some((id) => !context.projectScope!.includes(id)))
+      )
+        throw new Error("Invalid membership context");
+    }
     required(fact.id, "Fact ID");
     required(fact.repoId, "Repository ID");
     if (
@@ -418,11 +461,19 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
   for (const bucket of versions.values()) {
     const revision = Math.max(...bucket.map((fact) => fact.revision));
     const latest = bucket.filter((fact) => fact.revision === revision);
-    if (new Set(latest.map(stableJSON)).size !== 1) {
+    // The same source fact can be observed again without changing its revision.
+    // Observation time describes collection, not a competing semantic fact.
+    const semantic = (fact: MetricFact) => {
+      const { observedAt, ...rest } = fact;
+      return stableJSON(rest);
+    };
+    if (new Set(latest.map(semantic)).size !== 1) {
       reject(latest, "conflicting_revision");
       continue;
     }
-    current.push(latest[0]!);
+    current.push(
+      latest.sort((a, b) => compareInstants(a.observedAt, b.observedAt) || compare(a.observedAt, b.observedAt))[0]!,
+    );
   }
   const canonical = new Map<string, MetricFact[]>();
   for (const fact of current) {
@@ -468,9 +519,12 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
     if (!reason && (scope.projects.length || scope.workstreams.length)) {
       if (!context) reason = "unknown_membership_context";
       else if (scope.projects.length && !scope.projects.some((id) => context.projects.includes(id)))
-        reason = "project_filter";
+        reason =
+          context.projectScope && scope.projects.some((id) => !context.projectScope!.includes(id))
+            ? "unknown_membership_context"
+            : "project_filter";
       else if (scope.workstreams.length && !scope.workstreams.some((id) => context.workstreams.includes(id)))
-        reason = "workstream_filter";
+        reason = context.workstreamsKnown === false ? "unknown_membership_context" : "workstream_filter";
     }
     if (
       !reason &&
@@ -581,7 +635,7 @@ export function selectPortfolioFacts(
 ): MetricFact[] {
   validateMetricPolicy(policy);
   const scope = canonicalScope(requestedScope);
-  return prepare(
+  const selected = prepare(
     input,
     {
       ...policy,
@@ -593,6 +647,32 @@ export function selectPortfolioFacts(
     },
     scope,
   ).facts.filter((fact) => fact.role !== "unknown" && fact.occurredAt !== null);
+  const observed = new Map(selected.filter((fact) => fact.state === "observed").map((fact) => [fact.id, fact]));
+  const acceptedSources = new Set<string>();
+  for (const fact of selected) {
+    if (
+      fact.metricId !== "localization" ||
+      !["qualified", "reviewed"].includes(fact.state) ||
+      !fact.recognitionSourceFactId
+    )
+      continue;
+    const source = observed.get(fact.recognitionSourceFactId);
+    if (
+      source?.metricId === "localization" &&
+      source.actorId === fact.actorId &&
+      source.artifactId === fact.artifactId &&
+      source.repoId === fact.repoId &&
+      source.role === fact.role &&
+      source.rawState === fact.rawState &&
+      source.occurredAt === fact.occurredAt
+    )
+      // Recollection changes no source unit. Its first observation may precede
+      // the later observation from which an independently accepted copy arose.
+      acceptedSources.add(source.id);
+  }
+  // Keep both immutable facts for audit and recomputation, but expose one current
+  // locale activity unit. An unaccepted or unrelated language remains observed.
+  return selected.filter((fact) => !acceptedSources.has(fact.id));
 }
 
 export function aggregateMetric(
@@ -603,7 +683,8 @@ export function aggregateMetric(
   validateMetricPolicy(policy);
   const scope = canonicalScope(requestedScope);
   const prepared = prepare(input, policy, scope);
-  const complete = coverageComplete(input, policy, scope) && !hasUncertainty(prepared);
+  const complete = hasCompleteSourceCoverage(input, policy, scope) && !hasUncertainty(prepared);
+  const actorsById = new Map(input.actors.map((actor) => [actor.id, actor]));
   const byActor = new Map<string, MetricFact[]>();
   for (const fact of prepared.facts) {
     const bucket = byActor.get(fact.actorId!) ?? [];
@@ -612,7 +693,7 @@ export function aggregateMetric(
   }
   const rows: AggregateRow[] = [];
   for (const [actorId, facts] of byActor) {
-    const actor = input.actors.find((candidate) => candidate.id === actorId)!;
+    const actor = actorsById.get(actorId)!;
     const eligible = facts.filter((fact) => policy.rankedStates.includes(fact.state as never));
     const pendingEvidence = facts.filter(
       (fact) =>
@@ -721,14 +802,15 @@ export function aggregateMetric(
   );
   let rank = 0,
     previous: number | null = null;
+  const rankCounts = new Map<number, number>();
   for (const row of rows) {
     if (!policy.rank || row.value === null) continue;
     if (previous !== row.value) rank++;
     row.rank = rank;
     previous = row.value;
+    rankCounts.set(rank, (rankCounts.get(rank) ?? 0) + 1);
   }
-  for (const row of rows)
-    row.tied = row.rank !== null && rows.some((other) => other !== row && other.rank === row.rank);
+  for (const row of rows) row.tied = row.rank !== null && (rankCounts.get(row.rank) ?? 0) > 1;
   const audit = [
     ...prepared.audit,
     ...prepared.facts
@@ -983,7 +1065,7 @@ export function participationView(
   const complete =
     Boolean(history) &&
     (scope.from === null || instant(history!.originAt) <= instant(scope.from)) &&
-    coverageComplete(input, policy, historyScope) &&
+    hasCompleteSourceCoverage(input, policy, historyScope) &&
     !hasUncertainty(historical);
   const monday = (at: string) => {
     const date = new Date(instant(at));
@@ -995,14 +1077,26 @@ export function participationView(
   if (scope.from !== null)
     for (let at = instant(monday(scope.from)); at < instant(scope.to); at += 604800000)
       weeks.add(new Date(at).toISOString());
-  return unique(current.map((fact) => fact.actorId!)).map((actorId) => {
-    const historyFacts = all
-      .filter((fact) => fact.actorId === actorId)
-      .sort((a, b) => compareInstants(a[policy.dateBasis], b[policy.dateBasis]) || compare(a.id, b.id));
+  const indexByActor = (facts: MetricFact[]) => {
+    const indexed = new Map<string, MetricFact[]>();
+    for (const fact of facts) {
+      const actorId = fact.actorId!;
+      const bucket = indexed.get(actorId) ?? [];
+      bucket.push(fact);
+      indexed.set(actorId, bucket);
+    }
+    return indexed;
+  };
+  const historyByActor = indexByActor(all);
+  const currentByActor = indexByActor(current);
+  return unique([...currentByActor.keys()]).map((actorId) => {
+    const historyFacts = (historyByActor.get(actorId) ?? []).sort(
+      (a, b) => compareInstants(a[policy.dateBasis], b[policy.dateBasis]) || compare(a.id, b.id),
+    );
     const first = historyFacts[0];
     const activeWeeks = unique(
-      current
-        .filter((fact) => fact.actorId === actorId)
+      currentByActor
+        .get(actorId)!
         .flatMap((fact) => (fact[policy.dateBasis] === null ? [] : [monday(fact[policy.dateBasis]!)])),
     );
     return {

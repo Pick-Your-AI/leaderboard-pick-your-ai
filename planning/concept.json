@@ -73,7 +73,7 @@
     "public_entry": "Configured target domain leaderboard.pickyour.ai for local plans and examples; DNS, deployment, hosting, operations and launch acceptance remain unresolved",
     "research_boundary": "Research repository supplies public evidence and ownership; its frozen builder contracts remain unchanged. Leaderboard contracts are a separate bounded schema.",
     "website_boundary": "Current React/Vite website is static on cPanel; retain it as an independently deployed frontend. The proposed leaderboard server requires separately approved infrastructure.",
-    "mobile_boundary": "Android/Apple Projects are consumers and contribution scopes. Their 258 Backlog planning items are not shipped applications. No duplicate mobile backend is introduced.",
+    "mobile_boundary": "Android/Apple Projects are consumers and contribution scopes. The original 258-item planning baseline is historical; live issues, reviewed changes and acceptance records carry subsequent progress. Mobile release acceptance remains separate, and no duplicate mobile backend is introduced.",
     "unboarded_work": "Include eligible repository activity even without Project membership; .github#2 and website#31/#32/#33 demonstrate why boards alone are incomplete.",
     "existing_authority": "Live GitHub Assignees and native relationships remain authoritative. Do not transfer ownership or reparent existing issues to the new program."
   },
@@ -104,7 +104,7 @@
       "webhook_ack_p95": "<2 seconds after durable write",
       "received_to_publication_p95": "<60 seconds under agreed test load",
       "reconciliation": "5-15 minute recent-window scans and daily rotating completeness audits, budget-adaptive",
-      "availability_rto_rpo": "Owner/budget decision before launch; no unmeasured promise"
+      "availability_rto_rpo": "Evaluate release-gates/v1 targets in planning/release-manifest.json; actual host, budget, operating acceptance and measured results remain required before commitments"
     },
     "browser_refresh": "SSE revision notices with resumable cursor and conditional polling fallback; preserve reading position and only apply reorder on user action unless explicitly enabled.",
     "source_limits_reference": "metric-api-evidence.json and metrics-and-ingestion.json#sources"

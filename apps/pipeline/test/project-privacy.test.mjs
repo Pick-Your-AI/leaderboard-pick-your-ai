@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import {
   loadPipelineComponents,
   createPipeline,
@@ -206,8 +207,21 @@ async function getBoard(runtime, suffix = "") {
   return response.json();
 }
 
-for (const loss of ["private", "hidden", "controls_failure"])
-  test(`confirmed ${loss} Project revokes current and pinned publications until a new approved configuration`, async (t) => {
+for (const [loss, subjectType] of [
+  ["private", "issue"],
+  ["hidden", "issue"],
+  ["controls_failure", "issue"],
+  ["private", "pull_request"],
+  ["subject_private", "pull_request"],
+  ["subject_identity", "pull_request"],
+  ["inventory_missing_id", "pull_request"],
+  ["inventory_reused_id", "pull_request"],
+  ["inventory_malformed_id", "pull_request"],
+  ["inventory_oversized_id", "pull_request"],
+  ["normalization_identity", "pull_request"],
+  ["legacy_normalization_identity", "pull_request"],
+])
+  test(`confirmed ${loss} Project revokes current and pinned ${subjectType} publications until a new approved configuration`, async (t) => {
     const h = await harness(t);
     const config = structuredClone(h.options.config);
     config.repositories[0].families = ["project_history"];
@@ -223,6 +237,13 @@ for (const loss of ["private", "hidden", "controls_failure"])
       { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-policy" },
     ];
     let publicProject = true;
+    let privateSubject = false;
+    let changedSubject = false;
+    let inventoryLoss = null;
+    let invalidInventoryHistoryReads = 0;
+    let normalizationIdentityLoss = false;
+    let normalizing = false;
+    let normalizationIdentityReads = 0;
     const event = () => ({
       id: "E_synthetic",
       __typename: "ProjectV2ItemStatusChangedEvent",
@@ -232,28 +253,78 @@ for (const loss of ["private", "hidden", "controls_failure"])
       project: { id: "PVT_syntheticAllowed", public: publicProject },
     });
     const stableEvent = event();
-    const current = () => ({ ...stableEvent, project: { ...stableEvent.project, public: publicProject } });
+    const current = () => ({
+      ...stableEvent,
+      // A newly collected event forces hydration without disturbing an older
+      // cached publication. The legacy-cache case deliberately keeps this ID.
+      id: normalizationIdentityLoss && loss === "normalization_identity" ? "E_synthetic_new" : stableEvent.id,
+      project: { ...stableEvent.project, public: publicProject },
+    });
+    const subjectId = () => {
+      if (inventoryLoss === "inventory_malformed_id") return "PR invalid";
+      if (inventoryLoss === "inventory_oversized_id") return "P".repeat(129);
+      return subjectType === "pull_request" ? "PR_synthetic" : "I_synthetic";
+    };
     const client = {
-      rest: async () => ({ id: 2, private: false }),
-      scanRest: async (o) => o.select([{ id: 1, node_id: "I_synthetic", number: 1 }]),
-      scanGraphql: async (o) =>
-        o.select({
+      rest: async () => ({ id: 2, private: false, full_name: config.repositories[0].slug }),
+      scanRest: async (o) => {
+        const subject = {
+          id: 1,
+          node_id: subjectId(),
+          number: 1,
+          ...(subjectType === "pull_request" ? { pull_request: {} } : {}),
+        };
+        if (inventoryLoss === "inventory_missing_id") delete subject.node_id;
+        return o.select(
+          inventoryLoss === "inventory_reused_id" ? [subject, { ...subject, id: 2, number: 2 }] : [subject],
+        );
+      },
+      scanGraphql: async (o) => {
+        if (["inventory_malformed_id", "inventory_oversized_id"].includes(inventoryLoss))
+          invalidInventoryHistoryReads += 1;
+        const changedDuringHydration = normalizationIdentityLoss && normalizing;
+        if (changedDuringHydration) normalizationIdentityReads += 1;
+        return o.select({
           repository: {
             databaseId: 2,
-            isPrivate: false,
-            issue: {
-              id: "I_synthetic",
-              url: "https://github.com/synthetic-org/synthetic-repo/issues/1",
+            isPrivate: privateSubject,
+            [subjectType === "pull_request" ? "pullRequest" : "issue"]: {
+              id: changedSubject || changedDuringHydration ? "PR_synthetic_changed" : subjectId(),
+              url: `https://github.com/synthetic-org/synthetic-repo/${subjectType === "pull_request" ? "pull" : "issues"}/1`,
               timelineItems: { nodes: [current()], pageInfo: { hasNextPage: false, endCursor: null } },
             },
           },
-        }).nodes,
+        }).nodes;
+      },
       graphql: async (_source, query) =>
         query.includes("... on ProjectV2 {")
           ? { node: publicProject === null ? null : { id: "PVT_syntheticAllowed", public: publicProject } }
           : { node: { ...current(), previousStatus: "Todo", status: "Done" } },
     };
-    const runtime = await createPipeline({ ...h.options, config, githubClient: client, source: undefined });
+    const runtimeOptions = {
+      ...h.options,
+      config,
+      githubClient: client,
+      source: undefined,
+      components: {
+        ...components,
+        github: {
+          ...components.github,
+          createGithubEvidenceNormalizer(options) {
+            const normalize = components.github.createGithubEvidenceNormalizer(options);
+            return async (input) => {
+              normalizing = true;
+              try {
+                return await normalize(input);
+              } finally {
+                normalizing = false;
+              }
+            };
+          },
+        },
+      },
+    };
+    const runtime = await createPipeline(runtimeOptions);
     t.after(() => runtime.stop());
     const first = await runtime.runOnce();
     assert.equal(first.state, "published");
@@ -262,6 +333,20 @@ for (const loss of ["private", "hidden", "controls_failure"])
       (await runtime.app.inject(url)).json().rows.map((r) => r.result.value),
       [1],
     );
+    if (loss === "legacy_normalization_identity") {
+      const cached = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
+      assert.equal(cached.length, 1);
+      const document = structuredClone(cached[0].document);
+      assert.equal(document.projectHistoryNormalizationVersion, "collected-subject/v2");
+      // Emulate an intact private cache written before collected-subject
+      // binding. It must be recomputed, even with an unchanged event revision.
+      delete document.projectHistoryNormalizationVersion;
+      const hash = createHash("sha256").update(components.metrics.stableJSON(document)).digest("hex");
+      await h.db.query(
+        "UPDATE leaderboard_pipeline.normalizations SET document=$1::jsonb,document_hash=$2 WHERE fact_key=$3 AND policy_signature=$4",
+        [JSON.stringify(document), hash, cached[0].fact_key, cached[0].policy_signature],
+      );
+    }
     const originalTransaction = h.controlsStore.transaction.bind(h.controlsStore);
     if (loss === "controls_failure")
       h.controlsStore.transaction = (change, options) =>
@@ -269,16 +354,27 @@ for (const loss of ["private", "hidden", "controls_failure"])
           change(state);
           if (state.pipelineSourceDenials) throw Error("synthetic_controls_write_failure");
         }, options);
-    publicProject = loss === "hidden" ? null : false;
-    await runtime
-      .runOnce()
-      .catch((error) =>
-        assert.match(error.message, /project_source_scope_requires_reapproval|synthetic_controls_write_failure/),
-      );
+    if (loss === "subject_private") privateSubject = true;
+    else if (loss === "subject_identity") changedSubject = true;
+    else if (loss.startsWith("inventory_")) inventoryLoss = loss;
+    else if (loss.endsWith("normalization_identity")) normalizationIdentityLoss = true;
+    else publicProject = loss === "hidden" ? null : false;
+    let runError;
+    await runtime.runOnce().catch((error) => {
+      runError = error;
+    });
+    if (normalizationIdentityLoss) assert.ok(normalizationIdentityReads > 0);
     h.controlsStore.transaction = originalTransaction;
     const read = await runtime.app.inject(url + "&snapshot=" + first.publications[0].snapshotId);
     assert.notEqual(read.statusCode, 200);
     assert.notEqual((await runtime.app.inject(url)).statusCode, 200);
+    if (runError)
+      assert.match(
+        runError.message,
+        /project_source_scope_requires_reapproval|synthetic_controls_write_failure|project_subject_identity_unverified/,
+      );
+    if (["inventory_malformed_id", "inventory_oversized_id"].includes(loss))
+      assert.equal(invalidInventoryHistoryReads, 0);
     if (loss === "controls_failure") assert.equal(h.controlsStore.read().pipelineSourceDenials, undefined);
     else assert.equal(h.controlsStore.read().pipelineSourceDenials[2].configurationVersion, config.version);
     assert.equal(
@@ -296,9 +392,13 @@ for (const loss of ["private", "hidden", "controls_failure"])
     );
     // A repository that remains public cannot reopen a known-private Project publication.
     publicProject = true;
+    privateSubject = false;
+    changedSubject = false;
+    inventoryLoss = null;
+    normalizationIdentityLoss = false;
     await assert.rejects(runtime.runOnce(), /project_source_scope_requires_reapproval/);
     assert.notEqual((await runtime.app.inject(url)).statusCode, 200);
-    const restarted = await createPipeline({ ...h.options, config, githubClient: client, source: undefined });
+    const restarted = await createPipeline(runtimeOptions);
     t.after(() => restarted.stop());
     await assert.rejects(restarted.runOnce(), /project_source_scope_requires_reapproval/);
     assert.notEqual(
@@ -308,10 +408,8 @@ for (const loss of ["private", "hidden", "controls_failure"])
     // Recovery requires a separately approved config version and rebuilt publication.
     const approvedConfig = { ...config, version: config.version + "-reapproved" };
     const recovered = await createPipeline({
-      ...h.options,
+      ...runtimeOptions,
       config: approvedConfig,
-      githubClient: client,
-      source: undefined,
     });
     t.after(() => recovered.stop());
     assert.notEqual(

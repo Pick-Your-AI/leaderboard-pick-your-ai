@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { actorKindSchema, contributionRoleSchema } from "@pick-your-ai/contracts";
+import { actorKindSchema, contributionRoleSchema, coverageSchema } from "@pick-your-ai/contracts";
 import {
   aggregateMetric, selectPortfolioFacts, comparePolicies, compareRankMovement, getMetricDefinition,
-  participationView, planPolicyRelease, resolveMetricWindow, stableJSON, validateMetricPolicy,
+  hasCompleteSourceCoverage, participationView, planPolicyRelease, resolveMetricWindow, stableJSON, validateMetricPolicy,
 } from "../dist/index.js";
 
 const from = "2026-10-01T00:00:00Z", to = "2026-11-01T00:00:00Z";
@@ -17,6 +17,29 @@ const fact = (id, patch = {}) => ({ id, canonicalKey: `synthetic-action-${id}`, 
 const coverage = (patch = {}) => ({ schemaVersion: "leaderboard/v1", state: "complete", source: "github_rest", scopeId: "synthetic-repo", windowStart: "2026-01-01T00:00:00Z", windowEnd: to, knownStart: "2026-01-01T00:00:00Z", lastSuccessfulSync: to, sourceWatermark: to, missingPages: 0, permissionsMissing: [], sourceErrors: [], ...patch });
 const input = (facts = [], patch = {}) => ({ datasetId: "synthetic-frozen-dataset", cutoff: to, backfillRevision: "synthetic-backfill-1", repositoryIds: ["synthetic-repo"], actors: [actor("a"), actor("b"), actor("c")], facts, coverage: [coverage()], ...patch });
 const board = (facts, policyPatch = {}, scopePatch = {}, inputPatch = {}) => aggregateMetric(input(facts, inputPatch), policy(policyPatch), scope(scopePatch));
+
+test("localization accepted units reject raw counts and preserve distinct accepted locale categories", () => {
+  const configured = policy({ metricId: "localization", groupBy: "canonical", dateBasis: "occurredAt", rank: false });
+  assert.throws(() => validateMetricPolicy({ ...configured, rankedStates: ["observed"] }), /independent acceptance/);
+  assert.throws(() => validateMetricPolicy({ ...configured, groupBy: "actor_artifact" }), /canonical language/);
+  assert.throws(() => validateMetricPolicy({ ...configured, dateBasis: "acceptedAt" }), /source merge clock/);
+  const common = { metricId: "localization", artifactId: "synthetic-same-pr" };
+  const raw = fact("raw-fr", { ...common, canonicalKey: "synthetic-fr", state: "observed", acceptedAt: null, acceptedBy: null, acceptanceReceipt: null });
+  const other = fact("raw-de", { ...raw, id: "raw-de", canonicalKey: "synthetic-de" });
+  const rawOnly = input([raw, other]);
+  assert.ok(aggregateMetric(rawOnly, configured, scope()).rows.every((row) => row.value === null || row.value === 0));
+  assert.equal(selectPortfolioFacts(rawOnly, configured, scope()).length, 2);
+  const accepted = [fact("accepted-fr", { ...common, canonicalKey: "synthetic-accepted-fr" }), fact("accepted-de", { ...common, canonicalKey: "synthetic-accepted-de" })];
+  const result = aggregateMetric(input([...rawOnly.facts, ...accepted]), configured, scope());
+  assert.equal(result.rows[0].value, 2);
+  assert.deepEqual(result.rows[0].evidenceIds, ["accepted-de", "accepted-fr"]);
+  const mergedWindow = scope({ from: "2026-10-04T00:00:00Z", to: "2026-10-05T00:00:00Z" });
+  const reviewedWindow = scope({ from: "2026-10-05T00:00:00Z", to: "2026-10-06T00:00:00Z" });
+  assert.equal(aggregateMetric(input(accepted), configured, mergedWindow).rows[0].value, 2);
+  assert.deepEqual(aggregateMetric(input(accepted), configured, reviewedWindow).rows, []);
+  const selfReviewed = accepted.map((entry) => ({ ...entry, acceptedBy: entry.actorId }));
+  assert.equal(aggregateMetric(input(selfReviewed), configured, scope()).rows.length, 0);
+});
 
 test("accepted counts reconcile to evidence while pending stays outside dense ranks", () => {
   const facts = Array.from({ length: 14 }, (_, n) => fact(`accepted-${n}`));
@@ -136,9 +159,108 @@ test("zero requires complete source coverage throughout the selected window", ()
   assert.equal(board([f], p, { repos: ["synthetic-repo", "missing-repo"] }).coverage, "incomplete");
 });
 
+// These remain valid Coverage documents; completeness also requires reconciliation
+// through the exclusive end, independently of the enclosing collection window.
+for (const [label, sourceWatermark] of [["missing", null], ["fractionally short", "2026-10-31T23:59:59.999999999Z"]]) {
+  const frozen = (metricId = "pr_merged") => input([fact("watermark", { metricId, ...(metricId === "pr_lines_changed" ? { quantity: 0 } : {}) })], { coverage: [coverageSchema.parse(coverage({ sourceWatermark }))] });
+  test(`${label} source watermark preserves observed positive ranks but cannot certify complete totals`, () => {
+    const captured = frozen(), original = stableJSON(captured);
+    const result = aggregateMetric(captured, policy(), scope());
+    assert.equal(result.coverage, "incomplete");
+    assert.equal(result.rows[0].state, "partial");
+    assert.equal(result.rows[0].value, 1);
+    assert.equal(result.rows[0].rank, 1);
+    assert.deepEqual(result.rows[0].evidenceIds, ["watermark"]);
+    assert.equal(result.publicEnabled, false);
+    assert.equal(stableJSON(captured), original);
+  });
+  test(`${label} source watermark withholds an otherwise measured zero`, () => {
+    const result = aggregateMetric(frozen("pr_lines_changed"), policy({ metricId: "pr_lines_changed", aggregation: "sum" }), scope());
+    assert.equal(result.coverage, "incomplete");
+    assert.equal(result.rows[0].state, "unknown");
+    assert.equal(result.rows[0].value, null);
+    assert.equal(result.rows[0].rank, null);
+    assert.deepEqual(result.rows[0].evidenceIds, ["watermark"]);
+  });
+  test(`${label} source watermark cannot certify complete newcomer history`, () => {
+    const result = participationView(frozen(), policy(), scope(), { originAt: "2026-01-01T00:00:00Z", reviewReceipt: "synthetic-history-review" })[0];
+    assert.equal(result.historyCoverage, "incomplete");
+    assert.equal(result.newcomer, null);
+    assert.equal(result.firstContributionId, "watermark");
+    assert.equal(result.firstContributionAt, "2026-10-05T10:00:00Z");
+    assert.deepEqual(result.activeWeeks, ["2026-10-05T00:00:00.000Z"]);
+    assert.equal(result.denominatorWeeks, 5);
+  });
+  test(`${label} source watermark makes movement unavailable with the existing reason`, () => {
+    const captured = frozen();
+    const before = aggregateMetric(captured, policy(), scope());
+    const after = aggregateMetric({ ...captured, datasetId: "synthetic-watermark-later", cutoff: "2026-11-02T00:00:00Z" }, policy(), scope());
+    const result = compareRankMovement(before, after)[0];
+    assert.equal(result.state, "unavailable");
+    assert.equal(result.delta, null);
+    assert.equal(result.reason, "insufficient_history");
+  });
+}
+
+for (const sourceWatermark of [to, "2026-10-31T19:00:00.000000000-05:00"])
+  test(`reconciled exclusive-end watermark ${sourceWatermark} retains complete count, zero, history and movement`, () => {
+    const covered = coverageSchema.parse(coverage({ sourceWatermark }));
+    const captured = input([fact("watermark")], { coverage: [covered] });
+    const result = aggregateMetric(captured, policy(), scope());
+    assert.equal(result.coverage, "complete");
+    assert.deepEqual([result.rows[0].state, result.rows[0].value, result.rows[0].rank], ["measured", 1, 1]);
+    const zero = board([fact("zero", { metricId: "pr_lines_changed", quantity: 0 })], { metricId: "pr_lines_changed", aggregation: "sum" }, {}, { coverage: [covered] }).rows[0];
+    assert.deepEqual([zero.state, zero.value, zero.rank], ["zero", 0, 1]);
+    const participation = participationView(captured, policy(), scope(), { originAt: "2026-01-01T00:00:00Z", reviewReceipt: "synthetic-history-review" })[0];
+    assert.equal(participation.historyCoverage, "complete_known_history");
+    assert.equal(participation.newcomer, true);
+    const later = aggregateMetric({ ...captured, datasetId: "synthetic-watermark-later", cutoff: "2026-11-02T00:00:00Z" }, policy(), scope());
+    assert.deepEqual([compareRankMovement(result, later)[0].state, compareRankMovement(result, later)[0].delta], ["comparable", 0]);
+  });
+
+test("invalid watermark comparisons fail closed and coverage never replaces the frozen cutoff gate", () => {
+  for (const sourceWatermark of [undefined, "not-a-source-instant"]) {
+    const invalid = coverage({ sourceWatermark });
+    assert.equal(coverageSchema.safeParse(invalid).success, false);
+    assert.equal(hasCompleteSourceCoverage(input([], { coverage: [invalid] }), policy(), scope()), false);
+  }
+  for (const cutoff of [null, "2026-10-31T23:59:59.999Z"]) {
+    const captured = input([fact("watermark")], { cutoff });
+    assert.throws(() => aggregateMetric(captured, policy(), scope()));
+    assert.throws(() => participationView(captured, policy(), scope()));
+  }
+});
+
 test("dense ties and codepoint ordering do not confer superior alphabetical rank", () => {
   const result = board([fact("a"), fact("b", { actorId: "b" }), fact("c", { actorId: "c" }), fact("d", { actorId: "c" })]);
   assert.deepEqual(result.rows.map(row => [row.actorId, row.value, row.rank, row.tied]), [["c", 2, 1, false], ["a", 1, 2, true], ["b", 1, 2, true]]);
+});
+
+test("spotlight definitions retain unranked evidence without accepting a ranked policy", () => {
+  for (const metricId of ["appreciation", "incidents", "first_contribution"]) {
+    const configured = policy({ metricId, rank: false, dateBasis: metricId === "first_contribution" ? "occurredAt" : "acceptedAt" });
+    const frozen = input([fact("spotlight", { metricId })]);
+    const original = stableJSON(frozen);
+    const result = aggregateMetric(frozen, configured, scope());
+    assert.equal(result.rows[0].value, 1);
+    assert.deepEqual(result.rows[0].evidenceIds, ["spotlight"]);
+    assert.equal(result.rows[0].rank, null);
+    assert.equal(result.rows[0].tied, false);
+    assert.equal(result.publicEnabled, false);
+    assert.throws(() => aggregateMetric(frozen, { ...configured, rank: true }, scope()), /cannot rank contributors/);
+    assert.equal(stableJSON(frozen), original);
+  }
+});
+
+test("partial observed subsets preserve their disclosed values and ordering", () => {
+  const metricId = "issues_opened";
+  const observed = fact("observed", { metricId, state: "observed", acceptedAt: null, acceptedBy: null, acceptanceReceipt: null });
+  const result = board([observed], { metricId, dateBasis: "occurredAt", rankedStates: ["observed"] }, {}, { coverage: [coverage({ state: "partial", missingPages: 1 })] });
+  assert.equal(result.coverage, "incomplete");
+  assert.equal(result.rows[0].state, "partial");
+  assert.equal(result.rows[0].value, 1);
+  assert.equal(result.rows[0].rank, 1);
+  assert.deepEqual(result.rows[0].evidenceIds, ["observed"]);
 });
 
 test("review spam and repeated raw-state intervals follow the explicit aggregation policy", () => {
@@ -176,13 +298,13 @@ test("rank movement compares explicit compatible periods and refuses mixed polic
   const oldFacts = [fact("a"), fact("b", { actorId: "b" })];
   const newFact = fact("c", { actorId: "b", acceptedAt: "2026-11-01T12:00:00Z", observedAt: "2026-11-01T12:01:00Z" });
   const before = board(oldFacts, {}, oldScope);
-  const after = board([...oldFacts, newFact], {}, nextScope, { cutoff: nextCutoff, coverage: [coverage({ windowEnd: nextCutoff })] });
+  const after = board([...oldFacts, newFact], {}, nextScope, { cutoff: nextCutoff, coverage: [coverage({ windowEnd: nextCutoff, sourceWatermark: nextCutoff })] });
   assert.equal(compareRankMovement(before, after).find(row => row.actorId === "b").delta, 0);
   assert.equal(compareRankMovement(before, after).find(row => row.actorId === "a").delta, -1);
   for (const [patch, expected] of [[{ policyVersion: "v2" }, "mixed_policy_versions"], [{ backfillRevision: "backfill-2" }, "backfill_or_reconciliation"], [{ coverage: "incomplete" }, "insufficient_history"], [{ scope: scope({ from: "2026-09-01T00:00:00Z" }) }, "different_scope_or_window"]]) assert.equal(compareRankMovement(before, { ...after, ...patch })[0].reason, expected);
-  const entrant = board([...oldFacts, { ...newFact, actorId: "c" }], {}, nextScope, { cutoff: nextCutoff, coverage: [coverage({ windowEnd: nextCutoff })] });
+  const entrant = board([...oldFacts, { ...newFact, actorId: "c" }], {}, nextScope, { cutoff: nextCutoff, coverage: [coverage({ windowEnd: nextCutoff, sourceWatermark: nextCutoff })] });
   assert.equal(compareRankMovement(before, entrant).find(row => row.actorId === "c").state, "new_entrant");
-  const late = board([...oldFacts, fact("late", { actorId: "b" })], {}, nextScope, { cutoff: nextCutoff, coverage: [coverage({ windowEnd: nextCutoff })] });
+  const late = board([...oldFacts, fact("late", { actorId: "b" })], {}, nextScope, { cutoff: nextCutoff, coverage: [coverage({ windowEnd: nextCutoff, sourceWatermark: nextCutoff })] });
   assert.equal(compareRankMovement(before, late)[0].reason, "late_history");
 });
 
@@ -399,7 +521,7 @@ test("same policy unit cannot select a convenient conflicting sum, outcome or du
 test("adjacent UTC windows around the DST fallback count each boundary action once", () => {
   const cutoff = "2026-11-02T00:00:00Z", boundary = "2026-11-01T06:00:00Z";
   const facts = [fact("before", { acceptedAt: "2026-11-01T05:59:59.999Z", observedAt: "2026-11-01T06:01:00Z" }), fact("boundary", { acceptedAt: boundary, observedAt: "2026-11-01T06:01:00Z" })];
-  const frozen = { cutoff, coverage: [coverage({ windowEnd: cutoff })] };
+  const frozen = { cutoff, coverage: [coverage({ windowEnd: cutoff, sourceWatermark: cutoff })] };
   const before = board(facts, {}, { from: "2026-11-01T05:00:00Z", to: boundary }, frozen);
   const after = board(facts, {}, { from: boundary, to: "2026-11-01T07:00:00Z" }, frozen);
   assert.deepEqual(before.rows[0].evidenceIds, ["before"]);
@@ -490,7 +612,7 @@ test("fresh accepted activity remains comparable and timestamp spelling does not
   const nextCutoff = "2026-11-02T00:00:00Z";
   const before = board(oldFacts, {}, resolveMetricWindow("30d", to));
   const fresh = fact("fresh", { actorId: "b", acceptedAt: "2026-11-01T12:00:00Z", observedAt: "2026-11-01T12:01:00Z" });
-  const after = board([...oldFacts.map(f => ({ ...f, acceptedAt: "2026-10-05T10:00:00.000Z" })), fresh], {}, resolveMetricWindow("30d", nextCutoff), { cutoff: nextCutoff, coverage: [coverage({ windowEnd: nextCutoff })] });
+  const after = board([...oldFacts.map(f => ({ ...f, acceptedAt: "2026-10-05T10:00:00.000Z" })), fresh], {}, resolveMetricWindow("30d", nextCutoff), { cutoff: nextCutoff, coverage: [coverage({ windowEnd: nextCutoff, sourceWatermark: nextCutoff })] });
   assert.deepEqual(compareRankMovement(before, after).map(row => [row.actorId, row.state, row.delta]), [["b", "comparable", 0], ["a", "comparable", -1]]);
   const legacy = structuredClone(before);
   for (const row of legacy.rows) for (const evidence of row.evidence) delete evidence.comparisonSignature;
@@ -595,14 +717,22 @@ test("named movement uses event-window end separately from a later observation c
   const oldFacts = [fact("a"), fact("b", { actorId: "b" })];
   const before = board(oldFacts, {}, resolveMetricWindow("30d", firstEnd), { cutoff: "2026-11-01T00:10:00.123Z" });
   const fresh = fact("fresh", { actorId: "b", acceptedAt: "2026-11-01T00:05:00.000Z", observedAt: "2026-11-02T00:00:00.001Z" });
-  const later = { cutoff: "2026-11-02T00:10:00.456Z", coverage: [coverage({ windowEnd: nextEnd })] };
+  const later = { cutoff: "2026-11-02T00:10:00.456Z", coverage: [coverage({ windowEnd: nextEnd, sourceWatermark: nextEnd, lastSuccessfulSync: nextEnd })] };
   const after = board([...oldFacts, fresh], {}, resolveMetricWindow("30d", nextEnd), later);
+  assert.equal(before.coverage, "complete");
+  assert.equal(after.coverage, "complete");
   assert.deepEqual(compareRankMovement(before, after).map(row => [row.actorId, row.state, row.delta]), [["b", "comparable", 0], ["a", "comparable", -1]]);
   const late = board([...oldFacts, { ...fresh, acceptedAt: "2026-10-31T23:59:59.999Z" }], {}, resolveMetricWindow("30d", nextEnd), later);
   assert.ok(compareRankMovement(before, late).every(row => row.reason === "late_history"));
   assert.ok(compareRankMovement(before, { ...after, cutoff: "2026-11-01T23:59:59.999Z" }).every(row => row.reason === "different_scope_or_window"));
-  assert.ok(compareRankMovement({ ...after, cutoff: before.cutoff }, { ...before, cutoff: after.cutoff }).every(row => row.state === "unavailable"));
-  assert.ok(compareRankMovement(before, { ...after, coverage: "incomplete" }).every(row => row.reason === "insufficient_history"));
+  const reversed = compareRankMovement(
+    { ...after, cutoff: "2026-11-03T00:00:00.000Z" },
+    { ...before, cutoff: "2026-11-04T00:00:00.000Z" },
+  );
+  assert.ok(reversed.every(row => row.reason === "reversed_snapshots"));
+  const lagging = board([...oldFacts, fresh], {}, resolveMetricWindow("30d", nextEnd), { ...later, coverage: [coverage({ windowEnd: nextEnd, sourceWatermark: firstEnd })] });
+  assert.equal(lagging.coverage, "incomplete");
+  assert.ok(compareRankMovement(before, lagging).every(row => row.reason === "insufficient_history"));
 });
 
 test("named UTC publication windows keep DST boundary events half-open", () => {
@@ -613,6 +743,7 @@ test("named UTC publication windows keep DST boundary events half-open", () => {
     fact("inside", { acceptedAt: "2026-11-02T05:59:59.999Z", observedAt: "2026-11-02T06:00:00.001Z" }),
     fact("end", { acceptedAt: end, observedAt: "2026-11-02T06:00:00.001Z" }),
   ];
-  const result = board(facts, {}, window, { cutoff: "2026-11-02T06:00:00.123Z", coverage: [coverage({ windowEnd: end })] });
+  const result = board(facts, {}, window, { cutoff: "2026-11-02T06:00:00.123Z", coverage: [coverage({ windowEnd: end, sourceWatermark: end, lastSuccessfulSync: end })] });
+  assert.equal(result.coverage, "complete");
   assert.deepEqual(result.rows[0].evidenceIds, ["inside", "start"]);
 });

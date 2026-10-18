@@ -4,6 +4,8 @@
 
 Recognition exists to make work discoverable and attributable. It is not a measure of a person's worth or a performance-management system. Activity volume, accepted outcomes and editorial recognition require different labels and evidence.
 
+The [evidence and contributor-rights policy](evidence-contributor-rights.md) defines source admission, voluntary consent, corrections, opt-out, appeals, retention and attributable decisions. Its adoption is separate from source activation, actual deletion and operating acceptance.
+
 ## Ownership and policy changes
 
 GitHub Assignees own delivery work. The plan's owner roles describe required expertise; they do not assign a person. Accept an owner before work is Ready. Source repository owners retain authority over research, code and release acceptance. Leaderboard moderators cannot declare upstream deliverables complete.
@@ -12,13 +14,13 @@ Version metric definitions, identity rules, line classification and eligibility 
 
 ## Evidence and correction
 
-Observe raw activity without inferring its quality. Review receipts when recognition requires acceptance, mentoring, design contribution, source verification or other qualitative judgment. Document the artifact, participants, roles, occurrence date, submitter, independent reviewer, policy version and public summary. Reviewers declare conflicts and do not approve their own disputed recognition.
+Observe raw activity without inferring its quality. Review receipts when recognition requires acceptance, mentoring, design contribution, source verification or other qualitative judgment. Document the artifact, participants, roles, occurrence date, submitter, independent reviewer, policy version and public summary. Reviewers declare conflicts and cannot accept claims submitted by themselves or listing them as collaborators. Appeals and rollbacks require a reviewer who has made no earlier decision on that receipt.
 
-Provide a functioning correction and appeal route with a submission receipt. Preserve an auditable decision trail while minimizing personal data. Withdrawal, duplicate evidence and upheld corrections invalidate derived counts across every affected snapshot, export and cache. Do not promise response times until an operator accepts the commitment.
+Provide a functioning correction and appeal route with a submission receipt. Preserve an auditable decision trail while minimizing personal data. Withdrawal, duplicate evidence and upheld corrections invalidate derived counts across affected service-controlled snapshots, exports and caches. Explain that independently downloaded copies are outside the service's deletion control. Do not promise response times until an operator accepts the commitment.
 
 ## Privacy and consent
 
-Use approved public repositories and Project fields. Never publish commit emails, private issue content, security findings or inferred identities. Verified opt-out and deletion propagate to directory, rankings, profiles, live displays, embeds, caches and exports. Separate authenticated controls from public data. A source becoming private triggers suppression before later enrichment.
+Use approved public repositories and Project fields. Never publish commit emails, private issue content, security findings or inferred identities. Verified opt-out and suppression apply across all enabled service-controlled public surfaces, including historical views. Report actual payload deletion, backup expiry and remaining cleanup separately. Separate authenticated controls from public data. A source becoming private triggers suppression before later enrichment.
 
 ## Counting safeguards
 
@@ -26,7 +28,9 @@ Distinct contribution roles can share an artifact, but a repeated event or impor
 
 ## Decision register
 
-The dedicated repository boundary has been selected. Other recommendations below remain proposals until their responsible roles accept them. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
+The dedicated repository boundary has been selected. The [metric and recognition decision](metric-recognition-policy.md) and its [definition review](metric-definition-review.md) specify this project's policy choices; review and merge record their acceptance. Each register entry retains its unresolved source, role or operating evidence. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
+
+The [release-phase decision](release-decision.md) defines transition evidence and proposed evaluation targets. Its adoption does not establish that a phase has passed or turn a proposed role into a named operational commitment.
 
 **Id:** DEC-01
 
@@ -54,7 +58,7 @@ The dedicated repository boundary has been selected. Other recommendations below
 
 **Question:** Which sources and history are public and eligible?
 
-**Recommended:** All public repositories and Projects explicitly onboarded by stable IDs, starting with the three repositories and five Projects in the historical audit and including this newly published repository and Project after scope acceptance; unknown adoption boundaries are disclosed
+**Recommended:** Public repositories and Projects explicitly onboarded by immutable IDs after source-specific approval; refresh the historical inventory and disclose unknown adoption boundaries
 
 ### Alternatives
 
@@ -68,7 +72,9 @@ The dedicated repository boundary has been selected. Other recommendations below
 - LB-04.02
 - LB-06.01
 
-**Status:** Proposed
+**Status:** Source-admission policy adopted; individual source activation and history boundaries remain gated
+
+**Decision:** Apply docs/evidence-contributor-rights.md: default-deny source admission, approved event/field types, current visibility and source-use evidence, versioned capability receipts, explicit history gaps, and current suppression across enabled public surfaces. The six repository and six Project examples reviewed for LB-01.01 are candidates, not source-installation grants.
 
 **Id:** DEC-03
 
@@ -86,7 +92,13 @@ The dedicated repository boundary has been selected. Other recommendations below
 
 - LB-11.01
 
-**Status:** Proposed
+**Status:** Decision specified; review and merge of LB-01.02 record acceptance
+
+**Decision:** Use recognition-governance/v1: independent observed, qualified and reviewed views, dense ties, an inclusive unranked directory and no universal weighted contributor score. Descriptive ratios, wait times, context and editorial recognition remain unranked. The per-definition review preserves all 98 meanings and source limits; runtime policy configuration and public enablement remain separate.
+
+**Decision record:** docs/metric-recognition-policy.md
+
+**Definition review:** docs/metric-definition-review.md
 
 **Id:** DEC-04
 
@@ -106,7 +118,11 @@ The dedicated repository boundary has been selected. Other recommendations below
 - LB-10.03
 - LB-17.03
 
-**Status:** Needs role acceptance; no named assignment invented
+**Status:** Authority rules specified; actual runtime roster and operating acceptance remain required
+
+**Decision:** recognition-governance/v1 defines independent evidence review, source and receiving authority, conflict handling, appeal separation and versioned correction receipts. Repository engineering authorization accepts this project's policy decision; it does not create a runtime identity/role, a source observation, contributor consent or external receiving acceptance. No named assignment or response commitment is invented.
+
+**Decision record:** docs/metric-recognition-policy.md
 
 **Id:** DEC-05
 
@@ -146,7 +162,9 @@ The dedicated repository boundary has been selected. Other recommendations below
 - LB-15.03
 - LB-17.03
 
-**Status:** Policy decision required before production
+**Status:** Identity and contributor-rights policy adopted; implementation and operating acceptance remain required
+
+**Decision:** Apply docs/evidence-contributor-rights.md: eligible public facts after source admission; voluntary optional profile/external/editorial choices; verified stable-account identity without email/name inference; durable correction, opt-out and independent appeal processes; minimized attributable audit; and separate public suppression, payload deletion and backup completion evidence. Numeric retention windows and the actual operator/reviewer roster retain their own acceptance gates.
 
 **Id:** DEC-07
 
@@ -166,7 +184,11 @@ The dedicated repository boundary has been selected. Other recommendations below
 - LB-19.06
 - LB-20.04
 
-**Status:** Proposed; explicit release manifest required
+**Status:** Initial presentation defaults specified; explicit enabled-capability release manifest still required
+
+**Decision:** Use the implemented, source-proven per-definition lens without substituting an unsupported state or source clock. Raw activity remains labeled; qualified/reviewed outcomes need their exact acceptance. Retained-line analysis stays deferred. Candidate UI metadata and the complete 98-definition catalog are discovery aids, not permission, live measurement or public activation. The release manifest must independently select enabled capabilities and record disabled reasons.
+
+**Decision record:** docs/metric-recognition-policy.md
 
 **Id:** DEC-08
 
@@ -186,7 +208,11 @@ The dedicated repository boundary has been selected. Other recommendations below
 - LB-19.04
 - LB-20.04
 
-**Status:** Targets only; unmeasured
+**Status:** Evaluation targets specified; host-specific measurement and operating acceptance remain required
+
+**Decision:** release-gates/v1 retains proposed p95 durable acknowledgement under two seconds and receive-to-publication under sixty seconds within a declared load envelope. Report failures, unpublished/oldest-pending events, upstream lag, quiet successful collection and source disconnection separately. Review and merge adopt the evaluation policy, not measured latency or a live-service promise.
+
+**Decision record:** docs/release-decision.md
 
 **Id:** DEC-09
 
@@ -211,7 +237,7 @@ The dedicated repository boundary has been selected. Other recommendations below
 
 **Question:** What are retention, recovery and operating commitments?
 
-**Recommended:** Choose minimized payload retention, backup deletion bounds, RTO/RPO and accepted operational owner before launch; test rather than claim
+**Recommended:** Evaluate 99.5% public read availability over thirty days, recovery within four hours and at most twenty-four hours of unrecovered acknowledged public source observations; preserve current privacy state before serving; separately select retention and actual operating commitments
 
 ### Alternatives
 
@@ -226,7 +252,35 @@ The dedicated repository boundary has been selected. Other recommendations below
 - LB-20.03
 - LB-20.04
 
-**Status:** Unselected numeric retention/RTO/RPO; decision scoped
+**Status:** Proposed availability/recovery evaluation profile specified; numeric retention, host, budget and operating acceptance remain unresolved
+
+**Decision:** release-gates/v1 defines complete observation denominators, recovery start/end and reconciliation evidence in planning/release-manifest.json and docs/release-decision.md. Missing measurements and unknown data loss cannot pass. The source-observation recovery allowance does not permit losing privacy, consent, correction or deletion restrictions. Current authoritative restrictions and independent readback precede public serving even if a time objective is missed. The actual host/cost/operator profile, backup schedule, encrypted storage/key access and retention/deletion bounds remain separate decisions.
+
+**Decision record:** docs/release-decision.md
+
+**Id:** DEC-11
+
+**Question:** What evidence permits each release phase to advance?
+
+**Recommended:** Adopt release-gates/v1: distinct concept, synthetic, shadow, beta, production and full-project gates with exact source/scope, actual receiving evidence and explicit unresolved findings
+
+### Alternatives
+
+- Keep an explicitly labeled synthetic prototype until actual source/operating inputs are accepted
+- Use an explicitly periodic static preview after its own reviewed source/privacy/release acceptance
+
+**Decision role:** Project scope authority, affected source/metric/privacy/accessibility roles and actual operations/release authority
+
+### Before
+
+- LB-19.06
+- LB-20.04
+
+**Status:** Decision specified; review and merge of LB-01.06 record gate-policy adoption
+
+**Decision:** Each transition requires the release manifest evidence and attributable receiving review. Existing mandatory and conditional work-package lists remain in force. The local phase decision can use unresolved hosting alternatives as planning input; it cannot certify source activation, appoint a person, authorize spending or substitute rendered/synthetic output for deployment, participant or operational evidence. Full project acceptance retains every in-scope package unless explicitly descoped by reviewed authority.
+
+**Decision record:** docs/release-decision.md
 
 ## Related policies
 

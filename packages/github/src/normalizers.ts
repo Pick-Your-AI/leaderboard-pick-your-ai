@@ -7,6 +7,7 @@ import {
 } from "./research.js";
 import { createHash } from "node:crypto";
 import {
+  publicDocumentationReasons,
   serviceAccountClassificationSchema,
   type ServiceAccountClassification,
   publicEvidenceActionSchema,
@@ -19,6 +20,14 @@ import {
 import { GithubReadClient } from "./client.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
+import {
+  readPublicSubjectProjectSnapshot,
+  projectSubjectSnapshotRevision,
+  projectContextFromSnapshot,
+  validateProjectWorkstreamMapping,
+  type ProjectWorkstreamMapping,
+  type ProjectMembershipContext,
+} from "./project-context.js";
 import {
   classifyPhysicalDiff,
   pinnedSha,
@@ -121,13 +130,25 @@ export interface NormalizedGithubFact {
   acceptanceReceipt: string | null;
   acceptedBy: string | null;
   subjectActorId: string | null;
-  eventContext: { projects: string[]; workstreams: string[] } | null;
-  currentContext: { projects: string[]; workstreams: string[] } | null;
+  eventContext: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
+  currentContext: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
   quantity?: number;
   rawState?: string;
   outcome?: "merged" | "closed_unmerged" | "pending";
   readyAt?: string | null;
   firstReviewAt?: string | null;
+  /** Original observed locale unit superseded only in descriptive current activity. */
+  recognitionSourceFactId?: string;
 }
 export interface NormalizedGithubActor {
   id: string;
@@ -194,6 +215,8 @@ export interface NormalizedGithubResult {
   lineage: GithubLineage[];
   suppressArtifactIds: string[];
   physicalDiff?: ClassifiedPhysicalDiff;
+  /** Private current association; it never creates an action or historical attribution. */
+  projectContext?: NormalizedProjectContext;
   participation: Array<{
     artifactId: string;
     actorId: string;
@@ -238,8 +261,18 @@ export interface GithubEvidenceEnvelope {
   occurredAt?: string | null;
   action?: string;
   payload: unknown;
-  eventContext?: { projects: string[]; workstreams: string[] } | null;
-  currentContext?: { projects: string[]; workstreams: string[] } | null;
+  eventContext?: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
+  currentContext?: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
   verifiedCoauthors?: readonly { actor: unknown; verificationReceipt: string }[];
   /** Protected collector input, never copied from API payloads, trailers or public request bodies. */
   reviewedServiceAccounts?: readonly ServiceAccountClassification[];
@@ -412,6 +445,8 @@ function creditedAction(fact: NormalizedGithubFact, family: string, envelopeActi
     title_scope_edits: "title_or_body_edited",
     issue_transfers: "issue_transferred",
     reverted_delivery: "revert_observed",
+    documentation: "pull_request_merged",
+    localization: "pull_request_merged",
   };
   if (fact.metricId === "review_wait" && !fact.readyAt) return "unknown";
   if (fact.metricId === "pr_accepted_rate")
@@ -1058,6 +1093,33 @@ export function normalizeGithubObservation(
       }
     }
   }
+  // Specialist review must bind an immutable delivered revision, never a PR URL
+  // or its mutable update timestamp. This does not qualify the source fact.
+  const mergedRevisionTime = time(resource.merged_at);
+  if (
+    envelope.family === "pull_request" &&
+    resource.merged === true &&
+    mergedRevisionTime &&
+    Date.parse(mergedRevisionTime) <= Date.parse(observedAt) &&
+    integration?.diff &&
+    out.physicalDiff?.complete &&
+    pinnedSha(integration.after) &&
+    resource.merge_commit_sha === integration.after &&
+    object(resource.base) &&
+    text(resource.base.ref) &&
+    text(repository.defaultBranch) &&
+    resource.base.ref === integration.targetBranch &&
+    integration.targetBranch === integration.defaultBranch &&
+    repository.defaultBranch === integration.defaultBranch &&
+    integration.diff.before === integration.before &&
+    integration.diff.after === integration.after &&
+    text(integration.canonicalChangeId)
+  ) {
+    for (const evidence of out.evidence.filter((entry) => entry.contribution.metricIds.includes("pr_merged"))) {
+      evidence.sourceRevision = integration.after;
+      evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
+    }
+  }
   if (documentationPolicy && envelope.family === "pull_request") {
     validateDocumentationPolicy(documentationPolicy);
     const mergedAt = time(resource.merged_at);
@@ -1066,6 +1128,7 @@ export function normalizeGithubObservation(
       !integration?.diff ||
       resource.merged !== true ||
       !mergedAt ||
+      Date.parse(mergedAt) > Date.parse(observedAt) ||
       resource.merge_commit_sha !== integration.after ||
       !object(resource.base) ||
       !text(resource.base.ref) ||
@@ -1091,6 +1154,24 @@ export function normalizeGithubObservation(
         evidence.sourceRevision = integration.after;
         evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
         evidence.contribution.reasonCodes.push(`documentation_path_policy:${documentationPolicy.version}`);
+      }
+      for (const { locale, category } of classification.localizations) {
+        const fact = emit(
+          "localization",
+          author,
+          "author",
+          mergedAt,
+          JSON.stringify([repository.id, id, "localization", locale, category]),
+          { rawState: `merged_locale_participation:${locale}:${category}` },
+        );
+        const evidence = out.evidence.find((entry) => entry.contribution.contributionId === fact.id)!;
+        evidence.sourceRevision = integration.after;
+        evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
+        evidence.contribution.reasonCodes.push(
+          `documentation_path_policy:${documentationPolicy.version}`,
+          `locale:${locale}`,
+          `localization_category:${category}`,
+        );
       }
     }
   }
@@ -1168,8 +1249,29 @@ export interface VerifiedRecognitionReceipt {
   evidenceIds: readonly string[];
   /** One changeset for e.g. ordering/configuration; not one credit per affected child/item. */
   changesetId?: string;
+  /** Exact immutable merge revision reviewed for a localization target. */
+  sourceRevision?: string;
 }
 const receiptMetrics = new Set([
+  "catalog_proposals",
+  "pricebook_proposals",
+  "compatibility_proposals",
+  "primary_sources",
+  "freshness_checks",
+  "reproduced_measurements",
+  "negative_findings",
+  "rights_reviews",
+  "assumptions_resolved",
+  "market_research",
+  "evidence_manifests",
+  "documentation",
+  "tests",
+  "regressions_prevented",
+  "accessibility",
+  "design",
+  "usability",
+  "performance",
+  "security",
   "accepted_findings",
   "confirmed_bugs",
   "issue_resolution",
@@ -1198,6 +1300,7 @@ export function applyRecognitionReceipt(
 ): NormalizedGithubResult {
   const out = structuredClone(input);
   const target = input.facts.find((fact) => fact.id === receipt.targetFactId);
+  const targetEvidence = input.evidence.find((item) => item.contribution.contributionId === receipt.targetFactId);
   if (
     receipt.verified !== true ||
     !text(receipt.id) ||
@@ -1212,27 +1315,41 @@ export function applyRecognitionReceipt(
   ) {
     throw new Error("Independent verified recognition receipt is required");
   }
+  // Localization is one PR/language/category unit. A bulk changeset must never
+  // collapse different languages or mint another unit for the same source fact.
+  const unit = receipt.metricId === "localization" ? target.canonicalKey : (receipt.changesetId ?? target.canonicalKey);
+  if (receipt.metricId === "localization" && target.state !== "observed")
+    throw new Error("Localization acceptance must target its original observed source fact");
+  if (
+    receipt.metricId === "localization" &&
+    (!targetEvidence ||
+      !target.canonicalKey ||
+      typeof receipt.sourceRevision !== "string" ||
+      !pinnedSha(receipt.sourceRevision) ||
+      targetEvidence.sourceRevision !== receipt.sourceRevision ||
+      !time(target.occurredAt) ||
+      Date.parse(target.occurredAt!) > Date.parse(receipt.acceptedAt))
+  )
+    throw new Error(
+      "Localization acceptance requires its reviewed merge revision and a decision no earlier than merge",
+    );
   const fact = {
     ...target,
     metricId: receipt.metricId,
-    id: stable("recognized", receipt.metricId, receipt.changesetId ?? target.canonicalKey, receipt.actorId),
-    canonicalKey: stable(
-      "recognized-unit",
-      receipt.metricId,
-      receipt.changesetId ?? target.canonicalKey,
-      receipt.actorId,
-    ),
+    id: stable("recognized", receipt.metricId, unit, receipt.actorId),
+    canonicalKey: stable("recognized-unit", receipt.metricId, unit, receipt.actorId),
     state: receipt.decision === "accepted" ? ("qualified" as const) : ("excluded" as const),
     acceptedAt: time(receipt.acceptedAt),
     acceptedBy: receipt.reviewerId,
     acceptanceReceipt: receipt.id,
+    ...(receipt.metricId === "localization" ? { recognitionSourceFactId: target.id } : {}),
   };
   out.facts.push(fact);
-  const evidence = input.evidence.find((item) => item.contribution.contributionId === target.id);
+  const evidence = targetEvidence;
   if (evidence)
     out.evidence.push({
       ...structuredClone(evidence),
-      occurredAt: fact.acceptedAt,
+      occurredAt: receipt.metricId === "localization" ? target.occurredAt : fact.acceptedAt,
       ...(evidence.evidenceMetadata
         ? {
             evidenceMetadata: {
@@ -1246,13 +1363,30 @@ export function applyRecognitionReceipt(
       contribution: {
         ...evidence.contribution,
         contributionId: fact.id,
-        canonicalEventId: fact.canonicalKey,
+        canonicalEventId: receipt.metricId === "localization" ? target.canonicalKey! : fact.canonicalKey,
         metricIds: [fact.metricId],
         qualification: receipt.decision === "accepted" ? "eligible" : "ineligible",
-        reasonCodes: ["independent_recognition_receipt"],
+        reasonCodes: [
+          "independent_recognition_receipt",
+          ...(receipt.metricId === target.metricId && ["documentation", "localization"].includes(target.metricId)
+            ? publicDocumentationReasons(evidence.contribution)
+            : []),
+        ],
       },
     });
   return out;
+}
+
+export interface NormalizedProjectContext {
+  schemaVersion: "github-current-project-context/v1";
+  repositoryId: string;
+  subjectId: string;
+  subjectKind: "issue" | "pull_request";
+  sourceUrl: string;
+  sourceRevision: string;
+  observedAt: string;
+  mappingVersion: string | null;
+  context: ProjectMembershipContext & { projectScope: string[] };
 }
 
 export interface CollectionNormalizerInput {
@@ -1265,6 +1399,9 @@ export interface CollectionNormalizerInput {
   policyVersion: string;
   fact: {
     subjectId: string;
+    /** Native issue/PR identity retained by the trusted Project-history collector. */
+    historySubjectId?: string;
+    projectSubjectId?: string;
     sourceRevision: string;
     sourceUrl: string;
     evidence: "current_state" | "observed_transition";
@@ -1296,10 +1433,28 @@ export interface GithubEvidenceNormalizerOptions {
   maxReviewPages?: number;
   documentationPolicies?: readonly DocumentationPathPolicy[];
   researchPolicies?: readonly ResearchPathPolicy[];
+  projectWorkstreamMappings?: readonly (ProjectWorkstreamMapping & { repositoryId: number })[];
 }
 
 /** Read-only collection-to-metric adapter. Lossy snapshots are hydrated rather than guessed. */
 export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizerOptions) {
+  const projectMappings = structuredClone(options.projectWorkstreamMappings ?? []);
+  if (
+    !Array.isArray(projectMappings) ||
+    projectMappings.length > 1000 ||
+    projectMappings.some(
+      (mapping) =>
+        !object(mapping) ||
+        Object.keys(mapping).length !== 3 ||
+        !["repositoryId", "version", "projects"].every((key) => Object.hasOwn(mapping, key)) ||
+        typeof mapping.repositoryId !== "number" ||
+        !Number.isSafeInteger(mapping.repositoryId) ||
+        mapping.repositoryId < 1 ||
+        !options.allowedRepositoryIds.includes(mapping.repositoryId),
+    ) ||
+    new Set(projectMappings.map((mapping) => mapping.repositoryId)).size !== projectMappings.length
+  )
+    throw new Error("invalid_project_workstream_mapping");
   const documentationPolicies = structuredClone(options.documentationPolicies ?? []);
   for (const policy of documentationPolicies) validateDocumentationPolicy(policy);
   if (new Set(documentationPolicies.map((policy) => policy.repositoryId)).size !== documentationPolicies.length)
@@ -1316,14 +1471,19 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       throw new Error("Pipeline policy and observation time are required");
     if (input.family === "relationships" || input.family === "project_history") {
       const match = input.fact.sourceUrl.match(
-        new RegExp(`^https://github\\.com/${input.repository.slug.replaceAll(".", "\\.")}/issues/([1-9]\\d*)$`),
+        new RegExp(`^https://github\\.com/${input.repository.slug.replaceAll(".", "\\.")}/(issues|pull)/([1-9]\\d*)$`),
       );
-      if (!match) return none("typed_history_subject_url_unverified");
+      if (!match || (match[1] === "pull" && input.family !== "project_history"))
+        return none("typed_history_subject_url_unverified");
+      if (input.family === "project_history" && input.fact.historySubjectId === undefined)
+        return none("project_history_subject_identity_not_collected");
       const records = await readTypedIssueHistory({
         client: options.client,
         source: options.source,
         repository: input.repository,
-        number: Number(match[1]),
+        number: Number(match[2]),
+        subjectType: match[1] === "pull" ? "pull_request" : "issue",
+        ...(input.family === "project_history" ? { subjectId: input.fact.historySubjectId } : {}),
         family: input.family,
         scanId: input.factKey,
         ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
@@ -1354,7 +1514,16 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           : String(event.__typename).includes("Removed")
             ? "removed"
             : "added",
-        ...(project ? { eventContext: { projects: [String(project.id)], workstreams: [] } } : {}),
+        ...(project
+          ? {
+              eventContext: {
+                projects: [String(project.id)],
+                projectScope: [String(project.id)],
+                workstreams: [],
+                workstreamsKnown: false,
+              },
+            }
+          : {}),
         payload: isProject
           ? {
               id: event.id,
@@ -1376,6 +1545,53 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       });
     }
     if (input.family === "project_current") {
+      if (input.fact.projectSubjectId !== undefined) {
+        if (
+          input.fact.projectSubjectId !== input.fact.subjectId ||
+          input.fact.evidence !== "current_state" ||
+          input.selectedCurrentState !== true
+        )
+          return none("project_context_current_selection_unverified");
+        const configured = projectMappings.find((mapping) => mapping.repositoryId === input.repository.id);
+        const mapping = configured
+          ? validateProjectWorkstreamMapping(
+              { version: configured.version, projects: configured.projects },
+              input.repository.allowedProjectIds ?? [],
+            )
+          : undefined;
+        const snapshot = await readPublicSubjectProjectSnapshot({
+          client: options.client,
+          source: options.source,
+          repository: input.repository,
+          subjectId: input.fact.projectSubjectId,
+          sourceUrl: input.fact.sourceUrl,
+          allowedProjectIds: input.repository.allowedProjectIds ?? [],
+          scanId: input.factKey,
+          ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
+        });
+        if (!matchesSnapshotRevision(input.fact.sourceRevision, projectSubjectSnapshotRevision(snapshot)))
+          return none("project_snapshot_revision_or_subject_unverified");
+        if (snapshot.items.some((item) => Date.parse(item.updatedAt) > Date.parse(input.observedAt)))
+          return none("project_snapshot_after_observation_cutoff");
+        return {
+          ...result(),
+          isSynthetic: options.isSynthetic === true,
+          projectContext: {
+            schemaVersion: "github-current-project-context/v1",
+            repositoryId: String(snapshot.repositoryId),
+            subjectId: snapshot.subjectId,
+            subjectKind: snapshot.subjectKind,
+            sourceUrl: snapshot.sourceUrl,
+            sourceRevision: input.fact.sourceRevision,
+            observedAt: input.observedAt,
+            mappingVersion: mapping?.version ?? null,
+            context: {
+              ...projectContextFromSnapshot(snapshot, mapping),
+              projectScope: [...snapshot.allowedProjectIds],
+            },
+          },
+        };
+      }
       const snapshot = await readPublicProjectSnapshot({
         client: options.client,
         source: options.source,

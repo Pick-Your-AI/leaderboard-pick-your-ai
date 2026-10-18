@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { metricRegistryV1, getLeadMetrics, getMetricUi } from "@pick-your-ai/metrics";
+import { fileURLToPath } from "node:url";
+import { metricRegistryV1, getLeadMetrics, getMetricUi, selectMetricView } from "@pick-your-ai/metrics";
 import { families, metrics, searchMetrics } from "../src/data/registry.ts";
 import { buildSelectedBoard, resolveWallBoards, wallMetricIds } from "../src/data/metric-selection.ts";
 import { fixtureMetrics } from "../src/data/synthetic.ts";
@@ -91,6 +92,33 @@ test("unimplemented definitions stay not measured and cannot borrow another view
   }
 });
 
+test("domain candidate metadata preserves the documentation prototype and cannot invent other data adapters", () => {
+  const domainMetrics = metrics.filter((metric) =>
+    getMetricUi(metric.id)!.verification_cases.includes("apps/pipeline/test/domain-recognition.test.mjs"),
+  );
+  assert.equal(domainMetrics.length, 19);
+  for (const metric of domainMetrics) {
+    const ui = getMetricUi(metric.id)!;
+    assert.equal(ui.maturity, "synthetic_verified");
+    for (const pair of ui.supported_combinations) {
+      assert.deepEqual(selectMetricView(metric.id, pair), pair);
+      if (metric.id === "documentation" && pair.date_basis === "acceptedAt") {
+        assert.equal(buildSelectedBoard(metric.id, defaultScope, latest, pair)!.status, "measured");
+      } else {
+        assert.throws(() => buildSelectedBoard(metric.id, defaultScope, latest, pair), /Unsupported metric view/);
+      }
+    }
+    if (metric.id !== "documentation") {
+      assert.equal(buildSelectedBoard(metric.id, defaultScope, latest)!.status, "not_measured");
+      assert.deepEqual(ui.lead_view, { overview: false, wall: false, order: null });
+    }
+  }
+  const documentation = getMetricUi("documentation")!;
+  assert.deepEqual(documentation.default_combination, { state: "qualified", date_basis: "acceptedAt" });
+  assert.deepEqual(documentation.lead_view, { overview: true, wall: true, order: 5 });
+  assert.equal(buildSelectedBoard("documentation", defaultScope, latest)!.status, "measured");
+});
+
 test("an invalid explicit wall selection never falls back or drops an unsupported board", () => {
   assert.deepEqual(resolveWallBoards(undefined), wallMetricIds().slice(0, 1));
   assert.deepEqual(resolveWallBoards("pr_merged,pr_merged"), ["pr_merged"]);
@@ -103,7 +131,8 @@ test("rendered methods, paired filters and invalid wall errors consume registry 
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createServer } = await import("vite");
   const server = await createServer({
-    configFile: "apps/web/vite.config.ts",
+    root: fileURLToPath(new URL("../../..", import.meta.url)),
+    configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
     server: { middlewareMode: true, ws: false },
     appType: "custom",
   });

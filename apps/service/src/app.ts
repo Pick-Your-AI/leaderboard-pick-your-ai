@@ -11,6 +11,7 @@ import { comparePublishedRanks, type ComparedRanks } from "./rank-comparison.js"
 import { acceptedAchievements, ACHIEVEMENT_RULE_VERSION } from "./achievements.js";
 import { renderContributorCard, renderContributorCardImage } from "./cards.js";
 import { renderPublicExport } from "./exports.js";
+import { publicParticipation } from "./participation.js";
 import {
   activityGroupingVersion,
   activityIndex,
@@ -207,7 +208,7 @@ export function createService(options: ServiceOptions = {}) {
   }
   function project(result: PublicRead | null, scope: PublicScope, pin: string | null, actors: ActorFilter): PublicRead {
     if (result === null) fail(pin ? 410 : 503, pin ? "snapshot_expired_refetch" : "public_snapshot_unavailable");
-    const projected = projectRead(result, scope, pin);
+    const projected = projectRead(result, scope, pin, registry.metrics);
     if (projected.selected.snapshot.metricDefinitionVersion !== registry.policy_version)
       fail(409, "metric_definition_unavailable");
     const knownMetrics = new Set(registry.metrics.map((metric) => metric.id));
@@ -686,6 +687,7 @@ export function createService(options: ServiceOptions = {}) {
       actorId: actor.actorId,
       category,
       results: rows.map((row) => row.result),
+      activitySummary: publicParticipation(read, actor.actorId, category),
       categories: categories(evidence),
       diagnostics:
         read.selected.diagnostics?.filter(

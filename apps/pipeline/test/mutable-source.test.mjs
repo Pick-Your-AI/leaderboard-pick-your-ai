@@ -108,7 +108,8 @@ test("mutable review and Discussion snapshots replace current credit while pinne
             },
           },
         };
-      } else if (url.pathname === `/repos/${slug}`) body = { id: 2, private: false, default_branch: "main" };
+      } else if (url.pathname === `/repos/${slug}`)
+        body = { id: 2, private: false, full_name: slug, default_branch: "main" };
       else if (url.pathname === `/repos/${slug}/pulls`) body = [pull];
       else if (url.pathname === `/repos/${slug}/pulls/10`) body = pull;
       else if (url.pathname === `/repos/${slug}/pulls/10/reviews`) body = [review];

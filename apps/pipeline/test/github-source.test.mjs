@@ -16,7 +16,7 @@ const harness = (scan) =>
     sourceId: "synthetic",
     repositories: [repository],
     isSynthetic: true,
-    client: { rest: async () => ({ id: 2, private: false }), scanRest: scan },
+    client: { rest: async () => ({ id: 2, private: false, full_name: repository.slug }), scanRest: scan },
   });
 
 test("reviews traverse every pull and nested review list before exposing complete count", async () => {
@@ -63,7 +63,7 @@ test("Discussion source distinguishes disabled capability from an empty complete
     repositories: [{ ...repository, families: ["discussions"] }],
     isSynthetic: true,
     client: {
-      rest: async () => ({ id: 2, private: false }),
+      rest: async () => ({ id: 2, private: false, full_name: repository.slug }),
       scanRest: async () => [],
       scanGraphql: async (options) =>
         options.select({
@@ -121,7 +121,10 @@ test("timeline source retains actual event identity, actor and occurrence time",
   const source = createGithubCollectionSource({
     sourceId: "synthetic",
     repositories: [{ ...repository, families: ["timelines"] }],
-    client: { rest: async () => ({ id: 2, private: false }), scanRest: async (scan) => scan.select([event]) },
+    client: {
+      rest: async () => ({ id: 2, private: false, full_name: repository.slug }),
+      scanRest: async (scan) => scan.select([event]),
+    },
   });
   const page = await source.readPage({ ...request, family: "timelines" });
   assert.equal(page.facts[0].subjectId, "901");
@@ -130,51 +133,180 @@ test("timeline source retains actual event identity, actor and occurrence time",
   assert.equal(page.facts[0].occurredAt, "2026-10-01T12:00:00.000Z");
 });
 
+const unqualifiedSourceTimes = [
+  "2026-02-30T12:00:00Z",
+  "2025-02-29T12:00:00Z",
+  "2026-10-01",
+  "2026-10-01T12:00:00",
+  "2026-10-01T12:00:00+00:00",
+  "2026-10-01T12:00:00.000001Z",
+  "2026-10-01T12:00:00.0000Z",
+  "2026-10-01T24:00:00Z",
+  "2026-10-01T12:00:60Z",
+  "2026-10-01T12:00:00Z\n",
+  "October 1, 2026",
+  "",
+  0,
+  null,
+];
+
+test("timeline collection leaves unqualified source occurrence times unknown", async () => {
+  for (const created_at of unqualifiedSourceTimes) {
+    const event = {
+      id: 901,
+      event: "assigned",
+      created_at,
+      actor: { id: 3 },
+      issue: { html_url: `https://github.com/${repository.slug}/issues/20` },
+    };
+    const original = JSON.stringify(event);
+    const source = createGithubCollectionSource({
+      sourceId: "synthetic",
+      repositories: [{ ...repository, families: ["timelines"] }],
+      client: {
+        rest: async () => ({ id: 2, private: false, full_name: repository.slug }),
+        scanRest: async (scan) => scan.select([event]),
+      },
+    });
+    const page = await source.readPage({ ...request, family: "timelines" });
+    assert.equal(page.facts[0].occurredAt, null, JSON.stringify(created_at));
+    assert.equal(page.facts[0].subjectId, "901");
+    assert.equal(page.facts[0].actorId, "3");
+    assert.equal(JSON.stringify(event), original);
+  }
+});
+
+test("collection preserves calendar-valid UTC source instants at supported precision", async () => {
+  for (const [created_at, expected] of [
+    ["2024-02-29T12:00:00Z", "2024-02-29T12:00:00.000Z"],
+    ["2026-10-01T12:00:00.1Z", "2026-10-01T12:00:00.100Z"],
+    ["2026-10-01T12:00:00.12Z", "2026-10-01T12:00:00.120Z"],
+    ["2026-10-01T12:00:00.123Z", "2026-10-01T12:00:00.123Z"],
+  ]) {
+    const event = {
+      id: 901,
+      event: "assigned",
+      created_at,
+      actor: { id: 3 },
+      issue: { html_url: `https://github.com/${repository.slug}/issues/20` },
+    };
+    const source = createGithubCollectionSource({
+      sourceId: "synthetic",
+      repositories: [{ ...repository, families: ["timelines"] }],
+      client: {
+        rest: async () => ({ id: 2, private: false, full_name: repository.slug }),
+        scanRest: async (scan) => scan.select([event]),
+      },
+    });
+    assert.equal((await source.readPage({ ...request, family: "timelines" })).facts[0].occurredAt, expected);
+  }
+});
+
+test("unqualified timestamps cannot invent a current-state source revision", async () => {
+  for (const updated_at of unqualifiedSourceTimes) {
+    const issue = {
+      node_id: "I_synthetic",
+      html_url: `https://github.com/${repository.slug}/issues/20`,
+      state: "open",
+      updated_at,
+    };
+    const source = createGithubCollectionSource({
+      sourceId: "synthetic",
+      repositories: [{ ...repository, families: ["issues"] }],
+      client: {
+        rest: async () => ({ id: 2, private: false, full_name: repository.slug }),
+        scanRest: async (scan) => scan.select([issue]),
+      },
+    });
+    await assert.rejects(source.readPage({ ...request, family: "issues" }), /source_identity_or_revision_unverified/);
+  }
+});
+
 test("Project collector traverses subject memberships and current field snapshots", async () => {
   const calls = [];
+  let scopeProbes = 0;
+  let optionId = "OPTION_first";
+  const project = { id: "PVT_synthetic", public: true };
+  const subject = {
+    __typename: "Issue",
+    id: "I_synthetic",
+    url: `https://github.com/${repository.slug}/issues/20`,
+    repository: { databaseId: 2, isPrivate: false },
+  };
+  const item = {
+    id: "PVTI_synthetic",
+    updatedAt: "2026-10-01T12:00:00Z",
+    isArchived: false,
+    project,
+  };
+  const connection = (nodes) => ({
+    nodes,
+    totalCount: nodes.length,
+    pageInfo: { hasNextPage: false, endCursor: null },
+  });
   const source = createGithubCollectionSource({
     sourceId: "synthetic",
     repositories: [{ ...repository, families: ["project_current"], allowedProjectIds: ["PVT_synthetic"] }],
+    isSynthetic: true,
     client: {
-      graphql: async (_source, query) =>
-        query.includes("... on ProjectV2 {")
-          ? { node: { id: "PVT_synthetic", public: true } }
-          : { node: { project: { id: "PVT_synthetic", public: true } } },
-      rest: async () => ({ id: 2, private: false }),
-      scanRest: async () => [{ node_id: "I_synthetic" }],
+      graphql: async (_source, query, variables) => {
+        if (query.includes("PublicProjectContextScope")) {
+          assert.deepEqual(variables, { ids: [project.id] });
+          scopeProbes++;
+          return { nodes: [project] };
+        }
+        assert.ok(query.includes("... on ProjectV2"));
+        assert.deepEqual(variables, { id: project.id });
+        return { node: project };
+      },
+      rest: async () => ({ id: 2, private: false, full_name: repository.slug }),
+      scanRest: async (scan) => scan.select([{ number: 20, node_id: subject.id, html_url: subject.url }]),
       scanGraphql: async (scan) => {
-        calls.push(scan.key);
-        const node = scan.query.includes("ProjectV2Item {")
-          ? {
-              id: "PVTI_synthetic",
-              updatedAt: "2026-10-01T12:00:00Z",
-              isArchived: false,
-              project: { id: "PVT_synthetic", public: true },
-              content: {
-                url: `https://github.com/${repository.slug}/issues/20`,
-                repository: { databaseId: 2, isPrivate: false },
-              },
-              fieldValues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
-            }
-          : {
-              id: "I_synthetic",
-              repository: { databaseId: 2, isPrivate: false },
-              projectItems: {
-                nodes: [{ id: "PVTI_synthetic", project: { id: "PVT_synthetic", public: true } }],
-                pageInfo: { hasNextPage: false, endCursor: null },
-              },
-            };
-        return scan.select({ node }).nodes;
+        calls.push(scan);
+        assert.equal(scan.refresh, true);
+        if (scan.query.includes("PublicSubjectProjectFields")) {
+          assert.deepEqual(scan.variables, { id: item.id });
+          return scan.select({
+            node: {
+              ...item,
+              content: subject,
+              fieldValues: connection([
+                { __typename: "ProjectV2ItemFieldSingleSelectValue", field: { id: "FIELD_synthetic" }, optionId },
+              ]),
+            },
+          }).nodes;
+        }
+        assert.ok(scan.query.includes("PublicSubjectProjectMembership"));
+        assert.ok(scan.query.includes("includeArchived:true"));
+        assert.deepEqual(scan.variables, { id: subject.id });
+        return scan.select({ node: { ...subject, projectItems: connection([item]) } }).nodes;
       },
     },
   });
   const page = await source.readPage({ ...request, family: "project_current" });
-  assert.equal(calls.length, 2);
+  assert.deepEqual(
+    calls.map((scan) => scan.key),
+    [
+      "project-subject-context/v1:2:synthetic:I_synthetic:before",
+      "project-subject-context/v1:2:synthetic:PVTI_synthetic:fields",
+      "project-subject-context/v1:2:synthetic:I_synthetic:after",
+    ],
+  );
+  assert.equal(scopeProbes, 2);
   assert.equal(page.expectedCount, 1);
-  assert.equal(page.facts[0].subjectId, "PVTI_synthetic");
+  assert.equal(page.nextCursor, null);
+  assert.equal(page.facts.length, 1);
+  assert.equal(page.facts[0].subjectId, subject.id);
+  assert.equal(page.facts[0].projectSubjectId, subject.id);
+  assert.equal(page.facts[0].sourceUrl, subject.url);
   assert.equal(page.facts[0].actorId, null);
   assert.equal(page.facts[0].occurredAt, null);
   assert.equal(page.facts[0].evidence, "current_state");
+  optionId = "OPTION_second";
+  const changed = await source.readPage({ ...request, family: "project_current" });
+  assert.equal(changed.facts[0].subjectId, page.facts[0].subjectId);
+  assert.equal(changed.facts[0].projectSubjectId, subject.id);
+  assert.notEqual(changed.facts[0].sourceRevision, page.facts[0].sourceRevision);
 });
 
 test("selected relationship history enters collection as timestamped native transitions", async () => {
@@ -182,8 +314,8 @@ test("selected relationship history enters collection as timestamped native tran
     sourceId: "synthetic",
     repositories: [{ ...repository, families: ["relationships"] }],
     client: {
-      rest: async () => ({ id: 2, private: false }),
-      scanRest: async () => [{ number: 1 }],
+      rest: async () => ({ id: 2, private: false, full_name: repository.slug }),
+      scanRest: async () => [{ number: 1, node_id: "I_synthetic" }],
       scanGraphql: async (scan) =>
         scan.select({
           repository: {
@@ -224,7 +356,7 @@ test("Project history requires approved IDs even when repository inventory is em
   const source = createGithubCollectionSource({
     sourceId: "synthetic",
     repositories: [{ ...repository, families: ["project_history"] }],
-    client: { rest: async () => ({ id: 2, private: false }), scanRest: async () => [] },
+    client: { rest: async () => ({ id: 2, private: false, full_name: repository.slug }), scanRest: async () => [] },
   });
   await assert.rejects(source.readPage({ ...request, family: "project_history" }), /approved_project_scope_required/);
 });

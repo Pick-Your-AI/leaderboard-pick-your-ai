@@ -10,7 +10,9 @@ This repository contains the complete delivery baseline: **20 epics, 112 work pa
 - [Product scope](docs/PRODUCT.md) · [Delivery plan and complete task list](docs/DELIVERY_PLAN.md)
 - [Metric catalog](docs/METRICS.md) · [UI concept](docs/UI.md) · [Architecture](docs/ARCHITECTURE.md)
 - [Contribution and ownership](CONTRIBUTING.md) · [Governance](docs/GOVERNANCE.md)
-- [Source audit](docs/SOURCE_AUDIT.md) · [Release and operations plan](docs/OPERATIONS_PLAN.md)
+- [Organization boundaries and current inventory](docs/organization-boundaries.md) · [Historical source audit](docs/SOURCE_AUDIT.md)
+- [Project configuration and dependency readback](docs/project-configuration-readback-20261018.md)
+- [Release and operations plan](docs/OPERATIONS_PLAN.md)
 
 The proposed product name is **PickYour.AI Credits**, with the tagline **Contributions, with evidence.** Recognition covers PRs, code and deletions, review, issues, triage, planning, research, documentation, design, accessibility, testing, maintenance and community work. There is no universal contributor score. Every board exposes its unit, period, source coverage and counting policy; observed activity, accepted outcomes and reviewed recognition remain distinct.
 
@@ -32,7 +34,7 @@ These checks cover planning integrity, mappings, dependency cycles, local links 
 
 ## Repository boundaries
 
-The [research repository](https://github.com/Pick-Your-AI/pick-your-ai-research) owns research decisions and its imported v1 contracts. The [website repository](https://github.com/Pick-Your-AI/pickyour.ai) owns the builder. The [organization repository](https://github.com/Pick-Your-AI/.github) owns shared guidance. This repository owns contributor-recognition contracts and the future service. Existing owners, source issues and native relationships remain authoritative.
+The [research repository](https://github.com/Pick-Your-AI/pick-your-ai-research) owns research decisions and its frozen builder v1 contracts. The [website repository](https://github.com/Pick-Your-AI/pickyour.ai) owns the web builder; the [Android](https://github.com/Pick-Your-AI/pick-your-ai-android) and [Apple](https://github.com/Pick-Your-AI/pick-your-ai-apple) repositories own their native applications. The [organization repository](https://github.com/Pick-Your-AI/.github) owns shared guidance. This repository owns contributor-recognition contracts, the local runtime and public-service delivery. The [dated organization inventory](docs/organization-boundaries.md) records stable identifiers and existing work. Live owners, source issues and native relationships remain authoritative.
 
 The structured plan lives in [planning/](planning/README.md). See [local runtime setup](docs/runtime-foundation.md) for Node.js 24 startup, database migrations and explicitly synthetic fixtures, and [ingestion operations](docs/INGESTION.md) for the separate collector primitives. Public hosting and the proposed contributor subdomain require their own approved decisions and operational proof.
 

@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createService } from "../dist/app.js";
 import { startLiveUpdates } from "../dist/live-client.js";
-import { selection, validateExport } from "../../web/src/remote/client.ts";
+import { selection, validateExport, board as parseBoard } from "../../web/src/remote/client.ts";
+import { parseCSVExport } from "../../web/src/remote/csv-export.ts";
 
 const at = "2026-10-17T12:00:00.000Z";
 const scope = { organization: "Pick-Your-AI", repository: null, workstream: null, start: null, end: null };
@@ -20,7 +21,7 @@ const coverage = {
   permissionsMissing: [],
   sourceErrors: [],
 };
-function fixture(snapshotId = "public-1", revision = 1) {
+function fixture(snapshotId = "public-1", revision = 1, metricId = "pr_merged") {
   const actors = ["alice", "bob", "carol"].map((actorId) => ({
     actorId,
     state: "public",
@@ -51,7 +52,7 @@ function fixture(snapshotId = "public-1", revision = 1) {
       actorId,
       roles: ["author"],
       qualification: "eligible",
-      metricIds: ["pr_opened"],
+      metricIds: [metricId],
       reasonCodes: ["public_accepted_source"],
     },
     occurredAt: at,
@@ -62,7 +63,7 @@ function fixture(snapshotId = "public-1", revision = 1) {
     actorId,
     result: {
       schemaVersion: "leaderboard/v1",
-      metricId: "pr_opened",
+      metricId,
       state: "measured",
       value: index === 2 ? 1 : 2,
       coverage: structuredClone(coverage),
@@ -88,7 +89,7 @@ function fixture(snapshotId = "public-1", revision = 1) {
       actors,
       rows,
       evidence,
-      ranking: [{ metricId: "pr_opened", direction: "descending" }],
+      ranking: [{ metricId, direction: "descending" }],
     },
   };
 }
@@ -151,7 +152,7 @@ test("actor selections narrow all public views without treating user accounts as
       assert.equal(result.actorFilter, actors);
       return result;
     };
-    const board = await read("boards?metric=pr_opened");
+    const board = await read("boards?metric=pr_merged");
     assert.deepEqual(
       board.rows.map((row) => row.actorId),
       ids,
@@ -167,24 +168,25 @@ test("actor selections narrow all public views without treating user accounts as
     assert.equal((await read("contributors/bob")).actor.executionMode, "automated");
     assert.equal((await read("evidence/e-bob")).contribution.actorId, "bob");
     assert.equal((await read("health")).snapshotId, "public-1");
-    const json = await read("exports?metric=pr_opened&format=json");
+    const json = await read("exports?metric=pr_merged&format=json");
     assert.deepEqual(
       json.rows.map((entry) => entry.actorId),
       ids,
     );
     assert.equal(json.evidence.length, ids.length);
     assert.equal(json.rows.find((row) => row.actorId === "bob").executionMode, "automated");
-    const selected = selection(`?actors=${actors}&metric=pr_opened&snapshot=public-1`);
-    assert.doesNotThrow(() => validateExport(json, selected));
+    const selected = selection(`?actors=${actors}&metric=pr_merged&snapshot=public-1`);
+    assert.doesNotThrow(() => validateExport(json, selected, json.metric));
     const missingLabels = structuredClone(json);
     delete missingLabels.rows[0].actorKind;
     delete missingLabels.rows[0].executionMode;
-    if (actors === "all") assert.doesNotThrow(() => validateExport(missingLabels, selected));
-    else assert.throws(() => validateExport(missingLabels, selected), /api_actor_filter_mismatch/);
+    if (actors === "all") assert.doesNotThrow(() => validateExport(missingLabels, selected, missingLabels.metric));
+    else
+      assert.throws(() => validateExport(missingLabels, selected, missingLabels.metric), /api_actor_filter_mismatch/);
     const invalidKind = structuredClone(json);
     invalidKind.rows[0].actorKind = "manual";
-    assert.throws(() => validateExport(invalidKind, selected));
-    const csv = await app.inject(`/api/v1/exports?metric=pr_opened&actors=${actors}&format=csv`);
+    assert.throws(() => validateExport(invalidKind, selected, invalidKind.metric));
+    const csv = await app.inject(`/api/v1/exports?metric=pr_merged&actors=${actors}&format=csv`);
     assert.equal(csv.statusCode, 200);
     assert.equal(csv.headers["x-leaderboard-actor-filter"], actors);
     assert.ok(csv.body.split("\r\n")[0].includes('"actor_filter"'));
@@ -201,8 +203,8 @@ test("actor filtering is consistent for direct proof, card, activity and histori
   for (const path of [
     "contributors/carol",
     "evidence/e-carol",
-    "cards/carol?metric=pr_opened",
-    "cards/carol/image?metric=pr_opened",
+    "cards/carol?metric=pr_merged",
+    "cards/carol/image?metric=pr_merged",
   ]) {
     const response = await app.inject(`/api/v1/${path}${path.includes("?") ? "&" : "?"}actors=user&snapshot=public-1`);
     assert.equal(response.statusCode, 404, path);
@@ -210,13 +212,13 @@ test("actor filtering is consistent for direct proof, card, activity and histori
   const all = (await app.inject("/api/v1/activity")).json();
   const carol = all.groups.find((entry) => entry.actorId === "carol");
   assert.equal((await app.inject(`/api/v1/activity/${carol.groupId}?actors=user`)).statusCode, 404);
-  const allowedCard = await app.inject("/api/v1/cards/bob?metric=pr_opened&actors=automation");
+  const allowedCard = await app.inject("/api/v1/cards/bob?metric=pr_merged&actors=automation");
   assert.equal(allowedCard.statusCode, 200);
   assert.match(allowedCard.body, /actors=automation/);
   assert.match(allowedCard.body, /Activity selection<\/dt><dd>Automation/);
   data.controls.suppressedActorIds = ["bob"];
   data.controls.version = "privacy-2";
-  const board = (await app.inject("/api/v1/boards?metric=pr_opened&actors=automation&snapshot=public-1")).json();
+  const board = (await app.inject("/api/v1/boards?metric=pr_merged&actors=automation&snapshot=public-1")).json();
   assert.deepEqual(
     board.rows.map((row) => row.actorId),
     ["carol"],
@@ -227,7 +229,7 @@ test("actor filtering is consistent for direct proof, card, activity and histori
 
 test("actor selection is bound into every paginated endpoint and rejected before source reads when invalid", async (t) => {
   const { app, calls } = harness(t, mixedActors());
-  for (const path of ["boards?metric=pr_opened", "contributors", "activity"]) {
+  for (const path of ["boards?metric=pr_merged", "contributors", "activity"]) {
     const url = `/api/v1/${path}${path.includes("?") ? "&" : "?"}limit=1`;
     const first = (await app.inject(`${url}&actors=user`)).json();
     assert.ok(first.nextCursor);
@@ -239,7 +241,7 @@ test("actor selection is bound into every paginated endpoint and rejected before
   }
   const count = calls.length;
   for (const suffix of ["actors=", "actors=human", "actors=manual", "actors=ai", "actors=user&actors=all"])
-    assert.equal((await app.inject(`/api/v1/boards?metric=pr_opened&${suffix}`)).statusCode, 400);
+    assert.equal((await app.inject(`/api/v1/boards?metric=pr_merged&${suffix}`)).statusCode, 400);
   assert.equal(calls.length, count);
 });
 
@@ -257,7 +259,7 @@ test("actor-filter stream receipts and polling retain the selected view", async 
   });
   assert.match(changed.body, /event: reset/);
 });
-const boardUrl = "/api/v1/boards?metric=pr_opened";
+const boardUrl = "/api/v1/boards?metric=pr_merged";
 
 test("anonymous public board, complete metric discovery and snapshot metadata", async (t) => {
   const { app, calls } = harness(t);
@@ -276,7 +278,7 @@ test("anonymous public board, complete metric discovery and snapshot metadata", 
       ["carol", 2],
     ],
   );
-  assert.equal(body.metric.id, "pr_opened");
+  assert.equal(body.metric.id, "pr_merged");
   assert.equal(body.ranking.direction, "descending");
   assert.equal(calls.length, 1);
   assert.equal(result.headers["cache-control"], "public, max-age=0, must-revalidate");
@@ -325,11 +327,11 @@ test("canonical query order supports conditional responses, exports preserve exa
   const { app } = harness(t);
   const first = await app.inject(`${boardUrl}&limit=100`);
   const repeated = await app.inject({
-    url: "/api/v1/boards?limit=100&metric=pr_opened",
+    url: "/api/v1/boards?limit=100&metric=pr_merged",
     headers: { "if-none-match": first.headers.etag },
   });
   assert.equal(repeated.statusCode, 304);
-  const exported = await app.inject("/api/v1/exports?metric=pr_opened&limit=100");
+  const exported = await app.inject("/api/v1/exports?metric=pr_merged&limit=100");
   assert.equal(exported.json().snapshotId, first.json().snapshotId);
   assert.deepEqual(exported.json().scope, first.json().scope);
   assert.deepEqual(
@@ -369,8 +371,8 @@ test("public projection omits private, unknown, unsafe URLs, unlinked and suppre
   assert.equal((await h.app.inject("/api/v1/contributors/carol")).statusCode, 404);
   assert.equal((await h.app.inject("/api/v1/evidence/e-alice")).statusCode, 404);
   assert.equal((await h.app.inject("/api/v1/evidence/e-bob")).statusCode, 404);
-  assert.deepEqual((await h.app.inject("/api/v1/exports?metric=pr_opened&snapshot=public-1")).json().rows, []);
-  assert.doesNotMatch((await h.app.inject("/api/v1/exports?metric=pr_opened&format=csv")).body, /alice|bob|carol/);
+  assert.deepEqual((await h.app.inject("/api/v1/exports?metric=pr_merged&snapshot=public-1")).json().rows, []);
+  assert.doesNotMatch((await h.app.inject("/api/v1/exports?metric=pr_merged&format=csv")).body, /alice|bob|carol/);
 });
 
 test("artifact correction suppresses dependent aggregates without corrupting other totals", async (t) => {
@@ -541,12 +543,12 @@ test("invalid and costly queries are rejected before source I/O", async (t) => {
   for (const url of [
     "/api/v1/boards",
     `${boardUrl}&limit=101`,
-    `${boardUrl}&metric=pr_opened`,
+    `${boardUrl}&metric=pr_merged`,
     `${boardUrl}&unknown=private`,
     "/api/v1/boards?metric=does-not-exist",
     `${boardUrl}&start=2026-02-30T00:00:00.000Z&end=2026-03-02T00:00:00.000Z`,
     `${boardUrl}&start=2025-01-01T00:00:00.000Z&end=2026-10-17T00:00:00.000Z`,
-    "/api/v1/exports?metric=pr_opened&format=markdown",
+    "/api/v1/exports?metric=pr_merged&format=markdown",
     `${boardUrl}&cursor=bad`,
   ]) {
     assert.equal((await app.inject(url)).statusCode, 400, url);
@@ -578,13 +580,13 @@ test("provider scope mismatch, invalid schema and excessive rows never publish",
 test("CSV escapes formulas, quotes, newlines and includes metric, dates, source and snapshot", async (t) => {
   const h = harness(t);
   h.data.selected.actors[0].actor.login = ' =HYPERLINK("evil")\nmore';
-  const csv = await h.app.inject("/api/v1/exports?metric=pr_opened&format=csv");
+  const csv = await h.app.inject("/api/v1/exports?metric=pr_merged&format=csv");
   assert.equal(csv.statusCode, 200);
   assert.match(csv.headers["content-type"], /^text\/csv/);
   assert.match(csv.body, /"'=HYPERLINK\(""evil""\)\nmore"/);
   assert.match(csv.body, /public-1/);
   assert.match(csv.body, /https:\/\/github.com\/synthetic\/example\/pull\/1/);
-  assert.match(csv.body, /one per PR/);
+  assert.match(csv.body, /one per merged PR in window/);
 });
 
 test("SSE reconnect after missed notices resets to current snapshot; unchanged cursor gets heartbeat", async (t) => {
@@ -730,7 +732,7 @@ test("exact filtered scope is passed once to provider; CSV and share URL preserv
     end: "2026-11-01T00:00:00.000Z",
   };
   h.data.selected.scope = filtered;
-  const params = new URLSearchParams({ ...filtered, metric: "pr_opened" });
+  const params = new URLSearchParams({ ...filtered, metric: "pr_merged" });
   const board = await h.app.inject(`/api/v1/boards?${params}`);
   assert.equal(board.statusCode, 200, board.body);
   assert.deepEqual(h.calls[0].scope, filtered);
@@ -784,10 +786,10 @@ test("stream failure falls back to polling and missed notices request a current 
 });
 
 test("approved descriptive-only metrics publish facts with no implied ranking", async (t) => {
-  const h = harness(t);
+  const h = harness(t, fixture("public-1", 1, "pr_opened"));
   h.data.selected.ranking[0].rank = false;
   h.data.selected.rows[2].result.value = 100;
-  const body = (await h.app.inject(boardUrl)).json();
+  const body = (await h.app.inject("/api/v1/boards?metric=pr_opened")).json();
   assert.equal(body.ranking.rank, false);
   assert.deepEqual(
     body.rows.map((row) => [row.actorId, row.rank]),
@@ -834,24 +836,24 @@ test("disabled policy overlay explains unavailable metrics and removes pinned ev
   const h = harness(t);
   h.data.selected.disabledMetrics = [
     {
-      id: "pr_opened",
+      id: "pr_merged",
       reason: "policy_withdrawn",
       policyVersion: "review-v2",
       policyLink: "https://github.com/synthetic/example/blob/main/policy.md",
     },
   ];
   h.data.selected.methodology = [
-    { metricId: "pr_opened", policyVersion: "review-v1", policySignature: "a".repeat(64), policyLink: null },
+    { metricId: "pr_merged", policyVersion: "review-v1", policySignature: "a".repeat(64), policyLink: null },
   ];
   const response = await h.app.inject(`${boardUrl}&snapshot=public-1`);
   assert.equal(response.statusCode, 503);
   assert.equal(response.json().error, "metric_disabled");
   assert.equal(response.json().metric.reason, "policy_withdrawn");
-  assert.equal((await h.app.inject("/api/v1/exports?metric=pr_opened&format=csv&snapshot=public-1")).statusCode, 503);
+  assert.equal((await h.app.inject("/api/v1/exports?metric=pr_merged&format=csv&snapshot=public-1")).statusCode, 503);
   assert.deepEqual((await h.app.inject("/api/v1/contributors/alice?snapshot=public-1")).json().results, []);
   assert.equal((await h.app.inject("/api/v1/evidence/e-alice?snapshot=public-1")).statusCode, 404);
   const health = (await h.app.inject("/api/v1/health")).json();
-  assert.equal(health.disabledMetrics[0].id, "pr_opened");
+  assert.equal(health.disabledMetrics[0].id, "pr_merged");
   assert.equal(health.methodology[0].policySignature, "a".repeat(64));
 });
 
@@ -866,7 +868,7 @@ test("public evidence times use the frozen source timestamp contract and reject 
 test("diagnostic denominators/samples stay bound to visible selected rows and retain null unknowns", async (t) => {
   const h = harness(t);
   h.data.selected.diagnostics = ["alice", "bob", "carol"].map((actorId) => ({
-    metricId: "pr_opened",
+    metricId: "pr_merged",
     actorId,
     numerator: 2,
     denominator: 3,
@@ -883,7 +885,7 @@ test("diagnostic denominators/samples stay bound to visible selected rows and re
   const profile = (await h.app.inject("/api/v1/contributors/bob")).json();
   assert.equal(profile.diagnostics.length, 1);
   assert.equal(profile.diagnostics[0].actorId, "bob");
-  const exported = await h.app.inject("/api/v1/exports?metric=pr_opened&format=csv&limit=1");
+  const exported = await h.app.inject("/api/v1/exports?metric=pr_merged&format=csv&limit=1");
   assert.match(exported.body, /"numerator","denominator","sample_count","censored","missing_readiness","p75"/);
   assert.match(exported.body, /"2","3","3","1","0","","","\[\]"\r\n/);
   h.data.controls.suppressedActorIds = ["alice"];
@@ -900,6 +902,127 @@ function withPortfolio(data = fixture()) {
   }));
   return data;
 }
+
+function withLocalization() {
+  const data = fixture();
+  data.selected.ranking = [{ metricId: "localization", direction: "descending", rank: false }];
+  for (const row of data.selected.rows) row.result.metricId = "localization";
+  for (const entry of data.selected.evidence) {
+    entry.contribution.metricIds = ["localization"];
+    entry.contribution.reasonCodes = [
+      "documentation_path_policy:synthetic-locales-v1",
+      "locale:fr",
+      "localization_category:documentation",
+    ];
+  }
+  return withPortfolio(data);
+}
+
+test("locale proof retains explicit labels in public views and rejects conflicting copies", async (t) => {
+  const h = harness(t, withLocalization());
+  h.data.selected.portfolioEvidence[0].contribution.reasonCodes.push("private reviewer context SECRET");
+  const proof = await h.app.inject("/api/v1/evidence/e-alice");
+  assert.equal(proof.statusCode, 200, proof.body);
+  assert.deepEqual(
+    proof.json().contribution.reasonCodes.filter((reason) => !reason.startsWith("public_")),
+    ["documentation_path_policy:synthetic-locales-v1", "locale:fr", "localization_category:documentation"],
+  );
+  const profile = await h.app.inject("/api/v1/contributors/alice");
+  assert.equal(profile.statusCode, 200, profile.body);
+  assert.doesNotMatch(proof.body + profile.body, /SECRET/);
+  h.data.selected.portfolioEvidence[0].contribution.reasonCodes[1] = "locale:de";
+  assert.equal((await h.app.inject("/api/v1/evidence/e-alice")).statusCode, 503);
+  assert.equal((await h.app.inject("/api/v1/boards?metric=localization")).statusCode, 503);
+  h.data.selected.portfolioEvidence[0].contribution.reasonCodes = ["public_observed_work"];
+  assert.equal((await h.app.inject("/api/v1/contributors/alice")).statusCode, 503);
+});
+
+test("primary-only locale proof cannot expose internal reason strings", async (t) => {
+  const data = withLocalization();
+  delete data.selected.portfolioEvidence;
+  data.selected.evidence[0].contribution.reasonCodes.push("private reviewer context SECRET email@example.invalid");
+  const { app } = harness(t, data);
+  for (const path of ["evidence/e-alice", "contributors/alice", "boards?metric=localization"]) {
+    const response = await app.inject(`/api/v1/${path}`);
+    assert.equal(response.statusCode, 200, response.body);
+    assert.doesNotMatch(response.body, /SECRET|email@example/);
+  }
+  assert.ok((await app.inject("/api/v1/evidence/e-alice")).json().contribution.reasonCodes.includes("locale:fr"));
+});
+
+test("malformed locale proof fails closed while historical documentation without portfolio labels remains readable", async (t) => {
+  const h = harness(t, withLocalization());
+  for (const entry of [h.data.selected.evidence[0], h.data.selected.portfolioEvidence[0]])
+    entry.contribution.reasonCodes[1] = "locale:und";
+  assert.equal((await h.app.inject("/api/v1/evidence/e-alice")).statusCode, 503);
+  const data = fixture();
+  data.selected.ranking = [{ metricId: "documentation", direction: "descending", rank: false }];
+  for (const row of data.selected.rows) row.result.metricId = "documentation";
+  for (const entry of data.selected.evidence) {
+    entry.contribution.metricIds = ["documentation"];
+    entry.contribution.reasonCodes = ["documentation_path_policy:synthetic-historical-v1"];
+  }
+  withPortfolio(data);
+  for (const entry of data.selected.portfolioEvidence) entry.contribution.reasonCodes = ["public_observed_work"];
+  h.set(data);
+  assert.equal((await h.app.inject("/api/v1/contributors/alice")).statusCode, 200);
+  const detail = await h.app.inject("/api/v1/evidence/e-alice");
+  assert.equal(detail.statusCode, 200, detail.body);
+  assert.doesNotMatch(detail.body, /locale:|localization_category:/);
+});
+
+test("documentation proof rejects conflicting present classifications while retaining legacy absent labels", async (t) => {
+  const documentationCopies = () => {
+    const data = fixture();
+    data.selected.ranking = [{ metricId: "documentation", direction: "descending", rank: false }];
+    for (const row of data.selected.rows) row.result.metricId = "documentation";
+    for (const entry of data.selected.evidence) {
+      entry.contribution.metricIds = ["documentation"];
+      entry.contribution.reasonCodes = ["documentation_path_policy:synthetic-docs-v1"];
+    }
+    return withPortfolio(data);
+  };
+  const h = harness(t, documentationCopies());
+  for (const path of ["boards?metric=documentation", "evidence/e-alice", "contributors/alice"])
+    assert.equal(
+      (await h.app.inject(`/api/v1/${path}`)).statusCode,
+      200,
+      "Matching nonempty classifications remain readable",
+    );
+  h.data.selected.portfolioEvidence[0].contribution.reasonCodes = ["documentation_path_policy:synthetic-docs-v2"];
+  for (const path of ["boards?metric=documentation", "evidence/e-alice", "contributors/alice"])
+    assert.equal(
+      (await h.app.inject(`/api/v1/${path}`)).statusCode,
+      503,
+      "One contribution cannot carry contradictory policy proof",
+    );
+  for (const missing of ["evidence", "portfolioEvidence"]) {
+    const legacy = documentationCopies();
+    legacy.selected[missing][0].contribution.reasonCodes = ["public_observed_work"];
+    h.set(legacy);
+    assert.equal(
+      (await h.app.inject("/api/v1/evidence/e-alice")).statusCode,
+      200,
+      "Absent historical labels do not invent a conflicting classification",
+    );
+  }
+  const separated = documentationCopies();
+  separated.selected.portfolioEvidence[0].contribution.reasonCodes = ["public_observed_work"];
+  separated.selected.pendingEvidence = [
+    {
+      ...structuredClone(separated.selected.evidence[0]),
+      activityState: "pending",
+      observedAt: at,
+    },
+  ];
+  separated.selected.pendingEvidence[0].contribution.reasonCodes = ["documentation_path_policy:synthetic-docs-v2"];
+  h.set(separated);
+  assert.equal(
+    (await h.app.inject("/api/v1/boards?metric=documentation")).statusCode,
+    503,
+    "An intervening legacy copy cannot erase the earlier nonempty classification",
+  );
+});
 
 test("directory includes observed-only public contributors without ranking, membership or identity leakage", async (t) => {
   const h = harness(t, withPortfolio());
@@ -920,7 +1043,7 @@ test("directory includes observed-only public contributors without ranking, memb
     ["alice"],
   );
   assert.deepEqual(response.json().contributors[0].categories, [
-    { metricId: "pr_opened", observed: 1, pending: 0, accepted: 0, unknown: 0 },
+    { metricId: "pr_merged", observed: 1, pending: 0, accepted: 0, unknown: 0 },
   ]);
   for (const search of ["bob", "carol", "assigned-only"])
     assert.deepEqual((await h.app.inject(`/api/v1/contributors?search=${search}`)).json().contributors, []);
@@ -941,7 +1064,7 @@ test("directory cursors bind search, category, scope, size, route and current co
   assert.equal(second.statusCode, 200, second.body);
   assert.equal(second.json().contributors[0].actorId, "bob");
   assert.equal((await h.app.inject(url)).body, second.body);
-  for (const change of ["&search=a", "&category=pr_opened", "&repository=repo-1", "&snapshot=other"])
+  for (const change of ["&search=a", "&category=pr_merged", "&repository=repo-1", "&snapshot=other"])
     assert.equal((await h.app.inject(url + change)).json().error, "cursor_scope_mismatch");
   assert.equal((await h.app.inject(url.replace("limit=1", "limit=2"))).statusCode, 400);
   assert.equal((await h.app.inject(`/api/v1/contributors/alice?limit=1&cursor=${first.nextCursor}`)).statusCode, 400);
@@ -967,7 +1090,7 @@ test("profile traverses more than 100 equal-time records without loss and reconc
       ...first.contribution,
       contributionId: `many-${String(index).padStart(3, "0")}`,
       artifactId: `many-${index}`,
-      metricIds: ["pr_opened", "documentation"],
+      metricIds: ["pr_merged", "documentation"],
     },
     activityState: index % 2 ? "pending" : "observed",
   }));
@@ -1001,7 +1124,7 @@ test("profile traverses more than 100 equal-time records without loss and reconc
   assert.deepEqual(ids, [...ids].sort());
   assert.deepEqual(
     categories,
-    ["documentation", "pr_opened"].map((metricId) => ({
+    ["documentation", "pr_merged"].map((metricId) => ({
       metricId,
       observed: 102,
       pending: 102,
@@ -1022,7 +1145,7 @@ test("portfolio evidence fails closed for unsafe source, missing attribution, un
     ["carol"],
   );
   h.data.selected.disabledMetrics = [
-    { id: "pr_opened", reason: "withdrawn", policyVersion: "policy-2", policyLink: null },
+    { id: "pr_merged", reason: "withdrawn", policyVersion: "policy-2", policyLink: null },
   ];
   assert.deepEqual((await h.app.inject("/api/v1/contributors")).json().contributors, []);
   h.data.selected.portfolioEvidence[2].activityState = "accepted_by_guess";
@@ -1050,7 +1173,7 @@ test("portfolio projection cannot enable an unapproved metric or retain suppress
   let response = (await h.app.inject("/api/v1/contributors?search=alice")).json();
   assert.deepEqual(
     response.contributors[0].categories.map((item) => item.metricId),
-    ["pr_opened"],
+    ["pr_merged"],
   );
   h.data.controls.suppressedArtifactIds = ["pr-0"];
   response = (await h.app.inject("/api/v1/contributors?search=alice&snapshot=public-1")).json();
@@ -1080,11 +1203,11 @@ test("legacy portfolio and detail routes also restrict categories to published p
   h.data.selected.evidence[0].contribution.metricIds.push("documentation");
   const directory = (await h.app.inject("/api/v1/contributors?search=alice")).json();
   assert.deepEqual(directory.contributors[0].categories, [
-    { metricId: "pr_opened", observed: 0, pending: 0, accepted: 0, unknown: 1 },
+    { metricId: "pr_merged", observed: 0, pending: 0, accepted: 0, unknown: 1 },
   ]);
   assert.deepEqual((await h.app.inject("/api/v1/contributors?category=documentation")).json().contributors, []);
   assert.deepEqual((await h.app.inject("/api/v1/contributors/alice?category=documentation")).json().timeline, []);
-  assert.deepEqual((await h.app.inject("/api/v1/evidence/e-alice")).json().contribution.metricIds, ["pr_opened"]);
+  assert.deepEqual((await h.app.inject("/api/v1/evidence/e-alice")).json().contribution.metricIds, ["pr_merged"]);
 });
 
 test("service-account classification survives public projection without private review evidence", async (t) => {
@@ -1126,7 +1249,7 @@ test("share cards are scoped, dated, source-linked and deny external framing", a
   const value = fixture();
   const app = createService({ source: { read: async () => structuredClone(value) } });
   t.after(() => app.close());
-  const current = await app.inject({ url: "/api/v1/cards/alice?metric=pr_opened" });
+  const current = await app.inject({ url: "/api/v1/cards/alice?metric=pr_merged" });
   assert.equal(current.statusCode, 200);
   assert.match(current.headers["content-type"], /text\/html/);
   assert.equal(current.headers["cache-control"], "no-store");
@@ -1136,15 +1259,15 @@ test("share cards are scoped, dated, source-linked and deny external framing", a
   assert.match(current.body, /https:\/\/github.com\/synthetic\/example\/pull\/1/);
   assert.match(
     current.body,
-    /href="\/contributors\/alice\?organization=Pick-Your-AI&amp;snapshot=public-1&amp;metric=pr_opened&amp;ui=api"/,
+    /href="\/contributors\/alice\?organization=Pick-Your-AI&amp;snapshot=public-1&amp;metric=pr_merged&amp;ui=api"/,
   );
-  const pinned = await app.inject({ url: "/api/v1/cards/alice?metric=pr_opened&snapshot=public-1" });
+  const pinned = await app.inject({ url: "/api/v1/cards/alice?metric=pr_merged&snapshot=public-1" });
   assert.equal(pinned.statusCode, 200);
   assert.match(pinned.body, /Archived snapshot card/);
   assert.equal((await app.inject({ url: "/api/v1/cards/alice" })).statusCode, 400);
   value.controls.suppressedActorIds.push("alice");
   const hidden = await app.inject({
-    url: "/api/v1/cards/alice?metric=pr_opened&snapshot=public-1",
+    url: "/api/v1/cards/alice?metric=pr_merged&snapshot=public-1",
     headers: { "if-none-match": pinned.headers.etag },
   });
   assert.equal(hidden.statusCode, 404);
@@ -1156,12 +1279,12 @@ test("card output escapes publisher text and does not include suppressed source 
   value.selected.actors[0].actor.login = '<script>alert("x")</script>';
   const app = createService({ source: { read: async () => structuredClone(value) } });
   t.after(() => app.close());
-  const response = await app.inject({ url: "/api/v1/cards/alice?metric=pr_opened" });
+  const response = await app.inject({ url: "/api/v1/cards/alice?metric=pr_merged" });
   assert.equal(response.statusCode, 200);
   assert.doesNotMatch(response.body, /<script>/);
   assert.match(response.body, /&lt;script&gt;/);
   value.controls.suppressedArtifactIds.push("pr-0");
-  const hidden = await app.inject({ url: "/api/v1/cards/alice?metric=pr_opened&snapshot=public-1" });
+  const hidden = await app.inject({ url: "/api/v1/cards/alice?metric=pr_merged&snapshot=public-1" });
   assert.equal(hidden.statusCode, 404);
   assert.doesNotMatch(hidden.body, /synthetic\/example\/pull\/1/);
 });
@@ -1231,7 +1354,7 @@ test("achievement exclusions preserve positively evidenced automated execution o
     const response = await app.inject(`/api/v1/contributors/alice/achievements?${query}`);
     assert.equal(response.statusCode, 200);
     assert.deepEqual(response.json().achievements, [], `${filter} cannot award automated execution`);
-    const board = (await app.inject(`/api/v1/boards?metric=pr_opened&${query}`)).json();
+    const board = (await app.inject(`/api/v1/boards?metric=pr_merged&${query}`)).json();
     const row = board.rows.find((row) => row.actorId === "alice");
     assert.equal(row.actor.kind, "user", "execution evidence does not reclassify the account");
     assert.equal(row.actor.executionMode, "automated");
@@ -1248,7 +1371,7 @@ test("README SVG images are bounded passive dated output and enforce current pin
   value.selected.actors[0].actor.login = '<script>alert("unsafe")</script>';
   const app = createService({ source: { read: async () => structuredClone(value) } });
   t.after(() => app.close());
-  const url = "/api/v1/cards/alice/image?metric=pr_opened&snapshot=public-1";
+  const url = "/api/v1/cards/alice/image?metric=pr_merged&snapshot=public-1";
   const response = await app.inject({ url });
   assert.equal(response.statusCode, 200);
   assert.match(response.headers["content-type"], /image\/svg\+xml/);
@@ -1261,4 +1384,96 @@ test("README SVG images are bounded passive dated output and enforce current pin
   assert.equal((await app.inject({ url })).body, response.body);
   value.controls.suppressedActorIds.push("alice");
   assert.equal((await app.inject({ url, headers: { "if-none-match": response.headers.etag } })).statusCode, 404);
+});
+
+test("descriptive and spotlight metrics reject ranked provider policies across boards, profiles and exports", async (t) => {
+  for (const metricId of [
+    "pr_accepted_rate",
+    "review_wait",
+    "active_periods",
+    "appreciation",
+    "incidents",
+    "first_contribution",
+  ]) {
+    for (const rank of [true, undefined, false]) {
+      const value = fixture();
+      for (const row of value.selected.rows) row.result.metricId = metricId;
+      for (const item of value.selected.evidence) item.contribution.metricIds = [metricId];
+      value.selected.ranking = [{ metricId, direction: "descending", ...(rank === undefined ? {} : { rank }) }];
+      const { app } = harness(t, value);
+      for (const path of [
+        `boards?metric=${metricId}`,
+        `contributors/alice?metric=${metricId}`,
+        `exports?metric=${metricId}&format=json`,
+        `exports?metric=${metricId}&format=csv`,
+      ]) {
+        const response = await app.inject(`/api/v1/${path}`);
+        assert.equal(
+          response.statusCode,
+          rank === false ? 200 : 503,
+          `${metricId} ${String(rank)} ${path}: ${response.body}`,
+        );
+        if (rank !== false) {
+          assert.equal(response.headers.etag, undefined);
+          assert.doesNotMatch(response.body, /alice|bob|carol/);
+        }
+      }
+      if (rank !== false) continue;
+      const selected = selection(`?metric=${metricId}&snapshot=public-1`);
+      const boardData = (await app.inject(`/api/v1/boards?metric=${metricId}&snapshot=public-1`)).json();
+      assert.ok(boardData.rows.length > 0);
+      assert.ok(boardData.rows.every((row) => row.rank === null));
+      assert.doesNotThrow(() => parseBoard(boardData, selected));
+      const exported = (await app.inject(`/api/v1/exports?metric=${metricId}&snapshot=public-1&format=json`)).json();
+      assert.doesNotThrow(() => validateExport(exported, selected, exported.metric));
+      for (const data of [boardData, exported]) {
+        const parse =
+          data === boardData ? parseBoard : (value, selected) => validateExport(value, selected, exported.metric);
+        const contradictory = structuredClone(data);
+        contradictory.ranking.rank = true;
+        assert.throws(() => parse(contradictory, selected));
+        delete contradictory.ranking.rank;
+        assert.throws(() => parse(contradictory, selected));
+        contradictory.ranking = null;
+        contradictory.rows[0].rank = 1;
+        assert.throws(() => parse(contradictory, selected));
+      }
+    }
+  }
+});
+
+test("spotlight board and JSON/CSV clients retain proof and reject invented ranking", async (t) => {
+  for (const metricId of ["appreciation", "incidents", "first_contribution"]) {
+    const value = fixture("public-1", 1, metricId);
+    value.selected.ranking[0].rank = false;
+    const original = structuredClone(value);
+    const { app } = harness(t, value);
+    const selected = selection(`?metric=${metricId}&snapshot=public-1`);
+    const boardResponse = await app.inject(`/api/v1/boards?metric=${metricId}&snapshot=public-1`);
+    assert.equal(boardResponse.statusCode, 200);
+    const boardData = boardResponse.json();
+    assert.doesNotThrow(() => parseBoard(boardData, selected));
+    const jsonResponse = await app.inject(`/api/v1/exports?metric=${metricId}&snapshot=public-1&format=json`);
+    assert.equal(jsonResponse.statusCode, 200);
+    const exported = jsonResponse.json();
+    const csvResponse = await app.inject(`/api/v1/exports?metric=${metricId}&snapshot=public-1&format=csv`);
+    assert.equal(csvResponse.statusCode, 200);
+    const csv = parseCSVExport(csvResponse.body, exported.metric, Number(selected.limit));
+    for (const data of [boardData, exported, csv]) {
+      const parse =
+        data === boardData ? parseBoard : (value, selected) => validateExport(value, selected, exported.metric);
+      assert.doesNotThrow(() => parse(data, selected));
+      assert.deepEqual(
+        data.rows.map((row) => [row.actorId, row.rank, row.result.value, row.evidenceIds]),
+        value.selected.rows.map((row) => [row.actorId, null, row.result.value, row.evidenceIds]),
+      );
+      const forged = structuredClone(data);
+      forged.ranking.rank = true;
+      assert.throws(() => parse(forged, selected), `${metricId}: ranked metadata must not enable a spotlight`);
+      forged.ranking = null;
+      forged.rows[0].rank = 1;
+      assert.throws(() => parse(forged, selected), `${metricId}: an absent policy must not authorize a numeric rank`);
+    }
+    assert.deepEqual(value, original, "reads must preserve the stored unranked evidence");
+  }
 });

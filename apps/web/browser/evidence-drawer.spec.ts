@@ -3,7 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { evidenceService } from "./evidenceHarness.ts";
 
 test.use({ storageState: { cookies: [], origins: [] } });
-const board = "/leaderboards/pr_opened?ui=api&snapshot=api-1";
+const board = "/leaderboards/pr_merged?ui=api&snapshot=api-1";
 
 test("API drawer and permanent route have identical proof, retain cursor/scope and hold a new head", async ({
   page,
@@ -143,7 +143,7 @@ for (const withdrawal of ["suppress", "suppressArtifact", "revoke", "fail"] as c
   });
 }
 
-test("API proof keeps hostile text literal and unknown times, titles, revisions and acceptance honest", async ({
+test("API proof omits private reasons and keeps unknown times, titles, revisions and acceptance honest", async ({
   page,
 }) => {
   const api = await evidenceService(page);
@@ -152,7 +152,8 @@ test("API proof keeps hostile text literal and unknown times, titles, revisions 
     await page.goto(board);
     await page.getByRole("link", { name: "e-api-a", exact: true }).click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText('<img src=x onerror="window.proofInjected=true">', { exact: false })).toBeVisible();
+    await expect(dialog.locator("[data-evidence-body]")).toBeVisible();
+    await expect(dialog.getByText('<img src=x onerror="window.proofInjected=true">', { exact: false })).toHaveCount(0);
     await expect(dialog.locator("img, script")).toHaveCount(0);
     expect(await page.evaluate(() => Reflect.get(window, "proofInjected"))).toBeUndefined();
     await expect(dialog.getByText("Unknown; no event time is inferred", { exact: true })).toBeVisible();
@@ -182,7 +183,7 @@ test("deep linked unavailable source has no fabricated replacement and Close sta
     await dialog.getByRole("button", { name: "Close evidence panel" }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
-    expect(new URL(page.url()).pathname).toBe("/leaderboards/pr_opened");
+    expect(new URL(page.url()).pathname).toBe("/leaderboards/pr_merged");
     expect(new URL(page.url()).searchParams.get("snapshot")).toBe("api-1");
     expect(new URL(page.url()).searchParams.has("proof")).toBe(false);
   } finally {

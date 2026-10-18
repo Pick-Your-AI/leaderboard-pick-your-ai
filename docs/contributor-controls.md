@@ -14,7 +14,29 @@ Construct the provider with a **separate browser OAuth** `clientId` and `clientS
 
 GitHub authorization requests an empty OAuth scope, single-use state bound to a separate HttpOnly browser cookie, and S256 PKCE. The provider exchanges only with fixed GitHub endpoints, uses a ten-second timeout, refuses redirects, bounds response bytes, reads the stable numeric account ID and revokes the transient token before returning identity. A previously authorized broader scope is rejected and revoked. No OAuth access token or email is persisted. GitHub's documented flow supports [state and S256 PKCE](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps).
 
+Nonempty successful identity-provider responses require well-formed UTF-8 before
+JSON parsing. This applies to the token exchange, account lookup and any nonempty
+revocation response. Malformed bytes cannot become replacement text and allow a
+session to be created. A known token is still revoked after a failed account
+lookup; a malformed token response supplies no trusted token to use or revoke.
+An empty successful response remains valid for the documented
+[204 token-revocation result](https://docs.github.com/en/rest/apps/oauth-applications#delete-an-app-token).
+The existing 65,536-byte limit, HTTP error classification and leading-BOM
+rejection remain in force. Failed callbacks retain the existing fixed error and
+consume their one-time login state without rotating an existing session.
+
 Sessions use random 256-bit identifiers stored only as SHA-256 hashes. Reauthentication deletes the presented old session and creates a new identifier. `__Host-controls_session` has `Secure`, `HttpOnly`, `Path=/`, `SameSite=Lax`, no Domain attribute and a maximum lifetime of fifteen minutes. Mutation requires exact same-origin `Origin`, JSON and a per-session CSRF header. Duplicate cookies, duplicate callback parameters and unexpected fields are rejected. No CORS enablement is supplied. Public reading stays anonymous. All responses use `no-store`, JSON content type, `nosniff` and a restrictive CSP.
+
+Protected JSON mutation bodies require well-formed UTF-8 within the existing
+encoded-byte limit. Damaged bytes are rejected with the fixed `400 Invalid JSON`
+response before profile, request, audit or public-projection state can change;
+they are never replaced with different text and persisted. Authentication,
+origin and CSRF checks still precede body parsing, and successful parsing still
+rechecks the session before mutation. Valid multilingual text, combining marks,
+emoji and a literal replacement character retain their original spelling even
+when a client writes the bytes separately. Leading UTF-8 BOMs retain the previous
+JSON-parser rejection behavior. This boundary neither changes the stored schema
+nor reconstructs original bytes from older already-decoded records.
 
 ## Routes
 
@@ -42,6 +64,31 @@ Evidence submission requires `{ kind: 'evidence', locator, category, collaborato
 
 Review requires `{ version, decision, reason, conflict: false }`. Acceptance additionally requires `sourceReviewedPublic: true` and `policyVersion`, expressing an accountable reviewer's actual source/policy review. It cannot be performed by the submitter or a listed collaborator, including someone who declined attribution. An appeal or rollback requires a reviewer who did not make any earlier decision on that receipt. Accepted duplicate evidence with the same owner, locator, category and scope is blocked; use `decision: 'merge'` with `duplicateOf` pointing to an already accepted canonical receipt. Different scopes are not silently merged. No upstream GitHub object is modified.
 
+Locale acceptance also requires an explicit reviewed target in the acceptance input:
+`localization: { targetFactId, sourceRevision, locale, category, policyVersion }`.
+The reviewer form provides these fields behind its locale-review checkbox. The
+target names the actual observed contribution and immutable merge SHA, its
+canonical language tag, content category and documentation classification policy.
+The classification policy is distinct from the outer accepted metric policy.
+Only an authenticated independent acceptance action can record this target;
+submission, rejection, rollback and duplicate-merge inputs reject it. All five
+fields must be bounded canonical strings, with no extra fields or inferred values.
+
+The real acceptance audit stores that target with the reviewed request owner,
+locator, category, scope, current request version and receipt ID. The pipeline
+matches it against the current protected locale selector and exact public source,
+requires a decision no earlier than the merge, and verifies one unchanged audit
+entry. An earlier generic receipt cannot qualify locale work, and changing the
+configuration cannot redirect a recorded language or source revision. The owner
+must amend changed evidence and an independent reviewer must review it again.
+These private audit fields are omitted from `/controls/public` and public evidence.
+When a declared collaborator changes consent after locale acceptance, the receipt
+returns to pending review and its stale metric policy is cleared in the same
+transaction. The earlier target and decision remain in the private audit. The
+reviewer can then accept the current version directly; no unrelated owner appeal
+or amendment is required. Repeating the same consent leaves an accepted locale
+receipt and its version unchanged. Other evidence consent behavior is preserved.
+
 Correction, privacy and identity requests use `{ kind, detail, locator? }`. They are durable **pending** private receipts. Privacy/identity requests are accessible only to their owner or the `privacy` role; ordinary evidence reviewers cannot read them. They cannot be marked accepted/applied by the generic review API because the downstream correction/identity capability has not been integrated. This prevents a stored form from falsely claiming a correction was applied. Self-service suppression has a separate actual application path and receipt. Do not send a privacy request to a public GitHub issue. A safe staffed alternative for someone unable to authenticate still requires an accepted owner and verified private destination; none is invented here.
 
 ## Transactional publication
@@ -53,6 +100,26 @@ An optional `transactionalPublisher({ database, snapshot })` hook can update dep
 ## Validation and remaining acceptance
 
 Run `node --test apps/controls/test/controls.test.mjs` or the root test command. `npm run build --workspace @pick-your-ai/controls` checks JavaScript syntax; no TypeScript typecheck is claimed. Tests exercise actual loopback HTTP requests and SQLite files with fictional identities/provider responses: callback/state/PKCE/replay, fixation/expiry/revocation, direct role/CSRF bypass attempts, ownership and private receipt boundaries, collaborator declines, independent review/appeal/rollback/duplicate handling, withdrawal, suppression, reopened storage and transactional publisher failure. Provider tests assert exact endpoints, no requested scope, rejection of broader returned scopes, bounded responses, redirect policy and token revocation. Synthetic reviews do not establish real source rights or metric approval.
+
+`node --test apps/controls/test/request-encoding.test.mjs` exercises the protected
+UTF-8 boundary with real disposable HTTP listeners and SQLite stores. Its
+synthetic pre-authorized sessions test mutation handling, not a live OAuth login.
+Six malformed byte families are rejected for both profiles and private requests
+without changing the complete private state or public projection. The same
+session then accepts valid Unicode. Controls cover separate one-byte writes,
+BOM and JSON syntax rejection, authentication/CSRF ordering and the request-byte
+limit. These checks do not establish the remaining accessible product journey,
+deployed identity or production-storage acceptance for #119/#53.
+
+`node --test apps/controls/test/oauth-response-encoding.test.mjs` covers malformed
+provider bytes at all three response stages, valid Unicode delivered in one-byte
+stream chunks, literal U+FFFD, BOM/JSON rejection, exact byte limits, unsuccessful
+HTTP status handling and empty 204 revocation. Its real disposable HTTP/SQLite
+callback cases use fictional injected provider responses: a failed exchange
+preserves the complete prior state and public projection, consumes only the new
+login nonce, rejects replay, leaves the existing session usable and permits a
+fresh valid login. These are synthetic adapter and callback results, not live
+GitHub authorization, real token revocation or production identity evidence.
 
 Remaining release evidence includes approved OAuth registration/credentials and exact callback, accepted reviewer/privacy/operator roster, real source/identity probes, production private storage ACL/retention/recovery controls, staffed private alternative verification/destination, accessible UI and real participant journeys, policy recalculation preview/activation, all-public-surface suppression propagation, actual deployed correction readback and affected-owner acceptance. Neither an account role nor a response commitment is accepted by broad repository coding authorization.
 

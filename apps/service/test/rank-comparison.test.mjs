@@ -194,7 +194,7 @@ test("comparison receipts consume engine-validated clocks and never truncate fin
       /Expected an explicit UTC instant/,
     );
 });
-function harness(t, patch = () => {}) {
+function harness(t, patch = () => {}, registry = metricRegistryV1) {
   const before = published("synthetic-before", 1, beforeAt, oldFacts),
     after = published("synthetic-after", 2, afterAt, [...oldFacts, ...fresh]);
   const pair = {
@@ -206,6 +206,7 @@ function harness(t, patch = () => {}) {
   patch(pair);
   const calls = [];
   const app = createService({
+    registry,
     source: {
       async read() {
         calls.push("read");
@@ -233,6 +234,50 @@ function harness(t, patch = () => {}) {
   });
   return { app, pair, calls, params, url: `/api/v1/boards?${params}` };
 }
+test("paired current reads enforce the configured descriptive metric before boards and exports", async (t) => {
+  const registry = structuredClone(metricRegistryV1);
+  registry.metrics.find((metric) => metric.id === "pr_merged").definition.release_eligibility = "descriptive-only";
+  const h = harness(t, () => {}, registry);
+  for (const path of [h.url, `/api/v1/exports?${h.params}&format=json`, `/api/v1/exports?${h.params}&format=csv`]) {
+    const response = await h.app.inject(path);
+    assert.equal(response.statusCode, 503, response.body);
+    assert.equal(response.json().error, "public_projection_unavailable");
+    assert.equal(response.headers.etag, undefined);
+    assert.doesNotMatch(response.body, /synthetic-[abc]|private-acceptance-secret/);
+  }
+});
+
+test("a descriptive baseline violation withholds comparison while preserving valid current values", async (t) => {
+  const registry = structuredClone(metricRegistryV1);
+  registry.metrics.find((metric) => metric.id === "pr_merged").definition.release_eligibility = "descriptive-only";
+  const h = harness(
+    t,
+    (pair) => {
+      pair.current.selected.ranking[0].rank = false;
+    },
+    registry,
+  );
+  for (const path of [h.url, `/api/v1/exports?${h.params}&format=json`]) {
+    const response = await h.app.inject(path);
+    assert.equal(response.statusCode, 200, response.body);
+    const body = response.json();
+    assert.deepEqual(body.comparison, { snapshotId: null, scope: null, generatedAt: null });
+    assert.deepEqual(
+      body.rows.map((row) => row.result.value).sort((a, b) => a - b),
+      [1, 2, 3],
+    );
+    for (const row of body.rows) {
+      assert.equal(row.rank, null);
+      assert.deepEqual(row.movement, {
+        actorId: row.actorId,
+        state: "unavailable",
+        delta: null,
+        reason: "comparison_unavailable",
+      });
+    }
+  }
+});
+
 const safe = (body) => {
   for (const key of [
     "private-acceptance-secret",
@@ -502,6 +547,90 @@ test("comparison coverage uses only evidenced selected-policy source and reposit
     );
   }
 });
+
+for (const side of ["current", "previous"]) {
+  for (const location of ["snapshot", "result"]) {
+    for (const boundary of ["missing", "one nanosecond short", "exact end"]) {
+      test(`${side} ${location} coverage requires reconciliation through the end: ${boundary}`, async (t) => {
+        const h = harness(t, (pair) => {
+          const selected = pair[side].selected;
+          const sourceWatermark =
+            boundary === "missing"
+              ? null
+              : boundary === "exact end"
+                ? selected.scope.end.replace(".000Z", ".000000000Z")
+                : new Date(Date.parse(selected.scope.end) - 1).toISOString().replace(".999Z", ".999999999Z");
+          // Replace records to test snapshot and result coverage independently;
+          // the complete fixture intentionally shares their original object.
+          if (location === "snapshot")
+            selected.snapshot.coverage[0] = { ...selected.snapshot.coverage[0], sourceWatermark };
+          else for (const row of selected.rows) row.result.coverage = { ...row.result.coverage, sourceWatermark };
+        });
+        const response = await h.app.inject(h.url);
+        assert.equal(response.statusCode, 200, response.body);
+        const rows = response.json().rows;
+        assert.deepEqual(
+          rows.map((row) => [row.actorId, row.result.value]),
+          [
+            ["b", 3],
+            ["a", 2],
+            ["c", 1],
+          ],
+        );
+        if (boundary === "exact end")
+          assert.deepEqual(
+            rows.map((row) => [row.actorId, row.movement.state, row.movement.delta]),
+            [
+              ["b", "comparable", 1],
+              ["a", "comparable", -1],
+              ["c", "new_entrant", null],
+            ],
+          );
+        else
+          assert.ok(
+            rows.every(
+              (row) =>
+                row.movement.state === "unavailable" &&
+                row.movement.delta === null &&
+                row.movement.reason === "insufficient_history",
+            ),
+            response.body,
+          );
+        safe(response.body);
+      });
+    }
+  }
+  for (const boundary of ["one nanosecond short", "exact end"]) {
+    test(`${side} public snapshot must reach the selected end: ${boundary}`, async (t) => {
+      const h = harness(t, (pair) => {
+        const selected = pair[side].selected;
+        selected.snapshot.generatedAt =
+          boundary === "exact end"
+            ? selected.scope.end.replace(".000Z", ".000000000Z")
+            : new Date(Date.parse(selected.scope.end) - 1).toISOString().replace(".999Z", ".999999999Z");
+      });
+      const response = await h.app.inject(h.url);
+      assert.equal(response.statusCode, 200, response.body);
+      const rows = response.json().rows;
+      assert.deepEqual(
+        rows.map((row) => row.result.value),
+        [3, 2, 1],
+      );
+      if (boundary === "exact end") assert.equal(rows[0].movement.delta, 1);
+      else
+        assert.ok(
+          rows.every(
+            (row) =>
+              row.movement.state === "unavailable" &&
+              row.movement.delta === null &&
+              row.movement.reason === "insufficient_history",
+          ),
+          response.body,
+        );
+      safe(response.body);
+    });
+  }
+}
 
 test("large public cohorts validate retained rows and dense ranks without repeated scans", (t) => {
   const size = 5_000;

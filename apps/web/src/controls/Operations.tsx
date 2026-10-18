@@ -1,5 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import { control, type Session } from "./client.ts";
+import { ReplayWindowControls } from "./ReplayWindow.tsx";
+import {
+  checkedWindowPreview,
+  checkedWindowReceipt,
+  type ReplayWindow,
+  type WindowPreview,
+  type WindowReceipt,
+} from "./operations-window.ts";
 interface Status {
   repositoryId: number;
   sourceGeneration: string;
@@ -27,6 +35,7 @@ interface Status {
     beforeRevision: string;
     queuedRevision: string;
     resultingPublicationRevision: null;
+    batch?: { id: string; size: number; selectionRevision: string; window: ReplayWindow } | null;
   }>;
   truncated: { quarantined: boolean; runs: boolean; receipts: boolean };
   meaning: string;
@@ -38,6 +47,7 @@ export function Operations({ session }: { session: Session }) {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
+  const [windowPreview, setWindowPreview] = useState<WindowPreview | null>(null);
   const generation = useRef(0);
   const permitted = () => !document.hidden && session.roles.includes("operator") && session.expires > Date.now();
   function clear() {
@@ -45,6 +55,7 @@ export function Operations({ session }: { session: Session }) {
     setError("");
     setNotice("");
     setBusy(false);
+    setWindowPreview(null);
   }
   useEffect(() => {
     clear();
@@ -92,6 +103,7 @@ export function Operations({ session }: { session: Session }) {
     setBusy(true);
     setNotice("");
     setError("");
+    setWindowPreview(null);
     try {
       const receipt = await control<{ id: string; status: string }>(`/controls/operations/${repo}/replay`, session, {
         deliveryId: row.deliveryId,
@@ -109,6 +121,73 @@ export function Operations({ session }: { session: Session }) {
       if (current === generation.current && permitted()) {
         setData(null);
         setError("Replay was not confirmed. Reload diagnostics and receipts before deciding whether to retry.");
+      }
+    } finally {
+      if (current === generation.current) setBusy(false);
+    }
+  }
+  function invalidateWindow() {
+    ++generation.current;
+    setWindowPreview(null);
+    setError("");
+    setNotice("");
+  }
+  async function previewWindow(input: ReplayWindow) {
+    if (!data || busy || !permitted()) return;
+    const current = ++generation.current;
+    setBusy(true);
+    setWindowPreview(null);
+    setError("");
+    setNotice("");
+    try {
+      const { repositoryId, ...window } = input;
+      const value = await control<WindowPreview>(
+        `/controls/operations/${repositoryId}/replay-window/preview`,
+        session,
+        window,
+      );
+      if (current !== generation.current || !permitted()) return;
+      setWindowPreview(checkedWindowPreview(value, input, data.sourceGeneration, data.authorityRevision));
+    } catch {
+      if (current === generation.current && permitted()) {
+        setData(null);
+        setError(
+          "Window preview unavailable, larger than its limit, or access changed. Reload diagnostics before choosing a narrower window or retrying. Nothing was queued by this preview.",
+        );
+      }
+    } finally {
+      if (current === generation.current) setBusy(false);
+    }
+  }
+  async function replayWindow(reason: string) {
+    if (!data || !windowPreview || !windowPreview.deliveries.length || busy || !permitted()) return;
+    const preview = windowPreview,
+      current = ++generation.current;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const { repositoryId, ...window } = preview.window;
+      const receipt = await control<WindowReceipt>(`/controls/operations/${repositoryId}/replay-window`, session, {
+        ...window,
+        expectedRevision: preview.revision,
+        reason,
+        confirmed: true,
+      });
+      if (current !== generation.current || !permitted()) return;
+      checkedWindowReceipt(receipt, preview);
+      setData(null);
+      setWindowPreview(null);
+      setNotice(
+        `Window replay queued. Batch ${receipt.id}, ${receipt.receipts.length} durable delivery receipts. This does not confirm collection or publication; reload diagnostics to inspect receipts and retained progress.`,
+      );
+    } catch {
+      if (current === generation.current && permitted()) {
+        setData(null);
+        setWindowPreview(null);
+        setError(
+          "Window replay was not confirmed. Reload diagnostics and receipts before deciding whether another preview and replay are needed.",
+        );
       }
     } finally {
       if (current === generation.current) setBusy(false);
@@ -161,6 +240,19 @@ export function Operations({ session }: { session: Session }) {
               </React.Fragment>
             ))}
           </dl>
+          <ReplayWindowControls
+            repositoryId={data.repositoryId}
+            policyVersion={data.policyVersion}
+            busy={busy}
+            preview={windowPreview}
+            invalidate={invalidateWindow}
+            onInvalid={(message) => {
+              invalidateWindow();
+              setError(message);
+            }}
+            onPreview={(input) => void previewWindow(input)}
+            onReplay={(reason) => void replayWindow(reason)}
+          />
           <h3>Recent collection runs</h3>
           {data.runs.length === 0 && <p>No retained collection run is available.</p>}
           {data.runs.map((r, i) => (
@@ -199,11 +291,20 @@ export function Operations({ session }: { session: Session }) {
           ))}
           <h3>Retained replay receipts</h3>
           {data.receipts.map((r) => (
-            <p key={r.id}>
-              Source generation {r.sourceGeneration ?? "unknown"} · receipt {r.id} · delivery {r.deliveryId} · operator{" "}
-              {r.operatorId} · {r.reason} · policy {r.policyVersion} · before {r.beforeRevision} · queued{" "}
-              {r.queuedRevision}. Resulting publication revision: unknown.
-            </p>
+            <div key={r.id}>
+              <p>
+                Source generation {r.sourceGeneration ?? "unknown"} · receipt {r.id} · delivery {r.deliveryId} ·
+                operator {r.operatorId} · {r.reason} · policy {r.policyVersion} · before {r.beforeRevision} · queued{" "}
+                {r.queuedRevision}. Resulting publication revision: unknown.
+              </p>
+              {r.batch && (
+                <p>
+                  Batch {r.batch.id} · {r.batch.size} deliveries · received from {r.batch.window.receivedSince}{" "}
+                  (inclusive) to {r.batch.window.receivedUntil} (exclusive) · limit {r.batch.window.limit} · reviewed
+                  selection {r.batch.selectionRevision}.
+                </p>
+              )}
+            </div>
           ))}
           {Object.values(data.truncated).some(Boolean) && (
             <p>Results are limited to 50 records per section; this view is not a complete history.</p>
