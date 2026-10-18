@@ -1063,6 +1063,33 @@ export function normalizeGithubObservation(
       }
     }
   }
+  // Specialist review must bind an immutable delivered revision, never a PR URL
+  // or its mutable update timestamp. This does not qualify the source fact.
+  const mergedRevisionTime = time(resource.merged_at);
+  if (
+    envelope.family === "pull_request" &&
+    resource.merged === true &&
+    mergedRevisionTime &&
+    Date.parse(mergedRevisionTime) <= Date.parse(observedAt) &&
+    integration?.diff &&
+    out.physicalDiff?.complete &&
+    pinnedSha(integration.after) &&
+    resource.merge_commit_sha === integration.after &&
+    object(resource.base) &&
+    text(resource.base.ref) &&
+    text(repository.defaultBranch) &&
+    resource.base.ref === integration.targetBranch &&
+    integration.targetBranch === integration.defaultBranch &&
+    repository.defaultBranch === integration.defaultBranch &&
+    integration.diff.before === integration.before &&
+    integration.diff.after === integration.after &&
+    text(integration.canonicalChangeId)
+  ) {
+    for (const evidence of out.evidence.filter((entry) => entry.contribution.metricIds.includes("pr_merged"))) {
+      evidence.sourceRevision = integration.after;
+      evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
+    }
+  }
   if (documentationPolicy && envelope.family === "pull_request") {
     validateDocumentationPolicy(documentationPolicy);
     const mergedAt = time(resource.merged_at);
@@ -1196,6 +1223,25 @@ export interface VerifiedRecognitionReceipt {
   sourceRevision?: string;
 }
 const receiptMetrics = new Set([
+  "catalog_proposals",
+  "pricebook_proposals",
+  "compatibility_proposals",
+  "primary_sources",
+  "freshness_checks",
+  "reproduced_measurements",
+  "negative_findings",
+  "rights_reviews",
+  "assumptions_resolved",
+  "market_research",
+  "evidence_manifests",
+  "documentation",
+  "tests",
+  "regressions_prevented",
+  "accessibility",
+  "design",
+  "usability",
+  "performance",
+  "security",
   "accepted_findings",
   "confirmed_bugs",
   "issue_resolution",
