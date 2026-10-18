@@ -27,6 +27,11 @@ export interface PolicyChange {
     rank: string | null;
   };
 }
+export interface PolicyAuditEntry {
+  actorId: string | null;
+  factIds: string[];
+  reason: string;
+}
 export interface PolicyPreview {
   comparisonId: string;
   inputId: string;
@@ -35,8 +40,8 @@ export interface PolicyPreview {
   redactionsApplied: boolean;
   beforePolicy: ObjectValue;
   candidatePolicy: ObjectValue;
-  before: { policyVersion: string; coverage: unknown; rows: unknown[] };
-  after: { policyVersion: string; coverage: unknown; rows: unknown[] };
+  before: { policyVersion: string; coverage: unknown; rows: unknown[]; audit: PolicyAuditEntry[] };
+  after: { policyVersion: string; coverage: unknown; rows: unknown[]; audit: PolicyAuditEntry[] };
   changes: PolicyChange[];
 }
 const object = (v: unknown): v is ObjectValue => !!v && typeof v === "object" && !Array.isArray(v);
@@ -119,6 +124,28 @@ function causes(value: unknown): boolean {
     )
   );
 }
+function audit(value: unknown): value is PolicyAuditEntry[] {
+  if (!Array.isArray(value) || value.length > 10_000) return false;
+  let facts = 0;
+  return value.every((entry) => {
+    if (
+      !object(entry) ||
+      Object.keys(entry).length !== 3 ||
+      !Object.hasOwn(entry, "actorId") ||
+      !Object.hasOwn(entry, "factIds") ||
+      !Object.hasOwn(entry, "reason") ||
+      (entry.actorId !== null && !text(entry.actorId)) ||
+      !strings(entry.factIds) ||
+      entry.factIds.length === 0 ||
+      new Set(entry.factIds).size !== entry.factIds.length ||
+      typeof entry.reason !== "string" ||
+      !/^[a-z][a-z0-9_]{0,99}$/.test(entry.reason)
+    )
+      return false;
+    facts += entry.factIds.length;
+    return facts <= 10_000;
+  });
+}
 export function checkedPolicyPreview(value: unknown, input: FrozenPolicyInput, candidate?: ObjectValue): PolicyPreview {
   if (
     Date.parse(input.expiresAt) <= Date.now() ||
@@ -160,6 +187,8 @@ export function checkedPolicyPreview(value: unknown, input: FrozenPolicyInput, c
     value.before.rows.length > 2000 ||
     !Array.isArray(value.after.rows) ||
     value.after.rows.length > 2000 ||
+    !audit(value.before.audit) ||
+    !audit(value.after.audit) ||
     !Array.isArray(value.changes) ||
     value.changes.length > 2000 ||
     !value.changes.every(
