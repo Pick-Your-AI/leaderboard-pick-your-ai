@@ -4,6 +4,8 @@
 
 The planning audit was captured from 2026-10-17T02:24:58.286322+00:00 to 2026-10-17T02:26:10.902486+00:00. It covered the three visible public repositories and five Projects listed below, with 391 issue/PR records in the source inventory. This is a historical snapshot, not a live inventory or a claim about undisclosed private repositories.
 
+The [2026-10-18 organization boundary inventory](organization-boundaries.md) separately reconciles all six visible public repositories and six Projects, their stable identifiers, configured fields and existing ownership. The historical counts below remain unchanged.
+
 | Repository | Reviewed revision | Issues | PRs |
 | --- | --- | --- | --- |
 | [.github](https://github.com/Pick-Your-AI/.github) | 9b48a356b5934d836d9377502c9080c5fa9ed0e6 | 1 | 1 |

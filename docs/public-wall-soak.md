@@ -90,8 +90,23 @@ interrupted primary receipt. A killed process may leave a pending or missing
 receipt; neither is a successful run. A completed result must also have passed
 runtime status and a duration-matched full or short matrix label.
 
+One shared, bounded error recorder retains the first unexpected heartbeat, route
+and page error through the final matrix checks and both owned cleanups. The
+matrix checks it after final resource and input verification. Each cleanup
+checks it again after all awaited operations, including public-route draining
+and browser shutdown, and carries any late callback failure into its receipt.
+An error arriving during finalization therefore cannot leave a successful
+primary result. Synthetic source-tail and cleanup/finalization regressions
+exercise late errors separately from elapsed-time execution.
+
 Samples append within that attempt to `samples.jsonl` every fifteen seconds
 (every five seconds in a rehearsal). Event and sample entries also carry the attempt ID.
+Each future action records its start and completion with its scheduled and actual
+elapsed time. A sample's elapsed time is captured after action waits, alongside
+its actual browser capture timestamp; the earlier loop-entry time cannot describe
+a page observed after a recovery wait. Planned interruptions also record their
+start, fixed maximum duration and matching completion, and samples identify the
+currently intended interruption, if any.
 Separate event and summary files record exact Git input,
 actual browser/Node versions, real start/end time, elapsed duration, scenario
 completion, response-code counts and resource limits. Tracing and video are off
@@ -106,8 +121,8 @@ That test's injected clock supplies no real-duration soak evidence.
 A healthy automatic page must advance within two minutes. Every uninterrupted
 automatic period must visit all five pages within three real minutes and keep
 each page's subsequent absence below that bound throughout the run. Changing
-publication pins does not reset this coverage. An actual hold or deliberately
-injected outage starts a fresh bounded period on resumption. Transient empty
+publication pins does not reset this coverage. Only a scheduled harness hold or
+deliberately injected outage starts a fresh bounded period on resumption. Transient empty
 displays while otherwise automatic do not erase the deadline. Each nonempty page must contain its
 complete expected fixture actors, in order, including the current suppression.
 This detects skipped rows and actors repeated from earlier pages as well as
@@ -120,12 +135,42 @@ starts at board page one and observes both board pages and all three contributor
 pages. Every view's successive pages must contain disjoint actor IDs; refreshing
 one page and appearing in both the board and contributor roll remain valid.
 An incidental empty or missing-pin frame clears the partial observation but
-retains its deadline. Only an actual hold, hidden tab or deliberate network/source
-outage resets the full automatic window. Changing snapshots or repeatedly alternating between only two pages
+retains its deadline. Only an explicitly scheduled hold, planned background tab
+or deliberate network/source outage resets the full automatic window. Changing snapshots or repeatedly alternating between only two pages
 cannot reset the healthy-window deadline or reuse an earlier successful cycle.
 Missed sampled pages cannot certify a full cycle. Samples and the final receipt
 retain the completed-cycle count, automatic-window count and observed deadline
 measurements; memory retains at most one cycle's five page sets.
+
+The [intent guard](../apps/web/soak/intent.ts) derives expected operation from
+the harness's own actions, independently of the product's displayed mode.
+Unexpected `Paused`, `Paused while reading`, reduced-motion or background states
+fail instead of disabling the checks. Actual tab visibility must also match the
+planned foreground/background state. During deliberate network/source failures,
+the control mode must remain automatic even though progress is exempt while the
+source is intentionally unavailable. Every pause/resume action requires its
+actual button and verifies the resulting mode; startup, resumption and completion
+require automatic operation.
+
+Each of the six interruption kinds can be granted once and cannot overlap,
+repeat or renew. Its original elapsed-time deadline is checked before observation
+and before completion clears it: network 90 seconds, source 120 seconds,
+suppression 210 seconds, held cursor 19 minutes, revocation 240 seconds and
+background 210 seconds. Short privacy/background bounds include the existing
+sequential browser-recovery waits; the cursor action deliberately observes
+eighteen real minutes. All required interruptions must finish before success.
+These bounds are harness allowances, not new product recovery guarantees.
+
+The guard regression completes one cycle through the actual helpers and then
+supplies an unsolicited held page: it must fail immediately, regardless of whether rows are
+present. Other cases cover a falsely automatic frozen page, unexpected tab
+visibility, every expired lease, a late resume, missing completion, repeated or
+overlapping grants and a deliberate eighteen-minute cursor hold followed by
+fresh complete coverage. Simulated helper sequences are verifier tests, not
+elapsed-time acceptance evidence. A long run frozen at an earlier verifier
+revision retains that exact source and needs a
+[separately reviewed chronology audit](wall-soak-chronology-audit.md); adding the
+guard later does not retroactively execute it in that run.
 
 After ten minutes of warmup, then hourly and at completion, explicit renderer garbage collection
 allows comparison of retained JavaScript heap and DOM counts. Limits relative to

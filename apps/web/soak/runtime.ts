@@ -16,6 +16,7 @@ import {
 } from "@playwright/test";
 import { createAttempt } from "./monitor.ts";
 import { finalizeAttempt } from "./receipt.ts";
+import { SoakFailures } from "./failures.ts";
 
 interface Runtime {
   browser: Browser;
@@ -27,9 +28,15 @@ interface Runtime {
   attempt: { id: string; directory: string; startedAt: string };
   outputPath: (name: string) => string;
   timezoneId: string;
+  failures: SoakFailures;
 }
 
-export async function cleanupOwned(path: string, attemptId: string, steps: [string, () => Promise<unknown>][]) {
+export async function cleanupOwned(
+  path: string,
+  attemptId: string,
+  steps: [string, () => Promise<unknown>][],
+  unexpected: SoakFailures,
+) {
   const failures: string[] = [];
   for (const [name, run] of steps) {
     try {
@@ -42,6 +49,13 @@ export async function cleanupOwned(path: string, attemptId: string, steps: [stri
     } catch (error) {
       failures.push(`${name}: ${String(error).slice(0, 1000)}`);
     }
+  }
+  // A route/page callback may fail while a preceding cleanup step is awaited.
+  // Keep that error in the owned receipt even when the operation itself resolves.
+  try {
+    unexpected.assertClear();
+  } catch (error) {
+    failures.push(`recorded asynchronous errors: ${String(error).slice(0, 1000)}`);
   }
   try {
     await writeFile(path, JSON.stringify({ attemptId, at: new Date().toISOString(), failures }, null, 2) + "\n");
@@ -81,6 +95,7 @@ export const soakTest = base.extend<{ runtime: Runtime }>({
       startedAt: new Date().toISOString(),
     };
     const outputPath = (name: string) => join(attempt.directory, name);
+    const failures = new SoakFailures();
     let profile: string | null = null;
     const executable = process.env.WALL_SOAK_BROWSER_PATH ?? chromium.executablePath();
     let log: FileHandle | null = null;
@@ -167,35 +182,41 @@ export const soakTest = base.extend<{ runtime: Runtime }>({
         attempt,
         outputPath,
         timezoneId,
+        failures,
       });
     } finally {
       const stopped = () => !child?.pid || child.exitCode !== null || child.signalCode !== null;
       let cleanupFailure: unknown = null;
       try {
-        await cleanupOwned(outputPath("browser-cleanup.json"), attempt.id, [
-          ["detach owned emulation session", async () => cdp?.detach()],
-          ["disconnect CDP", async () => browser?.close()],
+        await cleanupOwned(
+          outputPath("browser-cleanup.json"),
+          attempt.id,
           [
-            "stop owned browser",
-            async () => {
-              if (!stopped()) child!.kill("SIGTERM");
-              await Promise.race([exited, delay(1_000, undefined, { ref: false })]);
-              if (!stopped()) {
-                child!.kill("SIGKILL");
-                await Promise.race([exited, delay(2_000, undefined, { ref: false })]);
-              }
-              if (!stopped()) throw new Error(`Owned browser ${child!.pid} has not exited; retain its profile`);
-            },
+            ["detach owned emulation session", async () => cdp?.detach()],
+            ["disconnect CDP", async () => browser?.close()],
+            [
+              "stop owned browser",
+              async () => {
+                if (!stopped()) child!.kill("SIGTERM");
+                await Promise.race([exited, delay(1_000, undefined, { ref: false })]);
+                if (!stopped()) {
+                  child!.kill("SIGKILL");
+                  await Promise.race([exited, delay(2_000, undefined, { ref: false })]);
+                }
+                if (!stopped()) throw new Error(`Owned browser ${child!.pid} has not exited; retain its profile`);
+              },
+            ],
+            ["close browser log", async () => log?.close()],
+            [
+              "remove owned profile",
+              async () => {
+                if (!stopped()) throw new Error(`Profile retained for unconfirmed browser exit: ${profile}`);
+                if (profile) await rm(profile, { recursive: true, force: true });
+              },
+            ],
           ],
-          ["close browser log", async () => log?.close()],
-          [
-            "remove owned profile",
-            async () => {
-              if (!stopped()) throw new Error(`Profile retained for unconfirmed browser exit: ${profile}`);
-              if (profile) await rm(profile, { recursive: true, force: true });
-            },
-          ],
-        ]);
+          failures,
+        );
       } catch (error) {
         cleanupFailure = error;
       }

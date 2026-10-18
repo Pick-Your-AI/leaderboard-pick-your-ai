@@ -6,6 +6,7 @@ import { expect, type Page } from "@playwright/test";
 import { soakTest as test, cleanupOwned, compiledOutputs } from "./runtime.ts";
 import { assertPageActors, CycleCoverage, fixturePages, responseKey } from "./monitor.ts";
 import { WallCycleTracker } from "./assertions.ts";
+import { WallIntent, type WallInterruption } from "./intent.ts";
 import { requireSoakMidnightWindow } from "./midnight.ts";
 import { scope, snapshot } from "../browser/wallFixture.ts";
 
@@ -15,7 +16,7 @@ const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" 
 const contributors = (page: Page) => page.locator('.api-wall-content a[href*="/contributors/"]');
 
 test("real elapsed wall display, bounded resources and recovery", async ({ runtime }) => {
-  const { page, context, browser, cdp, attempt, outputPath } = runtime;
+  const { page, context, browser, cdp, attempt, outputPath, failures } = runtime;
   const sourceStartedAt = new Date().toISOString();
   const input = {
     head: git("rev-parse", "HEAD"),
@@ -35,6 +36,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
     );
   const checks: Record<string, boolean> = {};
   const cycles = new WallCycleTracker();
+  const intent = new WallIntent();
   const counters = {
     requests: 0,
     bytes: 0,
@@ -56,9 +58,6 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
     networkFailed = false,
     sourceFailed = false,
     publishEnabled = true;
-  let heartbeatFailure: unknown = null,
-    routeFailure: unknown = null,
-    pageFailure: unknown = null;
   const background: { page: Page | null } = { page: null };
   let hiddenRequestCount = 0;
   let suppressedActor: string | null = null,
@@ -115,20 +114,20 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         counters.responses[code] = (counters.responses[code] ?? 0) + 1;
         await route.fulfill({ status: response.statusCode, headers: response.headers, body: response.body });
       } catch (error) {
-        routeFailure ??= error;
+        failures.record("route", error);
       } finally {
         counters.concurrent--;
       }
     });
     page.on("pageerror", (error) => {
-      pageFailure ??= error;
+      failures.record("page", error);
     });
     heartbeat = setInterval(() => {
       if (!publishEnabled) return;
       try {
         publish();
       } catch (error) {
-        heartbeatFailure ??= error;
+        failures.record("heartbeat", error);
       }
     }, 120_000);
     await cdp.send("Performance.enable");
@@ -154,6 +153,23 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
       wasAutomatic = false;
     let result = "failed",
       failure: string | null = null;
+    const beginInterruption = async (kind: WallInterruption) => {
+      const elapsed = performance.now() - start;
+      const lease = intent.begin(kind, elapsed);
+      coverage.reset();
+      cycles.interrupt();
+      wasAutomatic = false;
+      await record("intent-begin", lease);
+    };
+    const endInterruption = async (kind: WallInterruption) => {
+      const elapsed = performance.now() - start;
+      intent.end(kind, elapsed);
+      await record("intent-end", { kind, elapsedMilliseconds: elapsed });
+    };
+    const requireAutomatic = async () =>
+      expect(page.locator(".api-wall-state")).toHaveText(/^Automatic page boundaries(?: ·.*)?$/, {
+        timeout: 5_000,
+      });
     const healthy = async () => {
       await expect(page.getByRole("alert")).toHaveCount(0, { timeout: 65_000 });
       await expect(contributors(page).first()).toBeVisible({ timeout: 65_000 });
@@ -162,16 +178,21 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
       await page.getByRole("button", { name: "Recheck current publication controls" }).focus();
       await page.mouse.move(0, 0);
     };
-    const pause = async () => {
-      coverage.reset();
-      cycles.interrupt();
+    const pause = async (kind: "suppression" | "cursor" | "revocation") => {
+      await requireAutomatic();
+      await beginInterruption(kind);
       const button = page.getByRole("button", { name: "Pause wall", exact: true });
-      if (await button.count()) await button.click();
+      await expect(button).toBeVisible();
+      await button.click();
+      await expect(page.locator(".api-wall-state")).toHaveText(/^Paused(?: ·.*)?$/);
     };
-    const resume = async () => {
+    const resume = async (kind: "suppression" | "cursor" | "revocation") => {
       const button = page.getByRole("button", { name: "Resume wall", exact: true });
-      if (await button.count()) await button.click();
+      await expect(button).toBeVisible();
+      await button.click();
       await releaseReading();
+      await requireAutomatic();
+      await endInterruption(kind);
     };
     const pin = async () => {
       const href = await contributors(page).first().getAttribute("href");
@@ -211,7 +232,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         at: full ? 30 * 60_000 : 20_000,
         name: "network-loss",
         run: async () => {
-          cycles.interrupt();
+          await beginInterruption("network");
           networkFailed = true;
         },
       },
@@ -223,6 +244,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
           await expect(page.getByRole("alert")).toBeVisible();
           checks.networkCleared = true;
           networkFailed = false;
+          await endInterruption("network");
         },
       },
       {
@@ -240,7 +262,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
           at: 60 * 60_000,
           name: "source-exception",
           run: async () => {
-            cycles.interrupt();
+            await beginInterruption("source");
             sourceFailed = true;
           },
         },
@@ -252,6 +274,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             await expect(page.getByRole("alert")).toBeVisible();
             checks.sourceCleared = true;
             sourceFailed = false;
+            await endInterruption("source");
           },
         },
         {
@@ -267,7 +290,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
           name: "current-suppression",
           run: async () => {
             await healthy();
-            await pause();
+            await pause("suppression");
             const href = await contributors(page).first().getAttribute("href");
             suppressedActor = new URL(href!, "http://127.0.0.1").pathname.split("/").at(-1)!;
             controls.version = "privacy-soak-2";
@@ -282,7 +305,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             await healthy();
             checks.suppressionApplied = true;
             expectedPages = fixturePages(stages, suppressedActor);
-            await resume();
+            await resume("suppression");
           },
         },
         {
@@ -290,7 +313,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
           name: "hold-real-cursor",
           run: async () => {
             await healthy();
-            await pause();
+            await pause("cursor");
             for (let i = 0; i < 6; i++) {
               if (
                 (await page.locator("h1").textContent()) === "PRs merged" &&
@@ -315,7 +338,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             assert.equal(await pin(), cursorPin, "Cursor recovery retains the original snapshot pin");
             await expect(page.locator(".api-wall-page")).toContainText("Page 1");
             checks.realCursorExpired = true;
-            await resume();
+            await resume("cursor");
           },
         },
         {
@@ -323,7 +346,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
           name: "revoke-held-snapshot",
           run: async () => {
             await healthy();
-            await pause();
+            await pause("revocation");
             revokedPin = await pin();
             publish();
             controls.revokedSnapshotIds = [revokedPin];
@@ -333,7 +356,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             await healthy();
             assert.notEqual(await pin(), revokedPin);
             checks.revocationRecovered = true;
-            await resume();
+            await resume("revocation");
           },
         },
         {
@@ -424,7 +447,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         at: full ? 150 * 60_000 : 100_000,
         name: "real-tab-background",
         run: async () => {
-          cycles.interrupt();
+          await beginInterruption("background");
           background.page = await context.newPage();
           const hiddenCdp = await context.newCDPSession(background.page);
           await hiddenCdp.send("Emulation.setFocusEmulationEnabled", { enabled: false });
@@ -448,6 +471,8 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
           await healthy();
           checks.realForegroundRecovered = true;
           await releaseReading();
+          await requireAutomatic();
+          await endInterruption("background");
         },
       },
     );
@@ -457,6 +482,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
       await page.goto("http://127.0.0.1:4277/live?ui=api&mode=cycle&boards=pr_merged&interval=20");
       await healthy();
       await releaseReading();
+      await requireAutomatic();
       const zones = await page.evaluate(
         (requested) => ({
           actual: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -489,12 +515,20 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         clocks: "real; no installed clock or time advancement",
       });
       while ((elapsed = performance.now() - start) < minutes * 60_000) {
-        if (heartbeatFailure || routeFailure || pageFailure) throw heartbeatFailure ?? routeFailure ?? pageFailure;
-        while (actionIndex < actions.length && actions[actionIndex]!.at <= elapsed) {
+        failures.assertClear();
+        while (actionIndex < actions.length && actions[actionIndex]!.at <= performance.now() - start) {
           const action = actions[actionIndex++]!;
+          await record("action-start", {
+            action: action.name,
+            scheduledMilliseconds: action.at,
+            elapsedMilliseconds: performance.now() - start,
+          });
           await action.run();
           completed.push(action.name);
-          await record(action.name);
+          await record(action.name, {
+            scheduledMilliseconds: action.at,
+            elapsedMilliseconds: performance.now() - start,
+          });
         }
         const state = await page.evaluate(() => {
           const links = Array.from(
@@ -536,6 +570,9 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
               document.documentElement.scrollHeight > innerHeight + 1,
           };
         });
+        // Actions can await browser recovery. Bind progress and the sample to
+        // this post-action capture, never the earlier loop-entry timestamp.
+        elapsed = performance.now() - start;
         const identity = `${state.heading}:${state.page.split(" · ")[0]}`;
         assert(state.links.length <= 6, "Only the current bounded page may remain mounted");
         assert.equal(
@@ -591,11 +628,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             );
           }
         }
-        const automaticMode =
-          state.visibility === "visible" &&
-          state.controlState.startsWith("Automatic page boundaries") &&
-          !networkFailed &&
-          !sourceFailed;
+        const automaticMode = intent.observe(elapsed, state);
         const automatic = automaticMode && state.links.length > 0;
         coverage.observe(performance.now() - start, automaticMode, state.links.length ? identity : null);
         if (!automatic || !wasAutomatic || identity !== lastPage) lastPageChange = performance.now();
@@ -632,6 +665,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             attemptId: attempt.id,
             at: new Date().toISOString(),
             elapsedMilliseconds: elapsed,
+            intendedInterruption: intent.summary(),
             ...state,
             resource,
             requestCount: counters.requests,
@@ -649,6 +683,13 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         await delay(Math.min(full ? 15_000 : 5_000, Math.max(0, minutes * 60_000 - (performance.now() - start))));
       }
       await healthy();
+      await requireAutomatic();
+      const finalMode = await page.evaluate(() => ({
+        visibility: document.visibilityState,
+        controlState: document.querySelector(".api-wall-state")?.textContent ?? "",
+      }));
+      intent.observe(performance.now() - start, finalMode);
+      intent.finish(performance.now() - start, full);
       await record("final-resources", await measureResources());
       assert.equal(actionIndex, actions.length, "All scheduled events must execute");
       assert(counters.networkAborts > 0 && checks.networkCleared && checks.networkRecovered);
@@ -681,6 +722,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
         assert.equal(git("rev-parse", "HEAD^{tree}"), input.tree);
         assert.equal(git("status", "--porcelain", "--untracked-files=no"), "");
       }
+      failures.assertClear();
       result = full ? "completed-full-real-duration-matrix" : "completed-short-rehearsal-only";
     } catch (error) {
       failure = error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -743,10 +785,15 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
     }
   } finally {
     if (heartbeat) clearInterval(heartbeat);
-    await cleanupOwned(outputPath("service-cleanup.json"), attempt.id, [
-      ["close owned background tab", async () => background.page?.close()],
-      ["finish public routes", async () => page.unrouteAll({ behavior: "wait" })],
-      ["close synthetic service", async () => app.close()],
-    ]);
+    await cleanupOwned(
+      outputPath("service-cleanup.json"),
+      attempt.id,
+      [
+        ["close owned background tab", async () => background.page?.close()],
+        ["finish public routes", async () => page.unrouteAll({ behavior: "wait" })],
+        ["close synthetic service", async () => app.close()],
+      ],
+      failures,
+    );
   }
 });
