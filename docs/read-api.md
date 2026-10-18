@@ -103,6 +103,13 @@ filters. `snapshot` pins an immutable selection. Organization/repository/workstr
 and metric IDs are bounded identifiers; duplicate, unknown and malformed parameters
 are rejected before backend access.
 
+Opt-in `context=event|current` and comma-separated `project` node IDs select an
+exact approved [versioned membership scope](public-membership-scopes.md). The
+default remains event context; missing current/Project materializations never fall
+back or trigger collection. Extended scopes use `public-scope/v2`, public API
+envelopes use `public-read/v2`, and all scope dimensions remain bound through pins,
+cursors, comparison windows and shared links.
+
 `limit` is 1–100 (default 50). Signed cursors bind exact scope, metric, limit,
 snapshot, current policy version and offset. Cursors expire within 10–15 minutes;
 deployment restart/key rotation may expire them earlier. Supply the original query
@@ -144,7 +151,12 @@ including through legacy detail routes. An actor roster, membership, mention or
 assignment alone never establishes directory inclusion. See the
 [bounded directory design and acceptance limits](contributor-directory-runtime.md).
 
-JSON and CSV downloads use the `public-export/v1` export envelope. Markdown
+Legacy event-scope JSON and CSV downloads use the unchanged `public-export/v1`
+export envelope. Opt-in current-context or Project-filter selections use the
+explicit [public membership scope and v2 response/export contracts](public-membership-scopes.md).
+Their complete basis and Project identity must be validated by a v2-capable consumer;
+the existing strict v1 export consumer continues to reject those new envelopes.
+Markdown
 portfolio, print, HTML and SVG presentation exports are disabled: `format=markdown`,
 `format=print` and other unknown formats return 400. No rendering/Markdown/URL-fetch
 pipeline is enabled by the export module. The JSON/CSV automated package is accepted in

@@ -2,6 +2,8 @@
 
 The browser validates both public-export/v1 formats before offering a download. CSV transport success and valid UTF-8 alone do not establish that an export belongs to the displayed snapshot or follows its metric definition.
 
+Opt-in current-context and Project-filter backend selections have a separate [public-export/v2 contract](public-membership-scopes.md). They do not change v1 download bytes. A later coordinated browser integration must validate the complete versioned scope and the v2 CSV metadata before offering those downloads; this v1 reader continues to reject the new envelope until that support is delivered.
+
 The CSV reader accepts the service's existing bounded, fully quoted CRLF format with its exact columns, one metadata record and at most the selected page size. Every row must repeat the same metadata. It rejects malformed quoting, extra or duplicate columns, extra metadata records, nonfinite or ambiguous numbers, contradictory evidence bindings, unsafe formula prefixes and missing pending proofs. Quoted commas, Unicode, multiline labels, protected formula text, empty pages and unknown values retain their existing meaning. Valid downloads preserve the original bytes.
 
 The reader reconstructs the minimized public export and applies the same validator used for JSON. That binds scope, snapshot, actor filter and the full metric definition to the current selection and loaded registry, checks page totals and source proofs, and prevents descriptive metrics from gaining personal ranks. Raw counting-rule and unit columns must also match the loaded definition. A contradictory CSV response produces the existing controlled export error without a downloadable Blob.
