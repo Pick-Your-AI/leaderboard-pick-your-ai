@@ -6,6 +6,7 @@ import { getMetric } from "../data/registry.ts";
 import { listContributors, SourceError } from "../data/source.ts";
 import { formatNumber } from "../lib/format.ts";
 import { useLatestSnapshotId, useScope } from "../lib/hooks.ts";
+import { prototypeNavigation } from "../lib/prototype-url.ts";
 import { cutWithTies } from "../lib/ranking.ts";
 import { Link, ScopedLink } from "../lib/router.tsx";
 import { serializeScope, type Scope } from "../lib/scope.ts";
@@ -48,7 +49,9 @@ function WallConfigurator() {
 
   const wallScope: Scope = mode === "frozen" ? { ...scope, snapshot: scope.snapshot ?? latest } : scope;
   const selected = mode === "single" ? boards.slice(0, 1) : boards;
-  const href = `/live${serializeScope(wallScope, { mode, boards: selected.join(","), interval: String(interval), format })}`;
+  const href = prototypeNavigation(
+    `/live${serializeScope(wallScope, { mode, boards: selected.join(","), interval: String(interval), format })}`,
+  ).href;
 
   return (
     <>

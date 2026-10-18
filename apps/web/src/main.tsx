@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { RemoteApp } from "./remote/App.tsx";
 import { RemoteWall } from "./remote/Wall.tsx";
 import { applyThemePreference, readThemePreference } from "./lib/theme.ts";
+import { prototypeNavigation } from "./lib/prototype-url.ts";
 import "./styles/tokens.css";
 import "./styles/app.css";
 
@@ -19,6 +20,9 @@ try {
 if (["/account", "/admin"].includes(location.pathname.replace(/\/+$/, ""))) {
   void import("./controls/App.tsx").then(({ ControlsApp }) => root.render(<ControlsApp />));
 } else if (mode === "prototype") {
+  const path = `${location.pathname}${location.search}${location.hash}`;
+  const { href } = prototypeNavigation(path);
+  if (href !== path) history.replaceState(history.state, "", href);
   // Fixture modules are loaded only after the reader explicitly selects them.
   void Promise.all([import("./App.tsx"), import("./lib/router.tsx")]).then(([{ App }, { RouterProvider }]) =>
     root.render(
