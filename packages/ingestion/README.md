@@ -16,6 +16,11 @@ this method does not itself contact GitHub. Configure `lifecycle: new
 CollectionStore(database)` on the webhook handler; the CLI supplies it automatically.
 Rollback 003 before 002/001 on disposable databases only.
 
+[Synthetic webhook dispatch](../../docs/webhook-dispatch.md) adds migration
+`004_outbox_dispatch.up.sql`, `OutboxStore` and the stoppable `runOutboxWorker`.
+Apply 004 after 003; rollback 004 before 003 on disposable databases only.
+Existing notices remain pending. No production source is enabled automatically.
+
 ## Run validation
 
 Use Node 24, from this directory:
@@ -36,7 +41,7 @@ Default tests use PGlite's embedded PostgreSQL engine and explicitly skip multi-
 4. Poll `store.claim()` from a bounded worker. `null` means no available work. Call `store.complete(lease)` to persist the deterministic delivery observation and an outbox notice in one transaction. Call `store.fail(lease, reasonCode, permanent)` for a classified processing failure. A false result means the lease no longer belongs to that worker. An uncaught failure leaves the lease recoverable after expiry. Each call uses database time and a fresh token; never retry work using a stale token.
 5. After reviewing a quarantined delivery and accepting an opaque operator receipt, call `store.replay(deliveryId, receiptId)` from a protected operator process. Replay retains the original body hash, envelope, receive time and attempt history, records the previous reason and attempt budget, and grants a new bounded retry budget. No public replay endpoint is supplied. A receipt cannot be reused; transaction rollback preserves quarantine on a receipt conflict.
 
-All store writes are parameterized. Credentials, raw source bodies, titles, user text, emails and logins are not retained. Error responses contain fixed codes. Delivery IDs identify authenticated delivery receipts, not unique source contributions. Different delivery IDs describing the same GitHub action remain separate observations until the source-event deduplication and lineage layers reconcile them. The outbox is a durable internal notice queue; dispatch and public snapshot publication are separate work.
+All store writes are parameterized. Credentials, raw source bodies, titles, user text, emails and logins are not retained. Error responses contain fixed codes. Delivery IDs identify authenticated delivery receipts, not unique source contributions. Different delivery IDs describing the same GitHub action remain separate observations until the source-event deduplication and lineage layers reconcile them. The outbox remains an internal notice queue. The opt-in [synthetic pipeline dispatcher](../../docs/webhook-dispatch.md) adds a leased, retryable bridge for approved issue-creation fixtures; public dispatch remains disabled.
 
 ## HTTP and worker runtime
 

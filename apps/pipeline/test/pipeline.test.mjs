@@ -32,7 +32,12 @@ async function harness(t, extra = {}) {
     query: (sql, params) => engine.query(sql, params),
     transaction: (work) => engine.transaction((tx) => work({ query: (sql, params) => tx.query(sql, params) })),
   };
-  for (const name of ["001_ingestion.up.sql", "002_snapshots.up.sql", "003_collection.up.sql"])
+  for (const name of [
+    "001_ingestion.up.sql",
+    "002_snapshots.up.sql",
+    "003_collection.up.sql",
+    "004_outbox_dispatch.up.sql",
+  ])
     await engine.exec(await readFile(join(ingestionRoot, "packages/ingestion/sql", name), "utf8"));
   await migratePipeline(db);
   const controlsStore = new components.controls.ControlStore(join(directory, "controls.sqlite"));
