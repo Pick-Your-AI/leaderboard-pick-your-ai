@@ -141,3 +141,7 @@ and UI actor-kind filtering, authenticated production classification review
 and correction procedures, live source subtype/permission probes, owner
 acceptance and release/migration execution remain separate gates. This change
 does not close #40 by itself and does not claim deployment or a human ranking.
+
+### Reviewed source-runtime integration
+
+Both optional SQLite comparison inputs and SQL frozen policy inputs retain only projected actor labels plus provider-normalization hashes. Identity restoration queries the same versioned current-state normalization signature used by collection. Hash bindings are captured before transient recognition overlays are appended; those overlays cannot masquerade as persisted provider evidence. SQL policy preview reuses the current-source identity verifier and the same transaction for its publication/privacy guard. Tests exercise both preview paths with recognition configured and absent, and assert that neither store nor preview result retains provider IDs or private classification receipts.

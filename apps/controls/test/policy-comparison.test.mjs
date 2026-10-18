@@ -632,6 +632,22 @@ async function runtimePreviewHarness(t, { verifyConfiguration, fence, correction
   };
 }
 
+test("runtime comparison refreshes approval through the existing source transaction", async (t) => {
+  let approvals = 0;
+  // This harness deliberately exposes query only on its transaction. Calling the
+  // outer database during a protected response would escape the transaction and
+  // can deadlock adapters that serialize all database work.
+  const h = await runtimePreviewHarness(t, {
+    verifyConfiguration: async () => {
+      approvals++;
+      return true;
+    },
+  });
+  const result = await h.manager(h.request);
+  assert.equal(result.status, 200);
+  assert.equal(approvals, 2, "initial and final approval must both be checked");
+});
+
 test("approval revoked inside reviewer refresh prevents persistence and response", async (t) => {
   let allowed = true;
   const h = await runtimePreviewHarness(t, { verifyConfiguration: async () => allowed });
