@@ -65,6 +65,8 @@ async function harness(t, options = {}) {
     origin,
     loginSuccessPath: options.loginSuccessPath,
     spotlightEligibility: options.spotlightEligibility,
+    operations: options.operations,
+    authorizeRepository: options.authorizeRepository,
     approvedPolicyVersions: options.approvedPolicyVersions || ["test-1"],
     knownMetricIds: ["pr_merged", "prs_reviewed"],
     sourceVerifier: options.sourceVerifier ? (input) => options.sourceVerifier(input, timestamp) : undefined,
@@ -1461,4 +1463,132 @@ test("editorial HTTP workflow preserves session CSRF, independent approval, dura
     200,
   );
   assert.deepEqual((await h.call("/controls/spotlights")).data.spotlights, []);
+});
+
+test("operator operations require opt-in, repository authority, CSRF and scoped confirmation", async (t) => {
+  const calls = [];
+  let allowed = true;
+  const h = await harness(t, {
+    authorizeRepository: async ({ actorId, repositoryId }) => ({
+      allowed: allowed && actorId === "7" && repositoryId === 9,
+      policyVersion: "policy-1",
+      revision: "grant-1",
+    }),
+    operations: {
+      read: async (repo, authorize) => {
+        await authorize(repo);
+        calls.push("read");
+        return { repositoryId: repo };
+      },
+      replay: async (input, authorize) => {
+        await authorize(input.repositoryId);
+        calls.push(input);
+        return { id: "receipt", status: "queued" };
+      },
+    },
+  });
+  const operator = await h.login("7"),
+    user = await h.login("1");
+  assert.equal((await h.call("/controls/operations/9")).status, 401);
+  assert.equal((await h.call("/controls/operations/9", { user })).status, 403);
+  assert.equal((await h.call("/controls/operations/8", { user: operator })).status, 403);
+  assert.equal((await h.call("/controls/operations/9", { user: operator })).status, 200);
+  const input = {
+    deliveryId: "11111111-1111-1111-1111-111111111111",
+    expectedRevision: "a".repeat(64),
+    reason: "operator_reviewed",
+    confirmed: true,
+  };
+  assert.equal(
+    (
+      await h.call("/controls/operations/9/replay", {
+        user: operator,
+        method: "POST",
+        input,
+        headers: { "x-csrf-token": "wrong" },
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await h.call("/controls/operations/9/replay", {
+        user: operator,
+        method: "POST",
+        input: { ...input, confirmed: false },
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await h.call("/controls/operations/9/replay", {
+        user: operator,
+        method: "POST",
+        input: { ...input, operatorId: "2" },
+      })
+    ).status,
+    400,
+  );
+  assert.equal((await h.call("/controls/operations/9/replay", { user: operator, method: "POST", input })).status, 201);
+  assert.equal(calls[1].operatorId, "7");
+  allowed = false;
+  assert.equal((await h.call("/controls/operations/9", { user: operator })).status, 403);
+  const off = await harness(t);
+  assert.equal((await off.call("/controls/operations/9", { user: await off.login("7") })).status, 503);
+});
+
+test("authenticated operations HTTP bridge commits real scoped replay and exposes only its durable receipt", async (t) => {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const { readFile } = await import("node:fs/promises");
+  const { OperatorInbox } = await import("../../../packages/ingestion/dist/operator.js");
+  const engine = new PGlite();
+  t.after(() => engine.close());
+  for (const file of ["001_ingestion", "002_snapshots", "003_collection"])
+    await engine.exec(
+      await readFile(new URL(`../../../packages/ingestion/sql/${file}.up.sql`, import.meta.url), "utf8"),
+    );
+  const db = {
+    query: (sql, params) => engine.query(sql, params),
+    transaction: (work) => engine.transaction((tx) => work({ query: (sql, params) => tx.query(sql, params) })),
+  };
+  await db.query(
+    "INSERT INTO leaderboard_ingestion.repository_access(repository_id,installation_id,state) VALUES(9,1,'public')",
+  );
+  const id = "11111111-1111-1111-1111-111111111111";
+  await db.query(
+    "INSERT INTO leaderboard_ingestion.inbox(delivery_id,body_hash,envelope,state,attempts,reason_code) VALUES($1,$2,$3::jsonb,'quarantined',3,'source_unavailable')",
+    [
+      id,
+      "a".repeat(64),
+      JSON.stringify({ repositoryId: 9, installationId: 1, subjectId: "private-synthetic-subject" }),
+    ],
+  );
+  const h = await harness(t, {
+    operations: new OperatorInbox(db),
+    authorizeRepository: async ({ repositoryId }) => ({
+      allowed: repositoryId === 9,
+      policyVersion: "test-1",
+      revision: "roster-1",
+    }),
+  });
+  const user = await h.login("7");
+  const read = await h.call("/controls/operations/9", { user });
+  assert.equal(read.status, 200);
+  assert.equal(JSON.stringify(read.data).includes("private-synthetic-subject"), false);
+  const input = {
+    deliveryId: id,
+    expectedRevision: read.data.quarantined[0].revision,
+    reason: "source_recovered",
+    confirmed: true,
+  };
+  const result = await h.call("/controls/operations/9/replay", { user, method: "POST", input });
+  assert.equal(result.status, 201);
+  assert.equal(result.data.status, "queued");
+  assert.equal(result.data.resultingPublicationRevision, null);
+  assert.equal((await h.call("/controls/operations/9/replay", { user, method: "POST", input })).status, 409);
+  const after = await h.call("/controls/operations/9", { user });
+  assert.equal(after.data.counts.pending, 1);
+  assert.equal(after.data.receipts[0].id, result.data.id);
+  assert.equal(after.data.receipts[0].operatorId, "7");
 });
