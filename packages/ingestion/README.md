@@ -21,6 +21,15 @@ Rollback 003 before 002/001 on disposable databases only.
 Apply 004 after 003; rollback 004 before 003 on disposable databases only.
 Existing notices remain pending. No production source is enabled automatically.
 
+[Completed delivery payload expiry](../../docs/delivery-payload-expiry.md) adds
+`006_delivery_payload_expiry.up.sql` after 001–004. Apply it before using the
+updated object replay and operator readers. The protected host supplies every
+expiry scope, cutoff, policy, operator, authorization and operation identity;
+there is no automatic expiry. Both minimized copies can expire only after inbox
+and outbox completion. A missing payload produces explicit unavailable replay
+and cannot become a partial replacement snapshot. The down migration refuses
+after any actual expiry, preserving its immutable integrity receipts.
+
 ## Run validation
 
 Use Node 24, from this directory:

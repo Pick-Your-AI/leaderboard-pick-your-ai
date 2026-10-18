@@ -137,7 +137,11 @@ export class OperatorInbox {
         await tx.query(
           `SELECT count(*) FILTER(WHERE state='pending')::integer AS pending,
         count(*) FILTER(WHERE state='leased')::integer AS leased,count(*) FILTER(WHERE state='quarantined')::integer AS quarantined,
-        count(*) FILTER(WHERE state='done')::integer AS completed FROM leaderboard_ingestion.inbox WHERE envelope->>'repositoryId'=$1 AND envelope->>'installationId'=$2`,
+        count(*) FILTER(WHERE state='done')::integer AS completed
+        FROM leaderboard_ingestion.inbox AS intake
+        LEFT JOIN leaderboard_ingestion.delivery_payload_expiries AS expiry USING (delivery_id)
+        WHERE COALESCE(envelope->>'repositoryId',expiry.repository_id::text)=$1
+          AND COALESCE(envelope->>'installationId',expiry.installation_id::text)=$2`,
           [String(repositoryId), installationId],
         )
       ).rows[0]!;

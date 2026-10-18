@@ -8,7 +8,13 @@ import { InboxStore, OperatorInbox } from "../dist/index.js";
 let engine, db, ops;
 before(async () => {
   engine = new PGlite();
-  for (const file of ["001_ingestion", "002_snapshots", "003_collection"])
+  for (const file of [
+    "001_ingestion",
+    "002_snapshots",
+    "003_collection",
+    "004_outbox_dispatch",
+    "006_delivery_payload_expiry",
+  ])
     await engine.exec(await readFile(new URL(`../sql/${file}.up.sql`, import.meta.url), "utf8"));
   db = {
     query: (sql, params) => engine.query(sql, params),

@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import type { Delivery, Envelope, IntakeStore } from "./webhook.js";
 import { replayTransitions, transitionFromDelivery, type ReplayResult, type Transition } from "./replay.js";
 import { assertRepositoryAvailable } from "./collection.js";
+import { lockDeliveryReplay } from "./delivery-expiry.js";
 
 export interface SqlSession {
   query<T extends Record<string, unknown> = Record<string, unknown>>(
@@ -20,24 +21,44 @@ export interface RetainedObjectReplay {
   replay: ReplayResult;
 }
 
-/** One statement fixes the evidence set for a bounded object reconstruction. */
-export async function readObjectReplay(
-  db: SqlSession,
-  repositoryId: number,
-  subjectId: string,
-): Promise<RetainedObjectReplay> {
+export interface ExpiredObjectReplay {
+  coverage: "unavailable_expired_observations";
+  sourceObservationCount: number;
+  expiredObservationCount: number;
+  reason: "delivery_payload_expired";
+  expiryOperationIds: string[];
+  replay: null;
+}
+export type ObjectReplay = RetainedObjectReplay | ExpiredObjectReplay;
+
+/** Caller owns the transaction; its shared expiry gate covers the full reconstruction/publication. */
+export async function readObjectReplay(db: SqlSession, repositoryId: number, subjectId: string): Promise<ObjectReplay> {
   if (!Number.isSafeInteger(repositoryId) || repositoryId < 1 || !/^[A-Za-z0-9_=-]{1,200}$/.test(subjectId)) {
     throw new Error("invalid_replay_scope");
   }
   await assertRepositoryAvailable(db, repositoryId, subjectId);
+  await lockDeliveryReplay(db, repositoryId);
   const rows = await db.query(
-    `SELECT normalization_version, observation
-    FROM leaderboard_ingestion.observations
-    WHERE observation->>'repositoryId' = $1 AND observation->>'subjectId' = $2
-    ORDER BY event_key LIMIT 257`,
+    `SELECT evidence.normalization_version, evidence.observation, expiry.operation_id
+    FROM leaderboard_ingestion.observations AS evidence
+    LEFT JOIN leaderboard_ingestion.delivery_payload_expiries AS expiry USING (event_key)
+    WHERE COALESCE(evidence.observation->>'repositoryId', expiry.repository_id::text) = $1
+      AND COALESCE(evidence.observation->>'subjectId', expiry.subject_id) = $2
+    ORDER BY evidence.event_key LIMIT 257`,
     [String(repositoryId), subjectId],
   );
   if (rows.rows.length > 256) throw new Error("replay_limit_exceeded");
+  const expired = rows.rows.filter((row) => row.operation_id !== null);
+  if (expired.length) {
+    return {
+      coverage: "unavailable_expired_observations",
+      sourceObservationCount: rows.rows.length - expired.length,
+      expiredObservationCount: expired.length,
+      reason: "delivery_payload_expired",
+      expiryOperationIds: [...new Set(expired.map((row) => String(row.operation_id)))].sort(),
+      replay: null,
+    };
+  }
   const transitions: Transition[] = [];
   for (const row of rows.rows) {
     if (row.normalization_version !== "delivery-observation/v1") throw new Error("unsupported_normalization_version");
@@ -116,7 +137,7 @@ export class InboxStore implements IntakeStore {
   }
 
   /** Read-only bounded rebuild from retained delivery receipts, not source coverage certification. */
-  async replayObjectState(repositoryId: number, subjectId: string): Promise<RetainedObjectReplay> {
+  async replayObjectState(repositoryId: number, subjectId: string): Promise<ObjectReplay> {
     return this.db.transaction((tx) => readObjectReplay(tx, repositoryId, subjectId));
   }
 

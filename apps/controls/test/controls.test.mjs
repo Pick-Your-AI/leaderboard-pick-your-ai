@@ -1738,7 +1738,13 @@ test("authenticated operations HTTP bridge commits real scoped replay and expose
   const { OperatorInbox } = await import("../../../packages/ingestion/dist/operator.js");
   const engine = new PGlite();
   t.after(() => engine.close());
-  for (const file of ["001_ingestion", "002_snapshots", "003_collection"])
+  for (const file of [
+    "001_ingestion",
+    "002_snapshots",
+    "003_collection",
+    "004_outbox_dispatch",
+    "006_delivery_payload_expiry",
+  ])
     await engine.exec(
       await readFile(new URL(`../../../packages/ingestion/sql/${file}.up.sql`, import.meta.url), "utf8"),
     );
