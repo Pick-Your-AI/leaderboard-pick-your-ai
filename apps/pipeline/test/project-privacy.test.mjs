@@ -266,7 +266,7 @@ for (const [loss, subjectType] of [
       return subjectType === "pull_request" ? "PR_synthetic" : "I_synthetic";
     };
     const client = {
-      rest: async () => ({ id: 2, private: false, full_name: slug }),
+      rest: async () => ({ id: 2, private: false, full_name: config.repositories[0].slug }),
       scanRest: async (o) => {
         const subject = {
           id: 1,

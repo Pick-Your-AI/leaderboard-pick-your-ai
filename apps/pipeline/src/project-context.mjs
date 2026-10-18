@@ -38,6 +38,14 @@ export function canonicalProjectWorkstreamMappings(config, validate) {
 
 /** Project context stays in the private, hash-bound source normalization receipt. */
 export function normalizedProjectContext(output, row, repository, mappings) {
+  // A missing context can express uncertainty, but the marked observation must
+  // remain free of action or actor credit in fresh and cached output alike.
+  if (
+    row.family === "project_current" &&
+    row.document.projectSubjectId !== undefined &&
+    ["facts", "actors", "evidence"].some((field) => !Array.isArray(output?.[field]) || output[field].length !== 0)
+  )
+    fail();
   const value = output.projectContext;
   if (value === undefined) return {};
   const mapping = mappings.find((entry) => entry.repositoryId === repository.id);
@@ -91,10 +99,7 @@ export function normalizedProjectContext(output, row, repository, mappings) {
     context.workstreams.some((id) => !mappedWorkstreams.has(id)) ||
     typeof context.workstreamsKnown !== "boolean" ||
     (context.workstreamsKnown &&
-      context.projects.some((id) => !mapping?.projects.some((project) => project.projectId === id))) ||
-    output.facts.length !== 0 ||
-    output.actors.length !== 0 ||
-    output.evidence.length !== 0
+      context.projects.some((id) => !mapping?.projects.some((project) => project.projectId === id)))
   )
     fail();
   return { projectContext: structuredClone(value) };

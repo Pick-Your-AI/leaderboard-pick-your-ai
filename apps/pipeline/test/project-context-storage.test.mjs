@@ -33,7 +33,7 @@ const sourceDocument = (subject, revision, project = false) => ({
 // The separate real-transport test covers provider hydration. This harness uses
 // the actual collection SQL, normalization cache, frozen store, and metric engine
 // with a trusted synthetic Project adapter whose captured revision is immutable.
-async function projectHarness(t, { stableProjectRevisions = false } = {}) {
+async function projectHarness(t, { stableProjectRevisions = false, transformProjectOutput = (output) => output } = {}) {
   const payloads = [1, 2].map((number) => ({
     id: 1000 + number,
     node_id: "SYNTHETIC_ISSUE_" + number,
@@ -96,7 +96,7 @@ async function projectHarness(t, { stableProjectRevisions = false } = {}) {
       const snapshot = captured.get(input.fact.sourceRevision);
       assert.ok(snapshot, "only the captured synthetic source revision is available");
       const selectedMapping = { version: configured.version, projects: configured.projects };
-      return {
+      const output = {
         facts: [],
         actors: [],
         evidence: [],
@@ -117,6 +117,7 @@ async function projectHarness(t, { stableProjectRevisions = false } = {}) {
           },
         },
       };
+      return transformProjectOutput(output, input);
     };
   };
   const h = await harness(t, {
@@ -331,6 +332,79 @@ test("a hash-consistent cache cannot retarget Project context to a different nat
     [row.fact_key, row.policy_signature, JSON.stringify(changed), comparisonHash(changed)],
   );
   await assert.rejects(h.runtime.runOnce({ cutoff }), /invalid_normalized_project_context/);
+});
+
+test("marked current Project normalization without context cannot emit activity", async (t) => {
+  let h;
+  h = await projectHarness(t, {
+    async transformProjectOutput(output, input) {
+      const ordinary = components.github.createGithubEvidenceNormalizer({
+        client: h.options.githubClient,
+        source: h.options.sourceId,
+        allowedRepositoryIds: [2],
+        isSynthetic: true,
+      });
+      const number = input.fact.sourceUrl.split("/").at(-1);
+      const payload = await h.options.githubClient.rest(h.options.sourceId, `/repos/${slug}/issues/${number}`);
+      const fact = sourceDocument(payload, payload.updated_at);
+      const activity = await ordinary({ ...input, family: "issues", fact });
+      assert.ok(activity.facts.length > 0, "the injected action is otherwise valid issue evidence");
+      delete output.projectContext;
+      return { ...output, facts: activity.facts, actors: activity.actors, evidence: activity.evidence };
+    },
+  });
+  await assert.rejects(h.runtime.runOnce(), /invalid_normalized_project_context/);
+  assert.equal((await h.db.query("SELECT snapshot_id FROM leaderboard_pipeline.snapshots")).rows.length, 0);
+});
+
+test("a hash-consistent marked Project cache without context cannot manufacture activity", async (t) => {
+  const h = await projectHarness(t);
+  const cutoff = clock();
+  const first = await h.runtime.runOnce({ cutoff });
+  const frozen = await h.frozen(first.publications[0]);
+  const caches = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
+  const row = caches.find((entry) => entry.document.projectContext);
+  const ordinary = caches.find((entry) => entry.document.facts.length > 0);
+  const changed = structuredClone(row.document);
+  delete changed.projectContext;
+  changed.facts = structuredClone(ordinary.document.facts);
+  changed.actors = structuredClone(ordinary.document.actors);
+  changed.evidence = structuredClone(ordinary.document.evidence);
+  for (const fact of changed.facts) {
+    fact.id += "-synthetic-forged";
+    fact.artifactId = "SYNTHETIC_FORGED_ACTIVITY";
+    fact.canonicalKey += "-synthetic-forged";
+  }
+  await h.db.query(
+    "UPDATE leaderboard_pipeline.normalizations SET document=$3::jsonb,document_hash=$4 WHERE fact_key=$1 AND policy_signature=$2",
+    [row.fact_key, row.policy_signature, JSON.stringify(changed), comparisonHash(changed)],
+  );
+  const normalizedBefore = h.normalizedProjects();
+  await assert.rejects(h.runtime.runOnce({ cutoff }), /invalid_normalized_project_context/);
+  assert.equal(h.normalizedProjects(), normalizedBefore, "cached receipt validation rejects before fresh hydration");
+  assert.deepEqual(await h.frozen(first.publications[0]), frozen);
+});
+
+test("marked Project output without context remains a valid empty unknown receipt", async (t) => {
+  const h = await projectHarness(t, {
+    transformProjectOutput(output) {
+      delete output.projectContext;
+      output.reasons = ["project_snapshot_revision_or_subject_unverified"];
+      return output;
+    },
+  });
+  const cutoff = clock();
+  const first = await h.runtime.runOnce({ cutoff });
+  assert.equal(first.state, "published");
+  const frozen = await h.frozen(first.publications[0]);
+  assert.equal(frozen.document.frozen.facts.length, 2);
+  assert.ok(frozen.document.frozen.facts.every((fact) => fact.currentContext === null));
+  assert.equal((await getBoard(h.runtime)).rows[0].result.value, 2);
+  const normalizedBefore = h.normalizedProjects();
+  const replay = await h.runtime.runOnce({ cutoff });
+  assert.equal(replay.state, "published");
+  assert.equal(h.normalizedProjects(), normalizedBefore, "empty unknown receipts remain eligible for cache reuse");
+  assert.deepEqual(await h.frozen(first.publications[0]), frozen);
 });
 
 test("two equally recent completed Project inventories fail instead of forming an inferred union", async (t) => {
