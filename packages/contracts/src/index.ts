@@ -1,11 +1,24 @@
 export { actorFilterSchema, actorFilterLabels, matchesActorFilter, type ActorFilter } from "./actor-filter.js";
 export {
+  verifiedIdentityCorrectionVersion,
+  verifiedGithubIdentitySchema,
+  verifiedIdentityCorrectionProposalSchema,
+  verifiedIdentityCorrectionDecisionSchema,
+  type VerifiedGithubIdentity,
+  type VerifiedIdentityCorrectionProposal,
+  type VerifiedIdentityCorrectionDecision,
+} from "./identity-corrections.js";
+export {
   canonicalPublicScope,
   publicScopeKey,
   publicScopeFilterKey,
   publicScopeParameters,
   publicScopeSchemaVersion,
+  publicRoleScopeSchemaVersion,
   publicScopeProjectLimit,
+  publicScopeRoleLimit,
+  publicContributionRoles,
+  type PublicContributionRole,
   type PublicScope,
 } from "./public-scope.js";
 export { compareSourceInstants } from "./v1/source-time.js";

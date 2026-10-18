@@ -178,7 +178,7 @@ export class InboxStore implements IntakeStore {
   async complete(lease: Lease): Promise<boolean> {
     return this.db.transaction(async (tx) => {
       const rows = await tx.query(
-        `SELECT envelope, received_at FROM leaderboard_ingestion.inbox
+        `SELECT envelope, received_at, operator_replay_receipt_id FROM leaderboard_ingestion.inbox
         WHERE delivery_id = $1 AND lease_token = $2 AND state = 'leased'
         AND lease_until > clock_timestamp() FOR UPDATE`,
         [lease.deliveryId, lease.token],
@@ -201,10 +201,19 @@ export class InboxStore implements IntakeStore {
         ON CONFLICT (event_key) DO NOTHING`,
         [eventKey, lease.deliveryId, JSON.stringify(observation)],
       );
-      await tx.query(
-        `INSERT INTO leaderboard_ingestion.outbox (event_key) VALUES ($1) ON CONFLICT (event_key) DO NOTHING`,
+      const notice = await tx.query(
+        `INSERT INTO leaderboard_ingestion.outbox (event_key) VALUES ($1) ON CONFLICT (event_key) DO NOTHING RETURNING event_key`,
         [eventKey],
       );
+      if (row.operator_replay_receipt_id !== null) {
+        // Bind the persisted replay and intake lease in the same transaction.
+        // A pre-existing outbox notice is never claimed as this replay's result.
+        await tx.query(
+          `INSERT INTO leaderboard_ingestion.replay_processing_results(receipt_id,delivery_id,lease_token,event_key)
+          VALUES($1,$2,$3,$4)`,
+          [row.operator_replay_receipt_id, lease.deliveryId, lease.token, notice.rows.length ? eventKey : null],
+        );
+      }
       await tx.query(
         `UPDATE leaderboard_ingestion.inbox SET state = 'done', lease_token = NULL, lease_until = NULL
         WHERE delivery_id = $1`,
@@ -280,7 +289,7 @@ export class InboxStore implements IntakeStore {
       );
       await tx.query(
         `UPDATE leaderboard_ingestion.inbox SET state = 'pending', attempts = 0,
-        available_at = clock_timestamp(), reason_code = NULL WHERE delivery_id = $1`,
+        available_at = clock_timestamp(), reason_code = NULL, operator_replay_receipt_id = NULL WHERE delivery_id = $1`,
         [deliveryId],
       );
       return true;

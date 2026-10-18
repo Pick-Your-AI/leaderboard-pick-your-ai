@@ -1,6 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import { control, type Session } from "./client.ts";
 import { ReplayWindowControls } from "./ReplayWindow.tsx";
+import { OperatorHealthView, OperatorReplayResultView } from "./OperationsObserved.tsx";
+import {
+  checkedOperatorHealth,
+  checkedReplayResult,
+  type OperatorHealthResponse,
+  type OperatorReplayResultResponse,
+} from "./operations-observed.ts";
 import {
   checkedWindowPreview,
   checkedWindowReceipt,
@@ -48,6 +55,8 @@ export function Operations({ session }: { session: Session }) {
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
   const [windowPreview, setWindowPreview] = useState<WindowPreview | null>(null);
+  const [observedHealth, setObservedHealth] = useState<OperatorHealthResponse | null>(null);
+  const [replayResult, setReplayResult] = useState<OperatorReplayResultResponse | null>(null);
   const generation = useRef(0);
   const permitted = () => !document.hidden && session.roles.includes("operator") && session.expires > Date.now();
   function clear() {
@@ -56,6 +65,8 @@ export function Operations({ session }: { session: Session }) {
     setNotice("");
     setBusy(false);
     setWindowPreview(null);
+    setObservedHealth(null);
+    setReplayResult(null);
   }
   useEffect(() => {
     clear();
@@ -104,6 +115,8 @@ export function Operations({ session }: { session: Session }) {
     setNotice("");
     setError("");
     setWindowPreview(null);
+    setObservedHealth(null);
+    setReplayResult(null);
     try {
       const receipt = await control<{ id: string; status: string }>(`/controls/operations/${repo}/replay`, session, {
         deliveryId: row.deliveryId,
@@ -131,6 +144,8 @@ export function Operations({ session }: { session: Session }) {
     setWindowPreview(null);
     setError("");
     setNotice("");
+    setObservedHealth(null);
+    setReplayResult(null);
   }
   async function previewWindow(input: ReplayWindow) {
     if (!data || busy || !permitted()) return;
@@ -139,6 +154,8 @@ export function Operations({ session }: { session: Session }) {
     setWindowPreview(null);
     setError("");
     setNotice("");
+    setObservedHealth(null);
+    setReplayResult(null);
     try {
       const { repositoryId, ...window } = input;
       const value = await control<WindowPreview>(
@@ -166,6 +183,8 @@ export function Operations({ session }: { session: Session }) {
     setBusy(true);
     setError("");
     setNotice("");
+    setObservedHealth(null);
+    setReplayResult(null);
     try {
       const { repositoryId, ...window } = preview.window;
       const receipt = await control<WindowReceipt>(`/controls/operations/${repositoryId}/replay-window`, session, {
@@ -187,6 +206,53 @@ export function Operations({ session }: { session: Session }) {
         setWindowPreview(null);
         setError(
           "Window replay was not confirmed. Reload diagnostics and receipts before deciding whether another preview and replay are needed.",
+        );
+      }
+    } finally {
+      if (current === generation.current) setBusy(false);
+    }
+  }
+  async function readObservation(receipt?: Status["receipts"][number]) {
+    if (!data || busy || !permitted()) return;
+    const selected = data,
+      current = ++generation.current;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    setWindowPreview(null);
+    setObservedHealth(null);
+    setReplayResult(null);
+    try {
+      const path = receipt ? `replays/${receipt.id}` : "health";
+      const response = await control<unknown>(`/controls/operations/${selected.repositoryId}/${path}`);
+      if (current !== generation.current || !permitted()) return;
+      if (receipt)
+        setReplayResult(
+          checkedReplayResult(response, {
+            repositoryId: selected.repositoryId,
+            sourceGeneration: selected.sourceGeneration,
+            policyVersion: selected.policyVersion,
+            authorityRevision: selected.authorityRevision,
+            receiptId: receipt.id,
+            deliveryId: receipt.deliveryId,
+          }),
+        );
+      else
+        setObservedHealth(
+          checkedOperatorHealth(response, {
+            repositoryId: selected.repositoryId,
+            sourceGeneration: selected.sourceGeneration,
+            policyVersion: selected.policyVersion,
+            authorityRevision: selected.authorityRevision,
+          }),
+        );
+    } catch {
+      if (current === generation.current && permitted()) {
+        setData(null);
+        setObservedHealth(null);
+        setReplayResult(null);
+        setError(
+          "The observed result is unavailable or access changed. Reload protected diagnostics before refreshing. No health or publication success is inferred.",
         );
       }
     } finally {
@@ -232,6 +298,10 @@ export function Operations({ session }: { session: Session }) {
             {data.authorityRevision}, policy {data.policyVersion}.
           </p>
           <p>{data.meaning}</p>
+          <button type="button" disabled={busy} onClick={() => void readObservation()}>
+            Read current operator health
+          </button>
+          {observedHealth && <OperatorHealthView health={observedHealth} />}
           <dl>
             {Object.entries(data.counts).map(([key, value]) => (
               <React.Fragment key={key}>
@@ -295,7 +365,7 @@ export function Operations({ session }: { session: Session }) {
               <p>
                 Source generation {r.sourceGeneration ?? "unknown"} · receipt {r.id} · delivery {r.deliveryId} ·
                 operator {r.operatorId} · {r.reason} · policy {r.policyVersion} · before {r.beforeRevision} · queued{" "}
-                {r.queuedRevision}. Resulting publication revision: unknown.
+                {r.queuedRevision}. Resulting publication revision: unknown in this queued audit.
               </p>
               {r.batch && (
                 <p>
@@ -304,6 +374,15 @@ export function Operations({ session }: { session: Session }) {
                   selection {r.batch.selectionRevision}.
                 </p>
               )}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void readObservation(r)}
+                aria-label={`Read verified replay result for delivery ${r.deliveryId}`}
+              >
+                Read verified replay result
+              </button>
+              {replayResult?.receiptId === r.id && <OperatorReplayResultView result={replayResult} />}
             </div>
           ))}
           {Object.values(data.truncated).some(Boolean) && (

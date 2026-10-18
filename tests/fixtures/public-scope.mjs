@@ -23,7 +23,7 @@ export function comparisonFixture(selectedScope, cutoff, id, revision) {
     repos: ["2"],
     projects: selectedScope.projects ?? [],
     workstreams: selectedScope.workstream === null ? [] : [selectedScope.workstream],
-    roles: [],
+    roles: selectedScope.roles ?? [],
     actors: "all",
     context: selectedScope.context ?? "event",
   };
