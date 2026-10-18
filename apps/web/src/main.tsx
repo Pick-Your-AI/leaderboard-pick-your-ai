@@ -27,8 +27,20 @@ if (["/account", "/admin"].includes(location.pathname.replace(/\/+$/, ""))) {
       </React.StrictMode>,
     ),
   );
+} else if (location.pathname === "/live") {
+  void import("./remote/Wall.tsx").then(({ RemoteWall }) =>
+    root.render(
+      <React.StrictMode>
+        <RemoteWall />
+      </React.StrictMode>,
+    ),
+  );
 } else {
-  void Promise.all([import("./remote/App.tsx"), import("./remote/Wall.tsx")]).then(([{ RemoteApp }, { RemoteWall }]) =>
-    root.render(<React.StrictMode>{location.pathname === "/live" ? <RemoteWall /> : <RemoteApp />}</React.StrictMode>),
+  void import("./remote/App.tsx").then(({ RemoteApp }) =>
+    root.render(
+      <React.StrictMode>
+        <RemoteApp />
+      </React.StrictMode>,
+    ),
   );
 }

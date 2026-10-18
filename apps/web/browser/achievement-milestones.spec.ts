@@ -209,3 +209,47 @@ test("an older category response cannot restore its milestones or peers after th
     await api.close();
   }
 });
+
+test("opaque artifact proof remains inspectable and current artifact retirement preserves unrelated recognition", async ({
+  page,
+}) => {
+  const api = await service(page);
+  const artifactId = Buffer.from("011:PullRequest10").toString("base64");
+  for (const collection of [api.current.selected.evidence, api.current.selected.portfolioEvidence]) {
+    for (const entry of collection) {
+      if (entry.artifact.stableId !== "synthetic-pr-1") continue;
+      entry.artifact.stableId = artifactId;
+      entry.contribution.artifactId = artifactId;
+    }
+  }
+  try {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(profile);
+    const recognition = page.getByRole("region", { name: "Sharing and accepted achievements" });
+    await expect(recognition.getByText("3 links in the visible evidence for this selection. Page 1.")).toBeVisible();
+    await expect(recognition.getByRole("link", { name: "Synthetic bea", exact: true })).toBeVisible();
+    const proof = recognition.getByRole("link", { name: "Inspect qualifying contribution", exact: true }).first();
+    await expect(proof).toHaveAttribute("href", /\/contributions\/alex-authored\?/);
+    await proof.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("heading", { name: "Contribution evidence", exact: true })).toBeVisible();
+    await expect(page.getByText("pull_request · " + artifactId, { exact: true })).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/contributions/alex-authored");
+
+    api.current.controls.suppressedArtifactIds = [artifactId];
+    await page.goto(profile);
+    await expect(recognition.getByText("1 links in the visible evidence for this selection. Page 1.")).toBeVisible();
+    await expect(recognition.getByRole("link", { name: "Synthetic bea", exact: true })).toHaveCount(0);
+    await expect(recognition.getByRole("link", { name: "Synthetic cam", exact: true })).toHaveCount(0);
+    await expect(recognition.getByRole("link", { name: "Synthetic dev", exact: true })).toBeVisible();
+    await expect(
+      recognition.getByRole("link", { name: "Inspect qualifying contribution", exact: true }).first(),
+    ).toHaveAttribute("href", /\/contributions\/alex-reviewed\?/);
+    const violations = await new AxeBuilder({ page }).include('[aria-labelledby="recognition-title"]').analyze();
+    expect(violations.violations).toEqual([]);
+    expect(await recognition.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    expect(api.current.controls.version).toBe("synthetic-controls-1");
+  } finally {
+    await api.close();
+  }
+});

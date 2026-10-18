@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { artifactKindSchema, contributionRoleSchema, sourceEventSchema } from "./schemas.js";
+import { publicArtifactIdSchema } from "../artifact-identity.js";
 
 export const achievementMilestoneVersion = "accepted-evidence/v2";
 export const achievementScopeMeaning =
@@ -50,7 +51,7 @@ export const achievementProofSchema = z
     contributionId: identifier,
     canonicalEventId: identifier,
     actorId: identifier,
-    artifactId: identifier,
+    artifactId: publicArtifactIdSchema,
     artifactKind: artifactKindSchema,
     repositoryId: identifier.nullable(),
     sourceUrl: publicUrl,
@@ -77,7 +78,7 @@ export const achievementMilestoneSchema = z
     scopeMeaning: z.literal(achievementScopeMeaning),
     occurredAt: time,
     evidenceIds: z.tuple([identifier]),
-    artifactIds: z.tuple([identifier]),
+    artifactIds: z.tuple([publicArtifactIdSchema]),
     sourceUrls: z.tuple([publicUrl]),
     sharedCredit: z.boolean(),
     proof: achievementProofSchema,

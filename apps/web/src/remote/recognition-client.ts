@@ -1,4 +1,4 @@
-import { compareSourceInstants, sourceEventSchema } from "@pick-your-ai/contracts";
+import { compareSourceInstants, publicArtifactIdSchema, sourceEventSchema } from "@pick-your-ai/contracts";
 import { metadata, parameters, publicLink, ReadFailure, type Selection } from "./client.ts";
 import { milestonePage } from "./achievement-milestones-client.ts";
 const id = /^[A-Za-z0-9_.:-]{1,200}$/;
@@ -14,6 +14,10 @@ const text = (value: unknown, max = 2000): string =>
 const identity = (value: unknown) => {
   const result = text(value, 200);
   return id.test(result) ? result : fail();
+};
+const artifactIdentity = (value: unknown) => {
+  const result = publicArtifactIdSchema.safeParse(value);
+  return result.success ? result.data : fail();
 };
 const date = (value: unknown) => {
   const result = text(value, 40);
@@ -122,11 +126,12 @@ export function achievements(value: unknown, selected: Selection, actorId: strin
       const occurredAt = date(item.occurredAt);
       if (
         (selected.start && Date.parse(occurredAt) < Date.parse(selected.start)) ||
-        (selected.end && Date.parse(occurredAt) >= Date.parse(selected.end))
+        (selected.end && Date.parse(occurredAt) >= Date.parse(selected.end)) ||
+        compareSourceInstants(occurredAt, meta.generatedAt) > 0
       )
         fail();
       const evidenceIds = list(item.evidenceIds, 1).map(identity);
-      const artifactIds = list(item.artifactIds, 1).map(identity);
+      const artifactIds = list(item.artifactIds, 1).map(artifactIdentity);
       const sourceUrls = list(item.sourceUrls, 1).map((value) => publicLink(text(value)) ?? fail());
       if (!evidenceIds.length || !artifactIds.length || !sourceUrls.length) fail();
       return {

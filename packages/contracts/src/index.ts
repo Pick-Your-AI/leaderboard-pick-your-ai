@@ -22,6 +22,7 @@ export {
   type PublicScope,
 } from "./public-scope.js";
 export { compareSourceInstants } from "./v1/source-time.js";
+export { publicArtifactIdSchema } from "./artifact-identity.js";
 export {
   achievementMilestoneVersion,
   achievementScopeMeaning,
