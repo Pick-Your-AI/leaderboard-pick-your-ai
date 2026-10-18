@@ -59,7 +59,8 @@ current suppression overlay before every response. Actor IDs must be unique acro
 the complete provider actor list, before hidden, deleted, unlinked or unresolved
 records are removed. Contribution IDs must likewise be unique within the provider's
 primary evidence collection before non-public or ineligible proof is removed.
-A contradictory public copy cannot survive by discarding its non-public counterpart;
+That check uses the contract-parsed contribution ID, including its whitespace
+normalization. A contradictory public copy cannot survive by discarding its non-public counterpart;
 duplicate identities reject the read, including historical pins and conditional
 responses. Visibility must also agree across primary, portfolio and pending proof
 for each contribution ID and each known artifact stable ID or contribution artifact

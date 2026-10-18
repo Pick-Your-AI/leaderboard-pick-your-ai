@@ -85,6 +85,21 @@ unidentified private proof. These are synthetic regression inputs. Their actual
 execution and final receiving disposition are recorded in the delivery PR;
 the pre-outage reproduction and initial sixteen-case receipts remain historical.
 
+### Normalized primary contribution identities
+
+Independent source review of the cross-collection correction found a separate
+regression: the contribution contract trims IDs, but the early uniqueness check
+compared raw strings. Two inputs could normalize to the same primary contribution
+ID and leave aggregate lookup and proof lookup selecting different public copies.
+
+Primary uniqueness now uses the contract-parsed ID before any privacy or
+eligibility filter. The visibility regression module adds matching public and all
+four non-public dispositions in both input orders, with matching and differing
+artifact references, a unique-normalized-ID control, and current/pinned conditional
+denial in both orders. This preserves the contract's normalization without allowing
+a duplicate to disappear during filtering. The finding above is source-derived;
+execution of this additional correction is recorded against its own delivery head.
+
 ## Verification and acceptance boundary
 
 The combined review starts from accepted main
