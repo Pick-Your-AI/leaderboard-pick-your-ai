@@ -1,6 +1,8 @@
+import { Operations } from "./Operations.tsx";
 import React, { useEffect, useRef, useState } from "react";
 import { canReview, control, ControlsFailure, verifiedSession, type Receipt, type Session } from "./client.ts";
 
+import { Amendment } from "./Amendment.tsx";
 import { Configuration, type ConfigurationState } from "./Configuration.tsx";
 import { Spotlights, type Nomination } from "./Spotlights.tsx";
 
@@ -195,6 +197,9 @@ function ReceiptCard({
         <summary>Audit history</summary>
         <pre>{JSON.stringify(r.history, null, 2)}</pre>
       </details>
+      {own && r.kind === "evidence" && !["withdrawn", "merged"].includes(r.status) && (
+        <Amendment receipt={r} categories={categories} run={run} />
+      )}
       {own && r.kind === "evidence" && r.status === "accepted" && (
         <form
           onSubmit={async (e) => {
@@ -517,12 +522,15 @@ export function ControlsApp() {
               </section>
               <Spotlights nominations={nominations} session={session} run={run} admin={admin} />
               {admin && session.roles.includes("operator") && (
-                <Configuration
-                  key={JSON.stringify(configuration)}
-                  state={configuration as ConfigurationState}
-                  session={session}
-                  run={run}
-                />
+                <>
+                  <Operations session={session} />
+                  <Configuration
+                    key={JSON.stringify(configuration)}
+                    state={configuration as ConfigurationState}
+                    session={session}
+                    run={run}
+                  />
+                </>
               )}
             </fieldset>
           )}

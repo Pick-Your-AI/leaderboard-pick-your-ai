@@ -49,10 +49,17 @@ not establish issue acceptance or launch readiness.
 - **Recognition and operator breadth (#69/#70/#93/#94/#115/#122/#124):** richer
   spotlight taxonomy/selection governance, cross-workstream achievement conditions,
   shared-credit presentation, specialist identity/correction application, and
-  protected collection diagnostics/replay remain incomplete. Policy comparisons
-  persist reviewed manifests; a complete protected recalculation/activation UI and
-  deployed reversible policy rollout are not established. Evidence amendments
-  currently use the existing backend API.
+  full operational recovery remain incomplete. The mounted protected UI now supports
+  version-bound evidence amendments with renewed review/consent, and an opt-in
+  [operations panel](operator-operations.md) exposes minimized repository-scoped
+  diagnostics and transactionally audited single-delivery inbox replay. Real
+  controls HTTP/database browser tests cover queued receipts and revoked access;
+  historical runs/receipts identify their own source generation. Approved host
+  adapter wiring, real recovery drills, time-window/bulk replay and downstream
+  publication reconciliation remain outstanding; outbox replay is not exposed.
+  Policy comparisons persist reviewed manifests; a complete protected
+  recalculation/activation UI and deployed reversible policy rollout are not
+  established.
 - **Sharing and long-running displays (#123/#127):** general external iframe
   embedding is not enabled. Third-party copied images/caches cannot be remotely
   withdrawn. Documented deployed soak and real display/accessibility acceptance

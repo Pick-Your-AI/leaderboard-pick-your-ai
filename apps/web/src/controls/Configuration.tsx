@@ -64,7 +64,8 @@ export function Configuration({ state, session, run }: { state: ConfigurationSta
       <h2>Configuration and operations</h2>
       <p>
         Active revision {state.revision}. Proposals do not change public coverage. Source-tested preview and independent
-        operator approval are required before activation. Collection diagnostics and replay are not available here.
+        operator approval are required before activation. Collection diagnostics and audited inbox replay are in the
+        separate operations panel.
       </p>
       {error && <p role="alert">{error}</p>}
       <details>
