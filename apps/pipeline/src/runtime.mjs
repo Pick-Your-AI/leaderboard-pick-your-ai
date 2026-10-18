@@ -1,3 +1,4 @@
+import { retainedRankHistory } from "./rank-history.mjs";
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
 import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
 import { AggregateExplanationStore } from "./aggregate-explanations.mjs";
@@ -242,6 +243,7 @@ export async function createPipeline(options) {
         classificationPolicies.documentation,
       ]),
     );
+  const identityNormalizationSignatures = [...new Set(frozenNormalizationSignatures)];
   const verifyConfig = options.verifyConfiguration ?? (async () => false);
   const authorizeCorrection = options.authorizeCorrection ?? (async () => false);
   const now = options.now ?? (() => new Date().toISOString());
@@ -330,12 +332,12 @@ export async function createPipeline(options) {
              AND ($4::jsonb IS NULL OR EXISTS (
                SELECT 1 FROM jsonb_to_recordset($4::jsonb) AS bound(fact_key text,document_hash text)
                WHERE bound.fact_key=f.fact_key AND bound.document_hash=n.document_hash
-             )) LIMIT 10001 FOR SHARE OF n`,
+             )) LIMIT $5 FOR SHARE OF n`,
             [
               binding.normalizationHashes,
               // Legacy documents still bind historical frozen actor evidence;
               // only signatures covering every current source classification are eligible.
-              frozenNormalizationSignatures,
+              identityNormalizationSignatures,
               authorization.sources.map((source) => source.repositoryId),
               normalizationSources === undefined
                 ? null
@@ -345,11 +347,12 @@ export async function createPipeline(options) {
                       document_hash: entry.documentHash,
                     })),
                   ),
+              10000 * identityNormalizationSignatures.length + 1,
             ],
           )
         ).rows;
         requireThat(
-          rows.length <= 10000 &&
+          new Set(rows.map((row) => JSON.stringify([row.fact_key, row.document_hash]))).size <= 10000 &&
             new Set(rows.map((row) => row.document_hash)).size === binding.normalizationHashes.length &&
             (normalizationSources === undefined ||
               new Set(rows.map((row) => row.fact_key)).size === normalizationSources.length),
@@ -1076,6 +1079,7 @@ export async function createPipeline(options) {
     )
       fail("dispatch_source_generation_changed");
     let priorPublication = null;
+    let replayedBackfillRevision;
     if (dispatch) {
       // A committed operation can be acknowledged after another publisher advances
       // the head. Never repoint the head to its historical immutable revision.
@@ -1122,6 +1126,22 @@ export async function createPipeline(options) {
         // An unconfirmed SQL commit has no private preview capture. Recompute
         // its exact frozen input before atomically confirming both; do not
         // manufacture a marker or move the SQL head to a historical operation.
+        const retained = (
+          await db.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
+            prior.snapshot_id,
+          ])
+        ).rows[0];
+        if (
+          !retained ||
+          digest(retained.document) !== retained.document_hash ||
+          retained.document.frozen?.cutoff !== observationCutoff ||
+          !/^[a-f0-9]{64}$/.test(retained.document.frozen?.backfillRevision)
+        )
+          fail("dispatch_frozen_input_unavailable");
+        // The committed operation owns its original marker format. Only that
+        // verified value is reused; the complete recomputed comparison input
+        // must still match the publication receipt before private confirmation.
+        replayedBackfillRevision = retained.document.frozen.backfillRevision;
       }
     }
     const normalized = await normalizeStored(
@@ -1211,6 +1231,22 @@ export async function createPipeline(options) {
         repos.map((repo) => repo.id),
       ])
     ).rows.map((row) => row.document.fact);
+    // Ordinary reconcile runs append activity without rewriting history. Retain
+    // the immutable facts actually introduced by explicit backfill/audit runs,
+    // including committed pages of a later-failed run. Current-state refreshes
+    // must not erase that lineage when they replace the selected normalization.
+    const importedHistory = replayedBackfillRevision
+      ? []
+      : (
+          await db.query(
+            `SELECT fact.first_run_id, fact.fact_key FROM leaderboard_ingestion.source_facts AS fact
+        JOIN leaderboard_ingestion.collection_runs AS run ON run.run_id=fact.first_run_id
+        WHERE fact.repository_id=ANY($1::bigint[]) AND fact.observed_at <= $2
+        AND run.mode IN ('backfill','audit') ORDER BY fact.first_run_id,fact.fact_key LIMIT 10001`,
+            [repos.map((repo) => repo.id), observationCutoff],
+          )
+        ).rows.map((row) => [row.first_run_id, row.fact_key]);
+    if (importedHistory.length > 10_000) fail("reconciliation_history_budget_exceeded");
     const window =
       scope.start === null
         ? c.metrics.resolveMetricWindow("all", cutoff)
@@ -1247,7 +1283,19 @@ export async function createPipeline(options) {
     const frozen = {
       datasetId: digest([facts, corrections]),
       cutoff: observationCutoff,
-      backfillRevision: digest(outputs),
+      backfillRevision:
+        replayedBackfillRevision ??
+        digest([
+          "pipeline-reconciliation/v1",
+          normalizationSignature,
+          importedHistory,
+          // Keep the complete captured corrections in frozen.facts for the existing
+          // dispatch input fence; only effective observations belong to this epoch.
+          corrections
+            .filter((fact) => Date.parse(fact.observedAt) <= Date.parse(observationCutoff))
+            .map(digest)
+            .sort(),
+        ]),
       repositoryIds: repos.map((repo) => String(repo.id)),
       // Validate all provider bindings before any privacy projection.
       actors: [...actors.values()],
@@ -1579,6 +1627,75 @@ export async function createPipeline(options) {
     }
   }
   const source = {
+    async readComparison(scope, pin, previous, signal) {
+      if (["organization", "repository", "workstream"].some((key) => scope[key] !== previous.scope[key])) return null;
+      // Both reads reuse this transaction. Source locks remain held through the
+      // final authority query, including expanded retained-source revocations.
+      return db.transaction(async (tx) => {
+        const current = await source.read(scope, pin, signal, tx);
+        if (!current) return null;
+        const prior = await source.read(previous.scope, previous.snapshotId, signal, tx);
+        const repositoryIds = repositoriesFor(scope).map((repo) => repo.id);
+        const access = (
+          await tx.query(
+            "SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE",
+            [repositoryIds],
+          )
+        ).rows;
+        if (signal.aborted || access.length !== repositoryIds.length || access.some((row) => row.state !== "public"))
+          return null;
+        const removed = (
+          await tx.query(
+            `${sourceSuppressionQuery}
+          UNION SELECT artifact_id AS subject_id FROM leaderboard_pipeline.corrections WHERE repository_id=ANY($1::bigint[])`,
+            [repositoryIds],
+          )
+        ).rows.map((row) => row.subject_id);
+        if (!(await approved(tx)) || signal.aborted) return null;
+        // No awaits below: configuration, recognition, confirmed heads and exact
+        // current privacy/source signatures fence both captured projections.
+        const controls = controlsStore.read(),
+          overlay = restrictConfiguration(controls);
+        const version = `controls-${controls.revision}-${overlay.revision}-${digest([config.version, access.map((row) => [String(row.repository_id), String(row.generation)]), [...removed].sort()]).slice(0, 16)}`;
+        const suppressedActors = Object.entries(controls.profiles)
+          .filter(([, profile]) => profile.suppressed)
+          .map(([id]) => id)
+          .sort();
+        for (const read of [current, prior].filter(Boolean)) {
+          const selectedScope = read.selected.scope,
+            head = controls.pipelineHeads?.[scopeKey(selectedScope)];
+          if (
+            read.controls.version !== version ||
+            canonical([...read.controls.suppressedActorIds].sort()) !== canonical(suppressedActors) ||
+            canonical([...read.controls.suppressedArtifactIds].sort()) !== canonical([...removed].sort()) ||
+            !confirmationMatches(head, selectedScope, read.head.snapshotId, read.head.revision) ||
+            !confirmationMatches(
+              controls.pipelinePublications?.[read.selected.snapshot.snapshotId],
+              selectedScope,
+              read.selected.snapshot.snapshotId,
+              read.selected.snapshot.revision,
+            ) ||
+            (recognitionBindings.length &&
+              [read.head.snapshotId, read.selected.snapshot.snapshotId].some(
+                (id) =>
+                  controls.pipelinePublications?.[id]?.recognitionFingerprint !==
+                  recognitionFingerprint(controls, recognitionBindings),
+              ))
+          )
+            return null;
+        }
+        const history = (read) =>
+          read === null
+            ? null
+            : retainedRankHistory(
+                aggregateExplanations.verify(read.selected.snapshot.snapshotId, {
+                  ...explanationBinding(read.selected.scope, read.selected.snapshot),
+                  digest: controls.pipelinePublications[read.selected.snapshot.snapshotId].aggregateExplanationHash,
+                }).document,
+              );
+        return { current, previous: prior, currentHistory: history(current), previousHistory: history(prior) };
+      });
+    },
     async readHealth(scope, pin, signal) {
       return source.read(scope, pin, signal, undefined, true);
     },
