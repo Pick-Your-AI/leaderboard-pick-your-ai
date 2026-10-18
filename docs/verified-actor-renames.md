@@ -74,4 +74,6 @@ service-account and cross-observation provider-conflict cases remain applicable.
 
 These are synthetic behavioral tests. They do not certify a live GitHub rename
 history, account-link authorization, identity correction receipts, installation
-capability or production deployment. The broader #36 work package remains open.
+capability or production deployment. The [identity foundation](contributor-identity-foundation.md)
+separately explains source availability, serving aliases, protected suppression and
+the remaining operational correction boundary.

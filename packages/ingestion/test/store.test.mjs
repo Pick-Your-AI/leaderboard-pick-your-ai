@@ -1085,6 +1085,65 @@ test("asynchronous enrichment retains revision-pinned metadata, failures stay vi
   );
 });
 
+test("enrichment keeps its original revision pin when the metadata adapter edits its request", async () => {
+  const { enrich } = await enrichment();
+  const retained = await facts();
+  assert.equal(
+    await enrich.processOne({
+      async readMetadata(request) {
+        await Promise.resolve();
+        request.fact.sourceRevision = "synthetic-v2";
+        return sourceMetadata({ sourceRevision: request.fact.sourceRevision });
+      },
+    }),
+    "failed",
+  );
+  let job = (await db.query("SELECT * FROM leaderboard_ingestion.enrichment_jobs")).rows[0];
+  assert.equal(job.state, "failed");
+  assert.equal(job.reason, "enrichment_unavailable");
+  assert.equal(job.metadata, null);
+  assert.equal(job.attempts, 1);
+  assert.deepEqual(await facts(), retained);
+  assert.deepEqual(await counts(), { observations: 0, notices: 0 });
+
+  await db.query(
+    "UPDATE leaderboard_ingestion.enrichment_jobs SET available_at = clock_timestamp() - interval '1 second'",
+  );
+  assert.equal(
+    await new EnrichmentStore(db, 3).processOne({
+      async readMetadata(request) {
+        assert.equal(request.fact.sourceRevision, "synthetic-v1");
+        return sourceMetadata();
+      },
+    }),
+    "classified",
+  );
+  job = (await db.query("SELECT * FROM leaderboard_ingestion.enrichment_jobs")).rows[0];
+  assert.equal(job.attempts, 2);
+  assert.deepEqual(job.metadata, sourceMetadata());
+  assert.deepEqual(await facts(), retained);
+  assert.deepEqual(await counts(), { observations: 0, notices: 0 });
+});
+
+test("adapter-local fact edits do not reject metadata for the retained enrichment revision", async () => {
+  const { enrich } = await enrichment();
+  const retained = await facts();
+  assert.equal(
+    await enrich.processOne({
+      async readMetadata(request) {
+        request.fact.sourceRevision = "adapter-working-copy";
+        request.fact.subjectId = "ADAPTER_LOCAL_SUBJECT";
+        return sourceMetadata();
+      },
+    }),
+    "classified",
+  );
+  const job = (await db.query("SELECT * FROM leaderboard_ingestion.enrichment_jobs")).rows[0];
+  assert.deepEqual(job.metadata, sourceMetadata());
+  assert.deepEqual(await facts(), retained);
+  assert.deepEqual(await counts(), { observations: 0, notices: 0 });
+});
+
 test("missing evidence, changed source revision and exhausted attempts never become classified", async () => {
   const { enrich } = await enrichment();
   for (const invalid of [
