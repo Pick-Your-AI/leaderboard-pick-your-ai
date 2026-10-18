@@ -1191,7 +1191,7 @@ function activityGroup(value: unknown, selected: Selection): ActivityGroup {
     categoryIds: array(data.categoryIds, 98).map(identity),
     artifactPreview: array(data.artifactPreview, 5).map((value) => {
       const item = object(value),
-        artifactId = identity(item.artifactId);
+        artifactId = item.artifactId;
       const artifact = artifactSchema.parse({
         schemaVersion: "leaderboard/v1",
         source: "github",
@@ -1201,8 +1201,9 @@ function activityGroup(value: unknown, selected: Selection): ActivityGroup {
         publicUrl: item.publicUrl,
       });
       const publicUrl = publicLink(artifact.publicUrl);
-      if (!publicUrl) throw new ReadFailure(502, "invalid_activity_response");
-      return { artifactId, kind: artifact.kind, publicUrl };
+      if (!publicUrl || !artifact.stableId || artifact.stableId !== artifactId)
+        throw new ReadFailure(502, "invalid_activity_response");
+      return { artifactId: artifact.stableId, kind: artifact.kind, publicUrl };
     }),
   };
   if (
