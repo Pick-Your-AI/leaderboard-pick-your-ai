@@ -387,7 +387,7 @@ Version metric definitions, identity rules, line classification and eligibility 
 
 ## Evidence and correction
 
-Observe raw activity without inferring its quality. Review receipts when recognition requires acceptance, mentoring, design contribution, source verification or other qualitative judgment. Document the artifact, participants, roles, occurrence date, submitter, independent reviewer, policy version and public summary. Reviewers declare conflicts and do not approve their own disputed recognition.
+Observe raw activity without inferring its quality. Review receipts when recognition requires acceptance, mentoring, design contribution, source verification or other qualitative judgment. Document the artifact, participants, roles, occurrence date, submitter, independent reviewer, policy version and public summary. Reviewers declare conflicts and cannot accept claims submitted by themselves or listing them as collaborators. Appeals and rollbacks require a reviewer who has made no earlier decision on that receipt.
 
 Provide a functioning correction and appeal route with a submission receipt. Preserve an auditable decision trail while minimizing personal data. Withdrawal, duplicate evidence and upheld corrections invalidate derived counts across affected service-controlled snapshots, exports and caches. Explain that independently downloaded copies are outside the service's deletion control. Do not promise response times until an operator accepts the commitment.
 
