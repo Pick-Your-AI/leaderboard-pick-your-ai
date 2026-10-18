@@ -255,6 +255,170 @@ test("follow waits independently for pointer, keyboard focus and open proof", as
   await expect(page.getByRole("status")).toContainText("Updated to snapshot syn-r43");
 });
 
+test("prototype follow pauses when reduced motion is enabled and manual apply remains available", async ({
+  page,
+}, info) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.clock.install();
+  await ready(page, "/leaderboards/prs_reviewed");
+  await page.clock.runFor(200);
+  const follow = page.getByRole("checkbox", { name: /Follow updates/ });
+  const freshness = page.locator(".freshness");
+  const rows = await page.locator("tbody").innerText();
+  await expect(follow).not.toBeChecked();
+  await expect(freshness).toContainText("Snapshot syn-r42");
+  await follow.check();
+  await page.mouse.move(0, 0);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(true);
+  await page.clock.runFor(20_000);
+  await page.clock.runFor(200);
+  await info.attach("reduced-motion-follow-observation.json", {
+    body: JSON.stringify({
+      beforeRows: rows,
+      afterRows: await page.locator("tbody").innerText(),
+      freshness: await freshness.innerText(),
+      followDisabled: await follow.isDisabled(),
+    }),
+    contentType: "application/json",
+  });
+  await expect.soft(follow).toBeDisabled({ timeout: 1_000 });
+  expect.soft(await page.locator("tbody").innerText()).toBe(rows);
+  expect.soft(await freshness.innerText()).toContain("Snapshot syn-r42");
+  const apply = page.getByRole("button", { name: "Apply updates" });
+  await expect(apply).toBeVisible({ timeout: 1_000 });
+  await expect(page.getByRole("status")).toBeEmpty();
+  await apply.click();
+  await page.clock.runFor(200);
+  await expect(freshness).toContainText("Snapshot syn-r43");
+  await expect(follow).toBeDisabled();
+  await expect(apply).toHaveCount(0);
+  await expect(page.getByRole("status")).toHaveCount(1);
+  await expect(page.getByRole("status")).toContainText("Updated to snapshot syn-r43");
+});
+
+test("prototype follow holds a hidden document and resumes only after visible table focus is released", async ({
+  page,
+}, info) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.clock.install();
+  await ready(page, "/leaderboards/prs_reviewed");
+  await page.clock.runFor(200);
+  const follow = page.getByRole("checkbox", { name: /Follow updates/ });
+  const freshness = page.locator(".freshness");
+  const rows = await page.locator("tbody").innerText();
+  await expect(freshness).toContainText("Snapshot syn-r42");
+  await follow.check();
+  await page.mouse.move(0, 0);
+  // Exercise the same controlled visibility event used by the remote browser tests.
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { value: true, configurable: true });
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.runFor(20_000);
+  await page.clock.runFor(200);
+  await info.attach("hidden-document-follow-observation.json", {
+    body: JSON.stringify({
+      beforeRows: rows,
+      afterRows: await page.locator("tbody").innerText(),
+      freshness: await freshness.innerText(),
+      visibility: await page.evaluate(() => document.visibilityState),
+    }),
+    contentType: "application/json",
+  });
+  expect.soft(await page.locator("tbody").innerText()).toBe(rows);
+  expect.soft(await freshness.innerText()).toContain("Snapshot syn-r42");
+  const apply = page.getByRole("button", { name: "Apply updates" });
+  await expect(apply).toBeVisible({ timeout: 1_000 });
+  await expect(page.getByRole("status")).toBeEmpty();
+  const proof = page.locator(".proof-link").first();
+  await proof.focus();
+  await page.evaluate(() => {
+    Reflect.deleteProperty(document, "hidden");
+    Reflect.deleteProperty(document, "visibilityState");
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.runFor(200);
+  await expect(proof).toBeFocused();
+  await expect(apply).toBeVisible();
+  await expect(freshness).toContainText("Snapshot syn-r42");
+  await page.locator("h1").evaluate((element) => {
+    element.setAttribute("tabindex", "-1");
+    (element as HTMLElement).focus({ preventScroll: true });
+  });
+  await page.clock.runFor(200);
+  await expect(freshness).toContainText("Snapshot syn-r43");
+  await expect(apply).toHaveCount(0);
+  await expect(page.getByRole("status")).toHaveCount(1);
+  await expect(page.getByRole("status")).toContainText("Updated to snapshot syn-r43");
+});
+
+for (const pause of ["reduced motion", "hidden document"] as const) {
+  test(`prototype follow resumes once after ${pause} becomes eligible`, async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.clock.install();
+    await ready(page, "/leaderboards/prs_reviewed");
+    await page.clock.runFor(200);
+    const follow = page.getByRole("checkbox", { name: /Follow updates/ });
+    const freshness = page.locator(".freshness");
+    const status = page.getByRole("status");
+    await status.evaluate((element) => {
+      const summaries: string[] = [];
+      const observer = new MutationObserver(() => {
+        if (element.textContent) summaries.push(element.textContent);
+      });
+      observer.observe(element, { childList: true, characterData: true, subtree: true });
+      Object.assign(element, { followSummaries: summaries, followObserver: observer });
+    });
+    await follow.check();
+    await page.mouse.move(0, 0);
+    if (pause === "reduced motion") await page.emulateMedia({ reducedMotion: "reduce" });
+    else
+      await page.evaluate(() => {
+        Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+    await page.clock.runFor(20_000);
+    await page.clock.runFor(200);
+    const apply = page.getByRole("button", { name: "Apply updates" });
+    await expect(apply).toBeVisible();
+    await expect(freshness).toContainText("Snapshot syn-r42");
+    await expect(status).toBeEmpty();
+    if (pause === "reduced motion") {
+      const proof = page.locator(".proof-link").first();
+      await proof.focus();
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await expect(follow).toBeEnabled();
+      await page.clock.runFor(200);
+      await expect(proof).toBeFocused();
+      await expect(apply).toBeVisible();
+      await expect(freshness).toContainText("Snapshot syn-r42");
+      await page.locator("h1").evaluate((element) => {
+        element.setAttribute("tabindex", "-1");
+        (element as HTMLElement).focus({ preventScroll: true });
+      });
+    } else
+      await page.evaluate(() => {
+        Reflect.deleteProperty(document, "visibilityState");
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+    await page.clock.runFor(200);
+    await expect(freshness).toContainText("Snapshot syn-r43");
+    await expect(apply).toHaveCount(0);
+    await expect(follow).toBeChecked();
+    await expect(status).toContainText("Updated to snapshot syn-r43");
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await page.clock.runFor(1_000);
+    const summaries = await status.evaluate((element) => {
+      const observed = element as HTMLElement & { followSummaries: string[]; followObserver: MutationObserver };
+      observed.followObserver.disconnect();
+      return observed.followSummaries;
+    });
+    expect(summaries).toEqual([await status.textContent()]);
+  });
+}
+
 test("cold production read records resource, timing, memory and DOM observations", async ({ page }, info) => {
   await page.goto("/leaderboards/pr_merged?snapshot=syn-r42");
   await expect(page.locator(".proof-link").first()).toBeVisible();

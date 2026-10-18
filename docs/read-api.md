@@ -350,7 +350,7 @@ source installation, production freshness, physical-device behavior or a display
 
 ## Bounds and verification
 
-Defaults: 4 KiB query URLs, 100 rows/page, 10,000 projection rows/actors, 20,000
+Defaults: 48 KiB request targets, 100 rows/page, 10,000 projection rows/actors, 20,000
 evidence records, 40,000 evidence references, 16 concurrent backend reads and 16
 concurrent SSE windows. Backend timeout defaults to two seconds. Slots remain held
 until a timed-out provider actually settles, so a provider ignoring cancellation
@@ -358,6 +358,22 @@ cannot exhaust the backend through unlimited retries. Saturation returns 429.
 Deployments can lower the configurable bounds; backend timeout cannot exceed ten
 seconds and concurrency cannot exceed 128. There is no claim of production load
 validation from these deterministic limits.
+
+The request-target bound admits 100 distinct 128-character Project IDs even when
+every character needs percent encoding, three 200-character base scope fields,
+all approved roles, and bounded route, pin and cursor fields. A target above the
+bound returns 414 before provider I/O. Parsed header names and values plus normal
+line framing have a separate inclusive 16 KiB budget and a 1,000-header limit;
+overflow returns 431. The native parser captures one extra header to detect count
+overflow before truncation. A fixed 65 KiB native parser limit bounds the bytes
+Node accounts for across the target and headers. Node excludes leading optional
+whitespace at both its original and current limits, so neither the parser setting
+nor the retained-header check establishes an exact wire-byte ceiling. These use the
+[Node HTTP server limits](https://nodejs.org/docs/latest-v24.x/api/http.html)
+through Fastify's supported
+[`http` option](https://fastify.dev/docs/latest/Reference/Server/#http).
+Deployed proxies need corresponding reviewed request-target limits. The actual
+loopback regressions establish the service boundary, not proxy or load acceptance.
 
 Validation commands:
 

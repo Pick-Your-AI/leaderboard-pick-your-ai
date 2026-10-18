@@ -1743,7 +1743,9 @@ test("authenticated operations HTTP bridge commits real scoped replay and expose
     "002_snapshots",
     "003_collection",
     "004_outbox_dispatch",
+    "006_delivery_payload_expiry",
     "007_operator_replay_results",
+    "008_dispatch_publication_scope_capacity",
   ])
     await engine.exec(
       await readFile(new URL(`../../../packages/ingestion/sql/${file}.up.sql`, import.meta.url), "utf8"),
