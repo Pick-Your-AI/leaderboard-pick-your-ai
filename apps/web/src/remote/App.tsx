@@ -1,4 +1,5 @@
 import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
+import { ContributorParticipation } from "./Participation.tsx";
 import { EvidenceDrawer, EvidenceProof, Receipt } from "./Evidence.tsx";
 import { isProofTransition, proofHref, readProof, withoutProof } from "./proof.ts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1086,6 +1087,7 @@ export function RemoteApp() {
                   </li>
                 ))}
               </ul>
+              <ContributorParticipation value={data.value.activitySummary} selected={pinned} metrics={catalogEntries} />
               <ContributorRecognition
                 key={`${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
                 base={parsed.base}
