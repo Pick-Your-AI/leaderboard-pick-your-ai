@@ -1,3 +1,10 @@
+import { contributionRoleSchema, type Contribution } from "./v1/schemas.js";
+
+export type PublicContributionRole = Exclude<Contribution["roles"][number], "unknown">;
+export const publicContributionRoles = Object.freeze(
+  contributionRoleSchema.options.filter((role): role is PublicContributionRole => role !== "unknown"),
+);
+
 /** Public materializations are exact scopes, never sums of overlapping views. */
 export interface PublicScope {
   organization: string;
@@ -5,13 +12,16 @@ export interface PublicScope {
   workstream: string | null;
   start: string | null;
   end: string | null;
-  schemaVersion?: "public-scope/v2";
+  schemaVersion?: "public-scope/v2" | "public-scope/v3";
   context?: "event" | "current";
   projects?: string[];
+  roles?: PublicContributionRole[];
 }
 
 export const publicScopeSchemaVersion = "public-scope/v2" as const;
+export const publicRoleScopeSchemaVersion = "public-scope/v3" as const;
 export const publicScopeProjectLimit = 100;
+export const publicScopeRoleLimit = publicContributionRoles.length;
 const keys = new Set([
   "organization",
   "repository",
@@ -21,6 +31,7 @@ const keys = new Set([
   "schemaVersion",
   "context",
   "projects",
+  "roles",
 ]);
 const identifier = (value: unknown): value is string =>
   typeof value === "string" && /^[A-Za-z0-9_.:-]{1,200}$/.test(value);
@@ -32,7 +43,8 @@ const instant = (value: unknown): value is string =>
 
 /** Canonicalize detached query/configuration input; never rewrite retained documents.
  * Explicit event + no Projects remains the original five-field scope, byte for byte.
- * New materializations carry a version and both membership dimensions explicitly.
+ * Membership-only scopes retain v2. A nonempty role union requires v3, with every
+ * membership and contribution-role dimension explicit. Retained v2 never acquires roles.
  */
 export function canonicalPublicScope(input: unknown): PublicScope {
   const invalid = (): never => {
@@ -48,17 +60,32 @@ export function canonicalPublicScope(input: unknown): PublicScope {
     (value.start === null) !== (value.end === null) ||
     (value.start !== null && (!instant(value.start) || !instant(value.end) || value.start >= value.end)) ||
     (value.context !== undefined && value.context !== "event" && value.context !== "current") ||
-    (value.schemaVersion !== undefined && value.schemaVersion !== publicScopeSchemaVersion) ||
+    (value.schemaVersion !== undefined &&
+      value.schemaVersion !== publicScopeSchemaVersion &&
+      value.schemaVersion !== publicRoleScopeSchemaVersion) ||
+    (value.roles !== undefined &&
+      (!Array.isArray(value.roles) ||
+        value.roles.length > publicScopeRoleLimit ||
+        Array.from(value.roles).some((role) => !publicContributionRoles.includes(role)))) ||
     (value.projects !== undefined &&
       (!Array.isArray(value.projects) ||
         value.projects.length > publicScopeProjectLimit ||
-        value.projects.some((id) => typeof id !== "string" || !/^[A-Za-z0-9_=.:-]{1,128}$/.test(id))))
+        Array.from(value.projects).some((id) => typeof id !== "string" || !/^[A-Za-z0-9_=.:-]{1,128}$/.test(id))))
   )
     return invalid();
   const projects = [...new Set((value.projects ?? []) as string[])].sort();
+  const roles = [...new Set((value.roles ?? []) as PublicContributionRole[])].sort();
   const context = value.context ?? "event";
-  const extended = context === "current" || projects.length > 0;
-  if (value.schemaVersion !== undefined && (!extended || value.context === undefined || value.projects === undefined))
+  const membership = context === "current" || projects.length > 0;
+  const version = roles.length ? publicRoleScopeSchemaVersion : membership ? publicScopeSchemaVersion : undefined;
+  if (
+    value.schemaVersion !== undefined &&
+    (value.schemaVersion !== version ||
+      value.context === undefined ||
+      value.projects === undefined ||
+      (value.schemaVersion === publicScopeSchemaVersion && "roles" in value) ||
+      (value.schemaVersion === publicRoleScopeSchemaVersion && value.roles === undefined))
+  )
     return invalid();
   return {
     organization: value.organization,
@@ -66,7 +93,8 @@ export function canonicalPublicScope(input: unknown): PublicScope {
     workstream: value.workstream as string | null,
     start: value.start as string | null,
     end: value.end as string | null,
-    ...(extended ? { schemaVersion: publicScopeSchemaVersion, context, projects } : {}),
+    ...(version ? { schemaVersion: version, context, projects } : {}),
+    ...(roles.length ? { roles } : {}),
   };
 }
 
@@ -76,6 +104,8 @@ export function publicScopeKey(input: PublicScope): string {
   const key: unknown[] = [scope.organization, scope.repository, scope.workstream, scope.start, scope.end];
   if (scope.schemaVersion === publicScopeSchemaVersion)
     key.push([publicScopeSchemaVersion, scope.context, scope.projects]);
+  if (scope.schemaVersion === publicRoleScopeSchemaVersion)
+    key.push([publicRoleScopeSchemaVersion, scope.context, scope.projects, scope.roles]);
   return JSON.stringify(key);
 }
 
@@ -90,9 +120,10 @@ export function publicScopeParameters(input: PublicScope): Record<string, string
   const params: Record<string, string> = { organization: scope.organization };
   for (const key of ["repository", "workstream", "start", "end"] as const)
     if (scope[key] !== null) params[key] = scope[key];
-  if (scope.schemaVersion === publicScopeSchemaVersion) {
+  if (scope.schemaVersion !== undefined) {
     params.context = scope.context!;
     if (scope.projects!.length) params.project = scope.projects!.join(",");
   }
+  if (scope.roles?.length) params.role = scope.roles.join(",");
   return params;
 }
