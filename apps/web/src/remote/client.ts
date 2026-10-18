@@ -191,20 +191,41 @@ export function publicLink(raw: string | null | undefined): string | null {
     return null;
   }
 }
-async function readBytes(response: Response): Promise<Uint8Array> {
+const maxResponseBytes = 2_000_000;
+function discardBody(response: Response): void {
+  void response.body?.cancel().catch(() => {});
+}
+async function readBytes(response: Response, signal: AbortSignal): Promise<Uint8Array> {
+  const advertised = response.headers.get("content-length");
+  if (advertised !== null && (!/^\d+$/.test(advertised) || Number(advertised) > maxResponseBytes)) {
+    discardBody(response);
+    throw new ReadFailure(502, "api_response_too_large");
+  }
   const reader = response.body?.getReader();
   if (!reader) throw new ReadFailure(502, "invalid_api_response");
+  // Abort the reader as well as fetch: a response may already have arrived, or
+  // a supplied transport may not propagate cancellation to its body stream.
+  const cancel = () => {
+    void reader.cancel().catch(() => {});
+  };
+  signal.addEventListener("abort", cancel, { once: true });
   let bytes = 0;
   const chunks: Uint8Array[] = [];
-  while (true) {
-    const chunk = await reader.read();
-    if (chunk.done) break;
-    bytes += chunk.value.length;
-    if (bytes > 2_000_000) {
-      await reader.cancel();
-      throw new ReadFailure(502, "api_response_too_large");
+  try {
+    signal.throwIfAborted();
+    while (true) {
+      const chunk = await reader.read();
+      signal.throwIfAborted();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > maxResponseBytes) throw new ReadFailure(502, "api_response_too_large");
+      chunks.push(chunk.value);
     }
-    chunks.push(chunk.value);
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    // An underlying cancel hook must not keep a failed request pending forever.
+    cancel();
+    reader.releaseLock();
   }
   const joined = new Uint8Array(bytes);
   let offset = 0;
@@ -220,22 +241,34 @@ export async function request(
   params: URLSearchParams,
   signal: AbortSignal,
 ): Promise<unknown> {
+  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(8000)]);
+  requestSignal.throwIfAborted();
   const response = await fetch(`${base}/${path}${params.size ? `?${params}` : ""}`, {
     credentials: "omit",
     cache: "no-store",
     redirect: "error",
-    signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
+    signal: requestSignal,
     headers: { accept: "application/json" },
   });
-  if (!response.headers.get("content-type")?.includes("application/json"))
+  if (requestSignal.aborted) {
+    discardBody(response);
+    requestSignal.throwIfAborted();
+  }
+  if (
+    response.redirected ||
+    response.type === "opaqueredirect" ||
+    !/^application\/json(?:\s*;|\s*$)/i.test(response.headers.get("content-type") ?? "")
+  ) {
+    discardBody(response);
     throw new ReadFailure(
       response.ok ? 502 : response.status,
       response.ok ? "invalid_api_response" : `http_${response.status}`,
     );
-  const joined = await readBytes(response);
+  }
+  const joined = await readBytes(response, requestSignal);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(new TextDecoder().decode(joined));
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(joined));
   } catch {
     throw new ReadFailure(502, "invalid_api_response");
   }
@@ -258,18 +291,42 @@ export async function exportPage(
   const params = parameters(selected, { board: true, cursor: selected.cursor });
   params.set("format", format);
   if (!selected.snapshot) throw new ReadFailure(400, "export_requires_displayed_snapshot");
+  const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(8000)]);
+  requestSignal.throwIfAborted();
   const response = await fetch(`${base}/exports?${params}`, {
     credentials: "omit",
     cache: "no-store",
     redirect: "error",
-    signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
+    signal: requestSignal,
   });
-  if (!response.ok) throw new ReadFailure(response.status, `export_http_${response.status}`);
+  if (requestSignal.aborted) {
+    discardBody(response);
+    requestSignal.throwIfAborted();
+  }
+  if (!response.ok) {
+    discardBody(response);
+    throw new ReadFailure(response.status, `export_http_${response.status}`);
+  }
   const type = format === "json" ? "application/json" : "text/csv";
-  if (!response.headers.get("content-type")?.includes(type)) throw new ReadFailure(502, "invalid_export_response");
-  if ((response.headers.get("x-leaderboard-actor-filter") ?? "all") !== (selected.actors ?? "all"))
+  if (
+    response.redirected ||
+    response.type === "opaqueredirect" ||
+    response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !== type
+  ) {
+    discardBody(response);
+    throw new ReadFailure(502, "invalid_export_response");
+  }
+  if ((response.headers.get("x-leaderboard-actor-filter") ?? "all") !== (selected.actors ?? "all")) {
+    discardBody(response);
     throw new ReadFailure(502, "api_actor_filter_mismatch");
-  const raw = new TextDecoder().decode(await readBytes(response));
+  }
+  const bytes = await readBytes(response, requestSignal);
+  let raw: string;
+  try {
+    raw = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new ReadFailure(502, "invalid_export_response");
+  }
   if (format === "json") {
     try {
       validateExport(JSON.parse(raw), selected);
