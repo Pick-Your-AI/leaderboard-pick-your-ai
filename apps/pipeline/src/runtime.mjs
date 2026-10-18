@@ -91,7 +91,7 @@ const statements = [
 // Derived artifacts retain their own immutable identity, while revocation follows
 // every authoritative source observation that supplied them. Dependencies are
 // private and append-only across classification changes and cache replacements.
-const sourceSuppressionQuery = `SELECT subject_id AS artifact_id
+const sourceSuppressionQuery = `SELECT subject_id
   FROM leaderboard_ingestion.object_suppressions WHERE repository_id=ANY($1::bigint[])
   UNION SELECT dependency.artifact_id FROM leaderboard_pipeline.source_artifacts AS dependency
   JOIN leaderboard_ingestion.source_facts AS fact USING(fact_key)
@@ -99,7 +99,7 @@ const sourceSuppressionQuery = `SELECT subject_id AS artifact_id
     ON removed.repository_id=fact.repository_id AND removed.subject_id=fact.subject_id
   WHERE fact.repository_id=ANY($1::bigint[])`;
 const sourceSuppressions = async (tx, repositoryIds) =>
-  (await tx.query(sourceSuppressionQuery, [repositoryIds])).rows.map((row) => row.artifact_id);
+  (await tx.query(sourceSuppressionQuery, [repositoryIds])).rows.map((row) => row.subject_id);
 async function retainSourceArtifacts(tx, factKey, document) {
   const artifactIds = [...new Set(document.facts.map((fact) => fact.artifactId))];
   if (artifactIds.some((id) => typeof id !== "string" || !/^[A-Za-z0-9_=.:-]{1,200}$/.test(id)))
@@ -1465,10 +1465,10 @@ export async function createPipeline(options) {
           const removed = (
             await tx.query(
               `${sourceSuppressionQuery}
-      UNION SELECT artifact_id FROM leaderboard_pipeline.corrections WHERE repository_id=ANY($1::bigint[])`,
+      UNION SELECT artifact_id AS subject_id FROM leaderboard_pipeline.corrections WHERE repository_id=ANY($1::bigint[])`,
               [selected.repository_ids],
             )
-          ).rows.map((row) => row.artifact_id);
+          ).rows.map((row) => row.subject_id);
           if (!(await approved(tx)) || signal.aborted) return null;
           // Read current private controls after all awaited I/O, even for pinned historical snapshots.
           const controls = controlsStore.read();
