@@ -109,3 +109,66 @@ test("review A to B to A observations retain distinct scan revisions", async () 
   assert.equal(a.sourceRevision.split(".")[0], a2.sourceRevision.split(".")[0]);
   assert.deepEqual((await source.readPage({ ...request, runId: "synthetic-a2" })).facts[0], a2);
 });
+
+test("timeline source retains actual event identity, actor and occurrence time", async () => {
+  const event = {
+    id: 901,
+    event: "assigned",
+    created_at: "2026-10-01T12:00:00Z",
+    actor: { id: 3 },
+    issue: { html_url: `https://github.com/${repository.slug}/issues/20` },
+  };
+  const source = createGithubCollectionSource({
+    sourceId: "synthetic",
+    repositories: [{ ...repository, families: ["timelines"] }],
+    client: { rest: async () => ({ id: 2, private: false }), scanRest: async (scan) => scan.select([event]) },
+  });
+  const page = await source.readPage({ ...request, family: "timelines" });
+  assert.equal(page.facts[0].subjectId, "901");
+  assert.equal(page.facts[0].evidence, "observed_transition");
+  assert.equal(page.facts[0].actorId, "3");
+  assert.equal(page.facts[0].occurredAt, "2026-10-01T12:00:00.000Z");
+});
+
+test("Project collector traverses subject memberships and current field snapshots", async () => {
+  const calls = [];
+  const source = createGithubCollectionSource({
+    sourceId: "synthetic",
+    repositories: [{ ...repository, families: ["project_current"] }],
+    client: {
+      rest: async () => ({ id: 2, private: false }),
+      scanRest: async () => [{ node_id: "I_synthetic" }],
+      scanGraphql: async (scan) => {
+        calls.push(scan.key);
+        const node = scan.query.includes("ProjectV2Item {")
+          ? {
+              id: "PVTI_synthetic",
+              updatedAt: "2026-10-01T12:00:00Z",
+              isArchived: false,
+              project: { id: "PVT_synthetic", public: true },
+              content: {
+                url: `https://github.com/${repository.slug}/issues/20`,
+                repository: { databaseId: 2, isPrivate: false },
+              },
+              fieldValues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
+            }
+          : {
+              id: "I_synthetic",
+              repository: { databaseId: 2, isPrivate: false },
+              projectItems: {
+                nodes: [{ id: "PVTI_synthetic", project: { public: true } }],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            };
+        return scan.select({ node }).nodes;
+      },
+    },
+  });
+  const page = await source.readPage({ ...request, family: "project_current" });
+  assert.equal(calls.length, 2);
+  assert.equal(page.expectedCount, 1);
+  assert.equal(page.facts[0].subjectId, "PVTI_synthetic");
+  assert.equal(page.facts[0].actorId, null);
+  assert.equal(page.facts[0].occurredAt, null);
+  assert.equal(page.facts[0].evidence, "current_state");
+});

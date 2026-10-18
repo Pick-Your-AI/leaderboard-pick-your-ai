@@ -1,7 +1,9 @@
+import { readPublicProjectSnapshot, projectSnapshotRevision } from "../../../packages/github/dist/project-snapshots.js";
 import {
   githubReviewRevision,
   githubDiscussionRevision,
   githubSnapshotRevision,
+  githubTimelineRevision,
 } from "../../../packages/github/dist/normalizers.js";
 
 const routes = {
@@ -10,6 +12,7 @@ const routes = {
   comments: "issues/comments?per_page=100",
   commits: "commits?per_page=100",
   releases: "releases?per_page=100",
+  timelines: "issues/events?per_page=100",
 };
 const at = (value) =>
   typeof value === "string" && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
@@ -58,7 +61,7 @@ export function createGithubCollectionSource({
       if (
         !repository ||
         !repository.families.includes(request.family) ||
-        (!route && !["reviews", "discussions"].includes(request.family))
+        (!route && !["reviews", "discussions", "project_current"].includes(request.family))
       )
         throw new Error("source_family_adapter_unavailable");
       assertAuthorized();
@@ -90,7 +93,58 @@ export function createGithubCollectionSource({
           },
         });
       let values;
-      if (request.family === "discussions") {
+      if (request.family === "project_current") {
+        if (!client.scanGraphql) throw new Error("project_source_unavailable");
+        const subjects = await scan("project-subjects", routes.issues);
+        if (subjects.length > 10000) throw new Error("source_dataset_budget_exceeded");
+        values = [];
+        for (const subject of subjects) {
+          if (typeof subject.node_id !== "string") throw new Error("project_subject_identity_unverified");
+          const items = await client.scanGraphql({
+            source: sourceId,
+            key: `pipeline:${repository.id}:${request.runId}:project-items:${subject.node_id}`,
+            query: `query($id:ID!, $first:Int!, $after:String) {
+              node(id:$id) {
+                ... on Issue { id repository { databaseId isPrivate } projectItems(first:$first,after:$after) { nodes { id project { public } } pageInfo { hasNextPage endCursor } } }
+                ... on PullRequest { id repository { databaseId isPrivate } projectItems(first:$first,after:$after) { nodes { id project { public } } pageInfo { hasNextPage endCursor } } }
+              }
+            }`,
+            variables: { id: subject.node_id },
+            maxPages,
+            assertAuthorized,
+            select(data) {
+              assertAuthorized();
+              if (
+                data?.node?.id !== subject.node_id ||
+                data.node.repository?.databaseId !== repository.id ||
+                data.node.repository?.isPrivate !== false ||
+                !Array.isArray(data.node.projectItems?.nodes)
+              )
+                throw new Error("project_subject_identity_unverified");
+              if (data.node.projectItems.nodes.some((item) => item?.project?.public !== true))
+                throw new Error("project_public_scope_unverified");
+              return data.node.projectItems;
+            },
+          });
+          if (items.length + values.length > 10000) throw new Error("source_dataset_budget_exceeded");
+          for (const item of items) {
+            const snapshot = await readPublicProjectSnapshot({
+              client,
+              source: sourceId,
+              repository,
+              itemId: item.id,
+              scanId: request.runId,
+              maxPages,
+              assertAuthorized,
+            });
+            values.push({
+              node_id: snapshot.id,
+              html_url: snapshot.sourceUrl,
+              source_revision: projectSnapshotRevision(snapshot),
+            });
+          }
+        }
+      } else if (request.family === "discussions") {
         if (!client.scanGraphql) throw new Error("discussions_source_unavailable");
         const [owner, name] = repository.slug.split("/");
         values = await client.scanGraphql({
@@ -147,6 +201,12 @@ export function createGithubCollectionSource({
           request.family === "issues" ? body.filter((item) => !item.pull_request) : body,
         );
       }
+      if (request.family === "timelines")
+        values = values.map((value) => ({
+          ...value,
+          node_id: Number.isSafeInteger(value.id) && value.id > 0 ? String(value.id) : null,
+          html_url: value.issue?.html_url,
+        }));
       assertAuthorized();
       if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
       const offset = request.cursor === null ? 0 : Number(request.cursor);
@@ -154,15 +214,17 @@ export function createGithubCollectionSource({
       const facts = values.slice(offset, offset + request.limit).map((value) => {
         const subjectId = value.node_id ?? value.sha ?? (Number.isSafeInteger(value.id) ? String(value.id) : null);
         const revision =
-          request.family === "reviews"
-            ? githubSnapshotRevision(githubReviewRevision(value), request.runId)
-            : request.family === "discussions"
-              ? githubSnapshotRevision(value.source_revision, request.runId)
-              : (value.sha ??
-                at(value.updated_at) ??
-                at(value.submitted_at) ??
-                at(value.published_at) ??
-                at(value.created_at));
+          request.family === "timelines"
+            ? githubTimelineRevision(value)
+            : request.family === "reviews"
+              ? githubSnapshotRevision(githubReviewRevision(value), request.runId)
+              : ["discussions", "project_current"].includes(request.family)
+                ? githubSnapshotRevision(value.source_revision, request.runId)
+                : (value.sha ??
+                  at(value.updated_at) ??
+                  at(value.submitted_at) ??
+                  at(value.published_at) ??
+                  at(value.created_at));
         if (
           typeof subjectId !== "string" ||
           !revision ||
@@ -174,9 +236,12 @@ export function createGithubCollectionSource({
           subjectId,
           sourceRevision: revision,
           sourceUrl: value.html_url,
-          evidence: "current_state",
-          actorId: null,
-          occurredAt: null,
+          evidence: request.family === "timelines" ? "observed_transition" : "current_state",
+          actorId:
+            request.family === "timelines" && Number.isSafeInteger(value.actor?.id) && value.actor.id > 0
+              ? String(value.actor.id)
+              : null,
+          occurredAt: request.family === "timelines" ? at(value.created_at) : null,
           state: value.merged_at
             ? "merged"
             : value.state === "closed"

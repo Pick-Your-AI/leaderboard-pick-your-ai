@@ -1096,3 +1096,50 @@ test("mutable review and Discussion revisions include retractions and selection 
     githubDiscussionRevision({ ...discussion, answer: { ...discussion.answer, id: "A2" } }),
   );
 });
+
+test("repository issue-event hydration preserves actor clocks without inferring metadata identity", async () => {
+  const event = {
+    id: 901,
+    event: "assigned",
+    created_at: at,
+    actor: fixture.merger,
+    assignee: fixture.reviewer,
+    issue: issue(),
+  };
+  const { githubTimelineRevision } = await import("../dist/index.js");
+  const normalize = createGithubEvidenceNormalizer({
+    client: { rest: async (_source, endpoint) => (endpoint.includes("/events/") ? event : fixture.repository) },
+    source: "synthetic",
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+  });
+  const input = {
+    repository: { id: 2, slug: "synthetic-owner/repository" },
+    family: "timelines",
+    factKey: "synthetic-event",
+    observedAt,
+    policyVersion: "synthetic/v1",
+    fact: {
+      subjectId: "901",
+      sourceRevision: githubTimelineRevision(event),
+      sourceUrl: event.issue.html_url,
+      evidence: "observed_transition",
+      actorId: "202",
+      occurredAt: at,
+      state: "present",
+    },
+  };
+  const out = await normalize(input);
+  assert.equal(metrics(out, "assignments_coordinated")[0].actorId, "202");
+  assert.equal(metrics(out, "assignments_coordinated")[0].occurredAt, "2026-10-07T10:00:00.000Z");
+  assert.equal(metrics(out, "assignments_coordinated")[0].state, "observed");
+  const wrongSubject = await normalize({
+    ...input,
+    fact: { ...input.fact, sourceUrl: "https://github.com/synthetic-owner/repository/issues/21" },
+  });
+  assert.match(wrongSubject.reasons[0], /timeline_subject_scope_unverified/);
+  event.actor = null;
+  const unknown = await normalize({ ...input, fact: { ...input.fact, sourceRevision: githubTimelineRevision(event) } });
+  assert.equal(metrics(unknown, "assignments_coordinated")[0].actorId, null);
+  assert.equal(metrics(unknown, "assignments_coordinated")[0].state, "unknown");
+});

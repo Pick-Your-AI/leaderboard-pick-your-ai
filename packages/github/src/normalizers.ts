@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { GithubReadClient } from "./client.js";
+import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
   classifyPhysicalDiff,
   pinnedSha,
@@ -52,6 +53,24 @@ function matchesSnapshotRevision(revision: string, fingerprint: string): boolean
   return (
     revision === fingerprint || (/^[a-f0-9]{64}\.[a-f0-9]{32}$/.test(revision) && revision.slice(0, 64) === fingerprint)
   );
+}
+
+export function githubTimelineRevision(value: Record<string, unknown>): string {
+  const identity = (item: unknown) =>
+    object(item) ? [item.id ?? null, item.node_id ?? null, item.name ?? null] : null;
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        value.id ?? null,
+        value.event ?? null,
+        value.created_at ?? null,
+        identity(value.actor),
+        identity(value.label),
+        identity(value.milestone),
+        identity(value.assignee),
+      ]),
+    )
+    .digest("hex");
 }
 
 export type GithubRole =
@@ -1003,6 +1022,35 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       return none("repository_not_authorized_for_normalization");
     if (!text(input.policyVersion) || !time(input.observedAt))
       throw new Error("Pipeline policy and observation time are required");
+    if (input.family === "project_current") {
+      const snapshot = await readPublicProjectSnapshot({
+        client: options.client,
+        source: options.source,
+        repository: input.repository,
+        itemId: input.fact.subjectId,
+        scanId: input.factKey,
+        ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
+      });
+      if (
+        snapshot.sourceUrl !== input.fact.sourceUrl ||
+        !matchesSnapshotRevision(input.fact.sourceRevision, projectSnapshotRevision(snapshot))
+      )
+        return none("project_snapshot_revision_or_subject_unverified");
+      return normalizeGithubObservation({
+        repository: { ...input.repository, visibility: "public" },
+        proof: {
+          verified: true,
+          source: "github_graphql",
+          revision: input.fact.sourceRevision,
+          isSynthetic: options.isSynthetic === true,
+        },
+        family: "project_snapshot",
+        action: "snapshot",
+        observedAt: input.observedAt,
+        payload: { id: snapshot.id, url: snapshot.sourceUrl },
+        currentContext: { projects: [snapshot.projectId], workstreams: [] },
+      });
+    }
     const enriched = options.enrich ? await options.enrich(input) : null;
     let normalized: NormalizedGithubResult;
     if (enriched) {
@@ -1030,9 +1078,14 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       let family: GithubEvidenceEnvelope["family"];
       let endpoint: string;
       let discussionPayload: Record<string, unknown> | undefined;
+      let timeline = false;
       let pullResource: unknown;
       let reviewParticipation: GithubEvidenceEnvelope["reviewParticipation"];
-      if (input.family === "discussions" && discussion) {
+      if (input.family === "timelines" && (issue || pull) && /^[1-9]\d*$/.test(input.fact.subjectId)) {
+        family = "triage";
+        timeline = true;
+        endpoint = `/repos/${input.repository.slug}/issues/events/${input.fact.subjectId}`;
+      } else if (input.family === "discussions" && discussion) {
         const [owner, name] = input.repository.slug.split("/");
         const data = await options.client.graphql<{ repository?: Record<string, unknown> }>(
           options.source,
@@ -1104,22 +1157,24 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       if (!identities.includes(input.fact.subjectId)) return none("hydrated_subject_identity_mismatch");
       const revisionMatches = options.verifyRevision
         ? await options.verifyRevision(input, payload)
-        : family === "review"
-          ? matchesSnapshotRevision(input.fact.sourceRevision, githubReviewRevision(payload))
-          : family === "discussion"
-            ? matchesSnapshotRevision(input.fact.sourceRevision, githubDiscussionRevision(payload))
-            : [
-                payload.sha,
-                payload.updated_at,
-                payload.created_at,
-                payload.submitted_at,
-                payload.published_at,
-                payload.updatedAt,
-              ].some(
-                (value) =>
-                  value === input.fact.sourceRevision ||
-                  (time(value) !== null && time(value) === time(input.fact.sourceRevision)),
-              );
+        : timeline
+          ? input.fact.sourceRevision === githubTimelineRevision(payload)
+          : family === "review"
+            ? matchesSnapshotRevision(input.fact.sourceRevision, githubReviewRevision(payload))
+            : family === "discussion"
+              ? matchesSnapshotRevision(input.fact.sourceRevision, githubDiscussionRevision(payload))
+              : [
+                  payload.sha,
+                  payload.updated_at,
+                  payload.created_at,
+                  payload.submitted_at,
+                  payload.published_at,
+                  payload.updatedAt,
+                ].some(
+                  (value) =>
+                    value === input.fact.sourceRevision ||
+                    (time(value) !== null && time(value) === time(input.fact.sourceRevision)),
+                );
       if (!revisionMatches) return none("hydrated_source_revision_unverified");
       if (family === "issue" && "pull_request" in payload) return none("pull_request_is_not_an_issue_creation_unit");
       // Hydration proves immutable creation/submission fields. It does not prove
@@ -1185,6 +1240,8 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           };
         }
       }
+      if (timeline && (!object(payload.issue) || payload.issue.html_url !== sourceUrl))
+        return none("timeline_subject_scope_unverified");
       const hydrated = family === "review" ? { review: payload, pull_request: pullResource } : payload;
       normalized = normalizeGithubObservation({
         repository: {
@@ -1197,12 +1254,14 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         },
         proof: {
           verified: true,
-          source: "github_rest",
+          source: family === "discussion" ? "github_graphql" : "github_rest",
+          ...(timeline ? { eventId: `github:${input.repository.id}:issue-event:${input.fact.subjectId}` } : {}),
           revision: input.fact.sourceRevision,
           isSynthetic: options.isSynthetic === true,
         },
         family,
-        action: "snapshot",
+        action: timeline ? String(payload.event) : "snapshot",
+        ...(timeline ? { occurredAt: time(payload.created_at) } : {}),
         observedAt: input.observedAt,
         payload: hydrated,
         ...(reviewParticipation ? { reviewParticipation } : {}),

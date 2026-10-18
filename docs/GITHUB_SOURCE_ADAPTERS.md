@@ -36,10 +36,25 @@ as helpfulness. Unknown authors and clocks remain unknown.
 Schema references: [GitHub Discussions API guide](https://docs.github.com/en/graphql/guides/using-the-graphql-api-for-discussions)
 and [Discussion fields](https://docs.github.com/en/graphql/reference/discussions).
 
-Remaining source work includes actor-backed timeline/event adapters, selectively
-supported Project history and relationship collectors, verified readiness
-cohorts, and live installation permission/reconciliation evidence. Current Project
-fields must not be used to reconstruct historic editors. Real source approval,
-public permission probes, independent evidence review and launch gates remain
-external acceptance prerequisites. None of these issues is closed by synthetic
-tests alone.
+Repository issue-event history now supplies the `timelines` family through the
+paginated repository events endpoint and exact event hydration. Attribution uses
+the event actor and event creation clock, never the issue's current assignee or
+updated timestamp. Unknown metadata target identities (for example historical
+labels containing only names) remain unknown. Unsupported event subtypes remain
+uncredited; this endpoint is not a claim of complete GitHub timeline coverage.
+See [issue events](https://docs.github.com/en/rest/issues/events).
+
+The `project_current` adapter traverses each approved repository issue/PR's
+Project memberships and each item's complete field-value connection. Public
+Project and content-repository scope are checked on every nested page. Item
+changes during field pagination fail closed. IDs, single-select option IDs,
+numbers and dates form current-only fingerprints; text fields and historic
+editors are not inferred. A Project snapshot produces a source observation and
+no contribution metrics. See [Project item fields](https://docs.github.com/en/graphql/reference/projects)
+and [issue Project memberships](https://docs.github.com/en/graphql/reference/issues).
+
+Remaining source work includes selectively supported Project history and
+relationship event collectors, verified readiness cohorts, and live installation
+permission/reconciliation evidence. Real source approval, public permission
+probes, independent evidence review and launch gates remain external acceptance
+prerequisites. None of these issues is closed by synthetic tests alone.
