@@ -17,7 +17,7 @@ class SourceSecurityCandidateTests(unittest.TestCase):
             "SSRF",
             "unknown",
             "test and owner role",
-            "no receiver exists",
+            "implemented boundaries",
             "No app installation or permission grant is authorized",
         ):
             self.assertIn(required.lower(), text.lower())
