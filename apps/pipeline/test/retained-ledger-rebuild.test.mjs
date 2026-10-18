@@ -3,9 +3,10 @@ import test from "node:test";
 import { createPipeline } from "../src/index.mjs";
 import { harness, components, clock, getBoard } from "./harness.mjs";
 
-test("retained source ledger rebuilds identical normalized documents and snapshot after cache loss and restart", async (t) => {
+async function assertRetainedLedgerRebuild(t, { transformPayloads, inspect = async () => {} } = {}) {
   let normalizations = 0;
   const h = await harness(t, {
+    transformPayloads,
     normalizerFactory(options) {
       const normalize = components.github.createGithubEvidenceNormalizer({
         client: options.githubClient,
@@ -40,6 +41,7 @@ test("retained source ledger rebuilds identical normalized documents and snapsho
   const beforeBoard = await getBoard(h.runtime);
   assert.equal(beforeFacts.length, 2);
   assert.equal(normalizations, 2);
+  await inspect(beforeFacts, beforeBoard, h.runtime);
   // Only disposable derived cache rows are removed. Retained source observations,
   // source-mode bindings, policies, approval records and publication history stay.
   await h.runtime.stop();
@@ -64,4 +66,42 @@ test("retained source ledger rebuilds identical normalized documents and snapsho
   assert.deepEqual(afterBoard.rows, beforeBoard.rows);
   assert.equal(afterBoard.snapshotId, beforeBoard.snapshotId);
   assert.equal(afterBoard.revision, beforeBoard.revision);
+  await inspect(await normalized(), afterBoard, restarted);
+}
+
+test("retained source ledger rebuilds identical normalized documents and snapshot after cache loss and restart", async (t) => {
+  await assertRetainedLedgerRebuild(t);
+});
+
+test("deleted source actor stays unknown and unranked through retained-ledger rebuild and database restart", async (t) => {
+  await assertRetainedLedgerRebuild(t, {
+    // Synthetic representation of an unavailable/deleted source actor. A null
+    // source user does not authorize reconstructing their former identity.
+    transformPayloads: (payloads) =>
+      payloads.map((payload, index) => (index === 1 ? { ...payload, user: null } : payload)),
+    async inspect(normalized, board, runtime) {
+      const deleted = normalized.find((row) =>
+        row.document.facts.some((fact) => fact.artifactId === "SYNTHETIC_ISSUE_2"),
+      ).document;
+      assert.deepEqual(deleted.actors, [], "no stable named actor can be inferred from the missing source user");
+      assert.ok(deleted.reasons.includes("unknown_actor"));
+      const facts = deleted.facts.filter((fact) => fact.metricId === "issues_opened");
+      assert.equal(facts.length, 1, "unknown attribution remains an explicit retained fact");
+      assert.equal(facts[0].actorId, null);
+      assert.equal(facts[0].subjectActorId, null);
+      assert.equal(facts[0].state, "unknown");
+      assert.ok(deleted.evidence.every((entry) => entry.contribution.actorId === null));
+      assert.deepEqual(
+        board.rows.map((row) => [row.actorId, row.result.value, row.rank]),
+        [["101", 1, 1]],
+        "only the known actor receives a named total or rank, before and after rebuild",
+      );
+      const directory = await runtime.app.inject("/api/v1/contributors");
+      assert.equal(directory.statusCode, 200, directory.body);
+      assert.deepEqual(
+        directory.json().contributors.map((entry) => entry.actor.githubDatabaseId),
+        [101],
+      );
+    },
+  });
 });
