@@ -98,10 +98,13 @@ for (const stage of stages) {
       );
     });
   }
-  test(stage + " response accepts valid byte-split multilingual text and literal U+FFFD", async () => {
+  test(stage + " response decodes valid byte-split multilingual text and literal U+FFFD", async () => {
     const h = fixture();
     h.responses[stage] = () => streamed(jsonBytes(stage, "Équité 日本語 🎉 \uFFFD"), true);
-    assert.deepEqual(await h.provider.exchange(exchange), { actorId: "42" });
+    // Valid revoke200 JSON passes decoding but cannot confirm GitHub's required 204 acknowledgment.
+    if (stage === "revoke")
+      await assert.rejects(h.provider.exchange(exchange), { status: 502, message: "Identity provider unavailable" });
+    else assert.deepEqual(await h.provider.exchange(exchange), { actorId: "42" });
     assert.deepEqual(
       h.calls.map((call) => call.stage),
       stages,
@@ -123,7 +126,13 @@ for (const stage of stages) {
     const bytes = jsonBytes(stage, "a".repeat(65_536 - jsonBytes(stage, "").byteLength));
     assert.equal(bytes.byteLength, 65_536);
     h.responses[stage] = () => streamed(bytes);
-    assert.deepEqual(await h.provider.exchange(exchange), { actorId: "42" });
+    if (stage === "revoke")
+      await assert.rejects(h.provider.exchange(exchange), { status: 502, message: "Identity provider unavailable" });
+    else assert.deepEqual(await h.provider.exchange(exchange), { actorId: "42" });
+    assert.deepEqual(
+      h.calls.map((call) => call.stage),
+      stages,
+    );
     const rejected = fixture();
     rejected.responses[stage] = () => streamed(Buffer.alloc(65_537, 0x78));
     await assert.rejects(rejected.provider.exchange(exchange), { status: 502, message: "Identity response too large" });
