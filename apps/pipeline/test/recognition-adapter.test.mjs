@@ -77,3 +77,26 @@ test("withdrawal, appeal, suppression and policy mismatch remove receipt without
   assert.equal(apply(s).receipt, undefined);
   assert.equal(input.facts.length, 1);
 });
+test("audit withdrawal, replacement and ambiguity fence recognition while unrelated audit activity does not", () => {
+  const original = recognitionFingerprint(state());
+  for (const mutate of [
+    (s) => {
+      s.audit = [];
+    },
+    (s) => {
+      s.audit[0].actor = "303";
+    },
+    (s) => {
+      s.audit.push(structuredClone(s.audit[0]));
+    },
+  ]) {
+    const s = state();
+    mutate(s);
+    assert.notEqual(recognitionFingerprint(s), original);
+    assert.throws(() => apply(s), /recognition_decision_unverified/);
+  }
+  const s = state();
+  s.audit.push({ id: "unrelated", action: "login", actor: "303" });
+  assert.equal(recognitionFingerprint(s), original);
+  assert.equal(apply(s).receipt.targetFactId, "fact");
+});

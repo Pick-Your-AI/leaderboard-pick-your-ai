@@ -164,7 +164,8 @@ export async function createPipeline(options) {
       ? ["current-state-selection-v2", dataMode, policySignatures, classificationPolicies]
       : ["current-state-selection-v1", dataMode, policySignatures],
   );
-  const normalizationSignature = digest([normalizationDocumentVersion, normalizationPolicySignature]);
+  const attributionNormalizationSignature = digest([normalizationDocumentVersion, normalizationPolicySignature]);
+  const normalizationSignature = digest(["verified-default-branch-merge-pins/v1", attributionNormalizationSignature]);
   const verifyConfig = options.verifyConfiguration ?? (async () => false);
   const authorizeCorrection = options.authorizeCorrection ?? (async () => false);
   const now = options.now ?? (() => new Date().toISOString());
@@ -234,8 +235,8 @@ export async function createPipeline(options) {
             [
               binding.normalizationHashes,
               // Legacy documents still bind historical frozen actor evidence;
-              // only fresh runs require the new private-attribution projection.
-              [normalizationSignature, normalizationPolicySignature],
+              // fresh runs require the current attribution and merge-pin projection.
+              [normalizationSignature, attributionNormalizationSignature, normalizationPolicySignature],
               authorization.sources.map((source) => source.repositoryId),
             ],
           )
@@ -987,6 +988,7 @@ export async function createPipeline(options) {
         facts: outputs.flatMap((o) => o.facts),
         actors: outputs.flatMap((o) => o.actors),
         evidence: outputs.flatMap((o) => o.evidence),
+        syntheticFactIds: outputs.filter((o) => o.isSynthetic === true).flatMap((o) => o.facts.map((fact) => fact.id)),
         reasons: [],
       };
       combined.facts = [
