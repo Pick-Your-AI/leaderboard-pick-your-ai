@@ -58,6 +58,8 @@ jobs:
       - run: npm run build
       - run: npm run typecheck
       - run: npm test
+        env:
+          PIPELINE_SCOPE_STORAGE_TEST_DATABASE_URL: postgres://leaderboard:leaderboard@127.0.0.1:5432/leaderboard_test
       - run: npm run db:validate
       - run: python scripts/validate_plan.py
       - run: python -m unittest discover -s tests -v

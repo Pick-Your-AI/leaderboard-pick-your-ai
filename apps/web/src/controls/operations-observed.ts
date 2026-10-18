@@ -10,6 +10,8 @@ export interface OperatorPublication {
   snapshotId: string;
   revision: number;
 }
+// Fits 100 full-length canonical Project IDs, all roles and maximum base dimensions.
+export const operatorPublicationScopeKeyLimit = 16_384;
 const sourceFamilies = [
   "issues",
   "pull_requests",
@@ -250,7 +252,7 @@ function publications(value: unknown, required: boolean): OperatorPublication[] 
     if (
       typeof row.scopeKey !== "string" ||
       !row.scopeKey.length ||
-      row.scopeKey.length > 2000 ||
+      row.scopeKey.length > operatorPublicationScopeKeyLimit ||
       scopes.has(row.scopeKey)
     )
       return invalid();

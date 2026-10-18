@@ -1,3 +1,4 @@
+import { assertPipelineStorage, pipelineKeySQL, publicationMonitorIdentity } from "./scope-storage.mjs";
 import { retainedRankHistory } from "./rank-history.mjs";
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
 import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
@@ -111,34 +112,6 @@ const utc = (value) => {
     fail("invalid_pipeline_time");
   return value;
 };
-const statements = [
-  "CREATE SCHEMA IF NOT EXISTS leaderboard_pipeline",
-  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.source_modes (fact_key text PRIMARY KEY REFERENCES leaderboard_ingestion.source_facts(fact_key), data_mode text NOT NULL CHECK(data_mode IN ('public','synthetic')))`,
-  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.normalizations (
-    fact_key text NOT NULL, policy_signature text NOT NULL, document jsonb NOT NULL,
-    document_hash text NOT NULL, PRIMARY KEY (fact_key, policy_signature))`,
-  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.source_artifacts (
-    fact_key text NOT NULL REFERENCES leaderboard_ingestion.source_facts(fact_key),
-    artifact_id text NOT NULL, PRIMARY KEY (fact_key, artifact_id))`,
-  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.receipts (
-    receipt_id text PRIMARY KEY, operation_key text UNIQUE NOT NULL, kind text NOT NULL,
-    document jsonb NOT NULL, document_hash text NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp())`,
-  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.corrections (
-    request_id text PRIMARY KEY, fact_id text NOT NULL, artifact_id text NOT NULL,
-    repository_id bigint NOT NULL, document jsonb NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.snapshots (
-    snapshot_id text PRIMARY KEY, scope_key text NOT NULL, revision bigint NOT NULL,
-    config_version text NOT NULL, repository_ids jsonb NOT NULL,
-    document jsonb NOT NULL, document_hash text NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp())`,
-  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.dispatch_publications (
-    operation_key text NOT NULL, scope_key text NOT NULL,
-    snapshot_id text NOT NULL REFERENCES leaderboard_pipeline.snapshots(snapshot_id),
-    PRIMARY KEY(operation_key,scope_key))`,
-  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.frozen_inputs (snapshot_id text PRIMARY KEY REFERENCES leaderboard_pipeline.snapshots(snapshot_id), document jsonb NOT NULL, document_hash text NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.policy_comparisons (comparison_id text PRIMARY KEY, document jsonb NOT NULL, document_hash text NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.heads (
-    scope_key text PRIMARY KEY, snapshot_id text NOT NULL REFERENCES leaderboard_pipeline.snapshots(snapshot_id), revision bigint NOT NULL)`,
-];
 
 // Derived artifacts retain their own immutable identity, while revocation follows
 // every authoritative source observation that supplied them. Dependencies are
@@ -163,10 +136,7 @@ async function retainSourceArtifacts(tx, factKey, document) {
   );
 }
 
-/** Apply only this app's additive schema. Ingestion migrations remain independently owned. */
-export async function migratePipeline(db) {
-  for (const statement of statements) await db.query(statement);
-}
+export { migratePipeline } from "./scope-storage.mjs";
 
 /** Host-neutral composition. Authorization and source verification default to denial. */
 export async function createPipeline(options) {
@@ -182,6 +152,7 @@ export async function createPipeline(options) {
     !db?.transaction
   )
     fail("pipeline_components_required");
+  await assertPipelineStorage(db);
   const scopeKey = c.contracts.publicScopeKey;
   const dataMode = options.dataMode ?? "public";
   if (!["public", "synthetic"].includes(dataMode)) fail("invalid_pipeline_data_mode");
@@ -634,7 +605,12 @@ export async function createPipeline(options) {
     if (!authorized) return false;
     assertDataMode(config);
     const persistedDenials = await transaction.query(
-      "SELECT operation_key FROM leaderboard_pipeline.receipts WHERE kind='project_scope_denial' AND operation_key=ANY($1::text[])",
+      `SELECT receipt.operation_key
+      FROM unnest($1::text[]) AS requested(operation_key)
+      JOIN leaderboard_pipeline.receipts AS receipt
+        ON receipt.operation_hash=pg_catalog.sha256(pg_catalog.convert_to(requested.operation_key,'UTF8'))
+        AND receipt.operation_key=requested.operation_key
+      WHERE receipt.kind='project_scope_denial'`,
       [config.repositories.map(projectDenialKey)],
     );
     for (const repo of config.repositories)
@@ -714,10 +690,24 @@ export async function createPipeline(options) {
   async function receipt(tx, operationKey, kind, document) {
     const receiptId = digest([operationKey, kind]);
     await tx.query(
-      `INSERT INTO leaderboard_pipeline.receipts (receipt_id,operation_key,kind,document,document_hash)
-      VALUES ($1,$2,$3,$4::jsonb,$5) ON CONFLICT (operation_key) DO NOTHING`,
+      `INSERT INTO leaderboard_pipeline.receipts (receipt_id,operation_key,kind,document,document_hash,operation_hash)
+      VALUES ($1,$2,$3,$4::jsonb,$5,${pipelineKeySQL("$2")}) ON CONFLICT (operation_hash) DO NOTHING`,
       [receiptId, operationKey, kind, JSON.stringify(document), digest(document)],
     );
+    const saved = (
+      await tx.query(
+        `SELECT receipt_id,kind,document,document_hash FROM leaderboard_pipeline.receipts
+       WHERE operation_hash=${pipelineKeySQL("$1")} AND operation_key=$1`,
+        [operationKey],
+      )
+    ).rows[0];
+    if (
+      !saved ||
+      saved.receipt_id !== receiptId ||
+      saved.kind !== kind ||
+      digest(saved.document) !== saved.document_hash
+    )
+      fail("pipeline_receipt_identity_conflict");
     return receiptId;
   }
   async function denyRepository(repo, reason, checkedAt) {
@@ -1180,7 +1170,7 @@ export async function createPipeline(options) {
           `SELECT saved.document,saved.document_hash,saved.snapshot_id,saved.revision,saved.config_version
         FROM leaderboard_pipeline.dispatch_publications AS operation
         JOIN leaderboard_pipeline.snapshots AS saved USING(snapshot_id)
-        WHERE operation.operation_key=$1 AND operation.scope_key=$2`,
+        WHERE operation.operation_key=$1 AND operation.scope_hash=${pipelineKeySQL("$2")} AND operation.scope_key=$2`,
           [dispatch.lease.operation.operationKey, scopeKey(scope)],
         )
       ).rows[0];
@@ -1197,7 +1187,10 @@ export async function createPipeline(options) {
         priorPublication = { snapshotId: prior.snapshot_id, revision: Number(prior.revision), changed: false };
         if (!controlsStore.read().pipelineHeads?.[scopeKey(scope)]) {
           const latest = (
-            await db.query("SELECT snapshot_id FROM leaderboard_pipeline.heads WHERE scope_key=$1", [scopeKey(scope)])
+            await db.query(
+              `SELECT snapshot_id FROM leaderboard_pipeline.heads WHERE scope_hash=${pipelineKeySQL("$1")} AND scope_key=$1`,
+              [scopeKey(scope)],
+            )
           ).rows[0];
           // Missing/legacy private authority has no trustworthy high-water mark.
           // Only an authorized replay of the latest SQL publication may rebuild
@@ -1576,13 +1569,13 @@ export async function createPipeline(options) {
         const bindDispatch = async (publication) => {
           if (dispatch) {
             await tx.query(
-              `INSERT INTO leaderboard_pipeline.dispatch_publications(operation_key,scope_key,snapshot_id)
-              VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,
+              `INSERT INTO leaderboard_pipeline.dispatch_publications(operation_key,scope_key,snapshot_id,scope_hash)
+              VALUES($1,$2,$3,${pipelineKeySQL("$2")}) ON CONFLICT (operation_key,scope_hash) DO NOTHING`,
               [dispatch.lease.operation.operationKey, scopeKey(scope), publication.snapshotId],
             );
             const saved = (
               await tx.query(
-                `SELECT snapshot_id FROM leaderboard_pipeline.dispatch_publications WHERE operation_key=$1 AND scope_key=$2`,
+                `SELECT snapshot_id FROM leaderboard_pipeline.dispatch_publications WHERE operation_key=$1 AND scope_hash=${pipelineKeySQL("$2")} AND scope_key=$2`,
                 [dispatch.lease.operation.operationKey, scopeKey(scope)],
               )
             ).rows[0];
@@ -1619,15 +1612,16 @@ export async function createPipeline(options) {
         );
         if (facts.some((fact) => removed.has(fact.artifactId))) fail("source_suppressed_before_publication");
         const current = (
-          await tx.query("SELECT snapshot_id,revision FROM leaderboard_pipeline.heads WHERE scope_key=$1", [
-            scopeKey(scope),
-          ])
+          await tx.query(
+            `SELECT snapshot_id,revision FROM leaderboard_pipeline.heads WHERE scope_hash=${pipelineKeySQL("$1")} AND scope_key=$1`,
+            [scopeKey(scope)],
+          )
         ).rows[0];
         assertRunConfiguration();
         if (priorPublication) {
           const saved = (
             await tx.query(
-              "SELECT document,document_hash FROM leaderboard_pipeline.receipts WHERE operation_key=$1 AND kind='snapshot_published'",
+              `SELECT document,document_hash FROM leaderboard_pipeline.receipts WHERE operation_hash=${pipelineKeySQL("$1")} AND operation_key=$1 AND kind='snapshot_published'`,
               [`publish:${scopeKey(scope)}:${snapshotId}`],
             )
           ).rows[0];
@@ -1683,11 +1677,15 @@ export async function createPipeline(options) {
         // Never advance the head to a new revision when that insert was skipped.
         // Re-materialize at a fresh cutoff instead of rewriting the prior snapshot.
         if (inserted.rows.length !== 1) fail("pipeline_snapshot_identity_conflict");
-        await tx.query(
-          `INSERT INTO leaderboard_pipeline.heads (scope_key,snapshot_id,revision) VALUES ($1,$2,$3)
-        ON CONFLICT (scope_key) DO UPDATE SET snapshot_id=EXCLUDED.snapshot_id,revision=EXCLUDED.revision`,
+        const savedHead = await tx.query(
+          `INSERT INTO leaderboard_pipeline.heads (scope_key,snapshot_id,revision,scope_hash)
+           VALUES ($1,$2,$3,${pipelineKeySQL("$1")})
+           ON CONFLICT (scope_hash) DO UPDATE SET snapshot_id=EXCLUDED.snapshot_id,revision=EXCLUDED.revision
+           WHERE heads.scope_key=EXCLUDED.scope_key RETURNING scope_key`,
           [scopeKey(scope), snapshotId, revision],
         );
+        if (savedHead.rows.length !== 1 || savedHead.rows[0].scope_key !== scopeKey(scope))
+          fail("pipeline_scope_identity_conflict");
         const frozenDocument = {
           frozen: { ...frozen, actors: frozen.actors.map(previewActor) },
           identityAuthorization: comparisonInputFor({ snapshotId, revision }).authorization,
@@ -1714,10 +1712,15 @@ export async function createPipeline(options) {
       // PostgreSQL can commit while controls change. Confirm publication only in
       // the same synchronous SQLite boundary used by configuration activation.
       confirmPublication(scope, publication, comparisonInputFor(publication));
-      monitorSuccess(scopeKey(scope), "publication", publicationStarted, String(publication.revision));
+      monitorSuccess(
+        publicationMonitorIdentity(scopeKey(scope)),
+        "publication",
+        publicationStarted,
+        String(publication.revision),
+      );
       return publication;
     } catch (error) {
-      monitorFailure(scopeKey(scope), "publication", "publication_failed");
+      monitorFailure(publicationMonitorIdentity(scopeKey(scope)), "publication", "publication_failed");
       throw error;
     }
   }
@@ -2092,7 +2095,7 @@ export async function createPipeline(options) {
       for (const publication of publications) {
         const receipt = (
           await tx.query(
-            `SELECT snapshot_id FROM leaderboard_pipeline.dispatch_publications WHERE operation_key=$1 AND scope_key=$2 AND snapshot_id=$3`,
+            `SELECT snapshot_id FROM leaderboard_pipeline.dispatch_publications WHERE operation_key=$1 AND scope_hash=${pipelineKeySQL("$2")} AND scope_key=$2 AND snapshot_id=$3`,
             [lease.operation.operationKey, publication.scopeKey, publication.snapshotId],
           )
         ).rows[0];

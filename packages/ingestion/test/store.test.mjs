@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createHmac } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import { Pool } from "pg";
+import { maximalPublicationScopeCases } from "../../../tests/fixtures/publication-scope-capacity.mjs";
 import {
   InboxStore,
   OutboxStore,
@@ -11,10 +12,12 @@ import {
   SnapshotStore,
   CollectionStore,
   EnrichmentStore,
+  DeliveryPayloadExpiryStore,
   postgresDatabase,
   createWebhookHandler,
   createIngestionServer,
   runWorker,
+  parseDispatchPublications,
 } from "../dist/index.js";
 
 const snapshotUp = await readFile(new URL("../sql/002_snapshots.up.sql", import.meta.url), "utf8");
@@ -30,9 +33,17 @@ const up =
   "\n" +
   (await readFile(new URL("../sql/004_outbox_dispatch.up.sql", import.meta.url), "utf8")) +
   "\n" +
-  (await readFile(new URL("../sql/007_operator_replay_results.up.sql", import.meta.url), "utf8"));
+  (await readFile(new URL("../sql/006_delivery_payload_expiry.up.sql", import.meta.url), "utf8")) +
+  "\n" +
+  (await readFile(new URL("../sql/007_operator_replay_results.up.sql", import.meta.url), "utf8")) +
+  "\n" +
+  (await readFile(new URL("../sql/008_dispatch_publication_scope_capacity.up.sql", import.meta.url), "utf8"));
 const down =
+  (await readFile(new URL("../sql/008_dispatch_publication_scope_capacity.down.sql", import.meta.url), "utf8")) +
+  "\n" +
   (await readFile(new URL("../sql/007_operator_replay_results.down.sql", import.meta.url), "utf8")) +
+  "\n" +
+  (await readFile(new URL("../sql/006_delivery_payload_expiry.down.sql", import.meta.url), "utf8")) +
   "\n" +
   (await readFile(new URL("../sql/004_outbox_dispatch.down.sql", import.meta.url), "utf8")) +
   "\n" +
@@ -69,15 +80,16 @@ before(async () => {
 after(async () => {
   if (engine) await (url ? engine.end() : engine.close());
 });
-beforeEach(async () => {
+async function resetStore() {
   await db.query(
     "TRUNCATE leaderboard_ingestion.object_suppressions, leaderboard_ingestion.enrichment_jobs, leaderboard_ingestion.collection_items, leaderboard_ingestion.collection_pages, leaderboard_ingestion.source_facts, leaderboard_ingestion.collection_runs, leaderboard_ingestion.lifecycle_receipts, leaderboard_ingestion.repository_access CASCADE",
   );
   await db.query(
-    "TRUNCATE leaderboard_ingestion.snapshot_notices, leaderboard_ingestion.snapshot_heads, leaderboard_ingestion.snapshots, leaderboard_ingestion.outbox, leaderboard_ingestion.observations, leaderboard_ingestion.replay_receipts, leaderboard_ingestion.attempt_history, leaderboard_ingestion.inbox RESTART IDENTITY CASCADE",
+    "TRUNCATE leaderboard_ingestion.snapshot_notices, leaderboard_ingestion.snapshot_heads, leaderboard_ingestion.snapshots, leaderboard_ingestion.outbox, leaderboard_ingestion.observations, leaderboard_ingestion.replay_receipts, leaderboard_ingestion.attempt_history, leaderboard_ingestion.inbox, leaderboard_ingestion.delivery_payload_expiry_operations RESTART IDENTITY CASCADE",
   );
   await new CollectionStore(db).verifyPublic(2, 1, null);
-});
+}
+beforeEach(resetStore);
 
 const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 function delivery(n = 1) {
@@ -1400,6 +1412,37 @@ test("outbox completion confirmation and receipt commit atomically", async () =>
   assert.equal(await outbox.complete(lease, dispatchProof, async () => {}), true);
 });
 
+test("outbox completion and replay parsing retain maximal canonical publication scope keys", async () => {
+  let deliveryNumber = 0;
+  for (const { name, scopeKey } of maximalPublicationScopeCases()) {
+    await outboxNotice(++deliveryNumber);
+    const outbox = new OutboxStore(db);
+    const lease = await outbox.claim(dispatchBinding);
+    const publications = [{ scopeKey, snapshotId: "b".repeat(64), revision: 1 }];
+    assert.equal(await outbox.complete(lease, publications, async () => {}), true, name);
+    const completion = (
+      await db.query("SELECT completion FROM leaderboard_ingestion.outbox WHERE event_key=$1", [lease.eventKey])
+    ).rows[0].completion;
+    assert.deepEqual(parseDispatchPublications(completion, lease.operation.operationKey), publications, name);
+    assert.deepEqual(completion.publications, publications, "retain the complete canonical key without truncation");
+    assert.equal(parseDispatchPublications(completion, "f".repeat(64)), null, "operation binding remains exact");
+  }
+});
+
+test("publication scope-key overflow fails before database or confirmation work", async () => {
+  const unavailable = new OutboxStore({
+    transaction() {
+      assert.fail("oversized publication must not reach the database");
+    },
+  });
+  const publications = [{ scopeKey: "S".repeat(16_385), snapshotId: "b".repeat(64), revision: 1 }];
+  await assert.rejects(
+    unavailable.complete({}, publications, async () => assert.fail("oversized publication must not confirm")),
+    /invalid_dispatch_publication/,
+  );
+  assert.equal(parseDispatchPublications({ operationKey: "a".repeat(64), publications }, "a".repeat(64)), null);
+});
+
 test("outbox retries are delayed/bounded, poison is quarantined, and reviewed replay retains identity", async () => {
   const event = await outboxNotice();
   const outbox = new OutboxStore(db, 2);
@@ -1488,6 +1531,378 @@ test("independent PostgreSQL outbox workers claim disjoint rows with SKIP LOCKED
   assert.equal(await outbox.complete(second, dispatchProof, async () => {}), true);
   assert.equal((await outbox.health()).completed, 2);
 });
+
+const expiryRequest = (operationId = "synthetic-expiry-operation") => ({
+  operationId,
+  repositoryId: 2,
+  installationId: 1,
+  completedBefore: "2026-10-02T00:00:00.000Z",
+  policyVersion: "synthetic-retention-v1",
+  operatorId: "SYNTHETIC_OPERATOR",
+  authorizationId: "synthetic-grant",
+  batchLimit: 10,
+});
+async function expiryNotice(n = 1) {
+  await outboxNotice(n);
+  const outbox = new OutboxStore(db);
+  assert.equal(await outbox.complete(await outbox.claim(dispatchBinding), dispatchProof, async () => {}), true);
+  await db.query(
+    "UPDATE leaderboard_ingestion.attempt_history SET finished_at='2026-10-01T00:00:00Z' WHERE delivery_id=$1 AND outcome='done'",
+    [id(n)],
+  );
+  await db.query(
+    "UPDATE leaderboard_ingestion.outbox_attempts SET finished_at='2026-10-01T00:00:00Z' WHERE event_key=$1 AND outcome='done'",
+    [`github:delivery:${id(n)}`],
+  );
+}
+
+test("disposable fixture reset removes parent expiry operations before an operation ID is reused", async () => {
+  await expiryNotice();
+  const expiry = new DeliveryPayloadExpiryStore(db);
+  assert.equal((await expiry.expireCompleted(expiryRequest(), async () => true)).expiredCount, 1);
+  await resetStore();
+  assert.equal(
+    (await db.query("SELECT count(*)::integer AS count FROM leaderboard_ingestion.delivery_payload_expiry_operations"))
+      .rows[0].count,
+    0,
+  );
+  await expiryNotice();
+  assert.notEqual((await db.query("SELECT envelope FROM leaderboard_ingestion.inbox")).rows[0].envelope, null);
+  assert.equal((await expiry.expireCompleted(expiryRequest(), async () => true)).expiredCount, 1);
+  assert.equal((await db.query("SELECT envelope FROM leaderboard_ingestion.inbox")).rows[0].envelope, null);
+});
+
+test("expiry, operation readback, replay, publication and rollback reject unsupported host isolation without changing it", async () => {
+  await expiryNotice();
+  const expiry = new DeliveryPayloadExpiryStore(db);
+  const emptyRequest = { ...expiryRequest("synthetic-empty-operation"), installationId: 99 };
+  const existing = await expiry.expireCompleted(emptyRequest, async () => true);
+  assert.equal(existing.expiredCount, 0);
+  const original = (
+    await db.query(`SELECT intake.envelope, evidence.observation FROM leaderboard_ingestion.inbox AS intake
+      JOIN leaderboard_ingestion.observations AS evidence USING (delivery_id)`)
+  ).rows;
+  const rollback = await readFile(new URL("../sql/006_delivery_payload_expiry.down.sql", import.meta.url), "utf8");
+  for (const [isolation, setting] of [
+    ["repeatable read", "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ"],
+    ["serializable", "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE"],
+    ["read uncommitted", "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ UNCOMMITTED"],
+  ]) {
+    // A one-connection pool tests postgresDatabase's inherited plain-BEGIN policy.
+    // PGlite uses its real session default and resets it before the next fixture.
+    const isolatedPool = url ? new Pool({ connectionString: url, max: 1 }) : null;
+    const isolatedDb = isolatedPool ? postgresDatabase(isolatedPool) : db;
+    try {
+      await isolatedDb.query(setting);
+      await isolatedDb.transaction(async (tx) => {
+        assert.equal((await tx.query("SHOW transaction_isolation")).rows[0].transaction_isolation, isolation);
+      });
+      const unsupported = new DeliveryPayloadExpiryStore(isolatedDb);
+      await assert.rejects(
+        unsupported.expireCompleted(expiryRequest(), async () => true),
+        /delivery_expiry_requires_read_committed/,
+      );
+      await assert.rejects(
+        unsupported.expireCompleted(emptyRequest, async () => true),
+        /delivery_expiry_requires_read_committed/,
+      );
+      await assert.rejects(
+        new InboxStore(isolatedDb).replayObjectState(2, "SYNTHETIC_ISSUE"),
+        /delivery_expiry_requires_read_committed/,
+      );
+      await assert.rejects(
+        new SnapshotStore(isolatedDb).publishObjectState(2, "SYNTHETIC_ISSUE", "synthetic-v1", "0"),
+        /delivery_expiry_requires_read_committed/,
+      );
+      await assert.rejects(
+        isolatedDb.transaction((tx) => tx.query(rollback)),
+        /delivery_expiry_requires_read_committed/,
+      );
+      assert.equal(
+        (await isolatedDb.query("SHOW default_transaction_isolation")).rows[0].default_transaction_isolation,
+        isolation,
+      );
+    } finally {
+      await isolatedDb.query("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED");
+      await isolatedPool?.end();
+    }
+  }
+  assert.deepEqual(
+    (
+      await db.query(`SELECT intake.envelope, evidence.observation FROM leaderboard_ingestion.inbox AS intake
+        JOIN leaderboard_ingestion.observations AS evidence USING (delivery_id)`)
+    ).rows,
+    original,
+  );
+  assert.deepEqual(await expiry.expireCompleted(emptyRequest, async () => true), existing);
+  assert.deepEqual(
+    (
+      await db.query(`SELECT
+        (SELECT count(*)::integer FROM leaderboard_ingestion.delivery_payload_expiry_operations) AS operations,
+        (SELECT count(*)::integer FROM leaderboard_ingestion.delivery_payload_expiries) AS expiries,
+        (SELECT count(*)::integer FROM leaderboard_ingestion.snapshots) AS snapshots,
+        (SELECT count(*)::integer FROM leaderboard_ingestion.snapshot_heads) AS heads,
+        (SELECT count(*)::integer FROM leaderboard_ingestion.snapshot_notices) AS notices`)
+    ).rows[0],
+    { operations: 1, expiries: 0, snapshots: 0, heads: 0, notices: 0 },
+  );
+  assert.equal((await expiry.expireCompleted(expiryRequest(), async () => true)).expiredCount, 1);
+});
+
+test(
+  "PostgreSQL rejects an older repeatable-read snapshot after concurrent expiry commits",
+  { skip: !url },
+  async () => {
+    await expiryNotice();
+    const stale = await engine.connect();
+    try {
+      await stale.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+      await stale.query("SET LOCAL lock_timeout='2s'");
+      // This is the availability read that previously established an old snapshot
+      // before the shared replay advisory gate was acquired.
+      await stale.query("SELECT state FROM leaderboard_ingestion.repository_access WHERE repository_id=2 FOR SHARE");
+      const expiry = new DeliveryPayloadExpiryStore(db);
+      assert.equal((await expiry.expireCompleted(expiryRequest(), async () => true)).expiredCount, 1);
+      assert.notEqual(
+        (await stale.query("SELECT observation FROM leaderboard_ingestion.observations")).rows[0].observation,
+        null,
+      );
+      assert.equal(
+        (await stale.query("SELECT count(*)::integer AS count FROM leaderboard_ingestion.delivery_payload_expiries"))
+          .rows[0].count,
+        0,
+      );
+      const staleDb = {
+        query: (sql, params) => stale.query(sql, params),
+        transaction: (work) => work(stale),
+      };
+      await assert.rejects(
+        new InboxStore(staleDb).replayObjectState(2, "SYNTHETIC_ISSUE"),
+        /delivery_expiry_requires_read_committed/,
+      );
+      await assert.rejects(
+        new SnapshotStore(staleDb).publishObjectState(2, "SYNTHETIC_ISSUE", "synthetic-v1", "0"),
+        /delivery_expiry_requires_read_committed/,
+      );
+      await assert.rejects(
+        new DeliveryPayloadExpiryStore(staleDb).expireCompleted(expiryRequest(), async () => true),
+        /delivery_expiry_requires_read_committed/,
+      );
+      await assert.rejects(
+        stale.query(await readFile(new URL("../sql/006_delivery_payload_expiry.down.sql", import.meta.url), "utf8")),
+        /delivery_expiry_requires_read_committed/,
+      );
+    } finally {
+      await stale.query("ROLLBACK");
+      stale.release();
+    }
+    assert.equal((await store.replayObjectState(2, "SYNTHETIC_ISSUE")).reason, "delivery_payload_expired");
+    assert.deepEqual(
+      (
+        await db.query(`SELECT
+        (SELECT count(*)::integer FROM leaderboard_ingestion.delivery_payload_expiries) AS expiries,
+        (SELECT count(*)::integer FROM leaderboard_ingestion.snapshots) AS snapshots,
+        (SELECT count(*)::integer FROM leaderboard_ingestion.snapshot_heads) AS heads,
+        (SELECT count(*)::integer FROM leaderboard_ingestion.snapshot_notices) AS notices`)
+      ).rows[0],
+      { expiries: 1, snapshots: 0, heads: 0, notices: 0 },
+    );
+  },
+);
+
+test(
+  "PostgreSQL retained replay excludes expiry until its shared evidence transaction ends",
+  { skip: !url },
+  async () => {
+    await expiryNotice();
+    const reader = await engine.connect();
+    try {
+      await reader.query("BEGIN");
+      await reader.query("SELECT pg_advisory_xact_lock_shared(hashtextextended('leaderboard-delivery-expiry:2',0))");
+      await assert.rejects(
+        new DeliveryPayloadExpiryStore(db).expireCompleted(expiryRequest(), async () => true),
+        /delivery_expiry_scope_busy/,
+      );
+      assert.equal(
+        (
+          await db.query(
+            "SELECT count(*)::integer AS count FROM leaderboard_ingestion.delivery_payload_expiry_operations",
+          )
+        ).rows[0].count,
+        0,
+      );
+      assert.equal((await store.replayObjectState(2, "SYNTHETIC_ISSUE")).coverage, "retained_observations_only");
+    } finally {
+      await reader.query("ROLLBACK");
+      reader.release();
+    }
+    assert.equal(
+      (await new DeliveryPayloadExpiryStore(db).expireCompleted(expiryRequest(), async () => true)).expiredCount,
+      1,
+    );
+    assert.equal((await store.replayObjectState(2, "SYNTHETIC_ISSUE")).reason, "delivery_payload_expired");
+  },
+);
+
+test("PostgreSQL expiry skips a locked completed dispatch without removing its payload", { skip: !url }, async () => {
+  await expiryNotice(1);
+  await expiryNotice(2);
+  const worker = await engine.connect();
+  try {
+    await worker.query("BEGIN");
+    await worker.query("SELECT event_key FROM leaderboard_ingestion.outbox WHERE event_key=$1 FOR UPDATE", [
+      `github:delivery:${id(1)}`,
+    ]);
+    const receipt = await new DeliveryPayloadExpiryStore(db).expireCompleted(expiryRequest(), async () => true);
+    assert.equal(receipt.expiredCount, 1);
+    assert.notEqual(
+      (await db.query("SELECT envelope FROM leaderboard_ingestion.inbox WHERE delivery_id=$1", [id(1)])).rows[0]
+        .envelope,
+      null,
+    );
+    assert.equal(
+      (await db.query("SELECT envelope FROM leaderboard_ingestion.inbox WHERE delivery_id=$1", [id(2)])).rows[0]
+        .envelope,
+      null,
+    );
+  } finally {
+    await worker.query("ROLLBACK");
+    worker.release();
+  }
+  assert.equal(
+    (await new DeliveryPayloadExpiryStore(db).expireCompleted(expiryRequest("synthetic-followup"), async () => true))
+      .expiredCount,
+    1,
+  );
+});
+
+test(
+  "PostgreSQL waiting replay observes committed expiry, publication refuses it and an uncertain retry returns the original receipt",
+  { skip: !url },
+  async () => {
+    await expiryNotice();
+    let enter, release;
+    const entered = new Promise((resolve) => {
+      enter = resolve;
+    });
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const paused = new DeliveryPayloadExpiryStore({
+      ...db,
+      transaction: (work) =>
+        db.transaction((tx) =>
+          work({
+            async query(sql, params) {
+              const result = await tx.query(sql, params);
+              if (sql.startsWith("UPDATE leaderboard_ingestion.inbox SET envelope=NULL")) {
+                enter();
+                await gate;
+              }
+              return result;
+            },
+          }),
+        ),
+    });
+    const first = paused.expireCompleted(expiryRequest(), async () => true);
+    await Promise.race([entered, first.then(() => assert.fail("expiry did not reach its payload boundary"))]);
+    let retry, waitingReplay, waitingPublication;
+    try {
+      const boundedReader = new InboxStore({
+        ...db,
+        transaction: (work) =>
+          db.transaction(async (tx) => {
+            await tx.query("SET LOCAL lock_timeout='100ms'");
+            return work(tx);
+          }),
+      });
+      await assert.rejects(boundedReader.replayObjectState(2, "SYNTHETIC_ISSUE"), { code: "55P03" });
+      await assert.rejects(
+        db.transaction(async (tx) => {
+          await tx.query("SET LOCAL lock_timeout='100ms'");
+          await tx.query(
+            await readFile(new URL("../sql/006_delivery_payload_expiry.down.sql", import.meta.url), "utf8"),
+          );
+        }),
+        { code: "55P03" },
+      );
+      await assert.rejects(
+        new DeliveryPayloadExpiryStore(db).expireCompleted(
+          expiryRequest("synthetic-competing-operation"),
+          async () => true,
+        ),
+        /delivery_expiry_scope_busy/,
+      );
+      const readerPids = [];
+      const waitingDb = {
+        ...db,
+        transaction: (work) =>
+          db.transaction(async (tx) => {
+            await tx.query("SET LOCAL lock_timeout='5s'");
+            readerPids.push((await tx.query("SELECT pg_backend_pid() AS pid")).rows[0].pid);
+            return work(tx);
+          }),
+      };
+      // Both readers start and establish their READ COMMITTED snapshots before
+      // expiry commits. Inspect actual waiting locks before allowing that commit.
+      const outcome = (promise) =>
+        promise.then(
+          (value) => ({ value }),
+          (error) => ({ error }),
+        );
+      waitingReplay = outcome(new InboxStore(waitingDb).replayObjectState(2, "SYNTHETIC_ISSUE"));
+      waitingPublication = outcome(
+        new SnapshotStore(waitingDb).publishObjectState(2, "SYNTHETIC_ISSUE", "synthetic-v1", "0"),
+      );
+      const deadline = Date.now() + 4000;
+      for (;;) {
+        const waiting = (
+          await db.query(
+            "SELECT pid FROM pg_locks WHERE locktype='advisory' AND mode='ShareLock' AND NOT granted AND pid=ANY($1::integer[])",
+            [readerPids],
+          )
+        ).rows;
+        if (readerPids.length === 2 && waiting.length === 2) break;
+        assert.ok(Date.now() < deadline, "both replay readers must wait at the expiry advisory gate");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      retry = new DeliveryPayloadExpiryStore(db).expireCompleted(expiryRequest(), async () => true);
+    } finally {
+      release();
+      await Promise.allSettled([first, retry, waitingReplay, waitingPublication]);
+    }
+    const [receipt, readback, replay, publication] = await Promise.all([
+      first,
+      retry,
+      waitingReplay,
+      waitingPublication,
+    ]);
+    assert.deepEqual(readback, receipt);
+    assert.equal(receipt.expiredCount, 1);
+    assert.equal(replay.error, undefined);
+    assert.equal(replay.value.reason, "delivery_payload_expired");
+    assert.equal(replay.value.replay, null);
+    assert.match(publication.error?.message ?? "", /snapshot_replay_unavailable_payload_expired/);
+    assert.deepEqual(
+      (
+        await db.query(`SELECT
+          (SELECT count(*)::integer FROM leaderboard_ingestion.snapshots) AS snapshots,
+          (SELECT count(*)::integer FROM leaderboard_ingestion.snapshot_heads) AS heads,
+          (SELECT count(*)::integer FROM leaderboard_ingestion.snapshot_notices) AS notices`)
+      ).rows[0],
+      { snapshots: 0, heads: 0, notices: 0 },
+    );
+    assert.equal(
+      (
+        await db.query(
+          "SELECT count(*)::integer AS count FROM leaderboard_ingestion.delivery_payload_expiry_operations",
+        )
+      ).rows[0].count,
+      1,
+    );
+    assert.equal((await store.replayObjectState(2, "SYNTHETIC_ISSUE")).reason, "delivery_payload_expired");
+  },
+);
 
 test("a current Project subject marker is retained only for matching native snapshot identity", async () => {
   const collect = await collection();

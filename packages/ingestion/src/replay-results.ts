@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { dispatchPublicationScopeKeyLimit } from "./outbox.js";
 import type { DispatchOperation, DispatchPublication } from "./outbox.js";
 import type { SqlSession } from "./store.js";
 
@@ -125,7 +126,7 @@ export function parseDispatchPublications(value: unknown, operationKey: string):
       !exact(item, ["scopeKey", "snapshotId", "revision"]) ||
       typeof item.scopeKey !== "string" ||
       !item.scopeKey.length ||
-      item.scopeKey.length > 2000 ||
+      item.scopeKey.length > dispatchPublicationScopeKeyLimit ||
       !hash(item.snapshotId) ||
       !Number.isSafeInteger(item.revision) ||
       Number(item.revision) < 1 ||
