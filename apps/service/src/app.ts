@@ -68,11 +68,24 @@ const allowed = new Set([
   "compareEnd",
 ]);
 const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
+// Admit the complete canonical scope even when all 100 maximum-length Project
+// IDs require percent encoding, together with bounded route/query/cursor fields.
+const requestTargetByteLimit = 48 * 1024;
+const retainedHeaderByteLimit = 16 * 1024;
+const retainedHeaderCountLimit = 1000;
 function fail(status: number, code: string): never {
   throw new PublicReadError(status, code);
 }
 export function createService(options: ServiceOptions = {}) {
-  const app = Fastify({ logger: false, bodyLimit: 1024, routerOptions: { maxParamLength: 200 } });
+  const app = Fastify({
+    logger: false,
+    bodyLimit: 1024,
+    routerOptions: { maxParamLength: 200 },
+    http: { maxHeaderSize: requestTargetByteLimit + retainedHeaderByteLimit + 1024 },
+  });
+  // Capture one overflow header so Node's count truncation cannot conceal it.
+  // The application retains the parser's original 1,000-header capacity.
+  app.server.maxHeadersCount = retainedHeaderCountLimit + 1;
   const source = options.source ?? unavailableSource;
   const registry = metricRegistrySchema.parse(options.registry ?? metricRegistryV1);
   const now = options.now ?? Date.now;
@@ -103,7 +116,17 @@ export function createService(options: ServiceOptions = {}) {
       .send({ error: error instanceof PublicReadError ? error.code : "public_projection_unavailable" });
   });
   app.addHook("onRequest", async (request) => {
-    if (request.url.length > 4096) fail(414, "query_too_large");
+    if (Buffer.byteLength(request.url, "latin1") > requestTargetByteLimit) fail(414, "query_too_large");
+    const fields = request.raw.rawHeaders;
+    if (fields.length > retainedHeaderCountLimit * 2) fail(431, "headers_too_large");
+    // Node exposes parsed HTTP header names/values as Latin-1 byte strings.
+    // Include normal line framing. Node excludes leading OWS from its native
+    // size accounting, so neither limit claims an exact wire-byte ceiling.
+    let headerBytes = 2;
+    for (let index = 0; index < fields.length; index += 2) {
+      headerBytes += Buffer.byteLength(fields[index]!, "latin1") + Buffer.byteLength(fields[index + 1]!, "latin1") + 4;
+      if (headerBytes > retainedHeaderByteLimit) fail(431, "headers_too_large");
+    }
   });
   function query(request: FastifyRequest) {
     const params = new URL(request.url, "http://localhost").searchParams;

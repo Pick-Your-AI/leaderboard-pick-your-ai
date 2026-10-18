@@ -42,8 +42,19 @@ rechecks authorization before the next one. Transport/provider deadlines remain
 the protected host's responsibility.
 
 The production pipeline persists an implicit scan's continuation in its private
-SQL store. After applying the additive `migratePipeline` schema, repeated batches
-and process restarts reuse the same event cutoff and per-family cursors until all
+SQL store. Before starting the worker, the host invokes the public
+`migratePipeline(db)` entrypoint after the independently owned ingestion migrations.
+It first completes the [versioned scope-storage migration](pipeline-scope-storage.md),
+then initializes the unchanged continuation table in a separately serialized
+transaction. The continuation schema does not change the `pipeline-storage/v2`
+version, historical statements or migration fingerprint. Invalid storage prevents
+continuation initialization. An interrupted continuation-table transaction leaves
+the completed storage upgrade intact; retrying preserves its receipt and existing
+scan rows. The documented drained-worker, backup and fresh-transaction requirements
+of the scope-storage upgrade still apply; the runner does not apply migrations.
+
+After this initialization, repeated batches and process restarts reuse the same
+event cutoff and per-family cursors until all
 configured pages and publications finish. One pending row is keyed by the full
 approved configuration, data mode and scan mode. A relevant controls configuration,
 recognition or source-generation change replaces that row's cycle; unrelated
@@ -92,6 +103,14 @@ authorization changes, bounds and delayed implicit/explicit publication races.
 It also exercises mixed named, role-filtered, custom and all-time scopes through
 a month-boundary database reopen, new-window validation before collection, and
 selection of concrete scope heads under the continuation row lock.
+The maximum-Project v2/v3 cases additionally interrupt the actual scan binding
+inside publication, then interrupt private confirmation and reopen the database.
+They verify rollback, unchanged-publication binding, literal scope and receipt
+identity, and successful retirement of the same recovered cycle.
+`scan-storage-migration.test.mjs` verifies the separate storage/worker handoff,
+retained migration and scan identity, invalid-version refusal and retry after an
+interrupted continuation-table transaction. These results do not establish
+independent PostgreSQL connection behavior when run with PGlite.
 These synthetic tests do not claim a deployed
 end-to-end installation. Build with `npm run build --workspace @pick-your-ai/worker`
 and run `node --test apps/worker/test/*.test.mjs`.

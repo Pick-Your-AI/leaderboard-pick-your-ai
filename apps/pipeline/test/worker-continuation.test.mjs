@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createPipeline } from "../src/index.mjs";
 import { runWorker } from "../../worker/dist/runner.js";
 import { harness, clock, ago, components, publicScope } from "./harness.mjs";
+import { hash, projects } from "./scope-storage-harness.mjs";
 
 const normalizerFor = (options) =>
   components.github.createGithubEvidenceNormalizer({
@@ -659,3 +660,108 @@ test("a new named cycle resolves its head keys from the event cutoff selected un
   assert.ok(fixture.requests.every((request) => request.cutoff === time.next));
   assert.deepEqual(await pendingScans(h), []);
 });
+
+for (const roles of [false, true])
+  test(`implicit maximum-Project v${roles ? 3 : 2} publication keeps scan binding atomic through confirmation failure and reopen`, async (t) => {
+    const fixture = paginatedSource();
+    const time = controlledClock();
+    const scope = components.contracts.canonicalPublicScope({
+      ...publicScope,
+      context: "current",
+      projects,
+      ...(roles ? { roles: components.contracts.publicContributionRoles } : {}),
+    });
+    const key = components.contracts.publicScopeKey(scope);
+    assert.ok(key.length > 13000, "use the real high-entropy key beyond the old B-tree bound");
+    const h = await harness(t, {
+      ...fixture,
+      ...time,
+      configure(config) {
+        config.scopes = [scope];
+        config.repositories[0].allowedProjectIds = projects;
+      },
+    });
+    const version = (await h.db.query("SELECT * FROM leaderboard_pipeline.storage_migrations")).rows;
+    const transaction = h.db.transaction;
+    let interruptBinding = true;
+    let bindings = 0;
+    h.db.transaction = (work) =>
+      transaction((tx) =>
+        work({
+          query: async (sql, parameters) => {
+            const result = await tx.query(sql, parameters);
+            if (sql.includes("SET scope_heads=jsonb_set")) {
+              bindings++;
+              if (interruptBinding) {
+                interruptBinding = false;
+                throw new Error("SYNTHETIC_SCAN_BINDING_INTERRUPTION");
+              }
+            }
+            return result;
+          },
+        }),
+      );
+    await assert.rejects(h.runtime.runOnce({ maxPages: 2 }), /SYNTHETIC_SCAN_BINDING_INTERRUPTION/);
+    assert.equal(bindings, 1);
+    assert.deepEqual((await h.db.query("SELECT snapshot_id FROM leaderboard_pipeline.snapshots")).rows, []);
+    assert.deepEqual((await h.db.query("SELECT snapshot_id FROM leaderboard_pipeline.heads")).rows, []);
+    assert.deepEqual((await pendingScans(h))[0].scope_heads, { [key]: null });
+
+    const confirm = h.controlsStore.transaction.bind(h.controlsStore);
+    let interruptConfirmation = true;
+    h.controlsStore.transaction = (work, options) =>
+      confirm((state) => {
+        const result = work(state);
+        if (interruptConfirmation && state.pipelinePublications) {
+          interruptConfirmation = false;
+          throw new Error("SYNTHETIC_LONG_SCOPE_CONFIRMATION_INTERRUPTION");
+        }
+        return result;
+      }, options);
+    await assert.rejects(h.runtime.runOnce({ maxPages: 2 }), /SYNTHETIC_LONG_SCOPE_CONFIRMATION_INTERRUPTION/);
+    assert.equal(bindings, 2);
+    const head = (
+      await h.db.query(
+        "SELECT scope_key,snapshot_id,encode(scope_hash,'hex') AS digest FROM leaderboard_pipeline.heads",
+      )
+    ).rows[0];
+    assert.equal(head.scope_key, key);
+    assert.equal(head.digest, hash(key));
+    const savedScan = (await pendingScans(h))[0];
+    assert.deepEqual(savedScan.scope_heads, { [key]: head.snapshot_id });
+    assert.equal(h.controlsStore.read().pipelineHeads?.[key], undefined);
+    const receipts = (
+      await h.db.query(
+        "SELECT receipt_id,operation_key,encode(operation_hash,'hex') AS digest FROM leaderboard_pipeline.receipts WHERE kind='snapshot_published'",
+      )
+    ).rows;
+    const operation = `publish:${key}:${head.snapshot_id}`;
+    assert.deepEqual(receipts, [
+      {
+        receipt_id: hash(JSON.stringify([operation, "snapshot_published"])),
+        operation_key: operation,
+        digest: hash(operation),
+      },
+    ]);
+    await h.runtime.stop();
+    await h.reopenDatabase();
+    time.advance();
+    const resumed = await createPipeline(h.options);
+    try {
+      const result = await resumed.runOnce({ maxPages: 1 });
+      assert.equal(result.state, "published");
+      assert.deepEqual(
+        result.publications.map(({ snapshotId, changed }) => ({ snapshotId, changed })),
+        [{ snapshotId: head.snapshot_id, changed: false }],
+      );
+      assert.equal(bindings, 3, "the unchanged-publication path must retain its same-transaction scan binding");
+      assert.equal(fixture.requests.length, 2, "recovery must not fetch an already completed page again");
+      assert.ok(fixture.requests.every((request) => request.cutoff === new Date(savedScan.event_cutoff).toISOString()));
+      assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 1);
+      assert.equal(h.controlsStore.read().pipelineHeads[key].snapshotId, head.snapshot_id);
+      assert.deepEqual(await pendingScans(h), []);
+      assert.deepEqual((await h.db.query("SELECT * FROM leaderboard_pipeline.storage_migrations")).rows, version);
+    } finally {
+      await resumed.stop();
+    }
+  });

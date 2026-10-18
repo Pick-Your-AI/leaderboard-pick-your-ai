@@ -29,6 +29,15 @@ retryable dependency block. Ordinary source mutations stay forbidden. This does
 not purge pipeline, controls, checkpoint or backup copies; rollback refuses to
 discard an existing permanent retirement.
 
+[Completed delivery payload expiry](../../docs/delivery-payload-expiry.md) adds
+`006_delivery_payload_expiry.up.sql` after 001–004. Apply it before using the
+updated object replay and operator readers. The protected host supplies every
+expiry scope, cutoff, policy, operator, authorization and operation identity;
+there is no automatic expiry. Both minimized copies can expire only after inbox
+and outbox completion. A missing payload produces explicit unavailable replay
+and cannot become a partial replacement snapshot. The down migration refuses
+after any actual expiry, preserving its immutable integrity receipts.
+
 [Protected replay results and source health](../../docs/operator-operations.md#native-health-and-replay-results)
 add migration `007_operator_replay_results.up.sql`. Apply it after migrations
 001–004 before starting this version of the inbox worker/operator bridge.
@@ -36,6 +45,16 @@ It binds an audited replay to its persisted processing lease and only a newly
 inserted publication notice; older receipts remain explicitly unbound. The native
 pipeline verifies actual publication references separately from the immutable
 queued audit. Optional collection retirement remains independently applied.
+
+Publication reference capacity adds `008_dispatch_publication_scope_capacity.up.sql`
+after 006. It updates the SQL completion recognizer to the same 16,384-character
+scope-key bound as the dispatch producer and replay readers, including canonical
+100-Project scopes with every approved role. The migration does not rewrite
+retained payloads, completion references or expiry receipts. Roll back 008 before
+006; its atomic downgrade requires read-committed isolation and refuses active
+outbox access or retained keys above the legacy 2,000-character bound. Stop and
+drain workers before disposable rollback and resume only with the matching source
+version. Existing expiry authorization, batch and cutoff checks remain required.
 
 ## Run validation
 

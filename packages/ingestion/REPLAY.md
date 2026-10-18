@@ -35,11 +35,19 @@ All validated assertions, including superseded versions, remain in the result. C
 
 ## Retained-inbox integration
 
-`InboxStore.replayObjectState(repositoryId, subjectId)` reads completed observations for one stable repository/subject scope. It normalizes the existing `delivery-observation/v1` records on read and does not update them, change worker state, or publish an outbox notice. Existing database rows need no migration. Unsupported observation versions fail closed. One SQL statement fixes the read's evidence set; a new store instance reconstructs the same state and digest from unchanged rows.
+`InboxStore.replayObjectState(repositoryId, subjectId)` reads completed observations for one stable repository/subject scope. It normalizes the existing `delivery-observation/v1` records on read and does not update them, change worker state, or publish an outbox notice. Apply migration 006 after 001–004 before using this reader. Unsupported observation versions fail closed. A shared transaction gate excludes concurrent delivery expiry, and one SQL statement fixes the read's evidence set; a new store instance reconstructs the same state and digest from unchanged rows.
 
 The current delivery bridge supports `opened`, `closed` and `reopened` lifecycle assertions. An `edited` webhook remains a receipt, but does not assert lifecycle or identify a superseded event. Label/correction scenarios are tested through synthetic normalized source assertions, not through a new installed source adapter. The existing webhook event/action allowlist remains unchanged. Live timeline ordering, label identity and correction acceptance require their source adapter/owner gates before they can produce these assertions.
 
 Database replay returns `coverage: retained_observations_only`, the number of retained receipts, and a nested replay result. An empty history returns no facets, not a measured zero or known-open object. It fetches at most 257 rows and throws on histories over the 256-event bound; it never presents a truncated history as complete. Larger histories need a separately reviewed complete-history/checkpoint design. The JSON scope lookup is bounded in returned data, but no database scan-time or production latency claim is made; indexing/resource acceptance belongs to the performance work.
+
+After [completed-delivery payload expiry](../../docs/delivery-payload-expiry.md),
+the bound includes both retained and expired receipts. Any expired observation
+returns `coverage: unavailable_expired_observations`, `replay: null`, separate
+retained/expired receipt counts and the responsible expiry operation IDs. The
+reader never drops expired receipts and returns a replay of the surviving subset.
+Snapshot publication refuses this unavailable result before changing a head or
+notice; previously stored snapshots retain their separate retention obligations.
 
 After `npm run build`, the local CLI can emit this report for an explicit stable scope using the managed `INGESTION_DATABASE_URL`. It needs no webhook secret, opens no listener, schedules no work and closes its pool after the read. For example, in a disposable synthetic environment:
 

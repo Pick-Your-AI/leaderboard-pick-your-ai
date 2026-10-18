@@ -1,8 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { canonicalPublicScope, publicContributionRoles, publicScopeKey } from "@pick-your-ai/contracts";
+import { control } from "../src/controls/client.ts";
 import {
   checkedOperatorHealth,
   checkedReplayResult,
+  operatorPublicationScopeKeyLimit,
   type OperatorReadAuthority,
   type OperatorHealthResponse,
   type OperatorReplayResultResponse,
@@ -28,6 +32,27 @@ const scopes = [
   { scopeKey: "organization:all:code", snapshotId: "b".repeat(64), revision: 3 },
 ];
 const clone = <T>(value: T): T => structuredClone(value);
+const capacityProjects = Array.from({ length: 100 }, (_, index) =>
+  createHash("sha512").update(`SYNTHETIC operator capacity Project ${index}`).digest("hex"),
+);
+function capacityScope(withRoles: boolean, index = 0) {
+  const identifier = (dimension: string) =>
+    createHash("sha512")
+      .update(`SYNTHETIC operator capacity ${dimension} ${index}`)
+      .digest("hex")
+      .repeat(2)
+      .slice(0, 200);
+  return canonicalPublicScope({
+    organization: identifier("organization"),
+    repository: identifier("repository"),
+    workstream: identifier("workstream"),
+    start,
+    end: asOf,
+    context: "current",
+    projects: capacityProjects,
+    ...(withRoles ? { roles: [...publicContributionRoles] } : {}),
+  });
+}
 function health(): OperatorHealthResponse {
   return {
     ...authority,
@@ -728,7 +753,7 @@ test("publication scope sets are bounded and unique with exact positive revision
     [...hundred, { ...hundred[0]!, scopeKey: "scope:100" }],
     [scopes[0], { ...scopes[0], snapshotId: "f".repeat(64) }],
     [{ ...scopes[0], scopeKey: "" }],
-    [{ ...scopes[0], scopeKey: "x".repeat(2001) }],
+    [{ ...scopes[0], scopeKey: "x".repeat(operatorPublicationScopeKeyLimit + 1) }],
     [{ ...scopes[0], snapshotId: "A".repeat(64) }],
     [{ ...scopes[0], snapshotId: "a".repeat(63) }],
   ];
@@ -742,6 +767,93 @@ test("publication scope sets are bounded and unique with exact positive revision
         authority,
       ),
     );
+  }
+});
+for (const withRoles of [false, true])
+  test(`maximum canonical ${withRoles ? "v3 role and" : "v2"} Project scope survives health and replay reads`, () => {
+    const scope = capacityScope(withRoles),
+      scopeKey = publicScopeKey(scope);
+    assert.equal(scope.schemaVersion, withRoles ? "public-scope/v3" : "public-scope/v2");
+    assert.equal(scope.organization.length, 200);
+    assert.equal(scope.repository!.length, 200);
+    assert.equal(scope.workstream!.length, 200);
+    assert.equal(scope.projects!.length, 100);
+    assert.equal(new Set(scope.projects).size, 100);
+    assert.ok(scope.projects!.every((project) => /^[a-f0-9]{128}$/.test(project)));
+    if (withRoles) {
+      assert.equal(publicContributionRoles.length, 9);
+      assert.deepEqual(scope.roles, [...publicContributionRoles].sort());
+    } else assert.equal(Object.hasOwn(scope, "roles"), false);
+    assert.equal(scopeKey.length, withRoles ? 13_895 : 13_796);
+    assert.equal(operatorPublicationScopeKeyLimit, 16_384);
+    assert.ok(scopeKey.length < operatorPublicationScopeKeyLimit);
+    const publications = [{ ...scopes[0]!, scopeKey }];
+    assert.deepEqual(checkedReplayResult({ ...replay(), publications }, expected).publications, publications);
+    assert.deepEqual(
+      checkedOperatorHealth(
+        { ...observedHealth(), publication: { ...observedHealth().publication, publications } },
+        authority,
+      ).publication.publications,
+      publications,
+    );
+  });
+test("100 maximum canonical scopes fit the controls byte cap and retain every health/result reference", async (t) => {
+  const previous = globalThis.fetch;
+  try {
+    for (const withRoles of [false, true]) {
+      const publications = Array.from({ length: 100 }, (_, index) => ({
+        scopeKey: publicScopeKey(capacityScope(withRoles, index)),
+        snapshotId: createHash("sha256").update(`SYNTHETIC operator capacity snapshot ${index}`).digest("hex"),
+        revision: Number.MAX_SAFE_INTEGER,
+      }));
+      assert.equal(new Set(publications.map((publication) => publication.scopeKey)).size, 100);
+      const maximumAuthority = {
+        repositoryId: Number.MAX_SAFE_INTEGER,
+        sourceGeneration: "9".repeat(19),
+        policyVersion: "p".repeat(128),
+        authorityRevision: "a".repeat(128),
+      };
+      const maximumExpected = { ...maximumAuthority, receiptId: "r".repeat(128), deliveryId };
+      const healthValue = {
+        ...observedHealth(),
+        ...maximumAuthority,
+        publication: { ...observedHealth().publication, policyVersion: "h".repeat(128), publications },
+      };
+      const replayValue = {
+        ...replay(),
+        ...maximumExpected,
+        replayPolicyVersion: "r".repeat(128),
+        publicationPolicyVersion: "h".repeat(128),
+        publications,
+      };
+      const healthBody = JSON.stringify(healthValue),
+        replayBody = JSON.stringify(replayValue);
+      const healthBytes = Buffer.byteLength(healthBody, "utf8"),
+        replayBytes = Buffer.byteLength(replayBody, "utf8");
+      assert.ok(healthBytes < 2_000_000);
+      assert.ok(replayBytes < 2_000_000);
+      globalThis.fetch = async (path) => {
+        const healthPath = `/controls/operations/${maximumAuthority.repositoryId}/health`;
+        const replayPath = `/controls/operations/${maximumAuthority.repositoryId}/replays/${maximumExpected.receiptId}`;
+        assert.ok(path === healthPath || path === replayPath);
+        return new Response(path === healthPath ? healthBody : replayBody, {
+          headers: { "content-type": "application/json" },
+        });
+      };
+      const readHealth = checkedOperatorHealth(
+        await control(`/controls/operations/${maximumAuthority.repositoryId}/health`),
+        maximumAuthority,
+      );
+      const readReplay = checkedReplayResult(
+        await control(`/controls/operations/${maximumAuthority.repositoryId}/replays/${maximumExpected.receiptId}`),
+        maximumExpected,
+      );
+      assert.deepEqual(readHealth, healthValue);
+      assert.deepEqual(readReplay, replayValue);
+      t.diagnostic(JSON.stringify({ version: withRoles ? "v3" : "v2", scopes: 100, healthBytes, replayBytes }));
+    }
+  } finally {
+    globalThis.fetch = previous;
   }
 });
 test("both returned responses detach all mutable children from the untrusted input", () => {
