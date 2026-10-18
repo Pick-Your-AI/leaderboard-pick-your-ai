@@ -17,9 +17,15 @@ coding task. A full run requires a committed, clean tracked tree and rechecks it
 identity at completion. The command first rebuilds the workspace. A manifest
 records every served web asset and imported service, contract and metrics build
 file, including its size and SHA-256; the full run verifies that these compiled
-inputs remain unchanged at completion. The preview server binds only `127.0.0.1:4277` and refuses
+inputs remain unchanged at completion. The preview server defaults to `127.0.0.1:4277` and refuses
 to reuse an existing server. API requests are intercepted into the test's actual
 service instance; no GitHub collector or real contributor data is involved.
+
+Use `WALL_SOAK_PORT` to select a distinct owned preview port from 1024 to 65535.
+It always binds loopback, retains strict port ownership, and records the selected
+base URL in start and summary receipts. Concurrent headful runs also need separate
+owned displays, source/build directories and profiles; their elapsed time and
+evidence are never combined. An existing run's inputs and browser stay untouched.
 
 Use `WALL_SOAK_MINUTES=2` for a short harness rehearsal. Its result explicitly says
 `completed-short-rehearsal-only`. The rehearsal exercises real polling, network

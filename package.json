@@ -30,7 +30,7 @@
     "db:seed:synthetic": "node --env-file-if-exists=.env infra/db/seed-synthetic.mjs",
     "db:validate": "node --env-file-if-exists=.env infra/db/validate.mjs",
     "test:browser": "tsc --noEmit -p apps/web/tsconfig.browser.json && playwright test --config apps/web/playwright.config.ts",
-    "test:wall-soak": "node --test apps/web/test/wall-soak-assertions.test.mjs apps/web/test/soak-monitor.test.mjs apps/web/test/soak-receipt.test.mjs apps/web/test/wall-soak-midnight.test.mjs apps/web/test/wall-soak-intent.test.mjs apps/web/test/wall-soak-chronology.test.mjs apps/web/test/wall-soak-failures.test.mjs && tsc --noEmit -p apps/web/tsconfig.soak.json && playwright test --config apps/web/playwright.soak.config.ts",
+    "test:wall-soak": "node --test apps/web/test/wall-soak-assertions.test.mjs apps/web/test/soak-monitor.test.mjs apps/web/test/soak-receipt.test.mjs apps/web/test/wall-soak-midnight.test.mjs apps/web/test/wall-soak-intent.test.mjs apps/web/test/wall-soak-chronology.test.mjs apps/web/test/wall-soak-failures.test.mjs apps/web/test/wall-soak-endpoint.test.mjs && tsc --noEmit -p apps/web/tsconfig.soak.json && playwright test --config apps/web/playwright.soak.config.ts",
     "pretest:wall-soak": "npm run build"
   },
   "devDependencies": {

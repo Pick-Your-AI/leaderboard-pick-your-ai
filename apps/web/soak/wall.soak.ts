@@ -8,10 +8,12 @@ import { assertPageActors, CycleCoverage, fixturePages, responseKey } from "./mo
 import { WallCycleTracker } from "./assertions.ts";
 import { WallIntent, type WallInterruption } from "./intent.ts";
 import { requireSoakMidnightWindow } from "./midnight.ts";
+import { soakEndpoint } from "./endpoint.ts";
 import { scope, snapshot } from "../browser/wallFixture.ts";
 
 const minutes = Number(process.env.WALL_SOAK_MINUTES ?? "480");
 const full = minutes >= 480;
+const { baseURL } = soakEndpoint();
 const git = (...args: string[]) => execFileSync("git", args, { encoding: "utf8" }).trim();
 const contributors = (page: Page) => page.locator('.api-wall-content a[href*="/contributors/"]');
 
@@ -479,7 +481,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
     actions.sort((a, b) => a.at - b.at);
     let actionIndex = 0;
     try {
-      await page.goto("http://127.0.0.1:4277/live?ui=api&mode=cycle&boards=pr_merged&interval=20");
+      await page.goto(`${baseURL}/live?ui=api&mode=cycle&boards=pr_merged&interval=20`);
       await healthy();
       await releaseReading();
       await requireAutomatic();
@@ -507,6 +509,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
       await record("start", {
         ...input,
         requestedMinutes: minutes,
+        baseURL,
         fullMatrix: full,
         browser: browser.version(),
         executableSha256: runtime.executableSha256,
@@ -741,6 +744,7 @@ test("real elapsed wall display, bounded resources and recovery", async ({ runti
             startedAt,
             endedAt: new Date().toISOString(),
             requestedMinutes: minutes,
+            baseURL,
             elapsedMilliseconds: elapsed,
             fullMatrix: full,
             input,
