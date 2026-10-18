@@ -525,8 +525,8 @@ export function projectRead(
     )
       return reject();
   }
-  // Bind clocks and detect duplicates using the same parsed IDs as public proof,
-  // before privacy filtering can discard any of the supplied pending entries.
+  // Match projectEvidence's contract-normalized IDs before checking uniqueness
+  // and retrieving clocks. Raw aliases must not duplicate proof or lose metadata.
   const pendingMetadata = new Map(
     pendingInput.map((entry) => [
       contributionSchema.shape.contributionId.parse(entry.contribution.contributionId),
