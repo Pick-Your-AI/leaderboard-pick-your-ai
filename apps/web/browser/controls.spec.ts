@@ -172,12 +172,19 @@ test("editorial nomination decisions require explicit public explanation and cur
   );
   await page.goto("/admin");
   await page.getByLabel("Nomination action").selectOption("accept");
+  await page.getByLabel("Private decision reason").fill("Independent review complete.");
   await page.getByLabel("Public selection explanation").fill("Reviewed contribution helps new contributors.");
   await page.getByLabel("I independently reviewed this nomination and have no conflict of interest").check();
   await page.getByRole("button", { name: "Record nomination decision" }).click();
   await expect(page.getByRole("status")).toContainText("Service confirmed");
   expect(writes[0]).toMatchObject({
     path: `/controls/spotlights/${id}`,
-    body: { version: 4, action: "accept", reason: "Reviewed contribution helps new contributors.", conflict: false },
+    body: {
+      version: 4,
+      action: "accept",
+      reason: "Independent review complete.",
+      publicExplanation: "Reviewed contribution helps new contributors.",
+      conflict: false,
+    },
   });
 });

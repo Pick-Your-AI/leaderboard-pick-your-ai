@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import type { Session } from "./client.ts";
 export interface Nomination {
   id: string;
@@ -20,6 +20,7 @@ export function Spotlights({
   admin: boolean;
   run: (path: string, input: unknown) => Promise<boolean>;
 }) {
+  const [accepting, setAccepting] = useState<Record<string, boolean>>({});
   return (
     <section>
       <h2>Editorial spotlight nominations</h2>
@@ -48,12 +49,16 @@ export function Spotlights({
                   action: d.get("action"),
                   reason: d.get("reason"),
                   conflict: false,
+                  ...(d.get("action") === "accept" ? { publicExplanation: d.get("publicExplanation") } : {}),
                 });
               }}
             >
               <label className="control-field">
                 Nomination action
-                <select name="action">
+                <select
+                  name="action"
+                  onChange={(e) => setAccepting({ ...accepting, [n.id]: e.target.value === "accept" })}
+                >
                   {n.owner === session.actorId ? (
                     <option value="withdraw">Withdraw consent</option>
                   ) : (
@@ -65,10 +70,21 @@ export function Spotlights({
                 </select>
               </label>
               <label className="control-field">
-                Public selection explanation
+                Private decision reason
                 <textarea name="reason" required maxLength={2000} />
               </label>
-              <p>This explanation is public if the spotlight is selected. Do not include private request content.</p>
+              {accepting[n.id] && (
+                <>
+                  <label className="control-field">
+                    Public selection explanation
+                    <textarea name="publicExplanation" required maxLength={2000} />
+                  </label>
+                  <p>
+                    This explanation will be public if the spotlight is selected. Do not include private request
+                    content.
+                  </p>
+                </>
+              )}
               <label>
                 <input type="checkbox" required />
                 {n.owner === session.actorId
