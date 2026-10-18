@@ -1,4 +1,5 @@
 import { Operations } from "./Operations.tsx";
+import { PolicyComparison } from "./PolicyComparison.tsx";
 import React, { useEffect, useRef, useState } from "react";
 import { canReview, control, ControlsFailure, verifiedSession, type Receipt, type Session } from "./client.ts";
 
@@ -521,6 +522,16 @@ export function ControlsApp() {
                   ))}
               </section>
               <Spotlights nominations={nominations} session={session} run={run} admin={admin} />
+              {admin && session.roles.includes("reviewer") && (
+                <PolicyComparison
+                  session={session}
+                  onAuthorityLost={() => {
+                    ++generation.current;
+                    clear();
+                    setError("Your reviewer authority or session changed. Reload your account before continuing.");
+                  }}
+                />
+              )}
               {admin && session.roles.includes("operator") && (
                 <>
                   <Operations session={session} />
