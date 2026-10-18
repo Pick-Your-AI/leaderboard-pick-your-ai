@@ -80,7 +80,7 @@ function fixture(snapshotId = "public-1", revision = 1) {
         snapshotId,
         revision,
         generatedAt: at,
-        metricDefinitionVersion: "candidate-0.1.0",
+        metricDefinitionVersion: "candidate-0.1.1",
         computationVersion: "synthetic-test-only",
         coverage: [structuredClone(coverage)],
         results: [],
@@ -602,7 +602,8 @@ test("approved sort direction handles unknown separately and method version mism
     ],
   );
   assert.equal(body.rows[2].result.value, undefined);
-  h.data.selected.snapshot.metricDefinitionVersion = "unavailable-old-definition";
+  h.data.selected.snapshot.metricDefinitionVersion = "candidate-0.1.0";
+  // The prior daily-unit candidate cannot be relabeled with the corrected registry.
   assert.equal((await h.app.inject(boardUrl)).json().error, "metric_definition_unavailable");
 });
 
