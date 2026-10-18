@@ -212,7 +212,13 @@ function projectAggregate(aggregate) {
 /** Private SQLite tables are never part of controls_publication or public API documents. */
 export class PolicyComparisonStore {
   constructor(store, metrics, { now = Date.now } = {}) {
-    requireThat(store?.db && typeof metrics?.comparePolicies === "function", 500, "Comparison engine required");
+    requireThat(
+      store?.db &&
+        typeof metrics?.comparePolicies === "function" &&
+        typeof metrics?.hasCompleteSourceCoverage === "function",
+      500,
+      "Comparison engine required",
+    );
     this.store = store;
     this.metrics = metrics;
     this.now = now;
@@ -392,6 +398,40 @@ export class PolicyComparisonStore {
     );
     return { document, resultHash: row.digest };
   }
+  verifiedResult(id, record, restoreInput) {
+    const saved = this.result(id);
+    requireThat(saved.document.inputId === record.id, 409, "Private comparison integrity failure");
+    const complete = [
+      [saved.document.before, saved.document.beforePolicy],
+      [saved.document.after, saved.document.candidatePolicy],
+    ].filter(([aggregate]) => aggregate.coverage === "complete");
+    if (!complete.length) return saved;
+    try {
+      requireThat(
+        record.authorization.identityEvidence === undefined || typeof restoreInput === "function",
+        409,
+        "Frozen identity verification unavailable",
+      );
+      const input = copy(record.input);
+      // Called only inside the source/identity/session fence. Preserve the old
+      // receipt, but do not repeat a completeness claim its retained input lacks.
+      const verifiedInput = restoreInput ? restoreInput(input, record.authorization) : input;
+      if (verifiedInput && typeof verifiedInput.then === "function") {
+        void Promise.resolve(verifiedInput).catch(() => undefined);
+        throw new ControlError(409, "Frozen identity verification must be synchronous");
+      }
+      requireThat(
+        complete.every(([aggregate, policy]) =>
+          this.metrics.hasCompleteSourceCoverage(verifiedInput, policy, aggregate.scope),
+        ),
+        409,
+        "Frozen preview source coverage changed",
+      );
+    } catch {
+      throw new ControlError(409, "Frozen preview source coverage changed");
+    }
+    return saved;
+  }
   compare(record, candidate, restoreInput) {
     requireThat(
       record.authorization.identityEvidence === undefined || typeof restoreInput === "function",
@@ -404,7 +444,7 @@ export class PolicyComparisonStore {
       afterPolicyHash = this.bindCandidate(candidate);
     const id = comparisonHash([record.id, beforePolicyHash, afterPolicyHash]);
     const existing = this.store.db.prepare("SELECT id FROM policy_previews WHERE id=?").get(id);
-    if (existing) return this.result(id);
+    if (existing) return this.verifiedResult(id, record, restoreInput);
     requireThat(
       this.store.db.prepare("SELECT count(*) AS n FROM policy_previews").get().n < comparisonLimitsV1.previews,
       503,
@@ -614,7 +654,7 @@ export function createPolicyComparisonManager({ comparisons, withAuthorizedInput
     return guarded([record], ([current], state, removed, authority) => {
       const result = candidate
         ? comparisons.compare(current, candidate, authority.restoreInput)
-        : comparisons.result(read[1]);
+        : comparisons.verifiedResult(read[1], current, authority.restoreInput);
       return comparisons.redact(result, current, state, removed);
     });
   }
