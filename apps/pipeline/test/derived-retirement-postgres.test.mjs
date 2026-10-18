@@ -94,6 +94,7 @@ async function fixture(t) {
     "003_collection",
     "004_outbox_dispatch",
     "005_collection_retirement",
+    "007_operator_replay_results",
   ])
     await pool.query(
       await readFile(new URL(`../../../packages/ingestion/sql/${name}.up.sql`, import.meta.url), "utf8"),

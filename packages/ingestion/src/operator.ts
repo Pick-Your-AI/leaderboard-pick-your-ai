@@ -1,6 +1,17 @@
 import { createHash, randomUUID } from "node:crypto";
 import { sourceFamilies } from "./collection.js";
 import type { SqlDatabase, SqlSession } from "./store.js";
+import {
+  readOperatorReplayResult,
+  type OperatorReplayResult,
+  type OperatorReplayResultOptions,
+} from "./replay-results.js";
+import type {
+  OperatorHealth,
+  OperatorReadAuthority,
+  OperatorReadObserver,
+  ReadOperatorHealth,
+} from "./operator-health.js";
 
 type Authority = { policyVersion: string; revision: string };
 export type OperatorAuthorize = (repositoryId: number) => Promise<Authority>;
@@ -126,7 +137,69 @@ function batchAudit(audit: Record<string, unknown>) {
 }
 /** Privileged host adapter. Authorization must recheck the current session and explicit repository grant on every call. */
 export class OperatorInbox {
-  constructor(readonly db: SqlDatabase) {}
+  constructor(
+    readonly db: SqlDatabase,
+    readonly options: OperatorReplayResultOptions & { readHealth?: ReadOperatorHealth } = {},
+  ) {}
+  /** A queued receipt is distinct from an independently verified publication. */
+  async readReplayResult(
+    repositoryId: number,
+    receiptId: string,
+    authorize: OperatorAuthorize,
+    observe?: OperatorReadObserver<OperatorReadAuthority & OperatorReplayResult>,
+  ) {
+    scope(repositoryId);
+    if (typeof receiptId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(receiptId))
+      throw new Error("invalid_replay_receipt");
+    return this.db.transaction(async (tx) => {
+      const a = await authority(authorize, repositoryId);
+      const current = await access(tx, repositoryId);
+      const read = await readOperatorReplayResult(tx, { repositoryId, ...current }, receiptId, this.options);
+      if (JSON.stringify(a) !== JSON.stringify(await authority(authorize, repositoryId)))
+        throw new Error("operation_authority_changed");
+      const beforeSend = () => {
+        if (read.confirmCurrent && read.confirmCurrent() !== true) throw new Error("operation_publication_changed");
+      };
+      beforeSend();
+      const data = {
+        repositoryId,
+        sourceGeneration: current.generation,
+        policyVersion: a.policyVersion,
+        authorityRevision: a.revision,
+        ...read.result,
+      };
+      await observe?.(data, beforeSend);
+      return data;
+    });
+  }
+  async readHealth(
+    repositoryId: number,
+    authorize: OperatorAuthorize,
+    observe?: OperatorReadObserver<OperatorReadAuthority & OperatorHealth>,
+  ) {
+    scope(repositoryId);
+    if (typeof this.options.readHealth !== "function") throw new Error("operation_health_unavailable");
+    return this.db.transaction(async (tx) => {
+      const a = await authority(authorize, repositoryId);
+      const current = await access(tx, repositoryId);
+      const read = await this.options.readHealth!(tx, { repositoryId, ...current });
+      if (JSON.stringify(a) !== JSON.stringify(await authority(authorize, repositoryId)))
+        throw new Error("operation_authority_changed");
+      const beforeSend = () => {
+        if (read.confirmCurrent() !== true) throw new Error("operation_health_changed");
+      };
+      beforeSend();
+      const data = {
+        repositoryId,
+        sourceGeneration: current.generation,
+        policyVersion: a.policyVersion,
+        authorityRevision: a.revision,
+        ...read.health,
+      };
+      await observe?.(data, beforeSend);
+      return data;
+    });
+  }
   async read(repositoryId: number, authorize: OperatorAuthorize) {
     scope(repositoryId);
     return this.db.transaction(async (tx) => {
@@ -259,6 +332,8 @@ export class OperatorInbox {
           policyVersion: a.policyVersion,
           repositoryId: window.repositoryId,
           sourceGeneration: generation,
+          installationId,
+          resultBinding: "operator-replay/v1",
           authorityRevision: a.revision,
           beforeRevision,
           queuedRevision,
@@ -273,8 +348,8 @@ export class OperatorInbox {
           [receiptId, row.delivery_id, row.attempts, row.reason_code, JSON.stringify(audit)],
         );
         await tx.query(
-          `UPDATE leaderboard_ingestion.inbox SET state='pending',attempts=0,available_at=clock_timestamp(),reason_code=NULL WHERE delivery_id=$1`,
-          [row.delivery_id],
+          `UPDATE leaderboard_ingestion.inbox SET state='pending',attempts=0,available_at=clock_timestamp(),reason_code=NULL,operator_replay_receipt_id=$2 WHERE delivery_id=$1`,
+          [row.delivery_id, receiptId],
         );
         receipts.push({ id: receiptId, deliveryId: String(row.delivery_id), beforeRevision, queuedRevision });
       }
@@ -328,6 +403,8 @@ export class OperatorInbox {
         policyVersion: a.policyVersion,
         repositoryId: input.repositoryId,
         sourceGeneration: generation,
+        installationId,
+        resultBinding: "operator-replay/v1",
         authorityRevision: a.revision,
         beforeRevision: input.expectedRevision,
         queuedRevision,
@@ -338,8 +415,8 @@ export class OperatorInbox {
         [receiptId, input.deliveryId, row.attempts, row.reason_code, JSON.stringify(audit)],
       );
       await tx.query(
-        `UPDATE leaderboard_ingestion.inbox SET state='pending',attempts=0,available_at=clock_timestamp(),reason_code=NULL WHERE delivery_id=$1`,
-        [input.deliveryId],
+        `UPDATE leaderboard_ingestion.inbox SET state='pending',attempts=0,available_at=clock_timestamp(),reason_code=NULL,operator_replay_receipt_id=$2 WHERE delivery_id=$1`,
+        [input.deliveryId, receiptId],
       );
       // A role/session/grant may change during either database write. Reject
       // before the transaction commits so the receipt and queue roll back together.

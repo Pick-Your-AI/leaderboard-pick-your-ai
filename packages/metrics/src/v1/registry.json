@@ -6686,22 +6686,38 @@
         "synonyms": [
           "data quality"
         ],
-        "maturity": "definition_only",
+        "maturity": "synthetic_verified",
         "source_class": "evidence_reviewed",
-        "supported_states": [],
-        "supported_date_bases": [],
-        "supported_combinations": [],
-        "default_combination": null,
+        "supported_states": [
+          "qualified"
+        ],
+        "supported_date_bases": [
+          "acceptedAt"
+        ],
+        "supported_combinations": [
+          {
+            "state": "qualified",
+            "date_basis": "acceptedAt"
+          }
+        ],
+        "default_combination": {
+          "state": "qualified",
+          "date_basis": "acceptedAt"
+        },
         "lead_view": {
           "overview": false,
           "wall": false,
           "order": null
         },
-        "verification_cases": [],
+        "verification_cases": [
+          "apps/pipeline/test/domain-recognition.test.mjs",
+          "packages/metrics/test/registry-ui.test.js",
+          "apps/web/test/registry-ui.test.ts"
+        ],
         "limitations": [
           "All common gates and source-specific work-package acceptance must pass. Existing source gaps remain labeled.",
           "Synthetic candidate support does not establish source availability, accepted policy or public enablement.",
-          "No selectable implementation is connected to this UI metadata version; this definition remains discoverable and not measured."
+          "Only qualified/acceptedAt with canonical correction grouping is verified by the protected domain adapter; exact before/after evidence and complete reviewed origin are required. No prototype data adapter is provided."
         ]
       },
       {

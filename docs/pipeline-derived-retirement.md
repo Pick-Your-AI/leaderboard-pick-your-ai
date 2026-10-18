@@ -9,8 +9,11 @@ retire a source by itself or certify removal from every product store.
 
 ## Authority and installation
 
-Apply ingestion migrations 001–005 and the ordinary `migratePipeline(db)` schema
-first. Then explicitly call `migratePipelineDerivedRetirement(db)`, exported by
+Apply all ingestion migrations required by the deployed runtime and the ordinary
+`migratePipeline(db)` schema first. The current accepted runtime requires
+ingestion 001–005 and `007_operator_replay_results`; the derived component itself
+has a minimum ingestion prerequisite of 005. Then explicitly call
+`migratePipelineDerivedRetirement(db)`, exported by
 [the pipeline entry point](../apps/pipeline/src/index.mjs). Its optional
 [SQL migration](../apps/pipeline/sql/001_derived_retirement.up.sql) is transactional.
 The loader executes its checked-in statement boundaries without splitting
