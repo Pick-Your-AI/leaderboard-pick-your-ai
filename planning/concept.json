@@ -70,7 +70,7 @@
   "organization_integration": {
     "new_repo": "Pick-Your-AI/pick-your-ai-leaderboard",
     "new_project": "Contributor Leaderboard Delivery; see docs/PUBLICATION.json",
-    "public_entry": "Approved target domain leaderboard.pickyour.ai; hosting, operations and launch acceptance remain unresolved",
+    "public_entry": "Configured target domain leaderboard.pickyour.ai for local plans and examples; DNS, deployment, hosting, operations and launch acceptance remain unresolved",
     "research_boundary": "Research repository supplies public evidence and ownership; its frozen builder contracts remain unchanged. Leaderboard contracts are a separate bounded schema.",
     "website_boundary": "Current React/Vite website is static on cPanel; retain it as an independently deployed frontend. The proposed leaderboard server requires separately approved infrastructure.",
     "mobile_boundary": "Android/Apple Projects are consumers and contribution scopes. Their 258 Backlog planning items are not shipped applications. No duplicate mobile backend is introduced.",

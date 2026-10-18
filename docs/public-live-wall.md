@@ -43,7 +43,11 @@ changes. Manual next-page control remains available while paused or under reduce
 motion. One polite status region announces successfully displayed page changes,
 coalescing rapid manual changes for one second; refreshed rows are not themselves
 live regions. A privacy recheck does not repeat the page announcement or restart
-the rotation timer.
+the rotation timer. If a page boundary coincides with an unfinished controls read,
+one due rotation waits for that read to succeed and uses the resulting current
+page and cursor. Pausing, entering a reading hold, changing the interval, leaving
+the tab, moving manually or a read failure cancels that pending rotation. Resuming
+starts a full new interval; a delayed tick cannot jump past those holds.
 
 Every page uses one snapshot, computation revision, metric-definition version and
 current publication-policy version. Health and content must agree before content
@@ -77,6 +81,13 @@ display layouts at 1920×1080, 3840×2160, 1080×1920 and 960×540. The layout c
 require visible pause/scope controls, no viewport overflow, and no automated axe
 violations in the selected WCAG tags. The existing remote browser journeys run
 alongside these cases.
+
+The timer regressions include a real-clock 20-second page advance and a controlled
+overlap in which a controls read remains pending across that deadline. The latter
+reproduces the lost-tick defect on the earlier implementation and verifies that a
+successful fresh read advances once, current suppression still applies, and pause
+cancels the deferred advance. The short real-clock check is not the eight-hour
+continuous-display acceptance run.
 
 These are synthetic implementation and automated accessibility checks. They do
 not establish a completed human assistive-technology journey, an eight-hour
