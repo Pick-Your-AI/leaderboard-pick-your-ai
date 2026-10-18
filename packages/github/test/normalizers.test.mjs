@@ -274,6 +274,26 @@ test("agent execution under a User preserves account kind without certifying man
   assert.equal(metrics(unknownTarget, "labels_applied")[0].state, "unknown");
 });
 
+test("one User occupying author, automated sender and merger roles retains positive execution evidence", () => {
+  const out = normalizeGithubObservation(
+    envelope({
+      payload: {
+        pull_request: { ...pr(), merged_by: fixture.author },
+        sender: fixture.author,
+        execution_mode: "automated",
+      },
+    }),
+  );
+  assert.equal(out.actors.length, 1);
+  assert.equal(out.actors[0].id, "101");
+  assert.equal(out.actors[0].kind, "user");
+  assert.equal(out.actors[0].executionMode, "automated");
+  assert.equal(metrics(out, "pr_merged")[0].actorId, "101");
+  assert.equal(metrics(out, "pr_merged")[0].role, "author");
+  assert.equal(metrics(out, "maintainer_merges")[0].actorId, "101");
+  assert.equal(metrics(out, "maintainer_merges")[0].role, "merger");
+});
+
 test("recognition requires independently authorized receipt; COMMENTED feedback can qualify", () => {
   const raw = normalizeGithubObservation(
     envelope({

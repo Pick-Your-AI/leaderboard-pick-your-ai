@@ -22,13 +22,18 @@ export async function harness(t, extra = {}) {
   const slug = extra.markerFreeConfig ? "example-org/example-repo" : "synthetic-org/synthetic-repo";
   const directory = await mkdtemp(join(tmpdir(), "leaderboard-pipeline-"));
   let engine = new PGlite(join(directory, "postgres"));
+  const query = async (connection, sql, params) => {
+    const result = await connection.query(sql, params);
+    if (
+      extra.reverseNormalizationRows &&
+      (sql.includes("SELECT fact.*") || sql.includes("SELECT n.document,n.document_hash"))
+    )
+      result.rows.reverse();
+    return result;
+  };
   const db = {
-    query: async (sql, params) => {
-      const result = await engine.query(sql, params);
-      if (extra.reverseNormalizationRows && sql.includes("SELECT fact.*")) result.rows.reverse();
-      return result;
-    },
-    transaction: (work) => engine.transaction((tx) => work({ query: (sql, params) => tx.query(sql, params) })),
+    query: (sql, params) => query(engine, sql, params),
+    transaction: (work) => engine.transaction((tx) => work({ query: (sql, params) => query(tx, sql, params) })),
   };
   for (const name of [
     "001_ingestion.up.sql",
