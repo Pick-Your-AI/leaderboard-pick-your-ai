@@ -321,7 +321,9 @@ export class GithubReadClient {
       }
       throw new GithubClientError({ kind: "invalid_response" }, source);
     } finally {
-      await reader.cancel().catch(() => undefined);
+      // Cancellation closes the reader immediately; its transport cleanup hook
+      // may settle later. It must not hold the request slot or replace the error.
+      void reader.cancel().catch(() => undefined);
       reader.releaseLock();
     }
   }
@@ -405,7 +407,6 @@ export class GithubReadClient {
         // Access can change while fetch is pending, before any response is consumed.
         await authorize();
         if (response.status >= 300 && response.status < 400 && response.status !== 304) {
-          await response.body?.cancel();
           throw new GithubClientError({ kind: "unsafe_request" }, source);
         }
         // Retain only bounded numeric quota observations, including conditional
@@ -423,7 +424,6 @@ export class GithubReadClient {
         }
         await authorize();
         if (response.status === 304) {
-          await response.body?.cancel();
           await authorize();
           if (!cache) throw new GithubClientError({ kind: "invalid_response" }, source);
           return { body: cache.body, link: cache.link };
