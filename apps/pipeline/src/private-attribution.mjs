@@ -1,3 +1,5 @@
+import { pinnedSha } from "@pick-your-ai/github";
+
 // Serialization changes must invalidate normalization caches, including documents
 // produced before these private fields were retained. This is not a metric policy.
 export const normalizationDocumentVersion = "pipeline-private-attribution/v1";
@@ -26,7 +28,7 @@ export function privateAttribution(output, source) {
     source.family
   ];
   if (kind && /^[1-9]\d*$/.test(source.subject_id)) artifacts.add(`github:${kind}:${source.subject_id}`);
-  if (kind === "commit" && /^[a-f0-9]{40}$/.test(source.subject_id))
+  if (kind === "commit" && pinnedSha(source.subject_id))
     artifacts.add(`github:commit:${source.repository_id}:${source.subject_id}`);
   const actors = new Set(output.actors.map((actor) => actor.id));
   const boundArtifact = (entry) => {
