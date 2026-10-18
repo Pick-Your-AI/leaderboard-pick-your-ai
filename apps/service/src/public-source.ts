@@ -237,6 +237,7 @@ export function projectRead(
   const ranking = selected.ranking.map((entry) => {
     const definition = definitions.find((metric) => metric.id === entry.metricId)?.definition;
     const descriptive =
+      definition?.display_policy === "spotlight" ||
       definition?.release_eligibility === "descriptive-only" ||
       ["ratio", "median_and_p75_of_elapsed_hours"].includes(definition?.aggregation ?? "");
     if (
