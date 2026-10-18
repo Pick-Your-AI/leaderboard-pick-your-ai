@@ -148,3 +148,50 @@ test("retained run and replay history carries its own source generation after a 
   assert.equal(history.runs[0].sourceGeneration, "1");
   assert.equal(history.receipts[0].sourceGeneration, "1");
 });
+
+test("replay rolls back receipt and queue writes when authority is revoked during database work", async (t) => {
+  const { db, id, ops } = await fixture(t);
+  const read = await ops.read(9, allow);
+  let revoked = false;
+  const guarded = new OperatorInbox({
+    ...db,
+    transaction: (work) =>
+      db.transaction((tx) =>
+        work({
+          async query(sql, params) {
+            const result = await tx.query(sql, params);
+            if (sql.startsWith("INSERT INTO leaderboard_ingestion.replay_receipts")) revoked = true;
+            return result;
+          },
+        }),
+      ),
+  });
+  await assert.rejects(
+    () =>
+      guarded.replay(
+        {
+          repositoryId: 9,
+          deliveryId: id,
+          expectedRevision: read.quarantined[0].revision,
+          operatorId: "7",
+          reason: "operator_reviewed",
+        },
+        async () => {
+          if (revoked) throw Error("revoked");
+          return allow();
+        },
+      ),
+    /revoked/,
+  );
+  assert.equal(
+    (await db.query("SELECT count(*)::integer AS count FROM leaderboard_ingestion.replay_receipts")).rows[0].count,
+    0,
+  );
+  assert.deepEqual(
+    (await db.query("SELECT state,attempts FROM leaderboard_ingestion.inbox WHERE delivery_id=$1", [id])).rows[0],
+    {
+      state: "quarantined",
+      attempts: 3,
+    },
+  );
+});

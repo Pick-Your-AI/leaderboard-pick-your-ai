@@ -171,6 +171,10 @@ export class OperatorInbox {
         `UPDATE leaderboard_ingestion.inbox SET state='pending',attempts=0,available_at=clock_timestamp(),reason_code=NULL WHERE delivery_id=$1`,
         [input.deliveryId],
       );
+      // A role/session/grant may change during either database write. Reject
+      // before the transaction commits so the receipt and queue roll back together.
+      if (JSON.stringify(a) !== JSON.stringify(await authority(authorize, input.repositoryId)))
+        throw new Error("operation_authority_changed");
       return {
         id: receiptId,
         repositoryId: input.repositoryId,
