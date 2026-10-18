@@ -56,7 +56,7 @@ function historyMetric(
     !sameSet(metric.scope.projects, scope.projects ?? []) ||
     !sameSet(metric.scope.workstreams, scope.workstream === null ? [] : [scope.workstream]) ||
     (scope.repository !== null && !sameSet(metric.scope.repos, [scope.repository])) ||
-    metric.scope.roles.length !== 0 ||
+    !sameSet(metric.scope.roles, scope.roles ?? []) ||
     metric.scope.actors !== "all"
   )
     return null;

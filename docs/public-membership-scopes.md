@@ -21,7 +21,7 @@ For example, this is **synthetic syntax**, not a source or production configurat
 /api/v1/boards?organization=Pick-Your-AI&metric=issues_opened&context=current&project=PVT_synthetic_A,PVT_synthetic_B
 ```
 
-Any current-context selection or nonempty Project set has this explicit scope shape:
+Any current-context selection or nonempty Project set without a contribution-role filter has this explicit scope shape:
 
 ```json
 {
@@ -37,6 +37,8 @@ Any current-context selection or nonempty Project set has this explicit scope sh
 ```
 
 Current scopes without a Project filter still include `projects: []`. Event scopes with a Project filter explicitly include `context: "event"`. A provider may not return an unversioned extended scope; the service rejects it rather than silently reinterpreting an older document. The canonical scope participates in the immutable snapshot digest, publication/control identity, scope equality, signed cursors, paired comparison selection, shared links, contributor-card links, update polling URLs and exports.
+
+A nonempty contribution-role selection uses the separate [public-scope/v3 extension](public-role-scopes.md), which includes all of these membership dimensions and an explicit role union. It preserves existing v2 bytes; a retained v2 document cannot acquire a role field.
 
 Legacy scope keys stay `JSON.stringify([organization, repository, workstream, start, end])`. Extended keys append the tagged tuple `["public-scope/v2", context, projects]`. Equivalent Project orderings and repeated IDs share one key. Different bases or Project sets cannot share a materialized head or a pinned read. New cursors bind a SHA-256 digest of that complete scope key so a bounded Project list cannot make a valid cursor too large; existing default cursor bindings are unchanged.
 
@@ -81,4 +83,4 @@ npm run build
 node --test --test-concurrency=1 packages/contracts/test/public-scope.test.js apps/service/test/public-scope.test.mjs apps/pipeline/test/public-scope.test.mjs
 ```
 
-These tests do not certify live GitHub source capability or complete historical coverage. Calendar/named-period controls, user-selected timezone presentation, role/actor selector delivery, browser v2 integration, and the remaining full #91 acceptance evidence retain their existing owners and gates. This backend change alone does not close #91 or alter the 98-metric plan.
+These tests do not certify live GitHub source capability or complete historical coverage. Calendar/named-period controls, user-selected timezone presentation, browser membership/role selector integration, and the remaining full #91 acceptance evidence retain their existing owners and gates. The [role backend extension](public-role-scopes.md) has its own versioned boundary. These slices alone do not close #91 or alter the 98-metric plan.
