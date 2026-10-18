@@ -2,6 +2,7 @@
 // No records here are actual reviews, measurements, consent or source permission.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { normalizeGithubObservation, applyRecognitionReceipt } from "@pick-your-ai/github";
 import {
@@ -11,7 +12,7 @@ import {
   metricRegistryV1,
   selectMetricView,
 } from "@pick-your-ai/metrics";
-import { materializeRecognition } from "../src/recognition-adapter.mjs";
+import { materializeRecognition, recognitionFingerprint } from "../src/recognition-adapter.mjs";
 import { domainMetricIds, domainDateBasis } from "../src/domain-recognition.mjs";
 
 const fixture = JSON.parse(
@@ -114,6 +115,26 @@ const details = {
     artifactHash: hash,
     sourceUse: "approved",
     sourceIds: ["source:1"],
+  },
+  data_quality: {
+    canonicalKind: "model",
+    canonicalId: "model:1",
+    correctionId: "correction:1",
+    correctionVersion: "v1",
+    correctionType: "incorrect",
+    factualReview: true,
+    sourceIds: ["source:1"],
+    before: {
+      revision: before,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/commit/${before}`,
+      contentHash: "e".repeat(64),
+    },
+    after: {
+      revision: after,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/commit/${after}`,
+      contentHash: hash,
+    },
+    origin: { kind: "prior_contributors", complete: true, contributorIds: ["303"] },
   },
   documentation: { authorship: "authored", category: "guide", substantiveReview: true },
   tests: { authorship: "authored", category: "test_artifact", substantiveReview: true },
@@ -246,6 +267,336 @@ const run = (s) => materializeRecognition(s.input, s.state, [s.binding], s.polic
 const qualified = (s) =>
   run(s).facts.filter((fact) => fact.metricId === s.binding.metricId && fact.state === "qualified");
 
+test("data_quality: an independently accepted correction becomes a qualified canonical unit", () => {
+  const s = scenario("data_quality");
+  s.policies[0].policy.dateBasis = "acceptedAt";
+  const normalized = run(s);
+  const corrected = normalized.facts.filter((fact) => fact.metricId === "data_quality");
+  assert.equal(corrected.length, 1);
+  assert.equal(corrected[0].state, "qualified");
+  assert.equal(corrected[0].acceptedAt, acceptedAt);
+  assert.equal(corrected[0].actorId, s.request.owner);
+  assert.deepEqual(normalized.facts.slice(0, s.input.facts.length), s.input.facts);
+});
+
+test("data_quality: a host-normalized correction fact cannot bypass its specialist evidence review", () => {
+  const s = scenario("data_quality");
+  s.candidate.metricId = s.binding.sourceMetricId = "data_quality";
+  s.candidate.state = "observed";
+  s.evidence.contribution.metricIds = ["data_quality"];
+  assert.equal(qualified(s).length, 1);
+  delete s.binding.domainEvidence;
+  assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
+});
+
+test("data_quality: corrected records and externally stale records retain exact immutable source pins", () => {
+  for (const length of [40, 64]) {
+    for (const locator of ["commit", "blob"]) {
+      const s = scenario("data_quality");
+      for (const [index, pin] of [s.record.details.before, s.record.details.after].entries()) {
+        pin.revision = (index ? "c" : "b").repeat(length);
+        pin.sourceRevisionUrl = `https://github.com/synthetic-owner/repository/${locator}/${pin.revision}${locator === "blob" ? "/catalog/models.json" : ""}`;
+      }
+      s.record.sourceRevision = s.evidence.sourceRevision = s.record.details.after.revision;
+      s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl = s.record.details.after.sourceRevisionUrl;
+      assert.equal(qualified(s).length, 1);
+      s.record.details.correctionType = "stale";
+      s.record.details.origin = { kind: "external_source_change", complete: true, contributorIds: [] };
+      s.candidate.role = "coauthor";
+      assert.equal(qualified(s).length, 1, "Reviewed external staleness is not inferred from absent authorship");
+      const proof = run(s).evidence.at(-1);
+      assert.equal(proof.sourceRevisionUrl, s.record.details.after.sourceRevisionUrl);
+      assert.equal(proof.sourceRevision, s.record.details.after.revision);
+      assert.doesNotMatch(
+        JSON.stringify(proof),
+        /correction:1|source:1|prior_contributors|external_source_change|contentHash/,
+      );
+    }
+  }
+});
+
+test("data_quality: missing origin knowledge and self-introduced errors cannot earn correction credit", async (t) => {
+  for (const [name, mutate] of [
+    [
+      "unknown origin",
+      (s) => {
+        s.record.details.origin.kind = "unknown";
+      },
+    ],
+    [
+      "incomplete prior attribution",
+      (s) => {
+        s.record.details.origin.complete = false;
+      },
+    ],
+    [
+      "missing prior attribution",
+      (s) => {
+        s.record.details.origin.contributorIds = [];
+      },
+    ],
+    [
+      "claimant introduced the error",
+      (s) => {
+        s.record.details.origin.contributorIds.push(s.request.owner);
+      },
+    ],
+    [
+      "collaborator introduced the error",
+      (s) => {
+        s.request.collaborators["303"] = "accepted";
+      },
+    ],
+    [
+      "unknown cause disguised as external change",
+      (s) => {
+        s.record.details.origin = { kind: "external_source_change", complete: true, contributorIds: [] };
+      },
+    ],
+    [
+      "external change retains ambiguous contributors",
+      (s) => {
+        s.record.details.correctionType = "stale";
+        s.record.details.origin.kind = "external_source_change";
+      },
+    ],
+    [
+      "duplicate origin identities",
+      (s) => {
+        s.record.details.origin.contributorIds.push("303");
+      },
+    ],
+    [
+      "trailing-newline origin alias",
+      (s) => {
+        s.record.details.origin.contributorIds = ["101\n"];
+      },
+    ],
+    [
+      "origin identity beyond the bound",
+      (s) => {
+        s.record.details.origin.contributorIds = ["a".repeat(201)];
+      },
+    ],
+    [
+      "reviewer lacks affected-owner authority",
+      (s) => {
+        s.binding.domainEvidence.ownerIds = ["303"];
+      },
+    ],
+    [
+      "review participation is not correction authorship",
+      (s) => {
+        s.candidate.role = "reviewer";
+      },
+    ],
+  ])
+    await t.test(name, () => {
+      const s = scenario("data_quality");
+      mutate(s);
+      assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
+      assert.equal(
+        s.input.facts.some((fact) => fact.metricId === "data_quality"),
+        false,
+      );
+    });
+});
+
+test("data_quality: correction proof cannot substitute mutable, unrelated or unchanged evidence", async (t) => {
+  for (const [name, mutate] of [
+    [
+      "unreviewed factual change",
+      (s) => {
+        s.record.details.factualReview = false;
+      },
+    ],
+    [
+      "missing source identity",
+      (s) => {
+        s.record.details.sourceIds = [];
+      },
+    ],
+    [
+      "trailing-newline source identity",
+      (s) => {
+        s.record.details.sourceIds = ["source:1\n"];
+      },
+    ],
+    [
+      "trailing-newline correction identity",
+      (s) => {
+        s.record.details.correctionId += "\n";
+      },
+    ],
+    [
+      "duplicate source identities",
+      (s) => {
+        s.record.details.sourceIds.push("source:1");
+      },
+    ],
+    [
+      "changed revision with identical content",
+      (s) => {
+        s.record.details.before.contentHash = hash;
+      },
+    ],
+    [
+      "unchanged revision with invented new content",
+      (s) => {
+        s.record.details.before.revision = after;
+        s.record.details.before.sourceRevisionUrl = s.record.details.after.sourceRevisionUrl;
+      },
+    ],
+    [
+      "intermediate hash length",
+      (s) => {
+        s.record.details.before.revision = "b".repeat(41);
+        s.record.details.before.sourceRevisionUrl = `https://github.com/synthetic-owner/repository/commit/${s.record.details.before.revision}`;
+      },
+    ],
+    [
+      "trailing-newline content hash",
+      (s) => {
+        s.record.details.before.contentHash += "\n";
+      },
+    ],
+    [
+      "source file from another repository",
+      (s) => {
+        s.record.details.before.sourceRevisionUrl = s.record.details.before.sourceRevisionUrl.replace(
+          "/repository/",
+          "/different/",
+        );
+      },
+    ],
+    [
+      "commit substituted for a file",
+      (s) => {
+        s.record.details.before.sourceRevisionUrl = `https://github.com/synthetic-owner/repository/blob/${before}/catalog/models.json`;
+      },
+    ],
+    [
+      "different files inside the same commit pair",
+      (s) => {
+        s.record.details.before.sourceRevisionUrl = `https://github.com/synthetic-owner/repository/blob/${before}/catalog/models.json`;
+        s.record.details.after.sourceRevisionUrl = `https://github.com/synthetic-owner/repository/blob/${after}/catalog/prices.json`;
+        s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl = s.record.details.after.sourceRevisionUrl;
+      },
+    ],
+    [
+      "mutable branch URL",
+      (s) => {
+        s.record.details.before.sourceRevisionUrl =
+          "https://github.com/synthetic-owner/repository/blob/main/catalog/models.json";
+      },
+    ],
+    [
+      "empty blob locator",
+      (s) => {
+        for (const pin of [s.record.details.before, s.record.details.after])
+          pin.sourceRevisionUrl = `https://github.com/synthetic-owner/repository/blob/${pin.revision}/`;
+        s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl = s.record.details.after.sourceRevisionUrl;
+      },
+    ],
+    [
+      "empty interior file segment",
+      (s) => {
+        for (const pin of [s.record.details.before, s.record.details.after])
+          pin.sourceRevisionUrl = `https://github.com/synthetic-owner/repository/blob/${pin.revision}/catalog//models.json`;
+        s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl = s.record.details.after.sourceRevisionUrl;
+      },
+    ],
+    [
+      "after pin not collected",
+      (s) => {
+        s.record.details.after.revision = "a".repeat(40);
+        s.record.details.after.sourceRevisionUrl = `https://github.com/synthetic-owner/repository/commit/${s.record.details.after.revision}`;
+      },
+    ],
+    [
+      "after locator not collected",
+      (s) => {
+        for (const pin of [s.record.details.before, s.record.details.after])
+          pin.sourceRevisionUrl = `https://github.com/synthetic-owner/repository/blob/${pin.revision}/catalog/models.json`;
+      },
+    ],
+    [
+      "extra private proof field",
+      (s) => {
+        s.record.details.before.privateText = "PRIVATE_SENTINEL";
+      },
+    ],
+  ])
+    await t.test(name, () => {
+      const s = scenario("data_quality");
+      mutate(s);
+      assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
+    });
+});
+
+test("data_quality: later proof versions conserve a correction while separately accepted corrections remain distinct", () => {
+  const s = scenario("data_quality");
+  const original = qualified(s)[0].canonicalKey;
+  s.record.details.correctionVersion = "v2";
+  s.record.details.sourceIds.push("source:2");
+  s.record.details.before.contentHash = "f".repeat(64);
+  assert.equal(qualified(s)[0].canonicalKey, original);
+  for (const [suffix, correctionId] of [
+    ["proof", "correction:1"],
+    ["other", "correction:2"],
+  ]) {
+    const request = structuredClone(s.request);
+    request.id += `:${suffix}`;
+    request.history[0].id += `:${suffix}`;
+    request.history[0].at += 1000;
+    s.state.requests[request.id] = request;
+    s.state.audit.push(request.history[0]);
+    s.binding.domainEvidence.records.push({
+      ...structuredClone(s.record),
+      requestId: request.id,
+      decisionId: request.history[0].id,
+      details: { ...structuredClone(s.record.details), correctionId, correctionVersion: "v3" },
+    });
+  }
+  const result = aggregateDomain(s, run(s));
+  assert.equal(result.rows.length, 1);
+  assert.equal(result.rows[0].value, 2);
+  assert.equal(qualified(s).find((fact) => fact.canonicalKey === original).acceptedAt, acceptedAt);
+  s.state.requests = Object.fromEntries(Object.entries(s.state.requests).reverse());
+  assert.deepEqual(aggregateDomain(s, run(s)), result);
+  for (const status of ["pending", "withdrawn", "appealed", "rejected"]) {
+    for (const request of Object.values(s.state.requests)) request.status = status;
+    assert.deepEqual(qualified(s), []);
+  }
+  for (const request of Object.values(s.state.requests)) request.status = "accepted";
+  s.state.profiles["101"] = { suppressed: true };
+  assert.deepEqual(qualified(s), []);
+});
+
+// Exact pre-correction authority format for these single-request fixtures.
+// This independently pins compatibility rather than calling the current helper.
+function legacyDomainFingerprint(s, bindings = [s.binding]) {
+  return createHash("sha256")
+    .update(JSON.stringify(["localization-review-target/v1", [s.request], [], [JSON.stringify(s.decision)], bindings]))
+    .digest("hex");
+}
+
+test("data_quality: qualifier authority fences legacy correction publications without changing other domain fingerprints", () => {
+  for (const metric of domainMetricIds) {
+    const s = scenario(metric),
+      current = recognitionFingerprint(s.state, [s.binding]);
+    if (metric === "data_quality") assert.notEqual(current, legacyDomainFingerprint(s));
+    else assert.equal(current, legacyDomainFingerprint(s), `${metric}: established publication authority is retained`);
+  }
+  const mixed = scenario("documentation"),
+    bindings = [mixed.binding, scenario("data_quality").binding];
+  assert.notEqual(
+    recognitionFingerprint(mixed.state, bindings),
+    legacyDomainFingerprint(mixed, bindings),
+    "A snapshot bound to a mixed configuration retires as a whole, even without an accepted correction request",
+  );
+});
+
 // These expected clocks follow the canonical definitions, independently of the
 // adapter's domainDateBasis lookup and the registry's advertised selections.
 const candidateDateBases = {
@@ -260,6 +611,7 @@ const candidateDateBases = {
   assumptions_resolved: "acceptedAt",
   market_research: "acceptedAt",
   evidence_manifests: "acceptedAt",
+  data_quality: "acceptedAt",
   documentation: "occurredAt",
   tests: "occurredAt",
   regressions_prevented: "acceptedAt",
@@ -396,6 +748,9 @@ const exclusions = {
   },
   evidence_manifests: (s) => {
     s.record.details.sourceUse = "excluded";
+  },
+  data_quality: (s) => {
+    s.record.details.origin.kind = "unknown";
   },
   documentation: (s) => {
     s.record.details.authorship = "generated";
@@ -815,6 +1170,115 @@ test("accepted documentation retains bounded domain reasons through primary and 
       body,
       /PRIVATE_SENTINEL|domain_secret|private-request|private-review-receipt|substantiveReview/,
     );
+});
+
+test("data_quality: correction provenance stays private and obsolete generic authority is withheld after database reopen", async (t) => {
+  const { harness, components, publicScope } = await import("./harness.mjs");
+  const { createPipeline } = await import("../src/runtime.mjs");
+  const s = scenario("data_quality");
+  // Marker-free fictional data exercises the real-mode permission boundary;
+  // it supplies no actual source installation, factual review or owner receipt.
+  s.input = JSON.parse(JSON.stringify(s.input).replace(/synthetic/gi, "fixture"));
+  // A trusted custom normalizer could previously emit this metric directly and
+  // use the generic same-metric receipt path. Keep that original observation;
+  // only independently qualified correction evidence may add accepted credit.
+  s.candidate = s.input.facts.find((fact) => fact.id === s.candidate.id);
+  s.candidate.metricId = s.binding.sourceMetricId = "data_quality";
+  s.candidate.state = "observed";
+  s.evidence = s.input.evidence.find((entry) => entry.contribution.contributionId === s.candidate.id);
+  s.evidence.contribution.metricIds = ["data_quality"];
+  for (const entry of s.input.evidence) {
+    entry.artifact.publicUrl = entry.artifact.publicUrl.replace("fixture-owner/repository", "example-org/example-repo");
+    if (entry.sourceRevisionUrl)
+      entry.sourceRevisionUrl = entry.sourceRevisionUrl.replace("fixture-owner/repository", "example-org/example-repo");
+    entry.contribution.reasonCodes.push("domain_secret:PRIVATE_CORRECTION");
+  }
+  s.request.locator = s.evidence.artifact.publicUrl;
+  s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl;
+  for (const pin of [s.record.details.before, s.record.details.after])
+    pin.sourceRevisionUrl = pin.sourceRevisionUrl.replace("synthetic-owner/repository", "example-org/example-repo");
+  const payload = JSON.parse(JSON.stringify(fixture.pull_request).replace(/synthetic/gi, "fixture"));
+  payload.html_url = s.request.locator;
+  const h = await harness(t, {
+    markerFreeConfig: true,
+    dataMode: "public",
+    payloads: [payload],
+    normalizerFactory: () => async () => structuredClone(s.input),
+    configure(config) {
+      config.recognitionBindings = [s.binding];
+      const policy = {
+        ...config.policies[0].policy,
+        ...s.policies[0].policy,
+        roles: ["author"],
+        unit: components.metrics.getMetricDefinition("data_quality").definition.unit,
+      };
+      config.policies = [
+        { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "fixture-test-approval" },
+      ];
+    },
+  });
+  h.controlsStore.transaction((state) => {
+    state.requests = s.state.requests;
+    state.audit = s.state.audit;
+  });
+  const publication = await h.runtime.runOnce({ cutoff });
+  assert.equal(publication.state, "published");
+  const snapshotId = publication.publications[0].snapshotId;
+  const read = await h.runtime.source.read(publicScope, snapshotId, new AbortController().signal);
+  assert.equal(read.selected.rows[0].result.value, 1);
+  const accepted = read.selected.portfolioEvidence.filter((entry) => entry.activityState === "accepted");
+  assert.equal(accepted.length, 1);
+  const proofId = accepted[0].contribution.contributionId;
+  const primary = read.selected.evidence.find((entry) => entry.contribution.contributionId === proofId);
+  assert.deepEqual(primary.contribution.reasonCodes, [
+    "independent_recognition_receipt",
+    "domain_metric:data_quality",
+    "domain_clock:accepted_at",
+  ]);
+  assert.equal(primary.sourceRevisionUrl, s.record.details.after.sourceRevisionUrl);
+  const proofPath = `/api/v1/evidence/${proofId}?snapshot=${snapshotId}`;
+  const proof = await h.runtime.app.inject(proofPath);
+  assert.equal(proof.statusCode, 200, proof.body);
+  const profile = await h.runtime.app.inject(`/api/v1/contributors/101?metric=data_quality&snapshot=${snapshotId}`);
+  assert.equal(profile.statusCode, 200, profile.body);
+  assert.equal(profile.json().timeline.filter((entry) => entry.activityState === "accepted").length, 1);
+  for (const publicValue of [JSON.stringify(read.selected), proof.body, profile.body])
+    assert.doesNotMatch(
+      publicValue,
+      /PRIVATE_CORRECTION|domain_secret|private-request|private-review-receipt|correction:1|source:1|correctionVersion|contributorIds|factualReview|contentHash|prior_contributors/,
+    );
+  assert.ok(await h.runtime.aggregateExplanations.read(snapshotId));
+  const confirmed = h.controlsStore.read().pipelinePublications[snapshotId].recognitionFingerprint;
+  assert.equal(confirmed, recognitionFingerprint(h.controlsStore.read(), [s.binding]));
+  assert.notEqual(confirmed, legacyDomainFingerprint(s));
+  h.controlsStore.transaction((state) => {
+    // Preserve the stored document and all proof hashes, but restore the actual
+    // earlier generic qualifier's authorization receipt for this same binding.
+    state.pipelinePublications[snapshotId].recognitionFingerprint = legacyDomainFingerprint(s);
+  });
+  assert.equal(await h.runtime.source.read(publicScope, snapshotId, new AbortController().signal), null);
+  const retired = await h.runtime.app.inject(proofPath);
+  assert.equal(retired.statusCode, 410);
+  assert.equal(retired.json().error, "snapshot_expired_refetch");
+  await h.runtime.stop();
+  await h.reopenDatabase();
+  const restarted = await createPipeline(h.options);
+  t.after(() => restarted.stop());
+  for (const pin of [null, snapshotId])
+    assert.equal(await restarted.source.read(publicScope, pin, new AbortController().signal), null);
+  assert.equal((await restarted.app.inject(proofPath)).statusCode, 410);
+  await assert.rejects(restarted.aggregateExplanations.read(snapshotId), /authorization_changed/);
+  const recomputed = await restarted.runOnce({ cutoff });
+  assert.equal(recomputed.state, "published");
+  const currentId = recomputed.publications[0].snapshotId;
+  const restored = await restarted.source.read(publicScope, currentId, new AbortController().signal);
+  assert.equal(restored.selected.rows[0].result.value, 1);
+  h.controlsStore.transaction((state) => {
+    state.requests[s.request.id].status = "withdrawn";
+  });
+  assert.equal(await restarted.source.read(publicScope, currentId, new AbortController().signal), null);
+  assert.equal((await restarted.app.inject(`/api/v1/evidence/${proofId}?snapshot=${currentId}`)).statusCode, 410);
+  await assert.rejects(restarted.aggregateExplanations.read(currentId), /authorization_changed/);
 });
 
 test("canonical units deduplicate aliases independently of request insertion order", () => {
