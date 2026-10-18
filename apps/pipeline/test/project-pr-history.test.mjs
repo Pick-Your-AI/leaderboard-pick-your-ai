@@ -55,7 +55,7 @@ function harness({ paginated = false } = {}) {
       const url = new URL(value);
       let body,
         headers = {};
-      if (url.pathname === `/repos/${repository.slug}`) body = { id: 2, private: false };
+      if (url.pathname === `/repos/${repository.slug}`) body = { id: 2, private: false, full_name: repository.slug };
       else if (url.pathname === `/repos/${repository.slug}/issues`) {
         body = state.inventory;
         if (paginated) {

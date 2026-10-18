@@ -33,8 +33,18 @@ export interface MetricFact {
   acceptanceReceipt: string | null;
   acceptedBy: string | null;
   subjectActorId: string | null;
-  eventContext: { projects: string[]; workstreams: string[] } | null;
-  currentContext: { projects: string[]; workstreams: string[] } | null;
+  eventContext: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
+  currentContext: {
+    projects: string[];
+    workstreams: string[];
+    workstreamsKnown?: boolean;
+    projectScope?: string[];
+  } | null;
   quantity?: number;
   /** Literal source state, never an inferred classification. */
   rawState?: string;
@@ -403,6 +413,21 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
   const versions = new Map<string, MetricFact[]>();
   for (const fact of input.facts) {
     if (fact.metricId !== policy.metricId) continue;
+    for (const context of [fact.eventContext, fact.currentContext]) {
+      if (context == null) continue;
+      if (
+        !context ||
+        !Array.isArray(context.projects) ||
+        !Array.isArray(context.workstreams) ||
+        (context.workstreamsKnown !== undefined && typeof context.workstreamsKnown !== "boolean") ||
+        (context.projectScope !== undefined && !Array.isArray(context.projectScope)) ||
+        [context.projects, context.workstreams, context.projectScope ?? []].some(
+          (ids) => ids.some((id) => typeof id !== "string" || !id.trim()) || new Set(ids).size !== ids.length,
+        ) ||
+        (context.projectScope !== undefined && context.projects.some((id) => !context.projectScope!.includes(id)))
+      )
+        throw new Error("Invalid membership context");
+    }
     required(fact.id, "Fact ID");
     required(fact.repoId, "Repository ID");
     if (
@@ -494,9 +519,12 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
     if (!reason && (scope.projects.length || scope.workstreams.length)) {
       if (!context) reason = "unknown_membership_context";
       else if (scope.projects.length && !scope.projects.some((id) => context.projects.includes(id)))
-        reason = "project_filter";
+        reason =
+          context.projectScope && scope.projects.some((id) => !context.projectScope!.includes(id))
+            ? "unknown_membership_context"
+            : "project_filter";
       else if (scope.workstreams.length && !scope.workstreams.some((id) => context.workstreams.includes(id)))
-        reason = "workstream_filter";
+        reason = context.workstreamsKnown === false ? "unknown_membership_context" : "workstream_filter";
     }
     if (
       !reason &&
@@ -636,9 +664,10 @@ export function selectPortfolioFacts(
       source.repoId === fact.repoId &&
       source.role === fact.role &&
       source.rawState === fact.rawState &&
-      source.occurredAt === fact.occurredAt &&
-      source.observedAt === fact.observedAt
+      source.occurredAt === fact.occurredAt
     )
+      // Recollection changes no source unit. Its first observation may precede
+      // the later observation from which an independently accepted copy arose.
       acceptedSources.add(source.id);
   }
   // Keep both immutable facts for audit and recomputation, but expose one current
