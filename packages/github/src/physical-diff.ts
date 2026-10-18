@@ -160,6 +160,8 @@ export async function readPinnedGitDiff(options: {
     throw new Error("Invalid Git resource bounds");
   const exec = promisify(execFile);
   const argumentsFor = (ignoreWhitespace: boolean) => [
+    "--no-replace-objects",
+    "--no-lazy-fetch",
     "--no-optional-locks",
     "-C",
     options.repositoryPath,
