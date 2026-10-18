@@ -121,6 +121,7 @@ async function service(page: Page, approved = true) {
     entry.activityState = "accepted";
   });
   let unavailable = false;
+  let corruptAchievementCoverage = false;
   let calls = 0;
   const app = createService({
     approvedAchievementRuleVersion: approved ? "accepted-evidence/v1" : undefined,
@@ -137,7 +138,15 @@ async function service(page: Page, approved = true) {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith("/achievements")) calls++;
     const response = await app.inject({ method: "GET", url: url.pathname + url.search });
-    await route.fulfill({ status: response.statusCode, headers: response.headers, body: response.body });
+    let body = response.body;
+    const headers = { ...response.headers };
+    if (url.pathname.endsWith("/achievements") && response.statusCode === 200 && corruptAchievementCoverage) {
+      const value = response.json();
+      value.coverage = [];
+      body = JSON.stringify(value);
+      headers["content-length"] = String(Buffer.byteLength(body));
+    }
+    await route.fulfill({ status: response.statusCode, headers, body });
   });
   return {
     close: () => app.close(),
@@ -148,6 +157,9 @@ async function service(page: Page, approved = true) {
       current.controls.suppressedActorIds = ["api-a"];
     },
     calls: () => calls,
+    corruptAwardCoverage: () => {
+      corruptAchievementCoverage = true;
+    },
   };
 }
 
@@ -309,6 +321,36 @@ test("category-filtered portfolios withhold broader achievements and do not requ
     });
     await expect(page.getByRole("link", { name: "Qualifying public artifact" })).toBeVisible();
     expect(api.calls()).toBeGreaterThan(before);
+  } finally {
+    await api.close();
+  }
+});
+
+test("contradictory achievement coverage clears visible awards while keeping the valid portfolio available", async ({
+  page,
+}) => {
+  const api = await service(page);
+  try {
+    await page.clock.install();
+    await page.goto("/contributors/api-a?ui=api&snapshot=api-1");
+    const source = page.getByRole("link", { name: "Qualifying public artifact" });
+    await expect(source).toBeVisible();
+    await source.focus();
+    const before = api.calls();
+    api.corruptAwardCoverage();
+    const refreshed = page.waitForResponse((response) => new URL(response.url()).pathname.endsWith("/achievements"));
+    await page.clock.fastForward(30_001);
+    const response = await refreshed;
+    expect(response.status()).toBe(200);
+    const supplied = await response.json();
+    expect(supplied.coverage).toEqual([]);
+    expect(supplied.achievements).toHaveLength(1);
+    await expect.poll(() => api.calls()).toBeGreaterThan(before);
+    await expect(page.getByText("Achievements are unavailable. No award or policy approval is implied.")).toBeVisible();
+    await expect(source).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "First accepted contribution in available scope" })).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Contributor portfolio", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open archived pr_merged card" })).toBeVisible();
   } finally {
     await api.close();
   }

@@ -1049,7 +1049,7 @@ export function participationView(
 ) {
   validateMetricPolicy(policy);
   const scope = canonicalScope(requestedScope);
-  // Newcomer discovery uses organization history, independent of the selected repository lens.
+  // Newcomer discovery uses policy-eligible organization history, independent of selected lenses.
   const historyScope = canonicalScope({
     ...scope,
     period: "custom",
@@ -1057,6 +1057,7 @@ export function participationView(
     repos: [],
     projects: [],
     workstreams: [],
+    roles: [],
   });
   if (history) {
     instant(history.originAt);

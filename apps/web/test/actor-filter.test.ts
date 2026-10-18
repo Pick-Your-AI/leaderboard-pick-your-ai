@@ -51,6 +51,7 @@ test("API, proof, sharing and navigation parameters retain actor selection and d
 
 test("client rejects omitted, widened or invalid actor-selection response labels", () => {
   const value = {
+    schemaVersion: "leaderboard/v1",
     scope: { organization: "Pick-Your-AI", repository: null, workstream: null, start: null, end: null },
     head: { snapshotId: "public-1", revision: 1, publishedAt: "2026-10-18T00:00:00.000Z" },
     snapshotId: "public-1",
