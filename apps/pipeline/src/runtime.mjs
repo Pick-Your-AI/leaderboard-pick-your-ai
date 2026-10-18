@@ -19,6 +19,8 @@ import {
   applyCurrentProjectContexts,
 } from "./project-context.mjs";
 import { readCurrentSourceHealth } from "./source-health.mjs";
+import { readOperatorHealth } from "./operator-health.mjs";
+import { createOperatorPublicationVerifier } from "./operator-publication.mjs";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -189,6 +191,21 @@ export async function createPipeline(options) {
   const scopeKey = c.contracts.publicScopeKey;
   const dataMode = options.dataMode ?? "public";
   if (!["public", "synthetic"].includes(dataMode)) fail("invalid_pipeline_data_mode");
+  const diagnosticOptions = options.operatorDiagnostics;
+  if (
+    diagnosticOptions !== undefined &&
+    (!diagnosticOptions ||
+      typeof diagnosticOptions !== "object" ||
+      Array.isArray(diagnosticOptions) ||
+      Object.keys(diagnosticOptions).some((key) => !["freshnessBudgetSeconds", "configurationCurrent"].includes(key)) ||
+      !Number.isSafeInteger(diagnosticOptions.freshnessBudgetSeconds) ||
+      diagnosticOptions.freshnessBudgetSeconds < 1 ||
+      diagnosticOptions.freshnessBudgetSeconds > 86400 ||
+      typeof diagnosticOptions.configurationCurrent !== "function" ||
+      typeof c.ingestion.OperatorInbox !== "function" ||
+      typeof c.ingestion.parseDispatchOperation !== "function")
+  )
+    fail("invalid_operator_diagnostics_options");
   const assertDataMode = (value) => {
     if (dataMode === "synthetic") return;
     const serialized = JSON.stringify(value);
@@ -286,7 +303,7 @@ export async function createPipeline(options) {
   });
   // Source read locks span the final reviewer reauthentication and synchronous
   // private result transaction. No source/network permission is granted here.
-  async function withAuthorizedComparisonInputs(authorizations, work) {
+  async function withAuthorizedComparisonInputs(authorizations, work, transaction) {
     requireThat(
       authorizations.every(
         (authorization) => authorization.configurationHash === digest(config) && authorization.dataMode === dataMode,
@@ -294,7 +311,7 @@ export async function createPipeline(options) {
       409,
       "Frozen input configuration changed",
     );
-    return db.transaction(async (tx) => {
+    const read = async (tx) => {
       requireThat(await approved(tx), 409, "Frozen input authorization unavailable");
       const sources = authorizations.flatMap((authorization) => authorization.sources);
       const ids = [...new Set(sources.map((source) => source.repositoryId))];
@@ -470,7 +487,8 @@ export async function createPipeline(options) {
         },
         tx,
       );
-    });
+    };
+    return transaction ? read(transaction) : db.transaction(read);
   }
   const defaultSource = options.githubClient
     ? createGithubCollectionSource({
@@ -2112,6 +2130,81 @@ export async function createPipeline(options) {
   function dispatchOnce() {
     return serialize(() => (stopped || !options.webhookDispatch ? "blocked" : dispatch()));
   }
+  const diagnosticConfigurationCurrent = (scope) => {
+    if (!diagnosticOptions || stopped) return false;
+    const current = diagnosticOptions.configurationCurrent({
+      configurationHash: digest(config),
+      configurationVersion: config.version,
+      dataMode,
+      repositoryId: scope.repositoryId,
+      installationId: scope.installationId,
+      sourceGeneration: scope.sourceGeneration ?? scope.generation,
+    });
+    if (current && typeof current.then === "function") void Promise.resolve(current).catch(() => undefined);
+    return current === true;
+  };
+  const verifyReplayPublications = createOperatorPublicationVerifier({
+    config,
+    dataMode,
+    policyVersion: c.metrics.metricRegistryV1.policy_version,
+    computationVersion,
+    scopeKey,
+    publicationScopesAt: (cutoff) =>
+      resolvePublicationWindows(config.scopes, cutoff, c.metrics.resolveMetricWindow).map(({ scope }) => scope),
+    digest,
+    approved,
+    controlsStore,
+    restrictConfiguration,
+    confirmationMatches,
+    aggregateExplanations,
+    recognitionCurrent: (state, confirmation) =>
+      !recognitionBindings.length ||
+      confirmation.recognitionFingerprint === recognitionFingerprint(state, recognitionBindings),
+    configurationCurrent: diagnosticConfigurationCurrent,
+    withAuthorizedInputs: withAuthorizedComparisonInputs,
+  });
+  const operatorOperations = diagnosticOptions
+    ? new c.ingestion.OperatorInbox(db, {
+        now: () => utc(now()),
+        verifyPublications: verifyReplayPublications,
+        readHealth: async (tx, scope) => {
+          const repository = config.repositories.find(
+            (repo) => repo.id === scope.repositoryId && String(repo.installationId) === scope.installationId,
+          );
+          if (!repository || !(await approved(tx))) fail("operation_health_unavailable");
+          const revision = restrictConfiguration(controlsStore.read()).revision;
+          const current = () => {
+            try {
+              return (
+                diagnosticConfigurationCurrent(scope) &&
+                restrictConfiguration(controlsStore.read()).revision === revision
+              );
+            } catch {
+              return false;
+            }
+          };
+          if (!current()) fail("operation_health_unavailable");
+          const read = await readOperatorHealth(tx, {
+            scope,
+            repository,
+            asOf: utc(now()),
+            freshnessBudgetSeconds: diagnosticOptions.freshnessBudgetSeconds,
+            protocol: c.ingestion,
+            verifyPublications: verifyReplayPublications,
+            readQuota: async () => {
+              if (!options.githubClient?.forRepository || typeof options.sourceId !== "string") return null;
+              const client = options.githubClient.forRepository(scope.repositoryId);
+              if (typeof client.readQuota !== "function") return null;
+              return client.readQuota(options.sourceId, () => {
+                if (!current()) fail("operation_health_changed");
+              });
+            },
+          });
+          if (!(await approved(tx))) fail("operation_health_changed");
+          return { health: read.health, confirmCurrent: () => current() && read.confirmCurrent() === true };
+        },
+      })
+    : null;
   async function policyInputGuard(snapshotId, input, transaction) {
     if (!input.scope) fail("policy_input_scope_unavailable");
     const read = await source.read(input.scope, snapshotId, new AbortController().signal, transaction);
@@ -2347,6 +2440,7 @@ export async function createPipeline(options) {
         controlsServer = c.controls.createControlsServer({
           ...options.controlsAuthentication,
           store: controlsStore,
+          operations: options.controlsAuthentication.operations ?? operatorOperations,
           policyComparisons: { comparisons: policyComparisons, withAuthorizedInputs: withAuthorizedComparisonInputs },
         });
         await new Promise((resolve, reject) => {
@@ -2412,6 +2506,7 @@ export async function createPipeline(options) {
     collection,
     inbox,
     outbox,
+    operations: operatorOperations,
     dispatchOnce,
     runOnce,
     applyCorrection,
