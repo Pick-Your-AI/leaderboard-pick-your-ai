@@ -8,6 +8,7 @@ interface Status {
   counts: Record<string, number | null>;
   quarantined: Array<{ deliveryId: string; attempts: number; reason: string; revision: string }>;
   runs: Array<{
+    sourceGeneration: string | null;
     family: string;
     mode: string;
     state: string;
@@ -17,6 +18,7 @@ interface Status {
     lastSuccessAt: string | null;
   }>;
   receipts: Array<{
+    sourceGeneration: string | null;
     id: string;
     deliveryId: string;
     operatorId: string;
@@ -45,6 +47,7 @@ export function Operations({ session }: { session: Session }) {
     setBusy(false);
   }
   useEffect(() => {
+    clear();
     const hide = () => {
       ++generation.current;
       clear();
@@ -146,7 +149,7 @@ export function Operations({ session }: { session: Session }) {
       {data && (
         <>
           <p>
-            Repository {data.repositoryId}, source generation {data.sourceGeneration}, authorization revision{" "}
+            Repository {data.repositoryId}, current source generation {data.sourceGeneration}, authorization revision{" "}
             {data.authorityRevision}, policy {data.policyVersion}.
           </p>
           <p>{data.meaning}</p>
@@ -162,8 +165,8 @@ export function Operations({ session }: { session: Session }) {
           {data.runs.length === 0 && <p>No retained collection run is available.</p>}
           {data.runs.map((r, i) => (
             <p key={i}>
-              {r.family} · {r.mode} · {r.state} · pages {r.pages}, items {r.items}, expected{" "}
-              {r.expectedItems ?? "unknown"}, last success {r.lastSuccessAt ?? "unknown"}
+              Source generation {r.sourceGeneration ?? "unknown"} · {r.family} · {r.mode} · {r.state} · pages {r.pages},
+              items {r.items}, expected {r.expectedItems ?? "unknown"}, last success {r.lastSuccessAt ?? "unknown"}
             </p>
           ))}
           <h3>Quarantined inbox deliveries</h3>
@@ -197,8 +200,9 @@ export function Operations({ session }: { session: Session }) {
           <h3>Retained replay receipts</h3>
           {data.receipts.map((r) => (
             <p key={r.id}>
-              Receipt {r.id} · delivery {r.deliveryId} · operator {r.operatorId} · {r.reason} · policy {r.policyVersion}{" "}
-              · before {r.beforeRevision} · queued {r.queuedRevision}. Resulting publication revision: unknown.
+              Source generation {r.sourceGeneration ?? "unknown"} · receipt {r.id} · delivery {r.deliveryId} · operator{" "}
+              {r.operatorId} · {r.reason} · policy {r.policyVersion} · before {r.beforeRevision} · queued{" "}
+              {r.queuedRevision}. Resulting publication revision: unknown.
             </p>
           ))}
           {Object.values(data.truncated).some(Boolean) && (

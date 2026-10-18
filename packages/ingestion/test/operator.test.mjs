@@ -125,3 +125,26 @@ test("diagnostics bound retained rows and changed installation excludes old deli
     ),
   );
 });
+
+test("retained run and replay history carries its own source generation after a source epoch changes", async (t) => {
+  const { db, id, ops } = await fixture(t);
+  const first = await ops.read(9, allow);
+  await ops.replay(
+    {
+      repositoryId: 9,
+      deliveryId: id,
+      expectedRevision: first.quarantined[0].revision,
+      operatorId: "7",
+      reason: "operator_reviewed",
+    },
+    allow,
+  );
+  await db.query(
+    "INSERT INTO leaderboard_ingestion.collection_runs(run_id,repository_id,family,mode,until_at,access_generation) VALUES('historic',9,'issues','audit',clock_timestamp(),1)",
+  );
+  await db.query("UPDATE leaderboard_ingestion.repository_access SET generation=2 WHERE repository_id=9");
+  const history = await ops.read(9, allow);
+  assert.equal(history.sourceGeneration, "2");
+  assert.equal(history.runs[0].sourceGeneration, "1");
+  assert.equal(history.receipts[0].sourceGeneration, "1");
+});

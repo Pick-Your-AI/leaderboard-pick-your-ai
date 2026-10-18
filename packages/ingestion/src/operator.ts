@@ -9,7 +9,8 @@ const reasons = ["source_recovered", "normalization_corrected", "operator_review
 const failure = (v: unknown) =>
   ["source_unavailable", "normalization_failed", "unsupported_payload"].includes(String(v)) ? v : "unknown";
 const digest = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex");
-const count = (v: unknown) => (Number.isSafeInteger(Number(v)) && Number(v) >= 0 ? Number(v) : null);
+const count = (v: unknown) =>
+  v !== null && v !== undefined && v !== "" && Number.isSafeInteger(Number(v)) && Number(v) >= 0 ? Number(v) : null;
 function scope(repositoryId: number) {
   if (!Number.isSafeInteger(repositoryId) || repositoryId < 1) throw new Error("invalid_operation_scope");
 }
@@ -66,7 +67,7 @@ export class OperatorInbox {
       ).rows;
       const runs = (
         await tx.query(
-          `SELECT family,mode,state,page_count,item_count,expected_count,last_success_at FROM leaderboard_ingestion.collection_runs
+          `SELECT family,mode,state,page_count,item_count,expected_count,last_success_at,access_generation FROM leaderboard_ingestion.collection_runs
         WHERE repository_id=$1 ORDER BY until_at DESC,run_id LIMIT 51`,
           [repositoryId],
         )
@@ -93,6 +94,7 @@ export class OperatorInbox {
           revision: revision(repositoryId, generation, a, r),
         })),
         runs: runs.slice(0, 50).map((r) => ({
+          sourceGeneration: count(r.access_generation) === null ? null : String(r.access_generation),
           family: (sourceFamilies as readonly unknown[]).includes(r.family) ? r.family : "unknown",
           mode: ["backfill", "reconcile", "audit"].includes(String(r.mode)) ? r.mode : "unknown",
           state: ["pending", "complete", "failed"].includes(String(r.state)) ? r.state : "unknown",
@@ -104,6 +106,7 @@ export class OperatorInbox {
         receipts: receipts.slice(0, 50).map((r) => {
           const audit = r.audit as Record<string, unknown>;
           return {
+            sourceGeneration: count(audit.sourceGeneration) === null ? null : String(audit.sourceGeneration),
             id: r.receipt_id,
             deliveryId: r.delivery_id,
             operatorId: identity(audit.operatorId) ? audit.operatorId : null,
