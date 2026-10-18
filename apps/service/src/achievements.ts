@@ -5,7 +5,7 @@ export const ACHIEVEMENT_RULE_VERSION = "accepted-evidence/v1";
 export function acceptedAchievements(read: PublicRead, actorId: string) {
   if (!read.selected.actors.some((entry) => entry.actorId === actorId && entry.actor.kind === "user")) return [];
   const { scope, snapshot } = read.selected;
-  const through = scope.end ?? snapshot.generatedAt;
+  const through = Date.parse(scope.end ?? snapshot.generatedAt);
   if (
     !snapshot.coverage.length ||
     snapshot.coverage.some(
@@ -17,11 +17,11 @@ export function acceptedAchievements(read: PublicRead, actorId: string) {
         !coverage.windowStart ||
         !coverage.windowEnd ||
         !coverage.sourceWatermark ||
-        coverage.windowEnd < through ||
-        coverage.sourceWatermark < through ||
+        !(Date.parse(coverage.windowEnd) >= through) ||
+        !(Date.parse(coverage.sourceWatermark) >= through) ||
         (scope.start
-          ? coverage.windowStart > scope.start
-          : !coverage.knownStart || coverage.windowStart > coverage.knownStart),
+          ? !(Date.parse(coverage.windowStart) <= Date.parse(scope.start))
+          : !coverage.knownStart || !(Date.parse(coverage.windowStart) <= Date.parse(coverage.knownStart))),
     )
   )
     return [];
@@ -37,8 +37,12 @@ export function acceptedAchievements(read: PublicRead, actorId: string) {
     )
     .sort(
       (a, b) =>
-        a.occurredAt!.localeCompare(b.occurredAt!) ||
-        a.contribution.contributionId.localeCompare(b.contribution.contributionId),
+        Date.parse(a.occurredAt!) - Date.parse(b.occurredAt!) ||
+        (a.contribution.contributionId < b.contribution.contributionId
+          ? -1
+          : a.contribution.contributionId > b.contribution.contributionId
+            ? 1
+            : 0),
     );
   const award = (id: string, label: string, evidence: PortfolioEvidence | undefined) =>
     evidence
