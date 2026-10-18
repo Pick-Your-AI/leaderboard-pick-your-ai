@@ -13,6 +13,8 @@ const equal = (a, b) =>
   typeof a === "string" &&
   typeof b === "string" &&
   a.length === b.length &&
+  // Equal string lengths can still encode to unequal UTF-8 buffer lengths.
+  Buffer.byteLength(a) === Buffer.byteLength(b) &&
   timingSafeEqual(Buffer.from(a), Buffer.from(b));
 const sessionCookie = "__Host-controls_session";
 const loginCookie = "__Host-controls_login";
