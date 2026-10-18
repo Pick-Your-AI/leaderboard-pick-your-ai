@@ -565,3 +565,50 @@ test("future observations and unknown ratio outcomes remain explicitly accounted
   assert.deepEqual([ratio.rows[0].numerator, ratio.rows[0].denominator], [1, 1]);
   assert.ok(ratio.audit.some((entry) => entry.reason === "unknown_ratio_outcome" && entry.factIds.includes("unknown")));
 });
+
+
+test("rank movement indexes large prior cohorts and preserves first-match duplicate semantics", () => {
+  const size = 10_000;
+  const before = board([fact("indexed")]);
+  const after = { ...before };
+  let actorReads = 0;
+  before.rows = Array.from({ length: size }, (_, index) => ({
+    get actorId() {
+      assert.ok(++actorReads <= size * 3, "prior actor lookups must stay linear");
+      return `synthetic-indexed-${index}`;
+    },
+    value: size - index,
+    rank: index + 1,
+    evidence: [],
+  }));
+  after.rows = Array.from({ length: size }, (_, index) => ({
+    actorId: `synthetic-indexed-${index}`,
+    value: index + 1,
+    rank: size - index,
+    evidence: [],
+  }));
+  const movement = compareRankMovement(before, after);
+  assert.equal(movement.length, size);
+  for (let index = 0; index < size; index++)
+    assert.deepEqual(movement[index], {
+      actorId: `synthetic-indexed-${index}`,
+      state: "comparable",
+      delta: index + 1 - (size - index),
+      reason: null,
+    });
+  assert.ok(actorReads <= size * 3);
+
+  const row = { actorId: "synthetic-duplicate", value: 1, rank: 1, evidence: [] };
+  for (const firstRank of [1, null]) {
+    const result = compareRankMovement(
+      { ...before, rows: [{ ...row, rank: firstRank }, { ...row, rank: 9 }] },
+      { ...after, rows: [row] },
+    );
+    assert.deepEqual(result, [{
+      actorId: row.actorId,
+      state: firstRank === null ? "unavailable" : "comparable",
+      delta: firstRank === null ? null : 0,
+      reason: firstRank === null ? "unranked_metric" : null,
+    }]);
+  }
+});

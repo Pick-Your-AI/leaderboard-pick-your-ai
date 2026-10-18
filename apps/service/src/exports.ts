@@ -1,3 +1,4 @@
+import type { PublicRankComparison, RankMovement } from "./rank-comparison.js";
 import type { Actor, MetricRegistry, MetricResult, PendingCount } from "@pick-your-ai/contracts";
 import { PublicReadError, safePublicUrl, type PublicRead, type PublicDiagnostic } from "./public-source.js";
 
@@ -12,6 +13,7 @@ export const PUBLIC_EXPORT_LIMITS = Object.freeze({
 });
 const exportVersion = "public-export/v1";
 interface ExportBoard {
+  comparison?: PublicRankComparison;
   metric: MetricRegistry["metrics"][number];
   ranking: PublicRead["selected"]["ranking"][number] | null;
   rows: {
@@ -21,6 +23,7 @@ interface ExportBoard {
     result: MetricResult;
     evidenceIds: string[];
     pending?: PendingCount;
+    movement?: RankMovement;
   }[];
   totalRows: number;
   nextCursor: string | null;
@@ -109,6 +112,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
   const snapshot = read.selected.snapshot;
   // Deliberately omit raw/provider fields, display names, internal event IDs and control lists.
   const document = {
+    ...(board.comparison === undefined ? {} : { comparison: board.comparison }),
     exportSchemaVersion: exportVersion,
     schemaVersion: snapshot.schemaVersion,
     snapshotId: snapshot.snapshotId,
@@ -136,6 +140,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
       result: row.result,
       evidenceIds: [...row.evidenceIds],
       ...(row.pending === undefined ? {} : { pending: row.pending }),
+      ...(row.movement === undefined ? {} : { movement: row.movement }),
     })),
     evidence,
     pendingEvidence,
@@ -187,6 +192,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     "p75",
     "pending",
     "pending_evidence",
+    ...(board.comparison === undefined ? [] : ["comparison", "movement"]),
   ];
   const s = document.scope;
   const metadata = [
@@ -223,7 +229,9 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     lines.push(serialized);
   }
   line(columns);
-  line(["metadata", ...metadata, ...Array<string | null>(columns.length - metadata.length - 1).fill(null)]);
+  const empty = Array<string | null>(columns.length - metadata.length - 1).fill(null);
+  if (board.comparison !== undefined) empty[empty.length - 2] = boundedJson(board.comparison);
+  line(["metadata", ...metadata, ...empty]);
   const byId = new Map(evidence.map((entry) => [entry.evidenceId, entry]));
   for (const row of document.rows) {
     const diagnostic = document.diagnostics.find(
@@ -249,6 +257,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
       diagnostic?.p75 ?? null,
       row.pending === undefined ? null : boundedJson(row.pending),
       boundedJson((row.pending?.evidenceIds ?? []).map(serializeEvidence)),
+      ...(board.comparison === undefined ? [] : [boundedJson(board.comparison), boundedJson(row.movement ?? null)]),
     ]);
   }
   return { body: lines.join(""), contentType: "text/csv; charset=utf-8" };

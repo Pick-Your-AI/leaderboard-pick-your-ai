@@ -431,11 +431,19 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
   for (const bucket of versions.values()) {
     const revision = Math.max(...bucket.map((fact) => fact.revision));
     const latest = bucket.filter((fact) => fact.revision === revision);
-    if (new Set(latest.map(stableJSON)).size !== 1) {
+    // The same source fact can be observed again without changing its revision.
+    // Observation time describes collection, not a competing semantic fact.
+    const semantic = (fact: MetricFact) => {
+      const { observedAt, ...rest } = fact;
+      return stableJSON(rest);
+    };
+    if (new Set(latest.map(semantic)).size !== 1) {
       reject(latest, "conflicting_revision");
       continue;
     }
-    current.push(latest[0]!);
+    current.push(
+      latest.sort((a, b) => compareInstants(a.observedAt, b.observedAt) || compare(a.observedAt, b.observedAt))[0]!,
+    );
   }
   const canonical = new Map<string, MetricFact[]>();
   for (const fact of current) {
@@ -820,7 +828,21 @@ export function stableJSON(value: unknown): string {
     .join(",")}}`;
 }
 
-function compatibleScopes(before: MetricAggregate, after: MetricAggregate): boolean {
+/** Minimum immutable history used for movement, excluding audit/provider records. */
+export type RankComparisonInput = Pick<
+  MetricAggregate,
+  | "metricId"
+  | "policyVersion"
+  | "policySignature"
+  | "definitionVersion"
+  | "unit"
+  | "aggregation"
+  | "scope"
+  | "cutoff"
+  | "backfillRevision"
+  | "coverage"
+> & { rows: Pick<AggregateRow, "actorId" | "value" | "rank" | "evidence">[] };
+function compatibleScopes(before: RankComparisonInput, after: RankComparisonInput): boolean {
   if (stableJSON(before.scope) === stableJSON(after.scope)) return true;
   const { from: beforeFrom, to: beforeTo, ...beforeFilters } = before.scope;
   const { from: afterFrom, to: afterTo, ...afterFilters } = after.scope;
@@ -836,8 +858,8 @@ function compatibleScopes(before: MetricAggregate, after: MetricAggregate): bool
 }
 
 export function compareRankMovement(
-  before: MetricAggregate,
-  after: MetricAggregate,
+  before: RankComparisonInput,
+  after: RankComparisonInput,
 ): {
   actorId: string;
   state: "comparable" | "new_entrant" | "unavailable";
@@ -876,8 +898,12 @@ export function compareRankMovement(
       after.scope.from === null || item.effectiveAt === null || instant(item.effectiveAt) >= instant(after.scope.from)
     );
   });
+  const beforeRows = new Map<string, RankComparisonInput["rows"][number]>();
+  // Preserve the first matching row used by the previous lookup, including for
+  // callers that have not independently validated actor uniqueness.
+  for (const row of before.rows) if (!beforeRows.has(row.actorId)) beforeRows.set(row.actorId, row);
   return after.rows.map((row) => {
-    const previous = before.rows.find((item) => item.actorId === row.actorId);
+    const previous = beforeRows.get(row.actorId);
     if (reason || missingComparisonHistory || lateHistory || corrected || row.rank === null || previous?.rank === null)
       return {
         actorId: row.actorId,
