@@ -1470,6 +1470,8 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       return none("repository_not_authorized_for_normalization");
     if (!text(input.policyVersion) || !time(input.observedAt))
       throw new Error("Pipeline policy and observation time are required");
+    let repositoryClient: GithubReadClient | undefined;
+    const client = () => (repositoryClient ??= options.client.forRepository(input.repository.id));
     if (input.family === "relationships" || input.family === "project_history") {
       const match = input.fact.sourceUrl.match(
         new RegExp(`^https://github\\.com/${input.repository.slug.replaceAll(".", "\\.")}/(issues|pull)/([1-9]\\d*)$`),
@@ -1479,7 +1481,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       if (input.family === "project_history" && input.fact.historySubjectId === undefined)
         return none("project_history_subject_identity_not_collected");
       const records = await readTypedIssueHistory({
-        client: options.client,
+        client: client(),
         source: options.source,
         repository: input.repository,
         number: Number(match[2]),
@@ -1561,7 +1563,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
             )
           : undefined;
         const snapshot = await readPublicSubjectProjectSnapshot({
-          client: options.client,
+          client: client(),
           source: options.source,
           repository: input.repository,
           subjectId: input.fact.projectSubjectId,
@@ -1594,7 +1596,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         };
       }
       const snapshot = await readPublicProjectSnapshot({
-        client: options.client,
+        client: client(),
         source: options.source,
         repository: input.repository,
         itemId: input.fact.subjectId,
@@ -1675,7 +1677,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         endpoint = `/repos/${input.repository.slug}/issues/events/${input.fact.subjectId}`;
       } else if (input.family === "discussions" && discussion) {
         const [owner, name] = input.repository.slug.split("/");
-        const data = await options.client.graphql<{ repository?: Record<string, unknown> }>(
+        const data = await client().graphql<{ repository?: Record<string, unknown> }>(
           options.source,
           `query($owner:String!, $name:String!, $number:Int!) {
             repository(owner:$owner, name:$name) {
@@ -1704,7 +1706,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       } else if (input.family === "reviews" && pull && /^pullrequestreview-\d+$/.test(fragment ?? "")) {
         family = "review";
         endpoint = `/repos/${input.repository.slug}/pulls/${pull[1]}/reviews/${fragment!.slice("pullrequestreview-".length)}`;
-        pullResource = await options.client.rest(
+        pullResource = await client().rest(
           options.source,
           `/repos/${input.repository.slug}/pulls/${pull[1]}`,
           options.assertAuthorized,
@@ -1726,8 +1728,8 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         endpoint = `/repos/${input.repository.slug}/releases/tags/${release[1]}`;
       } else return none("source_family_requires_exact_event_enrichment");
       const [repositoryPayload, payload] = await Promise.all([
-        options.client.rest(options.source, `/repos/${input.repository.slug}`, options.assertAuthorized),
-        discussionPayload ?? options.client.rest(options.source, endpoint, options.assertAuthorized),
+        client().rest(options.source, `/repos/${input.repository.slug}`, options.assertAuthorized),
+        discussionPayload ?? client().rest(options.source, endpoint, options.assertAuthorized),
       ]);
       if (
         !object(repositoryPayload) ||
@@ -1768,7 +1770,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       // Hydration proves immutable creation/submission fields. It does not prove
       // any current-state field editor, closer, resolver or body-edit history.
       if (family === "review" && pull) {
-        const cohort = await options.client.scanRest<unknown>({
+        const cohort = await client().scanRest<unknown>({
           source: options.source,
           key: `review-cohort:${input.repository.id}:${input.factKey}:${input.fact.sourceRevision}`,
           url: `/repos/${input.repository.slug}/pulls/${pull[1]}/reviews?per_page=100`,
