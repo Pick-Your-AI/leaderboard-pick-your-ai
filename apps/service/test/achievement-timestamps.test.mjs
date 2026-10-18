@@ -182,3 +182,76 @@ test("the browser accepts contract-valid offset instants and enforces the same h
     assert.throws(() => achievements(changed, selected, "synthetic-actor"), occurredAt);
   }
 });
+
+test("profile pages preserve exact source order, true ties and unknown occurrence times", async (t) => {
+  const times = [
+    "2026-10-17T10:00:00.0001Z",
+    "2026-10-17T06:00:00.0009-04:00",
+    "2026-10-17T10:00:00.1000Z",
+    "2026-10-17T06:00:00.1-04:00",
+    null,
+    "2026-10-17T10:00:01Z",
+    null,
+  ];
+  const value = fixture(times);
+  const app = createService({ source: { read: async () => structuredClone(value) } });
+  t.after(() => app.close());
+  const parameters = new URLSearchParams({ snapshot: "synthetic-snapshot", limit: "2" });
+  const timeline = [];
+  do {
+    const url = `/api/v1/contributors/synthetic-actor?${parameters}`;
+    const response = await app.inject(url);
+    assert.equal(response.statusCode, 200, response.body);
+    const body = response.json();
+    assert.equal(body.evidenceCount, times.length);
+    assert.deepEqual((await app.inject(url)).json(), body, "replaying a pinned page is idempotent");
+    timeline.push(...body.timeline);
+    if (!body.nextCursor) break;
+    parameters.set("cursor", body.nextCursor);
+    assert.ok(timeline.length < times.length, "pagination must finish without repeating evidence");
+  } while (true);
+  assert.deepEqual(
+    timeline.map((entry) => entry.contribution.contributionId),
+    [5, 2, 3, 1, 0, 4, 6].map((index) => `synthetic-evidence-${index}`),
+  );
+  for (const entry of timeline) {
+    const index = Number(entry.contribution.contributionId.split("-").at(-1));
+    assert.equal(entry.occurredAt, times[index], "the source timestamp remains unchanged");
+  }
+});
+
+test("activity ranges retain sub-millisecond occurrence and collection bounds", async (t) => {
+  const value = fixture(["2026-10-17T10:00:00.0009Z", "2026-10-17T06:00:00.0001-04:00"]);
+  value.selected.portfolioEvidence[0].observedAt = "2026-10-17T12:00:00.0009Z";
+  value.selected.portfolioEvidence[1].observedAt = "2026-10-17T08:00:00.0001-04:00";
+  const app = createService({ source: { read: async () => structuredClone(value) } });
+  t.after(() => app.close());
+  const response = await app.inject("/api/v1/activity");
+  assert.equal(response.statusCode, 200, response.body);
+  const [group] = response.json().groups;
+  assert.equal(group.factCount, 2);
+  assert.equal(group.earliestOccurredAt, value.selected.portfolioEvidence[1].occurredAt);
+  assert.equal(group.latestOccurredAt, value.selected.portfolioEvidence[0].occurredAt);
+  assert.equal(group.firstCollectedAt, value.selected.portfolioEvidence[1].observedAt);
+  assert.equal(group.lastCollectedAt, value.selected.portfolioEvidence[0].observedAt);
+});
+
+test("canonical activity facts reject fractional time conflicts but retain equivalent encodings", async (t) => {
+  const value = fixture(["2026-10-17T10:00:00.0001Z"]);
+  const original = value.selected.portfolioEvidence[0];
+  const duplicate = structuredClone(original);
+  duplicate.contribution.contributionId = "synthetic-duplicate";
+  duplicate.occurredAt = "2026-10-17T06:00:00.0009-04:00";
+  value.selected.portfolioEvidence.push(duplicate);
+  const app = createService({ source: { read: async () => structuredClone(value) } });
+  t.after(() => app.close());
+  const conflict = await app.inject("/api/v1/activity");
+  assert.equal(conflict.statusCode, 503, conflict.body);
+  assert.equal(conflict.json().error, "activity_fact_conflict");
+  original.occurredAt = "2026-10-17T10:00:00.1000Z";
+  duplicate.occurredAt = "2026-10-17T06:00:00.1-04:00";
+  const equivalent = await app.inject("/api/v1/activity");
+  assert.equal(equivalent.statusCode, 200, equivalent.body);
+  assert.equal(equivalent.json().groups[0].factCount, 1);
+  assert.equal(equivalent.json().groups[0].proofCount, 2);
+});

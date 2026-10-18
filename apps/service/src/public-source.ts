@@ -17,6 +17,7 @@ import {
   type PendingCount,
   type Snapshot,
 } from "@pick-your-ai/contracts";
+import { compareSourceInstants } from "./source-time.js";
 
 /** An exact materialized scope, never a request to sum overlapping aggregates. */
 export interface PublicScope {
@@ -324,8 +325,8 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
           actorIds.has(entry.contribution.actorId ?? "") &&
           (scope.repository === null || entry.artifact.repositoryId === scope.repository) &&
           (scope.start === null ||
-            (entry.occurredAt !== null && Date.parse(entry.occurredAt) >= Date.parse(scope.start))) &&
-          (scope.end === null || (entry.occurredAt !== null && Date.parse(entry.occurredAt) < Date.parse(scope.end))),
+            (entry.occurredAt !== null && compareSourceInstants(entry.occurredAt, scope.start) >= 0)) &&
+          (scope.end === null || (entry.occurredAt !== null && compareSourceInstants(entry.occurredAt, scope.end) < 0)),
       );
   const evidence = projectEvidence(selected.evidence);
   const portfolioInput = selected.portfolioEvidence ?? [];
@@ -392,11 +393,11 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
       scope.end !== null &&
       coverage.state === "complete" &&
       coverage.knownStart !== null &&
-      Date.parse(coverage.knownStart) <= Date.parse(scope.start) &&
+      compareSourceInstants(coverage.knownStart, scope.start) <= 0 &&
       coverage.windowStart !== null &&
-      Date.parse(coverage.windowStart) <= Date.parse(scope.start) &&
+      compareSourceInstants(coverage.windowStart, scope.start) <= 0 &&
       coverage.windowEnd !== null &&
-      Date.parse(coverage.windowEnd) >= Date.parse(scope.end) &&
+      compareSourceInstants(coverage.windowEnd, scope.end) >= 0 &&
       coverage.missingPages === 0 &&
       coverage.permissionsMissing.length === 0 &&
       coverage.sourceErrors.length === 0;
