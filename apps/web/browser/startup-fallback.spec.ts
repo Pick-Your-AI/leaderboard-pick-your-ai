@@ -2,13 +2,13 @@ import { test, expect, type Page } from "@playwright/test";
 
 const wallPath = "/live?ui=api&repository=synthetic-repository&snapshot=synthetic-snapshot";
 
-async function expectStaticFallback(page: Page) {
+async function expectStaticFallback(page: Page, requestedPath = wallPath) {
   const fallback = page.getByRole("main", { name: "Live data has not loaded" });
   await expect(fallback).toBeVisible({ timeout: 2000 });
   await expect(fallback).toContainText("Source freshness is unknown");
   await expect(fallback).toContainText("reload this same page");
   await expect(page.getByRole("table")).toHaveCount(0);
-  expect(new URL(page.url()).pathname + new URL(page.url()).search).toBe(wallPath);
+  expect(new URL(page.url()).pathname + new URL(page.url()).search).toBe(requestedPath);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }
 
@@ -82,3 +82,34 @@ test("a failed entry script keeps the static unknown state and original wall URL
   expect(publicReads).toBe(0);
   await page.screenshot({ path: testInfo.outputPath("startup-entry-script-failed.png"), fullPage: true });
 });
+
+for (const { surface, requestedPath, modulePath } of [
+  {
+    surface: "leaderboard",
+    requestedPath: "/leaderboards/pr_merged?ui=api&repository=synthetic-repository&snapshot=synthetic-snapshot",
+    modulePath: /\/assets\/App-[^/]+\.js$/,
+  },
+  { surface: "live wall", requestedPath: wallPath, modulePath: /\/assets\/Wall-[^/]+\.js$/ },
+]) {
+  test(`a failed deferred ${surface} script preserves the static unknown state and requested URL`, async ({ page }) => {
+    let blockedDeferredScripts = 0;
+    let publicReads = 0;
+    await page.route("**/*", (route) => {
+      const request = route.request();
+      const pathname = new URL(request.url()).pathname;
+      if (pathname.startsWith("/api/v1/")) publicReads++;
+      if (request.resourceType() === "script" && modulePath.test(pathname)) {
+        blockedDeferredScripts++;
+        return route.abort("failed");
+      }
+      return route.continue();
+    });
+    await page.goto(requestedPath);
+    await expect.poll(() => blockedDeferredScripts).toBeGreaterThan(0);
+    // The entry script ran and selected API mode before this later script failed.
+    expect(await page.evaluate(() => localStorage.getItem("pyai.ui.mode"))).toBe("api");
+    await expectStaticFallback(page, requestedPath);
+    await expect(page.locator("noscript")).toBeHidden();
+    expect(publicReads).toBe(0);
+  });
+}
