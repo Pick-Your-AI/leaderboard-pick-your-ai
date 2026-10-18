@@ -705,6 +705,9 @@ export function RemoteApp() {
           event.altKey
         )
           return;
+        // The display has its own bounded page lifecycle. A normal same-tab
+        // navigation tears down this reader and its in-flight requests first.
+        if (new URL(target.href).pathname === "/live") return;
         event.preventDefault();
         if (target.hasAttribute("data-api-proof")) {
           proofOpener.current = target;
