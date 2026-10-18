@@ -4,8 +4,10 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,10 +16,74 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = "8.30.1"
 FINDINGS = 23
+HISTORY_OPTIONS = (
+    "--all", "--full-history", "--diff-merges=first-parent",
+    "--text", "--no-ext-diff", "--no-textconv",
+)
+MAX_TRACE_BYTES = 16 * 1024 * 1024
+MAX_TRACE_LINE_BYTES = 128 * 1024
 
 
 class RepositoryIgnoreFile(RuntimeError):
     """The pinned scanner always loads the source-root ignore file if present."""
+
+
+class HistoryCompletionError(RuntimeError):
+    """The actual Git history command has no unambiguous successful completion."""
+
+
+def require_history_completion(trace, repository):
+    """Bind bounded, private Git Trace2 events to the scanner's exact history argv."""
+    message = "Git history completion was not verified; no pass recorded"
+    sessions = {}
+    total = 0
+
+    def malformed(_):
+        raise HistoryCompletionError(message)
+
+    def unique_fields(pairs):
+        row = {}
+        for key, value in pairs:
+            if key in row:
+                raise HistoryCompletionError(message)
+            row[key] = value
+        return row
+
+    try:
+        with trace.open("rb") as stream:
+            while line := stream.readline(MAX_TRACE_LINE_BYTES + 1):
+                total += len(line)
+                if (total > MAX_TRACE_BYTES or len(line) > MAX_TRACE_LINE_BYTES
+                        or not line.endswith(b"\n")):
+                    raise HistoryCompletionError(message)
+                row = json.loads(line, object_pairs_hook=unique_fields, parse_constant=malformed)
+                if (not isinstance(row, dict) or not isinstance(row.get("event"), str)
+                        or not isinstance(row.get("sid"), str) or not row["sid"]):
+                    raise HistoryCompletionError(message)
+                session = sessions.setdefault(row["sid"], {"control": [], "last": None})
+                if len(sessions) > 64:
+                    raise HistoryCompletionError(message)
+                session["last"] = row["event"]
+                if row["event"] in ("version", "start", "exit", "atexit", "signal"):
+                    session["control"].append(row)
+                    if len(session["control"]) > 8:
+                        raise HistoryCompletionError(message)
+    except (OSError, ValueError, RecursionError):
+        raise HistoryCompletionError(message) from None
+
+    expected = ["-C", os.path.normpath(str(repository)), "log", "-p", "-U0", *HISTORY_OPTIONS]
+    matches = [session for session in sessions.values() if any(
+        row["event"] == "start" and isinstance(row.get("argv"), list)
+        and row["argv"][1:] == expected for row in session["control"])]
+    if len(matches) != 1:
+        raise HistoryCompletionError(message)
+    session = matches[0]
+    control = session["control"]
+    if ([row["event"] for row in control] != ["version", "start", "exit", "atexit"]
+            or control[0].get("evt") != "4" or session["last"] != "atexit"
+            or any(row.get("thread") != "main" for row in control)
+            or any(type(row.get("code")) is not int or row["code"] != 0 for row in control[2:])):
+        raise HistoryCompletionError(message)
 
 
 def run_scan(scanner, mode, repository, configuration):
@@ -29,6 +95,7 @@ def run_scan(scanner, mode, repository, configuration):
     with tempfile.TemporaryDirectory(prefix="leaderboard-secret-scan-") as folder:
         report = Path(folder) / "redacted.json"
         ignore = Path(folder) / "empty.ignore"
+        trace = Path(folder) / "history-events.json"
         ignore.write_text("", encoding="utf-8")
         command = [
             str(scanner), mode, str(repository), "--config", str(configuration),
@@ -37,10 +104,12 @@ def run_scan(scanner, mode, repository, configuration):
             "--report-format=json", "--report-path", str(report),
             "--no-banner", "--no-color", "--log-level=error", "--timeout=120",
         ]
+        environment = None
         if mode == "git":
-            command.append("--log-opts=--all --full-history --diff-merges=first-parent "
-                           "--text --no-ext-diff --no-textconv")
-        result = subprocess.run(command, capture_output=True, text=True, timeout=150)
+            command.append("--log-opts=" + " ".join(HISTORY_OPTIONS))
+            environment = {**os.environ, "GIT_TRACE2_EVENT": str(trace),
+                           "GIT_TRACE2_EVENT_BRIEF": "1", "GIT_TRACE2_EVENT_NESTING": "1"}
+        result = subprocess.run(command, capture_output=True, text=True, timeout=150, env=environment)
         # The pinned CLI can log a source failure and still return exit 0 with
         # an empty report. Error-only/no-banner scans must produce no diagnostics.
         # Keep their contents private; they can contain paths or source material.
@@ -48,6 +117,8 @@ def run_scan(scanner, mode, repository, configuration):
             raise RuntimeError("Credential scanner reported an incomplete or unreadable source; no pass recorded")
         if result.returncode not in (0, FINDINGS):
             raise RuntimeError(f"Credential scanner failed (exit {result.returncode}); no pass recorded")
+        if mode == "git":
+            require_history_completion(trace, repository)
         if not report.is_file():
             raise RuntimeError("Credential scanner produced no verifiable report")
         findings = json.loads(report.read_text(encoding="utf-8"))
@@ -227,6 +298,43 @@ def history_visibility_probe(scanner, configuration, kind):
             raise RuntimeError("Synthetic history visibility redaction probe failed")
 
 
+def silent_history_exit_probe(scanner, configuration, repository):
+    """Require intact controls around a silent failure of the actual Git history child."""
+    require_clean(scanner, "git", repository, configuration)
+    require_clean(scanner, "dir", repository, configuration)
+    # This private wrapper injects a silent failure only into the history
+    # child. The pinned scanner itself otherwise incorrectly returns zero.
+    real_git = shutil.which("git")
+    if real_git is None:
+        raise RuntimeError("Synthetic Git completion probe could not find Git")
+    with tempfile.TemporaryDirectory(prefix="leaderboard-secret-child-probe-") as child_folder:
+        wrapper = Path(child_folder) / "git"
+        wrapper.write_text(
+            '#!/bin/sh\nif [ "$3" = "log" ]; then\n  exit 73\nfi\nexec '
+            + shlex.quote(real_git) + ' "$@"\n', encoding="utf-8")
+        wrapper.chmod(0o700)
+        fault = subprocess.run([str(wrapper), "-C", str(repository), "log"],
+                               capture_output=True, text=True, timeout=10)
+        if fault.returncode != 73 or fault.stdout or fault.stderr:
+            raise RuntimeError("Synthetic silent Git failure was not established")
+        previous_path = os.environ.get("PATH")
+        os.environ["PATH"] = child_folder + os.pathsep + (previous_path or os.defpath)
+        try:
+            try:
+                run_scan(scanner, "git", repository, configuration)
+            except HistoryCompletionError:
+                pass
+            else:
+                raise RuntimeError("Synthetic silent Git completion rejection probe failed")
+        finally:
+            if previous_path is None:
+                os.environ.pop("PATH", None)
+            else:
+                os.environ["PATH"] = previous_path
+    require_clean(scanner, "git", repository, configuration)
+    require_clean(scanner, "dir", repository, configuration)
+
+
 def source_failure_probe(scanner, configuration, missing_blob=False):
     """A nonrepository or unreadable retained Git object cannot report a clean scan."""
     with tempfile.TemporaryDirectory(prefix="leaderboard-secret-source-") as folder:
@@ -248,6 +356,7 @@ def source_failure_probe(scanner, configuration, missing_blob=False):
             specimen.unlink()
             git("add", ".")
             git("commit", "-q", "-m", "Remove synthetic source")
+            silent_history_exit_probe(scanner, configuration, repository)
             # Deliberately damage only this disposable repository after committing
             # a clean working tree; no project or user history is modified.
             (repository / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
@@ -267,7 +376,7 @@ def self_test(scanner, configuration):
     source_failure_probe(scanner, configuration)
     source_failure_probe(scanner, configuration, missing_blob=True)
     print("Credential rejection, exact-exception, redaction, deleted-history, merge-only, "
-          "attribute/NUL/textconv visibility and unreadable-source probes passed")
+          "attribute/NUL/textconv visibility, silent Git completion and unreadable-source probes passed")
 
 
 def main():

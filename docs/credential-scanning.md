@@ -63,6 +63,19 @@ Nonrepository and missing-history-object probes exercise that actual failure
 path; exit status and a syntactically valid empty report cannot establish that
 the source was fully scanned.
 
+It also requires the actual history command's successful completion. The pinned
+scanner logs a failed Git child only at debug level, so an empty report and empty
+error stream alone cannot establish that Git finished. A private
+[Git Trace2 event target](https://git-scm.com/docs/api-trace2/)
+records the full history arguments and a unique process session. The driver
+requires exactly one matching version-4 session with ordered `start`, successful
+`exit` and final successful `atexit` records. Missing, ambiguous, malformed, truncated
+or unsuccessful completion fails the gate. Parsing is bounded to 16 MiB overall,
+128 KiB per line and 64 process sessions; the receipt is removed with the report.
+This observes the command used by the scanner, rather than an earlier repository
+check. Other Git commands used for optional remote metadata cannot substitute
+their own successful completion for the history scan.
+
 The pinned scanner's inherited rule and file-type limitations still apply. This
 is credential-pattern detection, not proof that arbitrary private text, encrypted
 data, unfetched Git objects or every possible credential is absent. It does not
@@ -93,6 +106,11 @@ configured text converter. The converter writes a temporary marker if invoked;
 that marker must remain absent. Separate nonrepository and deliberately missing
 Git-blob fixtures require rejection even when the CLI returns zero. All damaged
 Git objects belong exclusively to disposable probe repositories.
+A further private wrapper forwards Git commands except the history command,
+which deliberately exits 73 without output. The actual pinned scanner must be
+rejected specifically for missing history completion; the intact repository
+passes before and after that fault. Offline parser cases also reject incomplete,
+unsuccessful, mismatched, ambiguous and over-limit event receipts.
 Adding matching fingerprints in `.gitleaksignore` must separately fail closed.
 Scanner/configuration errors
 cannot pass this probe: its exact finding exit code and per-specimen locations are checked.

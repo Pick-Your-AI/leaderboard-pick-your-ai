@@ -4,6 +4,8 @@
 
 Recognition exists to make work discoverable and attributable. It is not a measure of a person's worth or a performance-management system. Activity volume, accepted outcomes and editorial recognition require different labels and evidence.
 
+The [evidence and contributor-rights policy](evidence-contributor-rights.md) defines source admission, voluntary consent, corrections, opt-out, appeals, retention and attributable decisions. Its adoption is separate from source activation, actual deletion and operating acceptance.
+
 ## Ownership and policy changes
 
 GitHub Assignees own delivery work. The plan's owner roles describe required expertise; they do not assign a person. Accept an owner before work is Ready. Source repository owners retain authority over research, code and release acceptance. Leaderboard moderators cannot declare upstream deliverables complete.
@@ -12,13 +14,13 @@ Version metric definitions, identity rules, line classification and eligibility 
 
 ## Evidence and correction
 
-Observe raw activity without inferring its quality. Review receipts when recognition requires acceptance, mentoring, design contribution, source verification or other qualitative judgment. Document the artifact, participants, roles, occurrence date, submitter, independent reviewer, policy version and public summary. Reviewers declare conflicts and do not approve their own disputed recognition.
+Observe raw activity without inferring its quality. Review receipts when recognition requires acceptance, mentoring, design contribution, source verification or other qualitative judgment. Document the artifact, participants, roles, occurrence date, submitter, independent reviewer, policy version and public summary. Reviewers declare conflicts and cannot accept claims submitted by themselves or listing them as collaborators. Appeals and rollbacks require a reviewer who has made no earlier decision on that receipt.
 
-Provide a functioning correction and appeal route with a submission receipt. Preserve an auditable decision trail while minimizing personal data. Withdrawal, duplicate evidence and upheld corrections invalidate derived counts across every affected snapshot, export and cache. Do not promise response times until an operator accepts the commitment.
+Provide a functioning correction and appeal route with a submission receipt. Preserve an auditable decision trail while minimizing personal data. Withdrawal, duplicate evidence and upheld corrections invalidate derived counts across affected service-controlled snapshots, exports and caches. Explain that independently downloaded copies are outside the service's deletion control. Do not promise response times until an operator accepts the commitment.
 
 ## Privacy and consent
 
-Use approved public repositories and Project fields. Never publish commit emails, private issue content, security findings or inferred identities. Verified opt-out and deletion propagate to directory, rankings, profiles, live displays, embeds, caches and exports. Separate authenticated controls from public data. A source becoming private triggers suppression before later enrichment.
+Use approved public repositories and Project fields. Never publish commit emails, private issue content, security findings or inferred identities. Verified opt-out and suppression apply across all enabled service-controlled public surfaces, including historical views. Report actual payload deletion, backup expiry and remaining cleanup separately. Separate authenticated controls from public data. A source becoming private triggers suppression before later enrichment.
 
 ## Counting safeguards
 
@@ -54,7 +56,7 @@ The dedicated repository boundary has been selected. Other recommendations below
 
 **Question:** Which sources and history are public and eligible?
 
-**Recommended:** All public repositories and Projects explicitly onboarded by stable IDs, starting with the three repositories and five Projects in the historical audit and including this newly published repository and Project after scope acceptance; unknown adoption boundaries are disclosed
+**Recommended:** Public repositories and Projects explicitly onboarded by immutable IDs after source-specific approval; refresh the historical inventory and disclose unknown adoption boundaries
 
 ### Alternatives
 
@@ -68,7 +70,9 @@ The dedicated repository boundary has been selected. Other recommendations below
 - LB-04.02
 - LB-06.01
 
-**Status:** Proposed
+**Status:** Source-admission policy adopted; individual source activation and history boundaries remain gated
+
+**Decision:** Apply docs/evidence-contributor-rights.md: default-deny source admission, approved event/field types, current visibility and source-use evidence, versioned capability receipts, explicit history gaps, and current suppression across enabled public surfaces. The six repository and six Project examples reviewed for LB-01.01 are candidates, not source-installation grants.
 
 **Id:** DEC-03
 
@@ -146,7 +150,9 @@ The dedicated repository boundary has been selected. Other recommendations below
 - LB-15.03
 - LB-17.03
 
-**Status:** Policy decision required before production
+**Status:** Identity and contributor-rights policy adopted; implementation and operating acceptance remain required
+
+**Decision:** Apply docs/evidence-contributor-rights.md: eligible public facts after source admission; voluntary optional profile/external/editorial choices; verified stable-account identity without email/name inference; durable correction, opt-out and independent appeal processes; minimized attributable audit; and separate public suppression, payload deletion and backup completion evidence. Numeric retention windows and the actual operator/reviewer roster retain their own acceptance gates.
 
 **Id:** DEC-07
 

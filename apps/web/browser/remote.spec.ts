@@ -52,7 +52,7 @@ function snapshot(id = "api-1", revision = 1) {
       actorId,
       roles: ["author"],
       qualification: "eligible",
-      metricIds: ["pr_opened", "documentation"],
+      metricIds: ["pr_merged", "documentation"],
       reasonCodes: ["public_accepted_source"],
     },
     occurredAt: at,
@@ -83,7 +83,7 @@ function snapshot(id = "api-1", revision = 1) {
       actors,
       evidence,
       portfolioEvidence: evidence.map((entry) => ({ ...entry, activityState: "observed", observedAt: at })),
-      rows: ["pr_opened", "documentation"].flatMap((metricId) =>
+      rows: ["pr_merged", "documentation"].flatMap((metricId) =>
         actors.map(({ actorId }, index) => ({
           actorId,
           result: { schemaVersion: "leaderboard/v1", metricId, state: "measured", value: index < 2 ? 2 : 1, coverage },
@@ -91,10 +91,10 @@ function snapshot(id = "api-1", revision = 1) {
         })),
       ),
       ranking: [
-        { metricId: "pr_opened", direction: "descending", rank: true },
+        { metricId: "pr_merged", direction: "descending", rank: true },
         { metricId: "documentation", direction: "descending", rank: false },
       ],
-      diagnostics: ["pr_opened", "documentation"].flatMap((metricId) =>
+      diagnostics: ["pr_merged", "documentation"].flatMap((metricId) =>
         actors.map(({ actorId }, index) => ({
           metricId,
           actorId,
@@ -108,7 +108,7 @@ function snapshot(id = "api-1", revision = 1) {
       ),
       methodology: [
         {
-          metricId: "pr_opened",
+          metricId: "pr_merged",
           policyVersion: "approved-policy-1",
           policySignature: "a".repeat(64),
           policyLink: "https://github.com/synthetic-api/example/blob/main/policy.md",
@@ -270,7 +270,7 @@ test("API polling fallback uses conditional health, holds new rankings and repor
   await page.clock.pauseAt(new Date(Date.parse(at) + 1000));
   const api = await service(page);
   try {
-    await page.goto("/leaderboards/pr_opened?ui=api&repository=repo-1&workstream=triage&actors=user&limit=1");
+    await page.goto("/leaderboards/pr_merged?ui=api&repository=repo-1&workstream=triage&actors=user&limit=1");
     const freshness = page.getByRole("region", { name: "Current source freshness" });
     const provenance = page.getByRole("region", { name: "Snapshot provenance" });
     const actor = page.getByRole("link", { name: "Synthetic API A", exact: true });
@@ -332,7 +332,7 @@ test("real SSE reset rechecks pinned privacy before the next poll, and visibilit
   await page.clock.pauseAt(new Date(Date.parse(at) + 1000));
   const api = await service(page, { holdUpdates: true, resetUpdates: true });
   try {
-    await page.goto("/leaderboards/pr_opened?ui=api&snapshot=api-1&repository=repo-1");
+    await page.goto("/leaderboards/pr_merged?ui=api&snapshot=api-1&repository=repo-1");
     const freshness = page.getByRole("region", { name: "Current source freshness" });
     const provenance = page.getByRole("region", { name: "Snapshot provenance" });
     const actor = page.getByRole("link", { name: "Synthetic API A", exact: true });
@@ -390,7 +390,7 @@ test("actor selections persist through controls and board-to-profile navigation"
   const api = await service(page);
   api.mixedActors();
   try {
-    await page.goto("/leaderboards/pr_opened?ui=api&metric=pr_opened&actors=user&limit=1");
+    await page.goto("/leaderboards/pr_merged?ui=api&metric=pr_merged&actors=user&limit=1");
     const provenance = page.getByRole("region", { name: "Snapshot provenance" });
     await expect(provenance).toContainText("User accounts");
     await page.getByText("Exact scope and snapshot", { exact: true }).click();
@@ -430,14 +430,14 @@ test("real service handler: exact scope, dense ties, cursors and pinned board â†
   try {
     const query =
       "?ui=api&organization=Pick-Your-AI&repository=repo-1&workstream=triage&start=2026-10-01T00%3A00%3A00.000Z&end=2026-11-01T00%3A00%3A00.000Z&limit=1";
-    await page.goto(`/leaderboards/pr_opened${query}`);
+    await page.goto(`/leaderboards/pr_merged${query}`);
     await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toBeVisible();
     const request = api.calls.find((call) => call.pathname.endsWith("/boards"))!;
     expect(Object.fromEntries(request.searchParams)).toMatchObject({
       organization: "Pick-Your-AI",
       repository: "repo-1",
       workstream: "triage",
-      metric: "pr_opened",
+      metric: "pr_merged",
       limit: "1",
       start: "2026-10-01T00:00:00.000Z",
       end: "2026-11-01T00:00:00.000Z",
@@ -483,7 +483,7 @@ test("real service handler: exact scope, dense ties, cursors and pinned board â†
       expect(Object.fromEntries(call.searchParams)).toMatchObject({
         repository: "repo-1",
         workstream: "triage",
-        metric: "pr_opened",
+        metric: "pr_merged",
         limit: "1",
         snapshot: "api-1",
         format: format.toLowerCase(),
@@ -510,7 +510,7 @@ test("current suppression revalidates pinned evidence and failed reads never sub
     await page.getByRole("button", { name: "Recheck current publication controls" }).click();
     await expect(page.getByRole("alert")).toContainText("Public record unavailable");
     await expect(page.getByRole("link", { name: "Open public source artifact" })).toHaveCount(0);
-    await page.goto("/leaderboards/pr_opened?ui=api&snapshot=api-1");
+    await page.goto("/leaderboards/pr_merged?ui=api&snapshot=api-1");
     await expect(page.getByRole("link", { name: "Synthetic API B", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toHaveCount(0);
     api.fail();
@@ -542,16 +542,16 @@ test("descriptive policy stays unranked; API media and supported reference pages
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     for (const route of [
       "/leaderboards",
-      "/methodology/pr_opened",
+      "/methodology/pr_merged",
       "/coverage",
       "/activity",
       "/contributors",
       "/live",
     ]) {
-      await page.goto(`${route}?ui=api`);
+      await page.goto(`${route}?ui=api${route === "/live" ? "&metric=pr_merged" : ""}`);
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       await expect(page.getByRole("status").filter({ hasText: /Loading/ })).toHaveCount(0);
-      if (route === "/methodology/pr_opened") {
+      if (route === "/methodology/pr_merged") {
         await expect(page.getByRole("region", { name: "Snapshot provenance" })).toHaveCount(0);
         await expect(page.getByText("UI metadata version", { exact: true })).toBeVisible();
         await expect(page.getByText("No published policy signature supplied for this selection.")).toBeVisible();
@@ -571,7 +571,7 @@ test("successful same-selection background recheck preserves keyboard DOM; suppr
 }) => {
   const api = await service(page);
   try {
-    await page.goto("/leaderboards/pr_opened?ui=api&snapshot=api-1");
+    await page.goto("/leaderboards/pr_merged?ui=api&snapshot=api-1");
     const actor = page.getByRole("link", { name: "Synthetic API A", exact: true });
     await actor.focus();
     const count = api.calls.length;
@@ -593,7 +593,7 @@ test("new heads remain held until applied; unsupported query is rejected before 
 }) => {
   const api = await service(page);
   try {
-    await page.goto("/leaderboards/pr_opened?ui=api");
+    await page.goto("/leaderboards/pr_merged?ui=api");
     await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toBeVisible();
     api.next();
     await page.getByRole("button", { name: "Recheck current publication controls" }).click();
@@ -602,10 +602,10 @@ test("new heads remain held until applied; unsupported query is rejected before 
     await page.getByRole("button", { name: "Apply new snapshot" }).click();
     await expect(page.getByRole("row", { name: /Synthetic API A/ })).toContainText("10");
     const count = api.calls.length;
-    await page.goto("/leaderboards/pr_opened?ui=api&repository=repo-1&repository=repo-2");
+    await page.goto("/leaderboards/pr_merged?ui=api&repository=repo-1&repository=repo-2");
     await expect(page.getByRole("alert")).toContainText("unsupported_or_duplicate_filter");
     expect(api.calls.length).toBe(count);
-    await page.goto("/leaderboards/pr_opened?ui=api&metric=documentation");
+    await page.goto("/leaderboards/pr_merged?ui=api&metric=documentation");
     await expect(page.getByRole("alert")).toContainText("conflicting_metric_selection");
     expect(api.calls.length).toBe(count);
   } finally {
@@ -618,7 +618,7 @@ test("page exports enforce current suppression and revoked export errors clear p
 }) => {
   const api = await service(page);
   try {
-    await page.goto("/leaderboards/pr_opened?ui=api&snapshot=api-1");
+    await page.goto("/leaderboards/pr_merged?ui=api&snapshot=api-1");
     await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toBeVisible();
     api.suppress();
     const exported = page.waitForEvent("download");
@@ -744,9 +744,9 @@ test("activity uses its public feed API, compact bursts and all source proofs wi
     expect(new URL(page.url()).searchParams.get("snapshot")).toBe("api-1");
     await page.getByRole("link", { name: "Return to this snapshotâ€™s activity" }).click();
     await expect(page.getByRole("link", { name: "Explore 205 source proofs" })).toBeVisible();
-    await page.getByRole("combobox", { name: "Contribution category" }).selectOption("pr_opened");
+    await page.getByRole("combobox", { name: "Contribution category" }).selectOption("pr_merged");
     await page.getByRole("button", { name: "Filter contributions" }).click();
-    expect(new URL(page.url()).searchParams.get("category")).toBe("pr_opened");
+    expect(new URL(page.url()).searchParams.get("category")).toBe("pr_merged");
     await expect(page.getByRole("link", { name: "Explore 205 source proofs" })).toBeVisible();
     expect(
       (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,

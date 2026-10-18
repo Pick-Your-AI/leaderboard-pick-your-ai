@@ -18,7 +18,7 @@
   {
     "id": "DEC-02",
     "question": "Which sources and history are public and eligible?",
-    "recommended": "All public repositories and Projects explicitly onboarded by stable IDs, starting with the three repositories and five Projects in the historical audit and including this newly published repository and Project after scope acceptance; unknown adoption boundaries are disclosed",
+    "recommended": "Public repositories and Projects explicitly onboarded by immutable IDs after source-specific approval; refresh the historical inventory and disclose unknown adoption boundaries",
     "alternatives": [
       "Explicit subset for beta",
       "Separate inherited-history lens"
@@ -28,7 +28,8 @@
       "LB-04.02",
       "LB-06.01"
     ],
-    "status": "Proposed"
+    "status": "Source-admission policy adopted; individual source activation and history boundaries remain gated",
+    "decision": "Apply docs/evidence-contributor-rights.md: default-deny source admission, approved event/field types, current visibility and source-use evidence, versioned capability receipts, explicit history gaps, and current suppression across enabled public surfaces. The six repository and six Project examples reviewed for LB-01.01 are candidates, not source-installation grants."
   },
   {
     "id": "DEC-03",
@@ -86,7 +87,8 @@
       "LB-15.03",
       "LB-17.03"
     ],
-    "status": "Policy decision required before production"
+    "status": "Identity and contributor-rights policy adopted; implementation and operating acceptance remain required",
+    "decision": "Apply docs/evidence-contributor-rights.md: eligible public facts after source admission; voluntary optional profile/external/editorial choices; verified stable-account identity without email/name inference; durable correction, opt-out and independent appeal processes; minimized attributable audit; and separate public suppression, payload deletion and backup completion evidence. Numeric retention windows and the actual operator/reviewer roster retain their own acceptance gates."
   },
   {
     "id": "DEC-07",
