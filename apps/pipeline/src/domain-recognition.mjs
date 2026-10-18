@@ -96,7 +96,7 @@ const pinnedGithubUrl = (value, revision) => {
       !url.hash &&
       url.href === value,
   );
-  require(/^[a-f0-9]{40,64}$/.test(revision));
+  require(typeof revision === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(revision));
   const path = url.pathname.split("/");
   require(path.length >= 5 && /^[A-Za-z0-9_.-]+$/.test(path[1]) && /^[A-Za-z0-9_.-]+$/.test(path[2]));
   require((path[3] === "commit" && path.length === 5) || (path[3] === "blob" && path.length > 5));

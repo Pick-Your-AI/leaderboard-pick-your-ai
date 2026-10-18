@@ -152,6 +152,105 @@ test("anonymous snapshot is available without login and no private state is expo
   assert.equal(snapshot.response.headers.get("cache-control"), "no-store");
 });
 
+test("authenticated acceptance records a validated private locale target and exact reviewed request", async (t) => {
+  const h = await harness(t);
+  const owner = await h.login("1"),
+    reviewer = await h.login("2");
+  const claim = fixture({
+    locator: "https://github.com/synthetic-example/demo/pull/1",
+    scope: "repository:2:locale:fr:documentation",
+  });
+  const target = {
+    targetFactId: "synthetic-locale:fr",
+    sourceRevision: "c".repeat(40),
+    locale: "fr",
+    category: "documentation",
+    policyVersion: "synthetic-locales-v1",
+  };
+  assert.equal(
+    (await h.call("/controls/requests", { user: owner, method: "POST", input: { ...claim, localization: target } }))
+      .status,
+    400,
+  );
+  const submitted = await h.call("/controls/requests", { user: owner, method: "POST", input: claim });
+  assert.equal(submitted.status, 201);
+  const path = `/controls/requests/${submitted.data.id}/review`;
+  const acceptance = {
+    version: submitted.data.version,
+    decision: "accept",
+    reason: "Reviewed this exact synthetic merge and language",
+    conflict: false,
+    policyVersion: "test-1",
+    sourceReviewedPublic: true,
+    localization: target,
+  };
+  for (const localization of [
+    null,
+    [],
+    "fr",
+    { ...target, unknown: "value" },
+    { ...target, locale: "FR" },
+    { ...target, locale: "und" },
+    { ...target, locale: "en-u-nu-latn" },
+    { ...target, category: "../documentation" },
+    { ...target, policyVersion: "" },
+    { ...target, sourceRevision: "main" },
+    { ...target, sourceRevision: "c".repeat(39) },
+    { ...target, sourceRevision: ["c".repeat(40)] },
+    { ...target, targetFactId: {} },
+  ]) {
+    const result = await h.call(path, { user: reviewer, method: "POST", input: { ...acceptance, localization } });
+    assert.equal(result.status, 400, JSON.stringify(localization));
+    assert.equal(h.store.read().requests[submitted.data.id].status, "pending");
+  }
+  assert.equal(
+    (await h.call(path, { user: reviewer, method: "POST", input: { ...acceptance, decision: "reject" } })).status,
+    400,
+  );
+  assert.equal((await h.call(path, { user: owner, method: "POST", input: acceptance })).status, 403);
+  const accepted = await h.call(path, { user: reviewer, method: "POST", input: acceptance });
+  assert.equal(accepted.status, 200);
+  const stored = h.store.read(),
+    request = stored.requests[submitted.data.id],
+    decision = request.history.at(-1);
+  assert.equal(request.status, "accepted");
+  assert.equal(decision.receipt, request.id);
+  assert.equal(decision.version, request.version);
+  assert.deepEqual(decision.localization, target);
+  assert.deepEqual(decision.evidenceRequest, {
+    owner: "1",
+    locator: claim.locator,
+    category: claim.category,
+    scope: claim.scope,
+  });
+  assert.deepEqual(
+    stored.audit.filter((event) => event.id === decision.id),
+    [decision],
+  );
+  const visible = JSON.stringify((await h.call("/controls/public")).data);
+  assert.equal(visible.includes(target.targetFactId), false);
+  assert.equal(visible.includes(target.sourceRevision), false);
+  const amended = await h.call(`/controls/requests/${request.id}/amend`, {
+    user: owner,
+    method: "POST",
+    input: {
+      version: request.version,
+      reason: "The public source changed",
+      locator: claim.locator,
+      category: claim.category,
+      scope: "repository:2:locale:de:documentation",
+      detail: "Updated evidence",
+      collaborators: [],
+    },
+  });
+  assert.equal(amended.status, 200);
+  const changed = h.store.read().requests[request.id];
+  assert.equal(changed.status, "pending");
+  assert.equal(changed.policyVersion, undefined);
+  assert.deepEqual(changed.history.find((event) => event.id === decision.id).localization, target);
+  assert.equal((await h.call("/controls/public")).data.claims.length, 0);
+});
+
 test("OAuth requires browser-bound one-use state, exact callback shape and PKCE", async (t) => {
   const h = await harness(t);
   const started = await h.begin();

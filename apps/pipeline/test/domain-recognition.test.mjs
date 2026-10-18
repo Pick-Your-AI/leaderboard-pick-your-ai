@@ -4,7 +4,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { normalizeGithubObservation, applyRecognitionReceipt } from "@pick-your-ai/github";
-import { aggregateMetric, getMetricDefinition, metricRegistryV1 } from "@pick-your-ai/metrics";
+import {
+  aggregateMetric,
+  getMetricDefinition,
+  getMetricUi,
+  metricRegistryV1,
+  selectMetricView,
+} from "@pick-your-ai/metrics";
 import { materializeRecognition } from "../src/recognition-adapter.mjs";
 import { domainMetricIds, domainDateBasis } from "../src/domain-recognition.mjs";
 
@@ -240,6 +246,123 @@ const run = (s) => materializeRecognition(s.input, s.state, [s.binding], s.polic
 const qualified = (s) =>
   run(s).facts.filter((fact) => fact.metricId === s.binding.metricId && fact.state === "qualified");
 
+// These expected clocks follow the canonical definitions, independently of the
+// adapter's domainDateBasis lookup and the registry's advertised selections.
+const candidateDateBases = {
+  catalog_proposals: "acceptedAt",
+  pricebook_proposals: "acceptedAt",
+  compatibility_proposals: "acceptedAt",
+  primary_sources: "acceptedAt",
+  freshness_checks: "occurredAt",
+  reproduced_measurements: "acceptedAt",
+  negative_findings: "acceptedAt",
+  rights_reviews: "acceptedAt",
+  assumptions_resolved: "acceptedAt",
+  market_research: "acceptedAt",
+  evidence_manifests: "acceptedAt",
+  documentation: "occurredAt",
+  tests: "occurredAt",
+  regressions_prevented: "acceptedAt",
+  accessibility: "acceptedAt",
+  design: "acceptedAt",
+  usability: "acceptedAt",
+  performance: "acceptedAt",
+  security: "occurredAt",
+};
+
+function aggregateDomain(s, normalized, scope = {}) {
+  const metric = s.binding.metricId;
+  return aggregateMetric(
+    {
+      datasetId: "synthetic-domain-candidate",
+      cutoff,
+      backfillRevision: "1",
+      repositoryIds: ["2"],
+      actors: normalized.actors,
+      facts: normalized.facts,
+      coverage: [],
+    },
+    {
+      ...s.policies[0].policy,
+      dateBasis: candidateDateBases[metric],
+      definitionVersion: metricRegistryV1.policy_version,
+      unit: getMetricDefinition(metric).definition.unit,
+      aggregation: "count",
+      roles: ["author"],
+      sources: ["github_rest"],
+      minimumSamples: 1,
+      rank: false,
+    },
+    {
+      timezone: "UTC",
+      from: null,
+      to: cutoff,
+      repos: [],
+      projects: [],
+      workstreams: [],
+      roles: [],
+      actors: "all",
+      context: "event",
+      ...scope,
+    },
+  );
+}
+
+for (const [metric, date_basis] of Object.entries(candidateDateBases)) {
+  test(`${metric}: source-to-engine candidate counts one canonical unit through review and observation replay`, () => {
+    assert.deepEqual(Object.keys(candidateDateBases).sort(), [...domainMetricIds].sort());
+    const s = scenario(metric);
+    s.policies[0].policy.dateBasis = date_basis;
+    const normalized = run(s),
+      result = aggregateDomain(s, normalized),
+      effectiveAt = date_basis === "acceptedAt" ? acceptedAt : occurredAt;
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.rows[0].actorId, "101");
+    assert.equal(result.rows[0].value, 1);
+    assert.equal(result.rows[0].sampleCount, 1);
+    assert.equal(result.rows[0].evidence.length, 1);
+    assert.equal(result.rows[0].evidence[0].effectiveAt, effectiveAt);
+    assert.equal(result.publicEnabled, false);
+    assert.deepEqual(aggregateDomain(s, normalized, { to: effectiveAt }).rows, []);
+    const containing = aggregateDomain(s, normalized, {
+      from: effectiveAt,
+      to: new Date(Date.parse(effectiveAt) + 1).toISOString(),
+    });
+    assert.equal(containing.rows[0].value, 1, "The canonical event belongs to its exact half-open clock window");
+
+    const duplicate = structuredClone(s.request);
+    duplicate.id = "replayed-request";
+    duplicate.history[0].id = "replayed-decision";
+    duplicate.history[0].at += 1000;
+    s.state.requests[duplicate.id] = duplicate;
+    s.state.audit.push(duplicate.history[0]);
+    s.binding.domainEvidence.records.push({
+      ...structuredClone(s.record),
+      requestId: duplicate.id,
+      decisionId: duplicate.history[0].id,
+    });
+    for (const reverse of [false, true]) {
+      if (reverse) s.state.requests = Object.fromEntries(Object.entries(s.state.requests).reverse());
+      // Re-normalize the source, re-apply both independent review receipts, and
+      // feed a repeated delivery to the actual engine. None is a second unit.
+      const repeated = run({ ...s, input: source() });
+      assert.deepEqual(aggregateDomain(s, repeated), result);
+      repeated.facts = [...repeated.facts, ...structuredClone(repeated.facts)].reverse();
+      assert.deepEqual(aggregateDomain(s, repeated), result);
+    }
+
+    const selected = { state: "qualified", date_basis },
+      ui = getMetricUi(metric);
+    assert.deepEqual(selectMetricView(metric, selected), selected);
+    assert.equal(ui.maturity, "synthetic_verified");
+    assert.deepEqual(
+      ui.supported_combinations,
+      metric === "documentation" ? [{ state: "qualified", date_basis: "acceptedAt" }, selected] : [selected],
+    );
+    assert.ok(ui.verification_cases.includes("apps/pipeline/test/domain-recognition.test.mjs"));
+  });
+}
+
 const exclusions = {
   catalog_proposals: (s) => {
     s.record.details.factualReview = false;
@@ -427,6 +550,19 @@ test("pricebook currency requires an actual uppercase three-letter string", () =
   }
 });
 
+test("immutable source pins require complete supported hash lengths even when both private bindings agree", () => {
+  const pinned = (revision) => {
+    const s = scenario();
+    s.record.sourceRevision = s.evidence.sourceRevision = revision;
+    s.record.sourceRevisionUrl =
+      s.evidence.sourceRevisionUrl = `https://github.com/synthetic-owner/repository/commit/${revision}`;
+    return s;
+  };
+  for (const length of [40, 64]) assert.equal(qualified(pinned("a".repeat(length))).length, 1);
+  for (const length of [39, ...Array.from({ length: 23 }, (_, index) => index + 41), 65])
+    assert.throws(() => run(pinned("a".repeat(length))), /domain_recognition_evidence_unverified/, String(length));
+});
+
 test("usability rejects study-only evidence and requires the specific sanitized finding to be accepted", () => {
   const studyOnly = scenario("usability");
   delete studyOnly.record.details.findingId;
@@ -612,6 +748,73 @@ test("the pipeline retains per-source synthetic provenance when flattening recog
   });
   await assert.rejects(h.runtime.runOnce({ cutoff }), /domain_recognition_evidence_unverified/);
   assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 0);
+});
+
+test("accepted documentation retains bounded domain reasons through primary and portfolio API reads", async (t) => {
+  const { harness, components, publicScope } = await import("./harness.mjs");
+  const s = scenario("documentation");
+  // Exercise the real-mode boundary with explicitly fictional marker-free
+  // data; the synthetic-mode rejection remains independently tested above.
+  s.input = JSON.parse(JSON.stringify(s.input).replace(/synthetic/gi, "fixture"));
+  s.evidence = s.input.evidence.find((entry) => entry.contribution.contributionId === s.candidate.id);
+  for (const entry of s.input.evidence) {
+    entry.artifact.publicUrl = entry.artifact.publicUrl.replace("fixture-owner/repository", "example-org/example-repo");
+    if (entry.sourceRevisionUrl)
+      entry.sourceRevisionUrl = entry.sourceRevisionUrl.replace("fixture-owner/repository", "example-org/example-repo");
+    entry.contribution.reasonCodes.push("domain_secret:PRIVATE_SENTINEL");
+  }
+  s.request.locator = s.evidence.artifact.publicUrl;
+  s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl;
+  const payload = JSON.parse(JSON.stringify(fixture.pull_request).replace(/synthetic/gi, "fixture"));
+  payload.html_url = s.request.locator;
+  const h = await harness(t, {
+    markerFreeConfig: true,
+    dataMode: "public",
+    payloads: [payload],
+    normalizerFactory: () => async () => structuredClone(s.input),
+    configure(config) {
+      config.recognitionBindings = [s.binding];
+      const policy = {
+        ...config.policies[0].policy,
+        ...s.policies[0].policy,
+        roles: ["author"],
+        unit: components.metrics.getMetricDefinition("documentation").definition.unit,
+      };
+      config.policies = [
+        { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "fixture-test-approval" },
+      ];
+    },
+  });
+  h.controlsStore.transaction((state) => {
+    state.requests = s.state.requests;
+    state.audit = s.state.audit;
+  });
+  const published = await h.runtime.runOnce({ cutoff });
+  assert.equal(published.state, "published");
+  const snapshotId = published.publications[0].snapshotId;
+  assert.equal(typeof snapshotId, "string");
+  const read = await h.runtime.source.read(publicScope, snapshotId, new AbortController().signal);
+  const accepted = read.selected.portfolioEvidence.filter((entry) => entry.activityState === "accepted");
+  assert.equal(accepted.length, 1);
+  const expected = ["domain_metric:documentation", "domain_clock:merged_at", "domain_authorship:authored"];
+  assert.deepEqual(accepted[0].contribution.reasonCodes, ["public_accepted_work", ...expected]);
+  const proofId = accepted[0].contribution.contributionId;
+  const primary = read.selected.evidence.find((entry) => entry.contribution.contributionId === proofId);
+  assert.ok(primary);
+  assert.deepEqual(primary.contribution.reasonCodes, ["independent_recognition_receipt", ...expected]);
+  const proof = await h.runtime.app.inject(`/api/v1/evidence/${proofId}?snapshot=${snapshotId}`);
+  assert.equal(proof.statusCode, 200, proof.body);
+  // The evidence route prefers the accepted portfolio copy when both exist.
+  assert.deepEqual(proof.json().contribution.reasonCodes, ["public_accepted_work", ...expected]);
+  const profile = await h.runtime.app.inject(`/api/v1/contributors/101?metric=documentation&snapshot=${snapshotId}`);
+  assert.equal(profile.statusCode, 200, profile.body);
+  assert.equal(profile.json().timeline.length, 1);
+  assert.deepEqual(profile.json().timeline[0].contribution.reasonCodes, ["public_accepted_work", ...expected]);
+  for (const body of [JSON.stringify(accepted), proof.body, profile.body])
+    assert.doesNotMatch(
+      body,
+      /PRIVATE_SENTINEL|domain_secret|private-request|private-review-receipt|substantiveReview/,
+    );
 });
 
 test("canonical units deduplicate aliases independently of request insertion order", () => {

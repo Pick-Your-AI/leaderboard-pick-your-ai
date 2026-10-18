@@ -46,8 +46,10 @@ cutoff. It limits the cutoff for which this reviewed source revision may be
 used; current publication consent is revoked through the private controls and
 configuration, which also fence historical reads.
 
-The record's immutable GitHub commit/blob URL and 40–64 character hexadecimal
-revision must equal the collected evidence's pin. Merged PR observations gain
+The record's immutable GitHub commit/blob URL and complete 40- or 64-character
+lowercase hexadecimal revision must equal the collected evidence's pin.
+Intermediate lengths are rejected even if both repeat the same malformed value
+and URL. Merged PR observations gain
 a pin only with a complete, matching default-branch integration diff whose after
 revision equals the provider's merge commit. An intermediate branch, missing or
 incomplete diff, changed merge SHA, mutable PR timestamp or URL alone cannot
@@ -127,16 +129,18 @@ collapse distinct pricebook as-of units.
 Raw source facts are retained. Recognition is recomputed from current controls
 after source normalization and is never saved into the source normalization
 cache. The cache version changes when immutable merge pins are introduced.
-Historical frozen identity evidence can still use either prior cache format under
-its exact metric and source-classification policy signature. Fresh normalization
-always uses the current projection, and changing classification cannot admit an
-older unclassified cache.
+Historical frozen identity evidence retains its exact prior policy-bound formats,
+including the version-one locale projection with or without the verified merge-pin
+wrapper. Every accepted format binds all active documentation and research rules;
+its stored records and preview results remain unchanged. Fresh normalization always
+uses the current projection, and changing classification cannot admit an older
+unclassified cache.
 Synthetic provenance is carried through the pipeline's flattening step, and
 specialist recognition rejects a synthetic source even if its private attestation
 claims real data. Synthetic fixtures never become actual measurement credit.
 
-The private recognition fingerprint includes the relevant audited decisions as
-well as requests and suppression. Removing, replacing or duplicating a used audit
+The private recognition fingerprint includes current recognition bindings and the
+relevant audited decisions, requests and suppression. Removing, replacing or duplicating a used audit
 entry invalidates a run's confirmation and previously pinned public reads.
 Unrelated audit activity does not revoke recognition. Withdrawal, renewed review,
 appeal and contributor suppression continue to remove accepted recognition.
@@ -151,15 +155,33 @@ or assumption conclusions retain that uncertainty. Research and catalog evidence
 explicitly distinguishes reviewed artifacts from issue completion and production
 publication.
 
+Accepted documentation retains its three fixed metric, merge-clock and authored
+contribution labels in primary evidence, accepted portfolio proof and contributor
+timelines. This projection requires the complete existing explanation and an
+accepted-work marker; it never invents missing labels or copies private values.
+It is separate from the explicit path-policy and locale classification contract,
+so preserving documentation explanations cannot qualify or retarget a locale.
+
 ## Verification and remaining acceptance
 
 The synthetic suite exercises all 19 qualification/exclusion pairs, immutable
 revision mismatches, stale or ambiguous audits, reviewer roles, policy clocks,
 private-field rejection, source-mode provenance, canonical aliases and proof
-variations, withdrawal and exact performance arithmetic. It includes a full
+variations, withdrawal and exact performance arithmetic. Each of the 19 metrics
+also has a source-to-qualification-to-engine case that counts one canonical unit,
+preserves it through repeated review and observation delivery in either order,
+and checks exact half-open event-clock boundaries. These cases support only the
+listed qualified candidate combinations in the [UI registry](../packages/metrics/UI_REGISTRY.md).
+Documentation's merge-date domain candidate is additive: its existing acceptance-date
+prototype default and overview/wall behavior remain. The prototype rejects every
+domain-only combination, and these metadata entries do not enable a public source.
+
+The suite includes a full
 pipeline case proving that flattened synthetic source facts cannot publish a
-specialist snapshot. Existing raw-source and generic recognition tests remain
-applicable.
+specialist snapshot, plus a marker-free fictional real-mode publication proving
+that accepted documentation keeps its bounded explanation through both stored
+proof copies and the actual evidence and contributor API routes. Existing
+raw-source and generic recognition tests remain applicable.
 
 Actual source installations, configured path/category mappings, rights and
 measurement review, reviewer enrollment, affected-owner acceptance, external

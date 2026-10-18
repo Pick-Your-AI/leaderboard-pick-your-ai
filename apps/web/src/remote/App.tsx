@@ -1,11 +1,14 @@
 import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
+import { ContributorParticipation } from "./Participation.tsx";
 import { EvidenceDrawer, EvidenceProof, Receipt } from "./Evidence.tsx";
 import { isProofTransition, proofHref, readProof, withoutProof } from "./proof.ts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { actorFilterLabels, type MetricDefinition, type MetricRegistry } from "@pick-your-ai/contracts";
+import { startLiveUpdates, type LiveState } from "@pick-your-ai/service/live-client";
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
 import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
 import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
+import { MethodDefinition } from "./MethodDefinition.tsx";
 import {
   discoverMetrics,
   isCatalogPath,
@@ -20,6 +23,7 @@ import {
   type ActivityDetail,
   apiBase,
   board,
+  controlsNavigationBase,
   directory,
   portfolioParameters,
   catalog,
@@ -58,6 +62,37 @@ type State =
   | { status: "loading" }
   | { status: "error"; error: ReadFailure }
   | { status: "ready"; data: Data; registry: MetricRegistry };
+const unknownLiveState: LiveState = { transport: "unavailable", freshness: "unknown", checkedAt: null };
+function CurrentFreshness({ value }: { value: LiveState }) {
+  const transport = {
+    stream: "Connected for snapshot notices",
+    polling: "Polling for updates",
+    paused: "Paused while this page is hidden",
+    unavailable: "Update checks unavailable",
+  }[value.transport];
+  const freshness = {
+    unknown: "Unknown",
+    recently_reconciled: "Recently reconciled",
+    stale_or_degraded: "Stale or degraded",
+  }[value.freshness];
+  return (
+    <section aria-label="Current source freshness" className="notice notice-info">
+      <h2>Current source freshness</h2>
+      <p>Update connection: {transport}.</p>
+      <p>Source freshness: {freshness}.</p>
+      <p>
+        {value.checkedAt ? (
+          <>
+            Last successful health check: <time dateTime={value.checkedAt}>{value.checkedAt}</time>.
+          </>
+        ) : (
+          "No successful health check for this scope."
+        )}
+      </p>
+      <p>This check describes the current publication. A pinned snapshot retains its own source dates.</p>
+    </section>
+  );
+}
 const fallback: Selection = {
   actors: "all",
   organization: "Pick-Your-AI",
@@ -118,8 +153,8 @@ function ControlsEntry() {
   try {
     return (
       <p>
-        <a href={`${apiBase(configured)}/auth/login`}>Open configured account authentication</a>. This public UI does
-        not implement private request forms or name a staffed privacy destination.
+        <a href={`${controlsNavigationBase(configured)}/auth/login`}>Open configured account authentication</a>. This
+        public UI does not implement private request forms or name a staffed privacy destination.
       </p>
     );
   } catch {
@@ -276,27 +311,9 @@ function Methods({ metric, registry, meta }: { metric: MetricDefinition; registr
   return (
     <section className="section">
       <h2>{metric.name}</h2>
+      <p>Definition policy {registry.policy_version}. Definition details do not certify a published measurement.</p>
+      <MethodDefinition metric={metric} />
       <dl className="receipt">
-        <dt>Definition</dt>
-        <dd>{metric.counting_rule}</dd>
-        <dt>Unit and aggregation</dt>
-        <dd>
-          {metric.definition.unit}; {metric.definition.aggregation}
-        </dd>
-        <dt>Numerator</dt>
-        <dd>{metric.definition.numerator}</dd>
-        <dt>Source definition</dt>
-        <dd>{metric.source}</dd>
-        <dt>Event clock</dt>
-        <dd>{metric.event_clock}</dd>
-        <dt>Attribution</dt>
-        <dd>{metric.attribution}</dd>
-        <dt>Denominator</dt>
-        <dd>{metric.definition.denominator.definition}</dd>
-        <dt>Coverage</dt>
-        <dd>{metric.coverage_class}</dd>
-        <dt>Release eligibility</dt>
-        <dd>{metric.definition.release_eligibility}</dd>
         <dt>Published policy</dt>
         <dd>
           {method ? (
@@ -338,6 +355,7 @@ export function RemoteApp() {
   }, [url.pathname]);
   const [state, setState] = useState<State>({ status: "loading" });
   const [checking, setChecking] = useState(false);
+  const [live, setLive] = useState<{ base: string; scope: string; value: LiveState } | null>(null);
   const [nonce, setNonce] = useState(0),
     [heldPin, setHeldPin] = useState<string | null>(null);
   const [follow, setFollow] = useState(false),
@@ -439,6 +457,32 @@ export function RemoteApp() {
     setChecking(true);
     setNonce((value) => value + 1);
   }, []);
+  // Registry-only pages do not require a source snapshot. Snapshot subscriptions
+  // follow the current scope, never a historical pin, cursor or proof selection.
+  const liveScope =
+    parsed.error || isCatalogPath(url.pathname) || /^\/methodology\/[^/]+$/.test(url.pathname)
+      ? null
+      : parameters(selected, { snapshot: null }).toString();
+  const liveState = live?.base === parsed.base && live.scope === liveScope ? live.value : unknownLiveState;
+  useEffect(() => {
+    if (liveScope === null) return;
+    const base = new URL(parsed.base);
+    return startLiveUpdates({
+      basePath: base.pathname.replace(/\/$/, ""),
+      scope: Object.fromEntries(new URLSearchParams(liveScope)),
+      onState: (value) => setLive({ base: parsed.base, scope: liveScope, value }),
+      // A notice invalidates the complete public projection even while a reader
+      // holds an older snapshot. Existing hold/apply controls govern reordering.
+      onSnapshot: refresh,
+      validateHealth: (body) => {
+        health(body, { ...selected, snapshot: null });
+      },
+      fetch: (input, init) => fetch(new URL(String(input), base.origin), init),
+      ...(globalThis.EventSource
+        ? { eventSource: (path: string) => new EventSource(new URL(path, base.origin), { withCredentials: false }) }
+        : {}),
+    });
+  }, [parsed.base, liveScope, refresh]);
   // Revalidate selected data even under a snapshot pin. Old aggregates are never a privacy cache.
   useEffect(() => {
     const revalidate = () => {
@@ -462,6 +506,7 @@ export function RemoteApp() {
     const controller = new AbortController();
     active.current = controller;
     if (parsed.error) {
+      setChecking(false);
       setState({ status: "error", error: parsed.error });
       return () => controller.abort();
     }
@@ -644,6 +689,9 @@ export function RemoteApp() {
           event.altKey
         )
           return;
+        // The display has its own bounded page lifecycle. A normal same-tab
+        // navigation tears down this reader and its in-flight requests first.
+        if (new URL(target.href).pathname === "/live") return;
         event.preventDefault();
         if (target.hasAttribute("data-api-proof")) {
           proofOpener.current = target;
@@ -710,6 +758,7 @@ export function RemoteApp() {
           </button>
           {checking && <span className="muted"> Rechecking…</span>}
         </p>
+        {liveScope !== null && <CurrentFreshness value={liveState} />}
         {state.status === "loading" && <p role="status">Loading current public data…</p>}
         {state.status === "error" && (
           <section className="notice notice-error" role="alert">
@@ -733,7 +782,7 @@ export function RemoteApp() {
                 ? `Pinned snapshot ${selected.snapshot}; current publication controls are still rechecked.`
                 : pending
                   ? `Update held: snapshot ${pending} is available.`
-                  : "Showing the selected publication. Updates are rechecked every 20 seconds while visible."}
+                  : "Showing the selected publication. Notices trigger a full read; publication controls are also rechecked every 20 seconds while visible."}
             </p>
             {pending && (
               <button type="button" className="button" onClick={apply} disabled={Boolean(selected.proof)}>
@@ -1024,6 +1073,7 @@ export function RemoteApp() {
                   </li>
                 ))}
               </ul>
+              <ContributorParticipation value={data.value.activitySummary} selected={pinned} metrics={catalogEntries} />
               <ContributorRecognition
                 key={`${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
                 base={parsed.base}
