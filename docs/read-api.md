@@ -162,8 +162,9 @@ assignment alone never establishes directory inclusion. See the
 Legacy event-scope JSON and CSV downloads use the unchanged `public-export/v1`
 export envelope. Opt-in current-context or Project-filter selections use the
 explicit [public membership scope and v2 response/export contracts](public-membership-scopes.md).
-Their complete basis and Project identity must be validated by a v2-capable consumer;
-the existing strict v1 export consumer continues to reject those new envelopes.
+The API-backed browser validates their complete retained basis and Project identity,
+and the explicit role union for public-export/v3, against the displayed selection.
+Unknown or mismatched scope/export versions remain rejected.
 Markdown
 portfolio, print, HTML and SVG presentation exports are disabled: `format=markdown`,
 `format=print` and other unknown formats return 400. No rendering/Markdown/URL-fetch
@@ -317,12 +318,16 @@ requests a complete refetch; the consumer decides when to replace the visible bo
 The API-backed web interface consumes the built, browser-only
 `@pick-your-ai/service/live-client` export. Importing that entry does not start the
 service or load its server dependencies. The interface subscribes to the current
-organization/repository/workstream/period and actor selection, excluding any
+organization/repository/workstream/period, membership basis, native Projects,
+contribution-role union and actor selection, excluding any
 historical snapshot, page cursor or proof selection. Registry-only pages still
 request only the registry. The deployment-configured public API origin and path
 are used for both full reads and update transport; route parameters cannot select
 a different server. The web consumer validates complete health metadata against
-its requested scope before accepting a freshness state.
+its requested scope before accepting a freshness state. Its synchronous `validateNotice`
+hook also checks the complete raw scope and envelope before stream or health acceptance
+can update the highest revision, last notice or conditional-health validator. The hook
+is optional for other helper callers and throws to use the existing fallback behavior.
 
 New snapshot or privacy-policy notices immediately trigger a complete public
 projection read, including for pinned snapshots. New rankings stay held until the

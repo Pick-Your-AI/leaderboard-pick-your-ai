@@ -77,6 +77,14 @@ for (const factor of [2, 4]) {
         await submit.focus();
         await page.keyboard.press("Enter");
         await expect(opener).toBeVisible();
+        // Changing the data scope retires the prior pin. Explicitly pin the
+        // newly verified scope before exercising frozen proof navigation.
+        expect(new URL(page.url()).searchParams.get("snapshot")).toBeNull();
+        const permalink = page.getByRole("link", { name: "Permalink to this snapshot", exact: true });
+        await expect(permalink).toHaveAttribute("href", /workstream=triage/);
+        await permalink.focus();
+        await page.keyboard.press("Enter");
+        await expect(opener).toBeVisible();
         for (const [key, value] of Object.entries({
           snapshot: "api-1",
           repository: "repo-1",
