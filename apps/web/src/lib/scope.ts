@@ -227,7 +227,16 @@ export interface TimeWindow {
 }
 
 function utcDay(date: Date): Date {
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = new Date(date.getTime());
+  day.setUTCHours(0, 0, 0, 0);
+  return day;
+}
+
+function utcMonthStart(date: Date, month: number): Date {
+  // Preserve the accepted year: Date.UTC remaps years 0–99 to 1900–1999.
+  const start = utcDay(date);
+  start.setUTCMonth(month, 1);
+  return start;
 }
 
 /**
@@ -252,21 +261,21 @@ export function resolveWindow(scope: Scope, cutoff: Date): TimeWindow {
       return { start: null, end: cutoff, label: "All time" };
     case "month":
       return {
-        start: new Date(Date.UTC(cutoff.getUTCFullYear(), cutoff.getUTCMonth(), 1)),
+        start: utcMonthStart(cutoff, cutoff.getUTCMonth()),
         end: cutoff,
         label: "This calendar month",
       };
     case "quarter": {
       const quarterMonth = Math.floor(cutoff.getUTCMonth() / 3) * 3;
       return {
-        start: new Date(Date.UTC(cutoff.getUTCFullYear(), quarterMonth, 1)),
+        start: utcMonthStart(cutoff, quarterMonth),
         end: cutoff,
         label: `Q${quarterMonth / 3 + 1} ${cutoff.getUTCFullYear()}`,
       };
     }
     case "year":
       return {
-        start: new Date(Date.UTC(cutoff.getUTCFullYear(), 0, 1)),
+        start: utcMonthStart(cutoff, 0),
         end: cutoff,
         label: `Calendar year ${cutoff.getUTCFullYear()}`,
       };

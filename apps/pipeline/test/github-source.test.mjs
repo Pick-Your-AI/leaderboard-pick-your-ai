@@ -183,7 +183,7 @@ test("selected relationship history enters collection as timestamped native tran
     repositories: [{ ...repository, families: ["relationships"] }],
     client: {
       rest: async () => ({ id: 2, private: false }),
-      scanRest: async () => [{ number: 1 }],
+      scanRest: async () => [{ number: 1, node_id: "I_synthetic" }],
       scanGraphql: async (scan) =>
         scan.select({
           repository: {
