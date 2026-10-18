@@ -1,3 +1,5 @@
+export { actorFilterSchema, actorFilterLabels, matchesActorFilter, type ActorFilter } from "./actor-filter.js";
+
 export {
   actorIdentityStateSchema,
   actorKindSchema,

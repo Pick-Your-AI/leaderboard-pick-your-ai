@@ -118,6 +118,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     computationVersion: snapshot.computationVersion,
     policyVersion: read.controls.version,
     scope: read.selected.scope,
+    actorFilter: read.actorFilter ?? "all",
     metric: board.metric,
     ranking: board.ranking,
     coverage: snapshot.coverage,
@@ -168,6 +169,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     "total_rows",
     "page_rows",
     "next_cursor",
+    "actor_filter",
     "actor_id",
     "actor",
     "actor_kind",
@@ -210,6 +212,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     board.totalRows,
     document.pageRows,
     board.nextCursor,
+    document.actorFilter,
   ];
   let bytes = 0;
   const lines: string[] = [];

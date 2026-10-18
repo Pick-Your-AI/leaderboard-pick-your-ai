@@ -137,6 +137,7 @@ export function EditorialSpotlights({
   selected: Selection;
 }) {
   const supported =
+    (selected.actors ?? "all") === "all" &&
     selected.organization === organization &&
     !selected.repository &&
     !selected.workstream &&

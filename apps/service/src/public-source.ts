@@ -1,4 +1,6 @@
 import {
+  matchesActorFilter,
+  type ActorFilter,
   publicEvidenceMetadataSchema,
   type PublicEvidenceMetadata,
   actorSchema,
@@ -76,6 +78,8 @@ export interface PublishedSnapshot {
 }
 /** Current controls must be read atomically even for a historical snapshot. */
 export interface PublicRead {
+  /** Applied only after current privacy projection; never a source authorization. */
+  actorFilter?: ActorFilter;
   head: { snapshotId: string; revision: number; publishedAt: string };
   selected: PublishedSnapshot;
   controls: {
@@ -104,6 +108,36 @@ export class PublicReadError extends Error {
   ) {
     super(code);
   }
+}
+
+/** Narrow whole actor aggregates and every proof view before ranking or pagination.
+ * User accounts may also have positively evidenced automated execution. The views
+ * can overlap; neither account type nor unknown execution certifies manual work.
+ * This requires an already validated projectRead result and does not mutate it.
+ */
+export function filterPublicActors(read: PublicRead, filter: ActorFilter): PublicRead {
+  const actors = read.selected.actors.filter((entry) => matchesActorFilter(entry.actor, filter));
+  const ids = new Set(actors.map((entry) => entry.actorId));
+  const included = (entry: PublicEvidence) => ids.has(entry.contribution.actorId ?? "");
+  return {
+    ...read,
+    actorFilter: filter,
+    selected: {
+      ...read.selected,
+      actors,
+      rows: read.selected.rows.filter((entry) => ids.has(entry.actorId)),
+      evidence: read.selected.evidence.filter(included),
+      ...(read.selected.portfolioEvidence === undefined
+        ? {}
+        : { portfolioEvidence: read.selected.portfolioEvidence.filter(included) }),
+      ...(read.selected.pendingEvidence === undefined
+        ? {}
+        : { pendingEvidence: read.selected.pendingEvidence.filter(included) }),
+      ...(read.selected.diagnostics === undefined
+        ? {}
+        : { diagnostics: read.selected.diagnostics.filter((entry) => ids.has(entry.actorId)) }),
+    },
+  };
 }
 export function safePublicUrl(value: string | null | undefined): string | null {
   if (!value || value.length > 2048) return null;

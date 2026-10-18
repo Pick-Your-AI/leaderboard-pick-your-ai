@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createService } from "../dist/app.js";
 import { startLiveUpdates } from "../dist/live-client.js";
+import { selection, validateExport } from "../../web/src/remote/client.ts";
 
 const at = "2026-10-17T12:00:00.000Z";
 const scope = { organization: "Pick-Your-AI", repository: null, workstream: null, start: null, end: null };
@@ -121,6 +122,141 @@ function harness(t, data = fixture(), extra = {}) {
     },
   };
 }
+
+function mixedActors() {
+  const data = fixture();
+  data.selected.actors[1].actor.executionMode = "automated";
+  data.selected.actors[2].actor.kind = "bot";
+  data.selected.actors[2].actor.executionMode = "automated";
+  data.selected.portfolioEvidence = data.selected.evidence.map((entry) => ({
+    ...structuredClone(entry),
+    activityState: "observed",
+    observedAt: at,
+  }));
+  return data;
+}
+
+test("actor selections narrow all public views without treating user accounts as manual execution", async (t) => {
+  const { app, data, calls } = harness(t, mixedActors());
+  const original = structuredClone(data);
+  for (const [actors, ids] of [
+    ["all", ["alice", "bob", "carol"]],
+    ["user", ["alice", "bob"]],
+    ["automation", ["bob", "carol"]],
+  ]) {
+    const read = async (path) => {
+      const response = await app.inject(`/api/v1/${path}${path.includes("?") ? "&" : "?"}actors=${actors}`);
+      assert.equal(response.statusCode, 200, response.body);
+      const result = response.json();
+      assert.equal(result.actorFilter, actors);
+      return result;
+    };
+    const board = await read("boards?metric=pr_opened");
+    assert.deepEqual(
+      board.rows.map((row) => row.actorId),
+      ids,
+    );
+    assert.equal(board.totalRows, ids.length);
+    assert.equal(board.rows.find((row) => row.actorId === "bob").actor.executionMode, "automated");
+    assert.equal(new URL(board.shareUrl, "https://example.invalid").searchParams.get("actors"), actors);
+    assert.deepEqual(
+      (await read("contributors")).contributors.map((entry) => entry.actorId),
+      ids,
+    );
+    assert.deepEqual((await read("activity")).groups.map((entry) => entry.actorId).sort(), [...ids].sort());
+    assert.equal((await read("contributors/bob")).actor.executionMode, "automated");
+    assert.equal((await read("evidence/e-bob")).contribution.actorId, "bob");
+    assert.equal((await read("health")).snapshotId, "public-1");
+    const json = await read("exports?metric=pr_opened&format=json");
+    assert.deepEqual(
+      json.rows.map((entry) => entry.actorId),
+      ids,
+    );
+    assert.equal(json.evidence.length, ids.length);
+    assert.equal(json.rows.find((row) => row.actorId === "bob").executionMode, "automated");
+    const selected = selection(`?actors=${actors}&metric=pr_opened&snapshot=public-1`);
+    assert.doesNotThrow(() => validateExport(json, selected));
+    const missingLabels = structuredClone(json);
+    delete missingLabels.rows[0].actorKind;
+    delete missingLabels.rows[0].executionMode;
+    if (actors === "all") assert.doesNotThrow(() => validateExport(missingLabels, selected));
+    else assert.throws(() => validateExport(missingLabels, selected), /api_actor_filter_mismatch/);
+    const invalidKind = structuredClone(json);
+    invalidKind.rows[0].actorKind = "manual";
+    assert.throws(() => validateExport(invalidKind, selected));
+    const csv = await app.inject(`/api/v1/exports?metric=pr_opened&actors=${actors}&format=csv`);
+    assert.equal(csv.statusCode, 200);
+    assert.equal(csv.headers["x-leaderboard-actor-filter"], actors);
+    assert.ok(csv.body.split("\r\n")[0].includes('"actor_filter"'));
+  }
+  assert.deepEqual(data, original, "a filtered request must not mutate the stored publication");
+  assert.ok(
+    calls.every((call) => !Object.hasOwn(call.scope, "actors")),
+    "actor selection is not a new or broader source grant",
+  );
+});
+
+test("actor filtering is consistent for direct proof, card, activity and historical privacy routes", async (t) => {
+  const { app, data } = harness(t, mixedActors());
+  for (const path of [
+    "contributors/carol",
+    "evidence/e-carol",
+    "cards/carol?metric=pr_opened",
+    "cards/carol/image?metric=pr_opened",
+  ]) {
+    const response = await app.inject(`/api/v1/${path}${path.includes("?") ? "&" : "?"}actors=user&snapshot=public-1`);
+    assert.equal(response.statusCode, 404, path);
+  }
+  const all = (await app.inject("/api/v1/activity")).json();
+  const carol = all.groups.find((entry) => entry.actorId === "carol");
+  assert.equal((await app.inject(`/api/v1/activity/${carol.groupId}?actors=user`)).statusCode, 404);
+  const allowedCard = await app.inject("/api/v1/cards/bob?metric=pr_opened&actors=automation");
+  assert.equal(allowedCard.statusCode, 200);
+  assert.match(allowedCard.body, /actors=automation/);
+  assert.match(allowedCard.body, /Activity selection<\/dt><dd>Automation/);
+  data.controls.suppressedActorIds = ["bob"];
+  data.controls.version = "privacy-2";
+  const board = (await app.inject("/api/v1/boards?metric=pr_opened&actors=automation&snapshot=public-1")).json();
+  assert.deepEqual(
+    board.rows.map((row) => row.actorId),
+    ["carol"],
+  );
+  assert.equal(board.rows[0].rank, 1);
+  assert.equal((await app.inject("/api/v1/evidence/e-bob?actors=automation&snapshot=public-1")).statusCode, 404);
+});
+
+test("actor selection is bound into every paginated endpoint and rejected before source reads when invalid", async (t) => {
+  const { app, calls } = harness(t, mixedActors());
+  for (const path of ["boards?metric=pr_opened", "contributors", "activity"]) {
+    const url = `/api/v1/${path}${path.includes("?") ? "&" : "?"}limit=1`;
+    const first = (await app.inject(`${url}&actors=user`)).json();
+    assert.ok(first.nextCursor);
+    const cursor = encodeURIComponent(first.nextCursor);
+    assert.equal((await app.inject(`${url}&actors=user&cursor=${cursor}`)).statusCode, 200);
+    const mismatch = await app.inject(`${url}&actors=automation&cursor=${cursor}`);
+    assert.equal(mismatch.statusCode, 400);
+    assert.equal(mismatch.json().error, "cursor_scope_mismatch");
+  }
+  const count = calls.length;
+  for (const suffix of ["actors=", "actors=human", "actors=manual", "actors=ai", "actors=user&actors=all"])
+    assert.equal((await app.inject(`/api/v1/boards?metric=pr_opened&${suffix}`)).statusCode, 400);
+  assert.equal(calls.length, count);
+});
+
+test("actor-filter stream receipts and polling retain the selected view", async (t) => {
+  const { app } = harness(t, mixedActors());
+  const response = await app.inject("/api/v1/updates?actors=automation");
+  assert.equal(response.statusCode, 200);
+  assert.match(response.body, /id: 1:public-1:policy-1:automation/);
+  const payload = JSON.parse(response.body.split("data: ")[1].trim());
+  assert.equal(payload.actorFilter, "automation");
+  assert.equal(new URL(payload.pollingUrl, "https://example.invalid").searchParams.get("actors"), "automation");
+  const changed = await app.inject({
+    url: "/api/v1/updates?actors=user",
+    headers: { "last-event-id": "1:public-1:policy-1:automation" },
+  });
+  assert.match(changed.body, /event: reset/);
+});
 const boardUrl = "/api/v1/boards?metric=pr_opened";
 
 test("anonymous public board, complete metric discovery and snapshot metadata", async (t) => {
@@ -854,6 +990,19 @@ test("service-account classification survives public projection without private 
   assert.equal(profile.statusCode, 200, profile.body);
   assert.equal(profile.json().actor.kind, "service_account");
   assert.doesNotMatch(board.body + profile.body, /PRIVATE_|serviceAccountClassification|manual/);
+  const automated = (await h.app.inject(`${boardUrl}&actors=automation`)).json();
+  assert.deepEqual(
+    automated.rows.map((row) => row.actorId),
+    ["alice"],
+  );
+  assert.equal(automated.rows[0].actor.executionMode, "unknown");
+  const users = (await h.app.inject(`${boardUrl}&actors=user`)).json();
+  assert.deepEqual(
+    users.rows.map((row) => row.actorId),
+    ["bob", "carol"],
+  );
+  assert.equal((await h.app.inject("/api/v1/evidence/e-alice?actors=user")).statusCode, 404);
+  assert.equal((await h.app.inject("/api/v1/evidence/e-alice?actors=automation")).statusCode, 200);
   // A raw actor cannot accidentally serialize internal receipt fields as public profile fields.
   h.data.selected.actors[0].actor.serviceAccountClassification = h.data.selected.actors[0].serviceAccountClassification;
   assert.equal((await h.app.inject(boardUrl)).statusCode, 503);
