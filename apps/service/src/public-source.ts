@@ -12,6 +12,7 @@ import {
   type PublicEvidenceMetadata,
   actorSchema,
   artifactSchema,
+  publicArtifactIdSchema,
   contributionSchema,
   metricResultSchema,
   pendingCountSchema,
@@ -345,9 +346,12 @@ export function projectRead(
     input.head.revision < snapshot.revision ||
     !date(input.head.publishedAt) ||
     input.head.publishedAt === null ||
-    ![controls.suppressedActorIds, controls.suppressedArtifactIds, controls.revokedSnapshotIds].every(
+    ![controls.suppressedActorIds, controls.revokedSnapshotIds].every(
       (list) => Array.isArray(list) && list.length <= 20000 && list.every(id),
-    )
+    ) ||
+    !Array.isArray(controls.suppressedArtifactIds) ||
+    controls.suppressedArtifactIds.length > 20000 ||
+    !controls.suppressedArtifactIds.every((value) => publicArtifactIdSchema.safeParse(value).success)
   )
     return reject();
   if (pin !== null && snapshot.snapshotId !== pin) return reject();

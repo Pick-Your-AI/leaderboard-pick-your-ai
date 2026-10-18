@@ -123,6 +123,7 @@ async function service(page: Page, approved = true) {
   let unavailable = false;
   let corruptAchievementCoverage = false;
   let calls = 0;
+  const categories: (string | null)[] = [];
   const app = createService({
     approvedAchievementRuleVersion: approved ? "accepted-evidence/v1" : undefined,
     source: {
@@ -136,7 +137,10 @@ async function service(page: Page, approved = true) {
   });
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
-    if (url.pathname.endsWith("/achievements")) calls++;
+    if (url.pathname.endsWith("/achievements")) {
+      calls++;
+      categories.push(url.searchParams.get("category"));
+    }
     const response = await app.inject({ method: "GET", url: url.pathname + url.search });
     let body = response.body;
     const headers = { ...response.headers };
@@ -157,6 +161,7 @@ async function service(page: Page, approved = true) {
       current.controls.suppressedActorIds = ["api-a"];
     },
     calls: () => calls,
+    categories: () => [...categories],
     corruptAwardCoverage: () => {
       corruptAchievementCoverage = true;
     },
@@ -298,7 +303,9 @@ test("real controls current spotlights reject filtered scope and disappear after
   }
 });
 
-test("category-filtered portfolios withhold broader achievements and do not request them", async ({ page }) => {
+test("a legacy service receives only the exact category request and never supplies broader fallback achievements", async ({
+  page,
+}) => {
   const api = await service(page);
   try {
     await page.clock.install();
@@ -309,11 +316,17 @@ test("category-filtered portfolios withhold broader achievements and do not requ
       history.pushState(null, "", "/contributors/api-a?ui=api&snapshot=api-1&category=documentation");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
-    await expect(page.getByText(/Achievements are unavailable for category-filtered portfolios/)).toBeVisible();
+    await expect(page.getByText(/Achievements are unavailable for this category-filtered portfolio/)).toBeVisible();
     await expect(page.getByRole("link", { name: "Qualifying public artifact" })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "First accepted contribution in available scope" })).toHaveCount(0);
     await page.clock.fastForward(30_001);
-    expect(api.calls()).toBe(before);
+    expect(api.calls()).toBeGreaterThan(before);
+    expect(
+      api
+        .categories()
+        .slice(before)
+        .every((category) => category === "documentation"),
+    ).toBe(true);
     await expect(page.getByRole("link", { name: "Open archived documentation card" })).toBeVisible();
     await page.evaluate(() => {
       history.pushState(null, "", "/contributors/api-a?ui=api&snapshot=api-1");
