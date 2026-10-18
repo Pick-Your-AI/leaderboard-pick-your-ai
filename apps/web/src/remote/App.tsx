@@ -1,5 +1,13 @@
 import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
 import { PublicScopeControls, PublicScopeProvenance } from "./PublicScope.tsx";
+import { Programs } from "./Programs.tsx";
+import {
+  programDirectoryAsset,
+  programRoute,
+  readProgramDirectory,
+  type ProgramDirectory,
+  type ProgramRecord,
+} from "./program-directory.ts";
 import { selectionScope } from "./public-scope.ts";
 import { ContributorParticipation } from "./Participation.tsx";
 import { EvidenceDrawer, EvidenceProof, Receipt } from "./Evidence.tsx";
@@ -58,6 +66,7 @@ import {
 
 type Data =
   | { kind: "catalog" }
+  | { kind: "programs"; directory: ProgramDirectory; program: ProgramRecord | null }
   | { kind: "method"; metricId: string }
   | { kind: "health"; value: Health }
   | { kind: "board"; value: Board }
@@ -127,25 +136,27 @@ const name = (actor: Profile["actor"], actorId: string) => actor.displayName ?? 
 const title = (path: string) =>
   path === "/"
     ? "Public contribution evidence"
-    : path.startsWith("/contributions/")
-      ? "Contribution evidence"
-      : path.startsWith("/contributors/")
-        ? "Contributor portfolio"
-        : path.startsWith("/methodology")
-          ? "Methodology"
-          : path === "/leaderboards"
-            ? "Measures"
-            : path === "/contributors"
-              ? "Contributor directory"
-              : path === "/activity" || path.startsWith("/activity/")
-                ? "Public activity"
-                : path === "/coverage" || path === "/health"
-                  ? "Source coverage and health"
-                  : path === "/live"
-                    ? "Live board"
-                    : path === "/corrections"
-                      ? "Corrections and privacy"
-                      : "Contribution board";
+    : path === "/programs" || path.startsWith("/programs/")
+      ? "Program directory"
+      : path.startsWith("/contributions/")
+        ? "Contribution evidence"
+        : path.startsWith("/contributors/")
+          ? "Contributor portfolio"
+          : path.startsWith("/methodology")
+            ? "Methodology"
+            : path === "/leaderboards"
+              ? "Measures"
+              : path === "/contributors"
+                ? "Contributor directory"
+                : path === "/activity" || path.startsWith("/activity/")
+                  ? "Public activity"
+                  : path === "/coverage" || path === "/health"
+                    ? "Source coverage and health"
+                    : path === "/live"
+                      ? "Live board"
+                      : path === "/corrections"
+                        ? "Corrections and privacy"
+                        : "Contribution board";
 function Source({ href, children }: { href: string | null | undefined; children: React.ReactNode }) {
   const safe = publicLink(href);
   return safe ? (
@@ -459,6 +470,7 @@ export function RemoteApp() {
     try {
       const selected = selection(url.search, { comparison: rankComparisonPath(url.pathname) });
       validateCatalogRoute(url.pathname, url.search);
+      const program = programRoute(url.pathname);
       if (
         selected.proof &&
         (!selected.snapshot ||
@@ -490,7 +502,7 @@ export function RemoteApp() {
       }
       const base = apiBase(import.meta.env.VITE_PUBLIC_API_BASE || "/api/v1");
       const liveScope =
-        isCatalogPath(url.pathname) || /^\/methodology\/[^/]+$/.test(url.pathname)
+        program !== false || isCatalogPath(url.pathname) || /^\/methodology\/[^/]+$/.test(url.pathname)
           ? null
           : liveParameters(base, selected).toString();
       return { selected, base, liveScope, error: null };
@@ -569,6 +581,14 @@ export function RemoteApp() {
     const boardQuery = parameters(exact, { board: true, cursor: selected.cursor });
     const load = async (): Promise<Data> => {
       const path = url.pathname;
+      const programId = programRoute(path);
+      if (programId !== false) {
+        const asset = programDirectoryAsset(import.meta.env.BASE_URL, location.origin);
+        const directory = await readProgramDirectory(asset, selected.organization, controller.signal);
+        const program = programId === null ? null : directory.programs.find((entry) => entry.id === programId);
+        if (program === undefined) throw new ReadFailure(404, "unknown_program");
+        return { kind: "programs", directory, program };
+      }
       if (isCatalogPath(path)) return { kind: "catalog" };
       if (/^\/methodology\/[^/]+$/.test(path)) return { kind: "method", metricId: exact.metric };
       if (path === "/" || path === "/health" || path === "/coverage")
@@ -790,6 +810,7 @@ export function RemoteApp() {
               {[
                 ["/", "Overview"],
                 ["/leaderboards", "Measures"],
+                ["/programs", "Programs"],
                 ["/contributors", "Contributors"],
                 ["/activity", "Activity"],
                 ["/methodology", "Methodology"],
@@ -922,6 +943,9 @@ export function RemoteApp() {
               path={url.pathname}
               navigate={navigate}
             />
+          )}
+          {data?.kind === "programs" && state.status === "ready" && (
+            <Programs directory={data.directory} program={data.program} registry={state.registry} selected={selected} />
           )}
           {data?.kind === "method" && state.status === "ready" && (
             <>
