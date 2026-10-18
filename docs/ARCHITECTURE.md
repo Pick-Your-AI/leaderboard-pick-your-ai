@@ -2,7 +2,7 @@
 
 # Proposed service architecture
 
-This is an implementation design baseline. The runtime packages below are not yet scaffolded. Their acceptance belongs to the linked delivery work packages.
+This is the architecture and delivery baseline. Local runtime implementations now exist in `apps/` and `packages/`; the [runtime guide](runtime-foundation.md) lists the current workspaces and validation path. The planned module boundaries below are not an inventory of completed work. Each module's acceptance belongs to its linked delivery work packages, including their source, production and operational evidence gates.
 
 TypeScript modular application with React/Vite static frontend, API/webhook service, background workers and PostgreSQL-backed durable inbox/outbox; scale components independently only when measured load warrants it.
 
