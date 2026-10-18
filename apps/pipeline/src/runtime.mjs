@@ -1,4 +1,6 @@
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
+import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
+import { requireThat } from "../../controls/src/store.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
 import { createHash } from "node:crypto";
@@ -86,6 +88,80 @@ export async function createPipeline(options) {
   const verifyConfig = options.verifyConfiguration ?? (async () => false);
   const authorizeCorrection = options.authorizeCorrection ?? (async () => false);
   const now = options.now ?? (() => new Date().toISOString());
+  const policyComparisons = new PolicyComparisonStore(controlsStore, c.metrics, { now: () => Date.parse(utc(now())) });
+  // Source read locks span the final reviewer reauthentication and synchronous
+  // private result transaction. No source/network permission is granted here.
+  async function withAuthorizedComparisonInputs(authorizations, work) {
+    requireThat(
+      authorizations.every(
+        (authorization) => authorization.configurationHash === digest(config) && authorization.dataMode === dataMode,
+      ),
+      409,
+      "Frozen input configuration changed",
+    );
+    return db.transaction(async (tx) => {
+      requireThat(await approved(tx), 409, "Frozen input authorization unavailable");
+      const sources = authorizations.flatMap((authorization) => authorization.sources);
+      const ids = [...new Set(sources.map((source) => source.repositoryId))];
+      const access = (
+        await tx.query(
+          "SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE",
+          [ids],
+        )
+      ).rows;
+      requireThat(
+        access.length === ids.length &&
+          sources.every((source) =>
+            access.some(
+              (row) =>
+                String(row.repository_id) === source.repositoryId &&
+                row.state === "public" &&
+                String(row.generation) === source.generation,
+            ),
+          ),
+        409,
+        "Frozen input source authorization changed",
+      );
+      const removed = (
+        await tx.query(
+          "SELECT subject_id FROM leaderboard_ingestion.object_suppressions WHERE repository_id=ANY($1::bigint[])",
+          [ids],
+        )
+      ).rows.map((row) => row.subject_id);
+      const corrections = (
+        await tx.query(
+          "SELECT artifact_id,document FROM leaderboard_pipeline.corrections WHERE repository_id=ANY($1::bigint[])",
+          [ids],
+        )
+      ).rows;
+      for (const correction of corrections)
+        if (
+          authorizations.some(
+            (authorization) =>
+              !authorization.corrections?.some(
+                (saved) =>
+                  saved.artifactId === correction.artifact_id && saved.hash === digest(correction.document.fact),
+              ),
+          )
+        )
+          removed.push(correction.artifact_id);
+      return work(removed, {
+        refreshApproval: () => approved(tx),
+        isCurrent(session) {
+          // The host must atomically read its authoritative roster/configuration
+          // cache. Two independently awaited checks cannot establish this fence.
+          if (typeof options.policyComparisonAuthorityCurrent !== "function") return false;
+          const current = options.policyComparisonAuthorityCurrent({
+            configurationHash: digest(config),
+            actorId: session.actorId,
+            roleVersion: session.roleVersion,
+          });
+          if (current && typeof current.then === "function") void Promise.resolve(current).catch(() => undefined);
+          return current === true;
+        },
+      });
+    });
+  }
   const defaultSource = options.githubClient
     ? createGithubCollectionSource({
         client: options.githubClient,
@@ -536,10 +612,19 @@ export async function createPipeline(options) {
       for (const artifactId of suppressed) {
         if (typeof artifactId !== "string" || !/^[A-Za-z0-9_=.:-]{1,200}$/.test(artifactId))
           fail("invalid_artifact_suppression");
-        await db.query(
-          "INSERT INTO leaderboard_ingestion.object_suppressions(repository_id,subject_id,reason) VALUES($1,$2,'unavailable') ON CONFLICT DO NOTHING",
-          [repository.id, artifactId],
-        );
+        await db.transaction(async (tx) => {
+          // Match collection/correction suppression fencing: readers hold this
+          // source gate through their final current-privacy projection.
+          await tx.query(
+            "SELECT repository_id FROM leaderboard_ingestion.repository_access WHERE repository_id=$1 FOR UPDATE",
+            [repository.id],
+          );
+          assertRunConfiguration();
+          await tx.query(
+            "INSERT INTO leaderboard_ingestion.object_suppressions(repository_id,subject_id,reason) VALUES($1,$2,'unavailable') ON CONFLICT DO NOTHING",
+            [repository.id, artifactId],
+          );
+        });
       }
       // Persist authoritative exclusions even when this dispatch cannot yet
       // prove the target creation. Failure must not leave older evidence visible.
@@ -591,12 +676,13 @@ export async function createPipeline(options) {
       };
     });
   }
-  function confirmPublication(publication) {
+  function confirmPublication(publication, comparisonInput) {
     controlsStore.transaction((state) => {
       const overlay = restrictConfiguration(state);
       if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
       if (recognitionBindings.length && recognitionFingerprint(state) !== runRecognitionFingerprint)
         fail("recognition_changed_during_run");
+      if (comparisonInput) publication.comparisonInput = policyComparisons.capture(state, comparisonInput);
       state.pipelinePublications ||= {};
       state.pipelinePublications[publication.snapshotId] = {
         recognitionFingerprint: recognitionBindings.length ? runRecognitionFingerprint : null,
@@ -758,7 +844,13 @@ export async function createPipeline(options) {
       cutoff: observationCutoff,
       backfillRevision: digest(outputs),
       repositoryIds: repos.map((repo) => String(repo.id)),
-      actors: [...actors.values()],
+      actors: [...actors.values()].map(({ id, login, kind, publicState, executionMode }) => ({
+        id,
+        login,
+        kind,
+        publicState,
+        ...(executionMode === undefined ? {} : { executionMode }),
+      })),
       facts: [...facts, ...corrections],
       coverage,
     };
@@ -1015,7 +1107,22 @@ export async function createPipeline(options) {
       });
       // PostgreSQL can commit while controls change. Confirm publication only in
       // the same synchronous SQLite boundary used by configuration activation.
-      confirmPublication(publication);
+      confirmPublication(publication, {
+        input: frozen,
+        scope: engineScope,
+        policies: config.policies.map((item) => item.policy),
+        aggregates,
+        snapshot: { snapshotId: publication.snapshotId, revision: publication.revision },
+        authorization: {
+          configurationHash: digest(config),
+          dataMode,
+          controlsConfigurationRevision: runConfigurationRevision,
+          sources: generations.map((row) => ({
+            repositoryId: String(row.repository_id),
+            generation: String(row.generation),
+          })),
+        },
+      });
       monitorSuccess(scopeKey(scope), "publication", publicationStarted, String(publication.revision));
       return publication;
     } catch (error) {
@@ -1490,7 +1597,11 @@ export async function createPipeline(options) {
       }
       if (controls) {
         if (!options.controlsAuthentication) fail("controls_authentication_required");
-        controlsServer = c.controls.createControlsServer({ ...options.controlsAuthentication, store: controlsStore });
+        controlsServer = c.controls.createControlsServer({
+          ...options.controlsAuthentication,
+          store: controlsStore,
+          policyComparisons: { comparisons: policyComparisons, withAuthorizedInputs: withAuthorizedComparisonInputs },
+        });
         await new Promise((resolve, reject) => {
           controlsServer.once("error", reject);
           controlsServer.listen(controls.port, controls.host, resolve);
@@ -1559,6 +1670,8 @@ export async function createPipeline(options) {
     applyCorrection,
     previewPolicy,
     approvePolicyComparison,
+    // Privileged host composition only; never attached to the public service.
+    policyComparisons: { comparisons: policyComparisons, withAuthorizedInputs: withAuthorizedComparisonInputs },
     start,
     stop,
     run,

@@ -165,6 +165,18 @@ async function harness(t, extra = {}) {
     },
     ...extra,
   };
+  const { createPolicyPreviewAuthority, previewAuthorityLimitsV1 } =
+    await import("../../controls/src/policy-preview-authority.mjs");
+  const { comparisonHash } = await import("../../controls/src/policy-comparison.mjs");
+  const authority = createPolicyPreviewAuthority();
+  authority.replace({
+    schemaVersion: previewAuthorityLimitsV1.schemaVersion,
+    revision: 1,
+    validUntil: Date.now() + 60_000,
+    configurationHashes: [comparisonHash(options.config)],
+    reviewers: [{ actorId: "201", roleVersion: "1" }],
+  });
+  options.policyComparisonAuthorityCurrent ??= authority.isCurrent;
   const runtime = await createPipeline(options);
   t.after(async () => {
     await runtime.stop();
@@ -176,6 +188,7 @@ async function harness(t, extra = {}) {
   });
   return {
     runtime,
+    authority,
     db,
     controlsStore,
     options,
@@ -1329,4 +1342,130 @@ test("materialization retains separate pending provenance through replay and rev
   const exported = (await h.runtime.app.inject("/api/v1/exports?metric=pr_merged&format=json")).json();
   assert.equal(exported.pendingEvidence.length, 2);
   assert.equal(exported.rows.find((entry) => entry.actorId === "101").pending.count, 2);
+});
+
+test("confirmed publication captures minimal private snapshot-bound frozen input and engine audit for exact policy replay", async (t) => {
+  const { createPolicyComparisonManager, comparisonHash } = await import("../../controls/src/policy-comparison.mjs");
+  const h = await harness(t);
+  const publication = (await h.runtime.runOnce()).publications[0];
+  assert.equal(publication.comparisonInput.state, "retained");
+  const record = h.runtime.policyComparisons.comparisons.input(publication.comparisonInput.inputId);
+  assert.equal(record.snapshot.snapshotId, publication.snapshotId);
+  assert.equal(record.snapshot.revision, publication.revision);
+  assert.equal(record.baseline[0].metricId, "issues_opened");
+  assert.ok(Array.isArray(record.baseline[0].audit));
+  assert.deepEqual(Object.keys(record.input.actors[0]).sort(), ["executionMode", "id", "kind", "login", "publicState"]);
+  assert.doesNotMatch(JSON.stringify(record), /html_url|node_id|user:|private@example/);
+  const session = {
+    sid: "synthetic-reviewer-session",
+    actorId: "201",
+    roles: ["reviewer"],
+    roleVersion: "1",
+    expires: Date.now() + 600_000,
+  };
+  h.controlsStore.transaction((state) => {
+    state.sessions[session.sid] = session;
+  });
+  const manager = createPolicyComparisonManager(h.runtime.policyComparisons);
+  const request = {
+    path: "/controls/policy-comparisons",
+    method: "POST",
+    session,
+    refreshSession: async () => session,
+    input: {
+      inputId: record.id,
+      candidatePolicy: { ...record.policies[0], version: "synthetic-policy-v2", rank: false },
+    },
+  };
+  const result = await manager(request);
+  assert.equal(result.data.inputHash, comparisonHash(record.input));
+  assert.equal(result.data.before.datasetId, result.data.after.datasetId);
+  assert.equal(result.data.baselineHash, comparisonHash(record.baseline[0]));
+  assert.ok(result.data.changes.every((change) => change.afterRank === null));
+  const restarted = await createPipeline(h.options);
+  t.after(() => restarted.stop());
+  assert.deepEqual(await createPolicyComparisonManager(restarted.policyComparisons)(request), result);
+  for (const path of [boardUrl, "/api/v1/contributors", "/api/v1/exports?metric=issues_opened", "/api/v1/methodology"])
+    assert.doesNotMatch(
+      (await h.runtime.app.inject(path)).body,
+      /candidatePolicy|correctionReceipt|inputHash|baselineHash|excluded_by_policy/,
+    );
+  await h.runtime.collection.suppress(fixtureId(75), "e".repeat(64), 1, [2], "revoked");
+  await assert.rejects(manager(request), /source authorization changed/);
+  await assert.rejects(
+    manager({ ...request, method: "GET", path: "/controls/policy-comparisons/" + result.data.comparisonId }),
+    /source authorization changed/,
+  );
+});
+
+test("normalizer-derived suppression uses an exclusive repository gate without a shared-lock upgrade", async (t) => {
+  const h = await harness(t, {
+    normalizer: async () => ({
+      actors: [],
+      facts: [],
+      evidence: [],
+      isSynthetic: true,
+      suppressArtifactIds: ["SYNTHETIC_ISSUE_1"],
+    }),
+  });
+  const transaction = h.db.transaction;
+  const suppressionTransactions = [];
+  h.db.transaction = (work) =>
+    transaction(async (tx) => {
+      const statements = [];
+      const result = await work({
+        query: async (sql, params) => {
+          statements.push(sql);
+          if (sql.includes("INSERT INTO leaderboard_ingestion.object_suppressions")) {
+            assert.ok(statements.some((statement) => /repository_access.*FOR UPDATE/.test(statement)));
+            assert.equal(
+              statements.some((statement) => /FOR SHARE/.test(statement)),
+              false,
+            );
+            suppressionTransactions.push(statements);
+          }
+          return tx.query(sql, params);
+        },
+      });
+      return result;
+    });
+  assert.equal((await h.runtime.runOnce()).state, "published");
+  assert.ok(suppressionTransactions.length > 0);
+  assert.equal(
+    (await h.db.query("SELECT count(*)::int AS n FROM leaderboard_ingestion.object_suppressions")).rows[0].n,
+    1,
+  );
+});
+
+test("optional preview capacity cannot take an independently approved public publication offline", async (t) => {
+  const { comparisonLimitsV1 } = await import("../../controls/src/policy-comparison.mjs");
+  const h = await harness(t);
+  assert.equal((await h.runtime.runOnce()).state, "published");
+  const comparisons = h.runtime.policyComparisons.comparisons;
+  h.controlsStore.transaction(() => {
+    for (let i = 1; i < comparisonLimitsV1.approvedVersions; i++)
+      assert.equal(
+        comparisons.captureBindings([{ ...h.config.policies[0].policy, version: `synthetic-approved-history-${i}` }]),
+        null,
+      );
+    for (let i = 0; i < comparisonLimitsV1.candidateVersions; i++)
+      comparisons.bindCandidate({ ...h.config.policies[0].policy, version: `synthetic-unapproved-history-${i}` });
+  });
+  const config = structuredClone(h.config);
+  config.policies[0].policy.version = "synthetic-approved-new-policy";
+  config.policies[0].signature = components.metrics.stableJSON(config.policies[0].policy);
+  const next = await createPipeline({ ...h.options, config });
+  t.after(() => next.stop());
+  const publication = await next.runOnce();
+  assert.equal(publication.state, "published");
+  assert.deepEqual(publication.publications[0].comparisonInput, {
+    state: "unavailable",
+    reason: "frozen_approved_version_capacity_reached",
+  });
+  assert.equal((await next.app.inject(boardUrl)).statusCode, 200);
+  assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 2);
+  assert.equal(
+    h.controlsStore.read().pipelinePublications[publication.publications[0].snapshotId].configurationVersion,
+    config.version,
+  );
 });
