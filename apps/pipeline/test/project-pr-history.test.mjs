@@ -31,6 +31,8 @@ function harness({ paginated = false } = {}) {
     publicProject: true,
     privateRepository: false,
     subjectUrl: undefined,
+    subjectId: undefined,
+    subjectIdAfter: undefined,
     events: [projectEvent("E_issue", 1), projectEvent("E_pull", 2)],
     previousStatus: "Todo",
     status: "Done",
@@ -90,7 +92,10 @@ function harness({ paginated = false } = {}) {
                 isPrivate: state.privateRepository,
                 [field]: isExpectedSubject
                   ? {
-                      id: isPull ? "PR_synthetic" : "I_synthetic",
+                      id:
+                        (offset ? state.subjectIdAfter : undefined) ??
+                        state.subjectId ??
+                        (isPull ? "PR_synthetic" : "I_synthetic"),
                       url:
                         state.subjectUrl ??
                         `https://github.com/${repository.slug}/${isPull ? "pull" : "issues"}/${variables.number}`,
@@ -249,7 +254,7 @@ test("PR history verifies its exact subject and bounds every native timeline pag
         family: "project_history",
         scanId: "synthetic",
       }),
-      /typed_history_subject_unverified/,
+      /project_subject_identity_unverified/,
     );
   }
   const h = harness({ paginated: true });
@@ -319,4 +324,75 @@ test("duplicate subject inventory cannot establish a complete Project status cou
   const h = harness();
   h.state.inventory.push(h.state.inventory[1]);
   await assert.rejects(h.source.readPage(request), /history_subject_unverified/);
+});
+
+test("Project history binds the REST node ID and rejects missing or reused stable inventory identities", async () => {
+  for (const change of [
+    (h) => {
+      h.state.subjectId = "PR_different_from_inventory";
+    },
+    (h) => {
+      h.state.inventory[1].node_id = h.state.inventory[0].node_id;
+    },
+    (h) => {
+      delete h.state.inventory[1].node_id;
+    },
+  ]) {
+    const h = harness();
+    change(h);
+    await assert.rejects(h.source.readPage(request), /history_subject_unverified|project_subject_identity_unverified/);
+  }
+});
+
+test("a later Project timeline page cannot change the stable subject at the same canonical URL", async () => {
+  const h = harness({ paginated: true });
+  h.state.events.push(projectEvent("E_pull_second", 2));
+  h.state.subjectIdAfter = "PR_replaced_on_second_page";
+  await assert.rejects(h.source.readPage(request), /project_subject_identity_unverified/);
+});
+
+test("normalization independently binds stable Project subject identity across pages", async () => {
+  const h = harness({ paginated: true });
+  h.state.events.push(projectEvent("E_pull_second", 2));
+  const fact = (await h.source.readPage(request)).facts.find((entry) => entry.subjectId === "E_pull_second");
+  h.state.subjectIdAfter = "PR_replaced_during_hydration";
+  await assert.rejects(h.normalize(fact), /project_subject_identity_unverified/);
+});
+
+test("resumed Project timelines revalidate saved subject identities against subsequent pages", async () => {
+  const h = harness({ paginated: true });
+  h.state.events.push(projectEvent("E_pull_second", 2));
+  const options = {
+    client: h.client,
+    source: "synthetic",
+    repository,
+    number: 2,
+    subjectType: "pull_request",
+    family: "project_history",
+    scanId: "synthetic-resumed-normalization",
+  };
+  await assert.rejects(readTypedIssueHistory({ ...options, maxPages: 1 }), /exceeded maxPages/);
+  h.state.subjectIdAfter = "PR_changed_after_checkpoint";
+  await assert.rejects(readTypedIssueHistory({ ...options, maxPages: 2 }), /project_subject_identity_unverified/);
+});
+
+test("legacy typed-history checkpoints cannot bypass stable inventory identity verification", async () => {
+  const h = harness();
+  const scanGraphql = h.client.scanGraphql.bind(h.client);
+  // Reproduce the prior checkpoint namespace using the actual durable scan transport.
+  h.client.scanGraphql = (options) =>
+    scanGraphql({ ...options, key: options.key.replace("typed-history:subject-v2:", "typed-history:") });
+  h.state.subjectId = "PR_legacy_identity";
+  await readTypedIssueHistory({
+    client: h.client,
+    source: "synthetic",
+    repository,
+    number: 2,
+    subjectType: "pull_request",
+    family: "project_history",
+    scanId: "synthetic",
+  });
+  h.client.scanGraphql = scanGraphql;
+  h.state.subjectId = undefined;
+  assert.equal((await h.source.readPage(request)).expectedCount, 2);
 });

@@ -142,16 +142,26 @@ export function createGithubCollectionSource({
         if (subjects.length > 10000) throw new Error("source_dataset_budget_exceeded");
         values = [];
         const seen = new Set();
+        const seenIds = new Set();
         for (const subject of subjects) {
-          if (!Number.isSafeInteger(subject.number) || subject.number < 1 || seen.has(subject.number))
+          if (
+            !Number.isSafeInteger(subject.number) ||
+            subject.number < 1 ||
+            seen.has(subject.number) ||
+            typeof subject.node_id !== "string" ||
+            !subject.node_id.trim() ||
+            seenIds.has(subject.node_id)
+          )
             throw new Error("history_subject_unverified");
           seen.add(subject.number);
+          seenIds.add(subject.node_id);
           const records = await readTypedIssueHistory({
             client,
             source: sourceId,
             repository,
             number: subject.number,
             subjectType: subject.pull_request ? "pull_request" : "issue",
+            subjectId: subject.node_id,
             family: request.family,
             scanId: request.runId,
             maxPages,
