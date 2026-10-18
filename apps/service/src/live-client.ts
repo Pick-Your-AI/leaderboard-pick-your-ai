@@ -79,7 +79,13 @@ export function startLiveUpdates(options: LiveOptions): () => void {
         try {
           const previous = lastNotice;
           accept(JSON.parse(String(event.data)));
-          if (lastNotice !== previous) emit({ freshness: "unknown", checkedAt: null });
+          if (lastNotice !== previous) {
+            // A health validator describes the previous snapshot and policy. A notice
+            // carries no health evidence, so it cannot inherit that cached freshness.
+            etag = null;
+            lastHealth = "unknown";
+            emit({ freshness: "unknown", checkedAt: null });
+          }
         } catch {
           connection.onerror?.(new Event("error"));
         }
@@ -101,6 +107,7 @@ export function startLiveUpdates(options: LiveOptions): () => void {
   async function poll() {
     if (stopped || document?.hidden) return;
     const current = generation;
+    const requestedNotice = lastNotice;
     controller = new AbortController();
     const activeController = controller;
     const deadline = setTimeout(() => activeController.abort(), 5000);
@@ -111,14 +118,14 @@ export function startLiveUpdates(options: LiveOptions): () => void {
         cache: "no-cache",
         signal: activeController.signal,
       });
-      if (stopped || current !== generation) return;
+      if (stopped || current !== generation || requestedNotice !== lastNotice) return;
       if (response.status === 304) {
         if (!etag) throw new Error("unexpected_not_modified");
         emit({ transport: stream ? "stream" : "polling", freshness: lastHealth, checkedAt: new Date().toISOString() });
       } else {
         if (!response.ok) throw new Error("poll_unavailable");
         const body = (await response.json()) as Record<string, unknown>;
-        if (stopped || current !== generation) return;
+        if (stopped || current !== generation || requestedNotice !== lastNotice) return;
         if (body.status !== "recently_reconciled" && body.status !== "stale_or_degraded")
           throw new Error("invalid_health");
         if (typeof body.revision === "number" && body.revision < highestRevision) return;
