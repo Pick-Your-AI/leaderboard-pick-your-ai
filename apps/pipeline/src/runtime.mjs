@@ -1,5 +1,6 @@
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
 import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
+import { AggregateExplanationStore } from "./aggregate-explanations.mjs";
 import { requireThat } from "../../controls/src/store.mjs";
 import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-metadata.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
@@ -99,6 +100,14 @@ export async function createPipeline(options) {
   const authorizeCorrection = options.authorizeCorrection ?? (async () => false);
   const now = options.now ?? (() => new Date().toISOString());
   const policyComparisons = new PolicyComparisonStore(controlsStore, c.metrics, { now: () => Date.parse(utc(now())) });
+  const aggregateExplanations = new AggregateExplanationStore(controlsStore);
+  const computationVersion = `${dataMode}-pipeline-${digest(Array.isArray(config.policies) ? config.policies.map((item) => item?.signature) : []).slice(0, 16)}`;
+  const explanationBinding = (scope, publication) => ({
+    scopeKey: scopeKey(scope),
+    revision: publication.revision,
+    computationVersion,
+    configurationHash: digest(config),
+  });
   // Source read locks span the final reviewer reauthentication and synchronous
   // private result transaction. No source/network permission is granted here.
   async function withAuthorizedComparisonInputs(authorizations, work) {
@@ -778,13 +787,24 @@ export async function createPipeline(options) {
     confirmation.dataMode === dataMode &&
     confirmation.scopeKey === scopeKey(scope) &&
     confirmation.snapshotId === snapshotId &&
-    confirmation.revision === revision;
+    confirmation.revision === revision &&
+    typeof confirmation.aggregateExplanationHash === "string" &&
+    /^[a-f0-9]{64}$/.test(confirmation.aggregateExplanationHash);
   function confirmPublication(scope, publication, comparisonInput) {
     controlsStore.transaction((state) => {
       const overlay = restrictConfiguration(state);
       if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
       if (recognitionBindings.length && recognitionFingerprint(state) !== runRecognitionFingerprint)
         fail("recognition_changed_during_run");
+      // Required arithmetic explanation and visibility authority share this one
+      // durable commit. Optional preview limits can never bypass this write.
+      const binding = {
+        ...explanationBinding(scope, publication),
+        digest: state.pipelinePublications?.[publication.snapshotId]?.aggregateExplanationHash,
+      };
+      const explanation = comparisonInput
+        ? aggregateExplanations.capture(comparisonInput, binding)
+        : aggregateExplanations.verify(publication.snapshotId, binding);
       if (comparisonInput) publication.comparisonInput = policyComparisons.capture(state, comparisonInput);
       state.pipelinePublications ||= {};
       const confirmation = {
@@ -792,6 +812,7 @@ export async function createPipeline(options) {
         configurationVersion: config.version,
         configurationHash: digest(config),
         controlsConfigurationRevision: runConfigurationRevision,
+        aggregateExplanationHash: explanation.digest,
         dataMode,
         scopeKey: scopeKey(scope),
         snapshotId: publication.snapshotId,
@@ -1245,7 +1266,7 @@ export async function createPipeline(options) {
             revision,
             generatedAt: utc(now()),
             metricDefinitionVersion: content.definitionVersion,
-            computationVersion: `${dataMode}-pipeline-${digest(config.policies.map((item) => item.signature)).slice(0, 16)}`,
+            computationVersion,
             coverage,
             results: [],
           },
@@ -1401,6 +1422,16 @@ export async function createPipeline(options) {
             )
           )
             return null;
+          // Required explanations are private dependencies of both selected and
+          // current confirmed snapshots; corruption never acquires visibility.
+          for (const id of new Set([selected.selected_id, selected.head_id])) {
+            aggregateExplanations.verify(id, {
+              ...explanationBinding(scope, {
+                revision: id === selected.selected_id ? Number(selected.selected_revision) : Number(selected.revision),
+              }),
+              digest: controls.pipelinePublications[id].aggregateExplanationHash,
+            });
+          }
           const document = copy(selected.document);
           document.disabledMetrics = overlay.disabledMetrics.map((entry) => ({
             ...entry,
@@ -1589,6 +1620,14 @@ export async function createPipeline(options) {
           confirmation?.controlsConfigurationRevision !== runConfigurationRevision
         )
           fail("dispatch_publication_unconfirmed");
+        if (!confirmation.aggregateExplanationHash) fail("aggregate_explanation_required");
+        aggregateExplanations.verify(publication.snapshotId, {
+          scopeKey: publication.scopeKey,
+          revision: publication.revision,
+          computationVersion,
+          configurationHash: digest(config),
+          digest: confirmation.aggregateExplanationHash,
+        });
       }
       assertRunConfiguration();
     },
@@ -1903,6 +1942,46 @@ export async function createPipeline(options) {
     approvePolicyComparison,
     // Privileged host composition only; never attached to the public service.
     policyComparisons: { comparisons: policyComparisons, withAuthorizedInputs: withAuthorizedComparisonInputs },
+    aggregateExplanations: {
+      // Privileged in-process review only, with current source and privacy checks.
+      // No raw store is exposed and there is deliberately no public HTTP route.
+      async read(snapshotId) {
+        const initial = aggregateExplanations.read(snapshotId);
+        return withAuthorizedComparisonInputs([initial.document.authorization], async (removed, _authority, tx) => {
+          const stored = (
+            await tx.query("SELECT document,document_hash FROM leaderboard_pipeline.snapshots WHERE snapshot_id=$1", [
+              snapshotId,
+            ])
+          ).rows[0];
+          if (!stored) fail("aggregate_explanation_snapshot_unavailable");
+          if (digest(stored.document) !== stored.document_hash) fail("public_snapshot_integrity_error");
+          if (!(await approved(tx))) fail("aggregate_explanation_authorization_changed");
+          // No await after this current-state fence. Withhold the entire audit
+          // rather than leak hidden IDs through reasons, hashes or stale totals.
+          const state = controlsStore.read();
+          const overlay = restrictConfiguration(state);
+          const confirmation = state.pipelinePublications?.[snapshotId];
+          if (
+            !confirmation?.aggregateExplanationHash ||
+            (recognitionBindings.length && confirmation.recognitionFingerprint !== recognitionFingerprint(state)) ||
+            overlay.revision !== initial.document.authorization.controlsConfigurationRevision
+          )
+            fail("aggregate_explanation_authorization_changed");
+          const saved = aggregateExplanations.verify(snapshotId, {
+            ...explanationBinding(stored.document.scope, stored.document.snapshot),
+            digest: confirmation.aggregateExplanationHash,
+          });
+          if (
+            saved.document.references.some(
+              (reference) => state.profiles[reference.actorId]?.suppressed || removed.includes(reference.artifactId),
+            ) ||
+            saved.document.metrics.some((metric) => overlay.disabledMetricIds.includes(metric.metricId))
+          )
+            fail("aggregate_explanation_privacy_changed");
+          return copy(saved);
+        });
+      },
+    },
     start,
     stop,
     run,
