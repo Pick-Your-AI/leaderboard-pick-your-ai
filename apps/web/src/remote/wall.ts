@@ -1,5 +1,5 @@
 import { getLeadMetrics } from "@pick-your-ai/metrics";
-import type { MetricRegistry } from "@pick-your-ai/contracts";
+import { publicScopeKey, type MetricRegistry } from "@pick-your-ai/contracts";
 import {
   board,
   catalog,
@@ -106,6 +106,8 @@ export interface WallFrame {
 export const wallPageSize = (format: WallFormat) => (format === "overlay" ? 3 : 6);
 
 function samePublication(first: Metadata, second: Metadata): void {
+  if (publicScopeKey(first.scope) !== publicScopeKey(second.scope))
+    throw new ReadFailure(409, "wall_publication_changed_during_read");
   for (const key of [
     "snapshotId",
     "revision",

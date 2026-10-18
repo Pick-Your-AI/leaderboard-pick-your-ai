@@ -96,7 +96,7 @@ test("domain candidate metadata preserves the documentation prototype and cannot
   const domainMetrics = metrics.filter((metric) =>
     getMetricUi(metric.id)!.verification_cases.includes("apps/pipeline/test/domain-recognition.test.mjs"),
   );
-  assert.equal(domainMetrics.length, 20);
+  assert.equal(domainMetrics.length, 21);
   for (const metric of domainMetrics) {
     const ui = getMetricUi(metric.id)!;
     assert.equal(ui.maturity, "synthetic_verified");

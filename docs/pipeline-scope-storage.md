@@ -44,12 +44,29 @@ migrations. This entrypoint now upgrades retained databases as well as creating
 new ones. `createPipeline` verifies the resulting version and changed constraints
 before configuration verification, source collection or publication starts.
 
-Before an operating upgrade, stop and drain every old pipeline writer and retain
-a verified, restorable backup. Run the migration from the matching source version
-on one host; concurrent calls from that same version serialize on a transaction
+Before an operating upgrade, stop and drain all pipeline readers, writers and
+derived-retirement work, including their open transactions, and retain a verified,
+restorable backup. Run the migration from the matching source version on one
+host; concurrent calls from that same version serialize on a transaction
 advisory lock. The migration explicitly uses READ COMMITTED so a waiting caller
 observes the preceding committed migration even when its pool has a stricter
 session default. Its exclusive table locks cover schema changes and backfill.
+
+The three new digest columns are filled through PostgreSQL's
+[`ALTER COLUMN ... TYPE bytea USING ...` rewrite](https://www.postgresql.org/docs/17/sql-altertable.html).
+The type remains `bytea`; the explicit expression computes the complete original
+key's UTF-8 digest for every retained row. This changes only newly added lookup
+metadata, including when a head or dispatch proof must remain after permanent
+source retirement. The existing retirement trigger definitions and enable states
+remain unchanged. Ordinary writes to a retired source are still denied; the
+migrator does not disable triggers, change replication settings or grant a
+retirement exception to runtime requests.
+
+PostgreSQL can physically rewrite each affected table and rebuild its indexes
+under these exclusive locks. Reserve enough time and temporary disk for those
+copies before starting. A rewritten table is not MVCC-safe for a transaction with
+an earlier snapshot; resume readers and other work only after the upgrade commits,
+using fresh transactions from the matching source version.
 
 The entire operation is one transaction: inspect the legacy shape and original
 head/dispatch/receipt identities, fill the three digest columns, establish their
@@ -114,6 +131,22 @@ unique database, and never resets an existing database. The independent-connecti
 case observes PostgreSQL's actual advisory-lock wait before releasing the first
 migrator. It is explicitly skipped when that dedicated service is absent; a
 PGlite result is not evidence of independent PostgreSQL connection behavior.
+
+`scope-retirement-compatibility.test.mjs` applies the optional pipeline retirement
+guards to the actual retained v1 fixture before upgrading it. It verifies exact
+retired causal-row and trigger preservation, rollback after every digest rewrite,
+unchanged active/retired write behavior, and an already committed legacy heads
+manifest resumed after the complete v2 upgrade and SQLite reopening. Only the
+validated derived lookup column is excluded from the original manifest identity;
+new payload fields and altered constraints still prevent deletion. Maximum v2/v3
+retirement tests inspect the actual receipt and head point-lookup plans and exact
+raw predicates. The local variant uses in-memory PGlite and a private SQLite
+fixture; the same module uses the existing dedicated PostgreSQL test database
+when its explicit storage-test variable is present.
+Its independent-connection case observes an actual PostgreSQL upgrade waiting
+on the retirement transaction's shared table locks, then checks the same pending
+manifest and completed v2 schema after both finish. That case is explicitly
+skipped without the dedicated PostgreSQL service.
 
 The original storage-only qualification exposed a separate HTTP failure: the
 service's former 4,096-character request-URL cap rejected a valid 100-Project query

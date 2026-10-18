@@ -3,6 +3,7 @@ import { retainedRankHistory } from "./rank-history.mjs";
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
 import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
 import { AggregateExplanationStore } from "./aggregate-explanations.mjs";
+import { assertPipelineSourcesNotRetired } from "./derived-retirement.mjs";
 import { requireThat } from "../../controls/src/store.mjs";
 import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-metadata.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
@@ -1097,6 +1098,10 @@ export async function createPipeline(options) {
     /^[a-f0-9]{64}$/.test(confirmation.aggregateExplanationHash);
   function confirmPublication(scope, publication, comparisonInput) {
     controlsStore.transaction((state) => {
+      assertPipelineSourcesNotRetired(
+        controlsStore,
+        repositoriesFor(scope).map((repository) => repository.id),
+      );
       const overlay = restrictConfiguration(state);
       if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
       if (
@@ -1486,7 +1491,10 @@ export async function createPipeline(options) {
               `public_${activityState}_work`,
               ...c.contracts.publicDocumentationReasons(original.contribution),
               ...(activityState === "accepted"
-                ? c.contracts.publicDocumentationRecognitionReasons(original.contribution)
+                ? [
+                    ...c.contracts.publicDocumentationRecognitionReasons(original.contribution),
+                    ...c.contracts.publicReproductionRecognitionReasons(original.contribution, true),
+                  ]
                 : []),
             ],
           },

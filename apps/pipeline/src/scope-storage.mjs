@@ -49,9 +49,15 @@ const upgrades = [
   "ALTER TABLE leaderboard_pipeline.heads ADD COLUMN scope_hash bytea",
   "ALTER TABLE leaderboard_pipeline.dispatch_publications ADD COLUMN scope_hash bytea",
   "ALTER TABLE leaderboard_pipeline.receipts ADD COLUMN operation_hash bytea",
-  `UPDATE leaderboard_pipeline.heads SET scope_hash=pg_catalog.sha256(pg_catalog.convert_to(scope_key, 'UTF8'))`,
-  `UPDATE leaderboard_pipeline.dispatch_publications SET scope_hash=pg_catalog.sha256(pg_catalog.convert_to(scope_key, 'UTF8'))`,
-  `UPDATE leaderboard_pipeline.receipts SET operation_hash=pg_catalog.sha256(pg_catalog.convert_to(operation_key, 'UTF8'))`,
+  // Rewrite only the newly added metadata column. Row UPDATE would invoke the
+  // unchanged retirement guards on retained causal heads and dispatch proofs.
+  // USING computes the digest even though the column's bytea type is unchanged.
+  `ALTER TABLE leaderboard_pipeline.heads ALTER COLUMN scope_hash TYPE bytea
+    USING pg_catalog.sha256(pg_catalog.convert_to(scope_key, 'UTF8'))`,
+  `ALTER TABLE leaderboard_pipeline.dispatch_publications ALTER COLUMN scope_hash TYPE bytea
+    USING pg_catalog.sha256(pg_catalog.convert_to(scope_key, 'UTF8'))`,
+  `ALTER TABLE leaderboard_pipeline.receipts ALTER COLUMN operation_hash TYPE bytea
+    USING pg_catalog.sha256(pg_catalog.convert_to(operation_key, 'UTF8'))`,
   `ALTER TABLE leaderboard_pipeline.heads ALTER COLUMN scope_hash SET NOT NULL,
     ADD CONSTRAINT heads_scope_hash_valid CHECK (scope_hash=pg_catalog.sha256(pg_catalog.convert_to(scope_key, 'UTF8')))`,
   `ALTER TABLE leaderboard_pipeline.dispatch_publications ALTER COLUMN scope_hash SET NOT NULL,

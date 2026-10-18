@@ -1,8 +1,12 @@
 import { stableJSON } from "@pick-your-ai/metrics";
 import { defaultDisplayTimeZone, isDisplayTimeZone } from "../lib/display-time-zone.ts";
 import { parseCSVExport } from "./csv-export.ts";
+import { responseScope, scopeExportVersion, scopeReadVersion, selectionScope } from "./public-scope.ts";
 import { onlyExportKeys, parseExportJSON } from "./export-json.ts";
 import {
+  canonicalPublicScope,
+  publicScopeParameters,
+  type PublicScope,
   compareSourceInstants,
   participationWeekDenominator,
   publicParticipationSchema,
@@ -47,6 +51,9 @@ const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
 const scopeKeys = ["organization", "repository", "workstream", "start", "end"] as const;
 const supported = new Set([
   "actors",
+  "context",
+  "project",
+  "role",
   ...scopeKeys,
   "snapshot",
   "limit",
@@ -60,13 +67,8 @@ const supported = new Set([
   "department",
   "tz",
 ]);
-export interface Selection {
+export interface Selection extends PublicScope {
   actors?: ActorFilter;
-  organization: string;
-  repository: string | null;
-  workstream: string | null;
-  start: string | null;
-  end: string | null;
   snapshot: string | null;
   limit: string;
   cursor: string | null;
@@ -81,6 +83,7 @@ export interface Selection {
   timeZone?: string;
 }
 export function selection(query: string): Selection {
+  if (query.length > 4096) throw new ReadFailure(400, "selection_too_large");
   const params = new URLSearchParams(query);
   for (const key of params.keys())
     if (!supported.has(key) || params.getAll(key).length !== 1)
@@ -122,7 +125,23 @@ export function selection(query: string): Selection {
     throw new ReadFailure(400, "invalid_catalog_query");
   const search = params.get("search");
   if (search !== null && !/^[A-Za-z0-9-]{1,39}$/.test(search)) throw new ReadFailure(400, "invalid_search");
+  let scope: PublicScope;
+  try {
+    scope = canonicalPublicScope({
+      organization: id("organization") ?? "Pick-Your-AI",
+      repository: id("repository"),
+      workstream: id("workstream"),
+      start,
+      end,
+      ...(params.has("context") ? { context: params.get("context") } : {}),
+      ...(params.has("project") ? { projects: params.get("project")!.split(",") } : {}),
+      ...(params.has("role") ? { roles: params.get("role")!.split(",") } : {}),
+    });
+  } catch {
+    throw new ReadFailure(400, "invalid_public_scope");
+  }
   return {
+    ...scope,
     actors: actorFilter.data,
     timeZone,
     catalogQuery: catalogQuery?.trim() || null,
@@ -130,11 +149,6 @@ export function selection(query: string): Selection {
     search: search?.toLowerCase() ?? null,
     category: id("category"),
     proof: id("proof"),
-    organization: id("organization") ?? "Pick-Your-AI",
-    repository: id("repository"),
-    workstream: id("workstream"),
-    start,
-    end,
     snapshot: id("snapshot"),
     metric: id("metric") ?? "pr_opened",
     limit,
@@ -147,7 +161,7 @@ export function parameters(
 ): URLSearchParams {
   const params = new URLSearchParams();
   if (value.actors && value.actors !== "all") params.set("actors", value.actors);
-  for (const key of scopeKeys) if (value[key] !== null) params.set(key, value[key]);
+  for (const [key, entry] of Object.entries(publicScopeParameters(selectionScope(value)))) params.set(key, entry);
   const pin = extra.snapshot === undefined ? value.snapshot : extra.snapshot;
   if (pin) params.set("snapshot", pin);
   if (extra.board) {
@@ -264,6 +278,19 @@ async function readBytes(response: Response, signal: AbortSignal): Promise<Uint8
   }
   return joined;
 }
+function publicRequestURL(base: string, path: string, params: URLSearchParams): string {
+  const value = `${base}/${path}${params.size ? `?${params}` : ""}`;
+  const url = new URL(value, "https://request.invalid");
+  if (url.pathname.length + url.search.length > 4096) throw new ReadFailure(414, "query_too_large");
+  return value;
+}
+/** Budget both complete live request targets before a subscription can create any transport. */
+export function liveParameters(base: string, value: Selection): URLSearchParams {
+  const params = parameters(value, { snapshot: null });
+  publicRequestURL(base, "health", params);
+  publicRequestURL(base, "updates", params);
+  return params;
+}
 export async function request(
   base: string,
   path: string,
@@ -272,7 +299,7 @@ export async function request(
 ): Promise<unknown> {
   const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(8000)]);
   requestSignal.throwIfAborted();
-  const response = await fetch(`${base}/${path}${params.size ? `?${params}` : ""}`, {
+  const response = await fetch(publicRequestURL(base, path, params), {
     credentials: "omit",
     cache: "no-store",
     redirect: "error",
@@ -323,7 +350,7 @@ export async function exportPage(
   if (!selected.snapshot) throw new ReadFailure(400, "export_requires_displayed_snapshot");
   const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(8000)]);
   requestSignal.throwIfAborted();
-  const response = await fetch(`${base}/exports?${params}`, {
+  const response = await fetch(publicRequestURL(base, "exports", params), {
     credentials: "omit",
     cache: "no-store",
     redirect: "error",
@@ -415,8 +442,8 @@ function descriptiveMetric(metric: MetricDefinition): boolean {
 }
 /** Validate the minimized export contract, which intentionally has no actor profile or live head. */
 export function validateExport(value: unknown, selected: Selection, expectedMetric: MetricDefinition): void {
-  const data = object(value),
-    scope = object(data.scope);
+  const data = object(value);
+  const scope = validatedScope(data.scope, selected);
   onlyExportKeys(data, [
     "exportSchemaVersion",
     "schemaVersion",
@@ -440,11 +467,9 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
     "evidence",
     "pendingEvidence",
   ]);
-  onlyExportKeys(scope, scopeKeys);
-  if (data.exportSchemaVersion !== "public-export/v1" || data.schemaVersion !== "leaderboard/v1")
+  if (data.exportSchemaVersion !== scopeExportVersion(scope) || data.schemaVersion !== "leaderboard/v1")
     throw new ReadFailure(502, "invalid_export_response");
   const filter = actorSelection(data, selected);
-  for (const key of scopeKeys) if (scope[key] !== selected[key]) throw new ReadFailure(502, "api_scope_mismatch");
   if (!selected.snapshot || identity(data.snapshotId) !== selected.snapshot)
     throw new ReadFailure(502, "api_snapshot_mismatch");
   integer(data.revision);
@@ -599,6 +624,7 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
   }
 }
 export interface Metadata {
+  scope: PublicScope;
   actorFilter?: ActorFilter;
   snapshotId: string;
   revision: number;
@@ -611,14 +637,28 @@ export interface Metadata {
   methodology: { metricId: string; policyVersion: string; policySignature: string; policyLink: string | null }[];
   disabledMetrics: { id: string; reason: string }[];
 }
+function validatedScope(value: unknown, selected: Selection): PublicScope {
+  try {
+    return responseScope(value, selected);
+  } catch {
+    throw new ReadFailure(502, "api_scope_mismatch");
+  }
+}
 export function metadata(value: unknown, selected: Selection): Metadata {
   const data = object(value),
-    scope = object(data.scope),
+    scope = validatedScope(data.scope, selected),
     head = object(data.head);
-  for (const key of scopeKeys) if (scope[key] !== selected[key]) throw new ReadFailure(502, "api_scope_mismatch");
+  if (
+    data.schemaVersion !== scopeReadVersion(scope) ||
+    (scope.schemaVersion !== undefined
+      ? data.snapshotSchemaVersion !== "leaderboard/v1"
+      : Object.hasOwn(data, "snapshotSchemaVersion"))
+  )
+    throw new ReadFailure(502, "invalid_api_response");
   const snapshotId = identity(data.snapshotId);
   if (selected.snapshot && selected.snapshot !== snapshotId) throw new ReadFailure(502, "api_snapshot_mismatch");
   return {
+    scope,
     actorFilter: actorSelection(data, selected),
     snapshotId,
     revision: integer(data.revision),
@@ -742,11 +782,13 @@ export interface Evidence {
   activityState: "observed" | "pending" | "accepted" | "unknown";
   observedAt: string | null;
 }
-export function evidence(value: unknown): Evidence {
+export function evidence(value: unknown, selected?: Selection): Evidence {
   const data = object(value);
   const metadata =
     data.evidenceMetadata === undefined ? undefined : publicEvidenceMetadataSchema.parse(data.evidenceMetadata);
   const contribution = contributionSchema.parse(data.contribution);
+  if (selected?.roles?.length && !selected.roles.some((role) => contribution.roles.includes(role)))
+    throw new ReadFailure(502, "api_role_filter_mismatch");
   if (metadata?.acceptedAt && contribution.qualification !== "eligible")
     throw new ReadFailure(502, "invalid_api_response");
   const activityState = data.activityState ?? metadata?.activityState ?? "unknown";
@@ -875,7 +917,7 @@ export function profile(value: unknown, selected: Selection): Profile {
       const item = object(value);
       return { role: string(item.role), contributions: integer(item.contributions) };
     }),
-    timeline: array(data.timeline, 100).map(evidence),
+    timeline: array(data.timeline, 100).map((value) => evidence(value, selected)),
     timelineTruncated: data.timelineTruncated === true,
     nextCursor: data.nextCursor == null ? null : string(data.nextCursor),
     categories: categoryTotals(data.categories ?? []),
@@ -1056,7 +1098,7 @@ export function activityDetail(value: unknown, selected: Selection): ActivityDet
     group = activityGroup(data.group, selected);
   const proofs = array(data.proofs, Number(selected.limit)).map((value) => {
     const item = object(value),
-      result = evidence(value);
+      result = evidence(value, selected);
     if (
       result.contribution.actorId !== group.actorId ||
       result.activityState !== group.activityState ||

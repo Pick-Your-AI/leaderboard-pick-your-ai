@@ -10,6 +10,8 @@ export interface LiveOptions {
   onState(state: LiveState): void;
   onSnapshot(notice: { snapshotId: string; revision: number; policyVersion: string }): void;
   validateHealth?(body: Record<string, unknown>): void;
+  /** Synchronously throw to reject a stream or health notice before acceptance changes client state. */
+  validateNotice?(value: unknown): void;
   fetch?: typeof fetch;
   eventSource?: (url: string) => EventSource;
   document?: Pick<Document, "hidden" | "addEventListener" | "removeEventListener">;
@@ -102,6 +104,7 @@ export function startLiveUpdates(options: LiveOptions): () => void {
       !/^[A-Za-z0-9_.:-]{1,200}$/.test(notice.policyVersion)
     )
       throw new Error("invalid_notice");
+    options.validateNotice?.(value);
     if (notice.revision < highestRevision) return;
     highestRevision = notice.revision;
     const key = JSON.stringify([notice.snapshotId, notice.revision, notice.policyVersion]);

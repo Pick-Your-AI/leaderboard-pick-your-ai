@@ -1,10 +1,10 @@
 # CSV download validation
 
-The browser validates both public-export/v1 formats before offering a download. CSV transport success and valid UTF-8 alone do not establish that an export belongs to the displayed snapshot or follows its metric definition.
+The browser validates JSON and CSV downloads for the exact selected public-export/v1, v2 or v3 contract before offering a download. Transport success and valid UTF-8 alone do not establish that an export belongs to the displayed snapshot or follows its metric definition.
 
-Opt-in current-context and Project-filter backend selections have a separate [public-export/v2 contract](public-membership-scopes.md). They do not change v1 download bytes. A later coordinated browser integration must validate the complete versioned scope and the v2 CSV metadata before offering those downloads; this v1 reader continues to reject the new envelope until that support is delivered.
+Current-context and Project-filter selections use the [public-export/v2 contract](public-membership-scopes.md). Nonempty contribution-role selections use [public-export/v3](public-role-scopes.md). Versioned retained scopes require their explicit version, membership basis, canonical Project set and, in v3, nonempty canonical role union. Missing or mismatched versions, unknown members and response aliases are rejected. Legacy v1 and membership-only v2 download bytes are unchanged.
 
-Nonempty contribution-role selections use [public-export/v3](public-role-scopes.md), including an explicit role union in the scope and a `roles` JSON-array CSV column after the membership columns. The same coordinated consumer must validate that complete v3 identity and every repeated metadata record before offering a download. Existing v1/v2 export bytes are unchanged.
+The CSV header must exactly match its declared export version. V2 adds `scope_schema_version`, `context` and `projects` after `workstream`; v3 then adds `roles`. Project and role cells contain quoted JSON arrays. Every metadata/data row repeats the complete scope, including the metadata-only record of an empty export.
 
 The CSV reader accepts the service's existing bounded, fully quoted CRLF format with its exact columns, one metadata record and at most the selected page size. Every row must repeat the same metadata. It rejects malformed quoting, extra or duplicate columns, extra metadata records, nonfinite or ambiguous numbers, contradictory evidence bindings, unsafe formula prefixes and missing pending proofs. Quoted commas, Unicode, multiline labels, protected formula text, empty pages and unknown values retain their existing meaning. Valid downloads preserve the original bytes.
 
