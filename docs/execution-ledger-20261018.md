@@ -110,7 +110,7 @@ Every package below retains its exact baseline acceptance criteria, dependency I
 - State: OPEN / partial or acceptance unverified. Gate: Approved decision.
 - Dependencies (baseline): LB-01.03.
 - Implementation/test evidence: `planning/decision-register.json; docs/GOVERNANCE.md; docs/PRODUCT.md; docs/PUBLIC_TARGET.md`.
-- Remaining evidence / limit: Public target leaderboard.pickyour.ai is selected in docs/PUBLIC_TARGET.md; host capabilities, budget and operator are still unresolved.
+- Remaining evidence / limit: Target leaderboard.pickyour.ai is configured in local plans and docs/PUBLIC_TARGET.md; host capabilities, budget and operator are still unresolved.
 - Next action: Preserve configured domain value; obtain verified approved host/runtime and accountable operator receipt.
 - Acceptance criteria to verify against evidence:
   - Architecture decision identifies actual host capabilities and owner
