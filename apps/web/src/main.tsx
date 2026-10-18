@@ -15,7 +15,9 @@ try {
 } catch {
   mode ??= import.meta.env.VITE_UI_MODE;
 }
-if (mode === "prototype") {
+if (["/account", "/admin"].includes(location.pathname.replace(/\/+$/, ""))) {
+  void import("./controls/App.tsx").then(({ ControlsApp }) => root.render(<ControlsApp />));
+} else if (mode === "prototype") {
   // Fixture modules are loaded only after the reader explicitly selects them.
   void Promise.all([import("./App.tsx"), import("./lib/router.tsx")]).then(([{ App }, { RouterProvider }]) =>
     root.render(
