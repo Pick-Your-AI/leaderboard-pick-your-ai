@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { GithubReadClient } from "../../../packages/github/dist/client.js";
+import { syntheticCheckpointStore } from "../../../packages/github/test/synthetic-client.mjs";
 import { createGithubCollectionSource } from "../src/github-source.mjs";
 
 const approved = {
@@ -22,16 +23,12 @@ const request = {
 
 function harness(metadata, repository = approved) {
   const calls = [],
-    unavailable = [],
-    checkpoints = new Map();
+    unavailable = [];
   const client = new GithubReadClient({
     apiOrigin: "https://api.synthetic.invalid",
     token: async () => "synthetic-test-token",
     maxRetries: 0,
-    checkpoints: {
-      load: async (key) => structuredClone(checkpoints.get(key)),
-      save: async (key, value) => checkpoints.set(key, structuredClone(value)),
-    },
+    checkpoints: syntheticCheckpointStore(),
     fetch: async (value) => {
       const url = new URL(value);
       calls.push(url.pathname);
