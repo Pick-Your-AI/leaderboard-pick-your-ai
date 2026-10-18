@@ -50,13 +50,10 @@ export function PublicScopeControls({ selected }: { selected: PublicScope }) {
 
 export function PublicScopeProvenance({ scope }: { scope: PublicScope }) {
   return (
-    <div aria-label="Membership and contribution scope">
-      <p>Membership: {scope.context === "current" ? "current at snapshot cutoff" : "at event time"}.</p>
-      <p>GitHub Projects: {scope.projects?.length ? scope.projects.join(", ") : "all in this materialized scope"}.</p>
-      <p>
-        Contribution roles:{" "}
-        {scope.roles?.length ? `${scope.roles.map((role) => roleLabels[role]).join(", ")} (any selected)` : "all"}.
-      </p>
-    </div>
+    <p aria-label="Membership and contribution scope">
+      Membership: {scope.context === "current" ? "current at snapshot cutoff" : "at event time"}. GitHub Projects:{" "}
+      {scope.projects?.length ? scope.projects.join(", ") : "all in this materialized scope"}. Contribution roles:{" "}
+      {scope.roles?.length ? `${scope.roles.map((role) => roleLabels[role]).join(", ")} (any selected)` : "all"}.
+    </p>
   );
 }

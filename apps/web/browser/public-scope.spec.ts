@@ -267,3 +267,33 @@ test("pinned membership views recheck current privacy and disclose exact frozen 
     await api.close();
   }
 });
+
+test("percent-encoding expansion is rejected before live polling or EventSource construction", async ({ page }) => {
+  let apiCalls = 0;
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/v1/**", async (route) => {
+    apiCalls++;
+    await route.abort();
+  });
+  await page.addInitScript(() => {
+    const record = window as unknown as { scopeStreamAttempts: number };
+    record.scopeStreamAttempts = 0;
+    window.EventSource = class {
+      constructor() {
+        record.scopeStreamAttempts++;
+        throw Error("unexpected scoped stream");
+      }
+    } as unknown as typeof EventSource;
+  });
+  const projects = Array.from({ length: 31 }, (_, i) => `PVT_${i}_` + ":".repeat(100));
+  const path = "/leaderboards/pr_merged?ui=api&project=" + projects.join(",");
+  expect(path.length).toBeLessThan(4096);
+  await page.goto(path);
+  await expect(page.getByRole("alert")).toContainText("query_too_large");
+  await page.getByRole("button", { name: "Retry this selection", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("query_too_large");
+  expect(apiCalls).toBe(0);
+  expect(await page.evaluate(() => (window as unknown as { scopeStreamAttempts: number }).scopeStreamAttempts)).toBe(0);
+  expect(errors).toEqual([]);
+});

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { canonicalPublicScope, publicScopeParameters } from "@pick-your-ai/contracts";
+import { startLiveUpdates } from "@pick-your-ai/service/live-client";
 import { createService } from "../../service/dist/app.js";
 import { legacyScope, currentScope, scopeFixture } from "../../../tests/fixtures/public-scope.mjs";
 import {
@@ -12,6 +13,7 @@ import {
   directory,
   evidence,
   health,
+  liveParameters,
   metadata,
   parameters,
   portfolioParameters,
@@ -320,4 +322,43 @@ test("complete public request URLs stay within the service budget before fetch",
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("encoded live scope is budgeted before any polling or stream transport starts", () => {
+  const projects = Array.from({ length: 31 }, (_, i) => `PVT_${i}_` + ":".repeat(100));
+  const raw = "?project=" + projects.join(",");
+  assert.ok(raw.length < 4096);
+  const value = selection(raw);
+  assert.ok(parameters(value).toString().length > 4096);
+  let fetches = 0,
+    streams = 0;
+  assert.throws(
+    () =>
+      startLiveUpdates({
+        scope: Object.fromEntries(liveParameters("https://synthetic.invalid/api/v1", value)),
+        fetch: async () => {
+          fetches++;
+          throw Error("unexpected fetch");
+        },
+        eventSource: () => {
+          streams++;
+          throw Error("unexpected stream");
+        },
+        onState() {},
+        onSnapshot() {},
+      }),
+    /query_too_large/,
+  );
+  assert.equal(fetches, 0);
+  assert.equal(streams, 0);
+  const valid = selected(roleScope, { snapshot: "s1", cursor: "cursor", proof: "proof", timeZone: "Asia/Kathmandu" });
+  assert.deepEqual(liveParameters("/api/v1", valid), parameters(valid, { snapshot: null }));
+  for (const key of ["snapshot", "cursor", "proof", "tz"]) {
+    assert.equal(liveParameters("/api/v1", valid).has(key), false);
+  }
+  // The complete base path and the longer updates path participate in the budget.
+  const minimal = selected(legacyScope);
+  const base = "/" + "a".repeat(4087 - parameters(minimal).toString().length);
+  assert.equal((base + "/health?" + parameters(minimal)).length, 4096);
+  assert.throws(() => liveParameters(base, minimal), /query_too_large/);
 });

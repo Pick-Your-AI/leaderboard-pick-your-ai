@@ -34,6 +34,7 @@ import {
   catalog,
   exportPage,
   health,
+  liveParameters,
   metadata,
   parameters,
   profile,
@@ -477,11 +478,17 @@ export function RemoteApp() {
           throw new ReadFailure(400, "conflicting_metric_selection");
         selected.metric = id;
       }
-      return { selected, base: apiBase(import.meta.env.VITE_PUBLIC_API_BASE || "/api/v1"), error: null };
+      const base = apiBase(import.meta.env.VITE_PUBLIC_API_BASE || "/api/v1");
+      const liveScope =
+        isCatalogPath(url.pathname) || /^\/methodology\/[^/]+$/.test(url.pathname)
+          ? null
+          : liveParameters(base, selected).toString();
+      return { selected, base, liveScope, error: null };
     } catch (error) {
       return {
         selected: fallback,
         base: "",
+        liveScope: null,
         error: error instanceof ReadFailure ? error : new ReadFailure(400, "invalid_selection"),
       };
     }
@@ -494,10 +501,7 @@ export function RemoteApp() {
   }, []);
   // Registry-only pages do not require a source snapshot. Snapshot subscriptions
   // follow the current scope, never a historical pin, cursor or proof selection.
-  const liveScope =
-    parsed.error || isCatalogPath(url.pathname) || /^\/methodology\/[^/]+$/.test(url.pathname)
-      ? null
-      : parameters(selected, { snapshot: null }).toString();
+  const liveScope = parsed.liveScope;
   const liveState = live?.base === parsed.base && live.scope === liveScope ? live.value : unknownLiveState;
   useEffect(() => {
     if (liveScope === null) return;

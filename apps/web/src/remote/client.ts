@@ -284,6 +284,13 @@ function publicRequestURL(base: string, path: string, params: URLSearchParams): 
   if (url.pathname.length + url.search.length > 4096) throw new ReadFailure(414, "query_too_large");
   return value;
 }
+/** Budget both complete live request targets before a subscription can create any transport. */
+export function liveParameters(base: string, value: Selection): URLSearchParams {
+  const params = parameters(value, { snapshot: null });
+  publicRequestURL(base, "health", params);
+  publicRequestURL(base, "updates", params);
+  return params;
+}
 export async function request(
   base: string,
   path: string,
