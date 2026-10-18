@@ -104,6 +104,7 @@ This repository contains the complete delivery baseline: **{len(epics)} epics, {
 - [Metric catalog](docs/METRICS.md) · [UI concept](docs/UI.md) · [Architecture](docs/ARCHITECTURE.md)
 - [Contribution and ownership](CONTRIBUTING.md) · [Governance](docs/GOVERNANCE.md)
 - [Organization boundaries and current inventory](docs/organization-boundaries.md) · [Historical source audit](docs/SOURCE_AUDIT.md)
+- [Project configuration and dependency readback](docs/project-configuration-readback-20261018.md)
 - [Release and operations plan](docs/OPERATIONS_PLAN.md)
 
 The proposed product name is **PickYour.AI Credits**, with the tagline **Contributions, with evidence.** Recognition covers PRs, code and deletions, review, issues, triage, planning, research, documentation, design, accessibility, testing, maintenance and community work. There is no universal contributor score. Every board exposes its unit, period, source coverage and counting policy; observed activity, accepted outcomes and reviewed recognition remain distinct.
@@ -510,6 +511,7 @@ These files are the versioned source for generated documentation. GitHub issues 
 | [release-manifest.json](release-manifest.json) | Mandatory foundations, product journey, conditional modules and live readback |
 | [source-audit.json](source-audit.json) | Historical public organization inventory and explicit limits |
 | [organization-inventory-2026-10-18.json](organization-inventory-2026-10-18.json) | Dated complete public repository/issue/PR inventory, six Project identities, all configured field IDs and existing owner roles |
+| [project-configuration-readback-2026-10-18.json](project-configuration-readback-2026-10-18.json) | Complete dated Project membership, field options, saved views, native hierarchy and delivery prerequisites, and preserved contextual references |
 | [metric-api-evidence.json](metric-api-evidence.json) | Time-bounded official API references and source capability findings |
 | [plan-review-resolution.json](plan-review-resolution.json) | Review findings and their planned resolutions |
 

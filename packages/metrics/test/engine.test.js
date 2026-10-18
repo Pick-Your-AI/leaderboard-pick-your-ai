@@ -164,6 +164,33 @@ test("dense ties and codepoint ordering do not confer superior alphabetical rank
   assert.deepEqual(result.rows.map(row => [row.actorId, row.value, row.rank, row.tied]), [["c", 2, 1, false], ["a", 1, 2, true], ["b", 1, 2, true]]);
 });
 
+test("spotlight definitions retain unranked evidence without accepting a ranked policy", () => {
+  for (const metricId of ["appreciation", "incidents", "first_contribution"]) {
+    const configured = policy({ metricId, rank: false, dateBasis: metricId === "first_contribution" ? "occurredAt" : "acceptedAt" });
+    const frozen = input([fact("spotlight", { metricId })]);
+    const original = stableJSON(frozen);
+    const result = aggregateMetric(frozen, configured, scope());
+    assert.equal(result.rows[0].value, 1);
+    assert.deepEqual(result.rows[0].evidenceIds, ["spotlight"]);
+    assert.equal(result.rows[0].rank, null);
+    assert.equal(result.rows[0].tied, false);
+    assert.equal(result.publicEnabled, false);
+    assert.throws(() => aggregateMetric(frozen, { ...configured, rank: true }, scope()), /cannot rank contributors/);
+    assert.equal(stableJSON(frozen), original);
+  }
+});
+
+test("partial observed subsets preserve their disclosed values and ordering", () => {
+  const metricId = "issues_opened";
+  const observed = fact("observed", { metricId, state: "observed", acceptedAt: null, acceptedBy: null, acceptanceReceipt: null });
+  const result = board([observed], { metricId, dateBasis: "occurredAt", rankedStates: ["observed"] }, {}, { coverage: [coverage({ state: "partial", missingPages: 1 })] });
+  assert.equal(result.coverage, "incomplete");
+  assert.equal(result.rows[0].state, "partial");
+  assert.equal(result.rows[0].value, 1);
+  assert.equal(result.rows[0].rank, 1);
+  assert.deepEqual(result.rows[0].evidenceIds, ["observed"]);
+});
+
 test("review spam and repeated raw-state intervals follow the explicit aggregation policy", () => {
   const sameArtifact = [fact("a", { artifactId: "one" }), fact("b", { artifactId: "one" })];
   assert.equal(board(sameArtifact).rows[0].value, 1);
@@ -564,4 +591,51 @@ test("future observations and unknown ratio outcomes remain explicitly accounted
   const ratio = board([fact("unknown", { metricId: "pr_accepted_rate" }), fact("merged", { metricId: "pr_accepted_rate", outcome: "merged" })], { metricId: "pr_accepted_rate", aggregation: "ratio", rank: false });
   assert.deepEqual([ratio.rows[0].numerator, ratio.rows[0].denominator], [1, 1]);
   assert.ok(ratio.audit.some((entry) => entry.reason === "unknown_ratio_outcome" && entry.factIds.includes("unknown")));
+});
+
+
+test("rank movement indexes large prior cohorts and preserves first-match duplicate semantics", () => {
+  const size = 10_000;
+  const before = board([fact("indexed")]);
+  const after = { ...before };
+  let actorReads = 0;
+  before.rows = Array.from({ length: size }, (_, index) => ({
+    get actorId() {
+      assert.ok(++actorReads <= size * 3, "prior actor lookups must stay linear");
+      return `synthetic-indexed-${index}`;
+    },
+    value: size - index,
+    rank: index + 1,
+    evidence: [],
+  }));
+  after.rows = Array.from({ length: size }, (_, index) => ({
+    actorId: `synthetic-indexed-${index}`,
+    value: index + 1,
+    rank: size - index,
+    evidence: [],
+  }));
+  const movement = compareRankMovement(before, after);
+  assert.equal(movement.length, size);
+  for (let index = 0; index < size; index++)
+    assert.deepEqual(movement[index], {
+      actorId: `synthetic-indexed-${index}`,
+      state: "comparable",
+      delta: index + 1 - (size - index),
+      reason: null,
+    });
+  assert.ok(actorReads <= size * 3);
+
+  const row = { actorId: "synthetic-duplicate", value: 1, rank: 1, evidence: [] };
+  for (const firstRank of [1, null]) {
+    const result = compareRankMovement(
+      { ...before, rows: [{ ...row, rank: firstRank }, { ...row, rank: 9 }] },
+      { ...after, rows: [row] },
+    );
+    assert.deepEqual(result, [{
+      actorId: row.actorId,
+      state: firstRank === null ? "unavailable" : "comparable",
+      delta: firstRank === null ? null : 0,
+      reason: firstRank === null ? "unranked_metric" : null,
+    }]);
+  }
 });

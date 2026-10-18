@@ -11,6 +11,7 @@ This repository contains the complete delivery baseline: **20 epics, 112 work pa
 - [Metric catalog](docs/METRICS.md) · [UI concept](docs/UI.md) · [Architecture](docs/ARCHITECTURE.md)
 - [Contribution and ownership](CONTRIBUTING.md) · [Governance](docs/GOVERNANCE.md)
 - [Organization boundaries and current inventory](docs/organization-boundaries.md) · [Historical source audit](docs/SOURCE_AUDIT.md)
+- [Project configuration and dependency readback](docs/project-configuration-readback-20261018.md)
 - [Release and operations plan](docs/OPERATIONS_PLAN.md)
 
 The proposed product name is **PickYour.AI Credits**, with the tagline **Contributions, with evidence.** Recognition covers PRs, code and deletions, review, issues, triage, planning, research, documentation, design, accessibility, testing, maintenance and community work. There is no universal contributor score. Every board exposes its unit, period, source coverage and counting policy; observed activity, accepted outcomes and reviewed recognition remain distinct.

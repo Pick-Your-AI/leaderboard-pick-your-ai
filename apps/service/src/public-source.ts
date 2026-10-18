@@ -1,3 +1,4 @@
+import type { RankSnapshotHistory } from "./rank-comparison.js";
 import {
   publicDocumentationReasons,
   publicDocumentationRecognitionReasons,
@@ -109,7 +110,25 @@ export interface PublicRead {
     revokedSnapshotIds: string[];
   };
 }
+export interface PublicComparisonSelection {
+  snapshotId: string;
+  scope: PublicScope;
+}
+/** Provider-private pairing. Never serialize this object or either history receipt. */
+export interface PublicComparisonRead {
+  current: PublicRead;
+  previous: PublicRead | null;
+  currentHistory: RankSnapshotHistory | null;
+  previousHistory: RankSnapshotHistory | null;
+}
 export interface PublicSnapshotSource {
+  /** Pair under one authorization/source-lock boundary and final current privacy fence. */
+  readComparison?(
+    scope: PublicScope,
+    snapshotId: string | null,
+    previous: PublicComparisonSelection,
+    signal: AbortSignal,
+  ): Promise<PublicComparisonRead | null>;
   /** null means absent/unapproved/expired. Do not return raw ingestion replay documents.
    * Implementations must honor signal cancellation and enforce current controls.
    */
@@ -218,6 +237,7 @@ export function projectRead(
   const ranking = selected.ranking.map((entry) => {
     const definition = definitions.find((metric) => metric.id === entry.metricId)?.definition;
     const descriptive =
+      definition?.display_policy === "spotlight" ||
       definition?.release_eligibility === "descriptive-only" ||
       ["ratio", "median_and_p75_of_elapsed_hours"].includes(definition?.aggregation ?? "");
     if (

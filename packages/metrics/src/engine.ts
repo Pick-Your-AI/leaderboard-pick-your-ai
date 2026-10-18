@@ -259,6 +259,7 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
     policy.rank &&
     (policy.aggregation === "ratio" ||
       policy.aggregation === "duration" ||
+      metric.definition.display_policy === "spotlight" ||
       metric.definition.release_eligibility === "descriptive-only")
   )
     throw new Error("Descriptive metrics cannot rank contributors");
@@ -650,6 +651,7 @@ export function aggregateMetric(
   const scope = canonicalScope(requestedScope);
   const prepared = prepare(input, policy, scope);
   const complete = coverageComplete(input, policy, scope) && !hasUncertainty(prepared);
+  const actorsById = new Map(input.actors.map((actor) => [actor.id, actor]));
   const byActor = new Map<string, MetricFact[]>();
   for (const fact of prepared.facts) {
     const bucket = byActor.get(fact.actorId!) ?? [];
@@ -658,7 +660,7 @@ export function aggregateMetric(
   }
   const rows: AggregateRow[] = [];
   for (const [actorId, facts] of byActor) {
-    const actor = input.actors.find((candidate) => candidate.id === actorId)!;
+    const actor = actorsById.get(actorId)!;
     const eligible = facts.filter((fact) => policy.rankedStates.includes(fact.state as never));
     const pendingEvidence = facts.filter(
       (fact) =>
@@ -767,14 +769,15 @@ export function aggregateMetric(
   );
   let rank = 0,
     previous: number | null = null;
+  const rankCounts = new Map<number, number>();
   for (const row of rows) {
     if (!policy.rank || row.value === null) continue;
     if (previous !== row.value) rank++;
     row.rank = rank;
     previous = row.value;
+    rankCounts.set(rank, (rankCounts.get(rank) ?? 0) + 1);
   }
-  for (const row of rows)
-    row.tied = row.rank !== null && rows.some((other) => other !== row && other.rank === row.rank);
+  for (const row of rows) row.tied = row.rank !== null && (rankCounts.get(row.rank) ?? 0) > 1;
   const audit = [
     ...prepared.audit,
     ...prepared.facts
@@ -828,7 +831,21 @@ export function stableJSON(value: unknown): string {
     .join(",")}}`;
 }
 
-function compatibleScopes(before: MetricAggregate, after: MetricAggregate): boolean {
+/** Minimum immutable history used for movement, excluding audit/provider records. */
+export type RankComparisonInput = Pick<
+  MetricAggregate,
+  | "metricId"
+  | "policyVersion"
+  | "policySignature"
+  | "definitionVersion"
+  | "unit"
+  | "aggregation"
+  | "scope"
+  | "cutoff"
+  | "backfillRevision"
+  | "coverage"
+> & { rows: Pick<AggregateRow, "actorId" | "value" | "rank" | "evidence">[] };
+function compatibleScopes(before: RankComparisonInput, after: RankComparisonInput): boolean {
   if (stableJSON(before.scope) === stableJSON(after.scope)) return true;
   const { from: beforeFrom, to: beforeTo, ...beforeFilters } = before.scope;
   const { from: afterFrom, to: afterTo, ...afterFilters } = after.scope;
@@ -844,8 +861,8 @@ function compatibleScopes(before: MetricAggregate, after: MetricAggregate): bool
 }
 
 export function compareRankMovement(
-  before: MetricAggregate,
-  after: MetricAggregate,
+  before: RankComparisonInput,
+  after: RankComparisonInput,
 ): {
   actorId: string;
   state: "comparable" | "new_entrant" | "unavailable";
@@ -884,8 +901,12 @@ export function compareRankMovement(
       after.scope.from === null || item.effectiveAt === null || instant(item.effectiveAt) >= instant(after.scope.from)
     );
   });
+  const beforeRows = new Map<string, RankComparisonInput["rows"][number]>();
+  // Preserve the first matching row used by the previous lookup, including for
+  // callers that have not independently validated actor uniqueness.
+  for (const row of before.rows) if (!beforeRows.has(row.actorId)) beforeRows.set(row.actorId, row);
   return after.rows.map((row) => {
-    const previous = before.rows.find((item) => item.actorId === row.actorId);
+    const previous = beforeRows.get(row.actorId);
     if (reason || missingComparisonHistory || lateHistory || corrected || row.rank === null || previous?.rank === null)
       return {
         actorId: row.actorId,
