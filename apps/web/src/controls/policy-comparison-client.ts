@@ -125,6 +125,8 @@ function causes(value: unknown): boolean {
   );
 }
 function audit(value: unknown): value is PolicyAuditEntry[] {
+  // Retained engine identities have no field-length cap; transport and cardinality bounds still apply.
+  const identity = (v: unknown): v is string => typeof v === "string" && v.length > 0;
   if (!Array.isArray(value) || value.length > 10_000) return false;
   let facts = 0;
   return value.every((entry) => {
@@ -134,9 +136,11 @@ function audit(value: unknown): value is PolicyAuditEntry[] {
       !Object.hasOwn(entry, "actorId") ||
       !Object.hasOwn(entry, "factIds") ||
       !Object.hasOwn(entry, "reason") ||
-      (entry.actorId !== null && !text(entry.actorId)) ||
-      !strings(entry.factIds) ||
+      (entry.actorId !== null && !identity(entry.actorId)) ||
+      !Array.isArray(entry.factIds) ||
       entry.factIds.length === 0 ||
+      entry.factIds.length > 10_000 ||
+      !entry.factIds.every(identity) ||
       new Set(entry.factIds).size !== entry.factIds.length ||
       typeof entry.reason !== "string" ||
       !/^[a-z][a-z0-9_]{0,99}$/.test(entry.reason)
