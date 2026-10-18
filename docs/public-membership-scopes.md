@@ -88,7 +88,7 @@ node --test --test-concurrency=1 packages/contracts/test/public-scope.test.js ap
 These tests do not certify live GitHub source capability or complete historical coverage. Named-period controls, the initial 30-day experience and the remaining full #91 acceptance evidence retain their existing owners and gates. The browser selector and timezone changes remain bounded implementation evidence, with real source and release acceptance separate. The [role backend extension](public-role-scopes.md) has its own versioned boundary. These slices alone do not close #91 or alter the 98-metric plan.
 
 
-The API wall keeps long Project selections within its display layout using a
+The API wall keeps long Project or role selections within its display layout using a
 keyboard-operable scope disclosure. Its summary states the selected membership
 mode and Project/role counts; opening it shows every exact Project ID and role.
 This presentation does not narrow or broaden the full scope sent to the service.
