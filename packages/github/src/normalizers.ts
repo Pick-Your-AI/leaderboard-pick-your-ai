@@ -1265,6 +1265,8 @@ export interface CollectionNormalizerInput {
   policyVersion: string;
   fact: {
     subjectId: string;
+    /** Native issue/PR identity retained by the trusted Project-history collector. */
+    historySubjectId?: string;
     sourceRevision: string;
     sourceUrl: string;
     evidence: "current_state" | "observed_transition";
@@ -1316,14 +1318,19 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       throw new Error("Pipeline policy and observation time are required");
     if (input.family === "relationships" || input.family === "project_history") {
       const match = input.fact.sourceUrl.match(
-        new RegExp(`^https://github\\.com/${input.repository.slug.replaceAll(".", "\\.")}/issues/([1-9]\\d*)$`),
+        new RegExp(`^https://github\\.com/${input.repository.slug.replaceAll(".", "\\.")}/(issues|pull)/([1-9]\\d*)$`),
       );
-      if (!match) return none("typed_history_subject_url_unverified");
+      if (!match || (match[1] === "pull" && input.family !== "project_history"))
+        return none("typed_history_subject_url_unverified");
+      if (input.family === "project_history" && input.fact.historySubjectId === undefined)
+        return none("project_history_subject_identity_not_collected");
       const records = await readTypedIssueHistory({
         client: options.client,
         source: options.source,
         repository: input.repository,
-        number: Number(match[1]),
+        number: Number(match[2]),
+        subjectType: match[1] === "pull" ? "pull_request" : "issue",
+        ...(input.family === "project_history" ? { subjectId: input.fact.historySubjectId } : {}),
         family: input.family,
         scanId: input.factKey,
         ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
