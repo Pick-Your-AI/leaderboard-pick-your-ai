@@ -36,7 +36,14 @@ async function retainedContexts(t, count, bindSources) {
   ]);
   const attributionSignature = comparisonHash([normalizationDocumentVersion, policySignature]);
   const standaloneLocaleSignature = comparisonHash([normalizationDocumentVersion, policySignature, []]);
-  assert.equal(seed.policy_signature, comparisonHash(["verified-default-branch-merge-pins/v1", attributionSignature]));
+  assert.equal(
+    seed.policy_signature,
+    comparisonHash([
+      "project-membership-context/v1",
+      comparisonHash(["verified-default-branch-merge-pins/v1", attributionSignature]),
+      [],
+    ]),
+  );
   // These disposable actor-only source contexts carry no credited event. Their
   // identical documents still belong to distinct retained source observations.
   const addContexts = async (first, last) => {

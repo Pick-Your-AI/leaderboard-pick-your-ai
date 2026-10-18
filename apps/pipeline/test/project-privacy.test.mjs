@@ -267,7 +267,7 @@ for (const [loss, subjectType] of [
       return subjectType === "pull_request" ? "PR_synthetic" : "I_synthetic";
     };
     const client = syntheticRepositoryClient(2, {
-      rest: async () => ({ id: 2, private: false }),
+      rest: async () => ({ id: 2, private: false, full_name: config.repositories[0].slug }),
       scanRest: async (o) => {
         const subject = {
           id: 1,
@@ -338,7 +338,7 @@ for (const [loss, subjectType] of [
       const cached = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
       assert.equal(cached.length, 1);
       const document = structuredClone(cached[0].document);
-      assert.equal(document.projectHistoryNormalizationVersion, "collected-subject/v1");
+      assert.equal(document.projectHistoryNormalizationVersion, "collected-subject/v2");
       // Emulate an intact private cache written before collected-subject
       // binding. It must be recomputed, even with an unchanged event revision.
       delete document.projectHistoryNormalizationVersion;

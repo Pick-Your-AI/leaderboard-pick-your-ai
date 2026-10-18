@@ -151,6 +151,11 @@ streamed reads, completed/interrupted scans, nested delivery, and a full ETag ca
 that must not cause network retries. The default pipeline test uses the real
 adapter, normalizer, file checkpoints, PGlite and controls store; it verifies
 scoped probe/list/hydration caches and the next failed probe's publication fence.
+Native issue/PR Project-context cases use the real collector, normalizer and
+filesystem store. They check that normalization retains payloads only in the
+verified repository namespace, preserves current context without creating action
+credit, and rejects a retired repository before another GraphQL request in both
+the existing client and a client opened against the same durable authority.
 
 Those fixtures establish the tested component behavior. They are not a production
 purge, real GitHub installation evidence, cross-process proof, or acceptance of the
