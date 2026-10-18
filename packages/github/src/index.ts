@@ -7,6 +7,7 @@ export * from "./project-snapshots.js";
 export * from "./timeline-history.js";
 export * from "./physical-diff.js";
 export * from "./documentation.js";
+export * from "./research.js";
 
 export type EndpointOutcome =
   | { kind: "readable"; visibility: Visibility }

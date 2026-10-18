@@ -66,6 +66,9 @@ const statements = [
   `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.normalizations (
     fact_key text NOT NULL, policy_signature text NOT NULL, document jsonb NOT NULL,
     document_hash text NOT NULL, PRIMARY KEY (fact_key, policy_signature))`,
+  `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.source_artifacts (
+    fact_key text NOT NULL REFERENCES leaderboard_ingestion.source_facts(fact_key),
+    artifact_id text NOT NULL, PRIMARY KEY (fact_key, artifact_id))`,
   `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.receipts (
     receipt_id text PRIMARY KEY, operation_key text UNIQUE NOT NULL, kind text NOT NULL,
     document jsonb NOT NULL, document_hash text NOT NULL, created_at timestamptz NOT NULL DEFAULT clock_timestamp())`,
@@ -85,6 +88,29 @@ const statements = [
   `CREATE TABLE IF NOT EXISTS leaderboard_pipeline.heads (
     scope_key text PRIMARY KEY, snapshot_id text NOT NULL REFERENCES leaderboard_pipeline.snapshots(snapshot_id), revision bigint NOT NULL)`,
 ];
+
+// Derived artifacts retain their own immutable identity, while revocation follows
+// every authoritative source observation that supplied them. Dependencies are
+// private and append-only across classification changes and cache replacements.
+const sourceSuppressionQuery = `SELECT subject_id
+  FROM leaderboard_ingestion.object_suppressions WHERE repository_id=ANY($1::bigint[])
+  UNION SELECT dependency.artifact_id FROM leaderboard_pipeline.source_artifacts AS dependency
+  JOIN leaderboard_ingestion.source_facts AS fact USING(fact_key)
+  JOIN leaderboard_ingestion.object_suppressions AS removed
+    ON removed.repository_id=fact.repository_id AND removed.subject_id=fact.subject_id
+  WHERE fact.repository_id=ANY($1::bigint[])`;
+const sourceSuppressions = async (tx, repositoryIds) =>
+  (await tx.query(sourceSuppressionQuery, [repositoryIds])).rows.map((row) => row.subject_id);
+async function retainSourceArtifacts(tx, factKey, document) {
+  const artifactIds = [...new Set(document.facts.map((fact) => fact.artifactId))];
+  if (artifactIds.some((id) => typeof id !== "string" || !/^[A-Za-z0-9_=.:-]{1,200}$/.test(id)))
+    fail("invalid_source_artifact_dependency");
+  await tx.query(
+    `INSERT INTO leaderboard_pipeline.source_artifacts(fact_key,artifact_id)
+     SELECT $1,artifact_id FROM unnest($2::text[]) AS artifact_id ON CONFLICT DO NOTHING`,
+    [factKey, artifactIds],
+  );
+}
 
 /** Apply only this app's additive schema. Ingestion migrations remain independently owned. */
 export async function migratePipeline(db) {
@@ -112,11 +138,32 @@ export async function createPipeline(options) {
       fail("synthetic_data_forbidden_in_public_runtime");
   };
   const config = copy(options.config ?? { version: "unconfigured", repositories: [], policies: [], scopes: [] });
-  const normalizationPolicySignature = digest([
-    "current-state-selection-v1",
-    dataMode,
-    Array.isArray(config.policies) ? config.policies.map((item) => item?.signature) : [],
-  ]);
+  if (config.researchPolicies?.length) {
+    const recordPolicies = config.policies.filter((entry) => entry.policy.metricId === "decision_records");
+    if (
+      recordPolicies.some(
+        ({ policy }) =>
+          policy.aggregation !== "count" ||
+          policy.dateBasis !== "occurredAt" ||
+          policy.groupBy !== "actor_artifact" ||
+          !policy.rankedStates?.length ||
+          policy.rankedStates.some((state) => !["qualified", "reviewed"].includes(state)),
+      )
+    )
+      fail("research_record_metric_policy_incompatible");
+  }
+  const classificationPolicies = {
+    documentation: config.documentationPolicies ?? [],
+    research: config.researchPolicies ?? [],
+  };
+  // A changed path/provenance policy must not reuse a normalization produced
+  // under the previous classification, even when metric arithmetic is unchanged.
+  const policySignatures = Array.isArray(config.policies) ? config.policies.map((item) => item?.signature) : [];
+  const normalizationPolicySignature = digest(
+    classificationPolicies.documentation.length || classificationPolicies.research.length
+      ? ["current-state-selection-v2", dataMode, policySignatures, classificationPolicies]
+      : ["current-state-selection-v1", dataMode, policySignatures],
+  );
   const normalizationSignature = digest([normalizationDocumentVersion, normalizationPolicySignature]);
   const verifyConfig = options.verifyConfiguration ?? (async () => false);
   const authorizeCorrection = options.authorizeCorrection ?? (async () => false);
@@ -217,12 +264,7 @@ export async function createPipeline(options) {
         }
         restoredActors.set(digest(authorization), actors);
       }
-      const removed = (
-        await tx.query(
-          "SELECT subject_id FROM leaderboard_ingestion.object_suppressions WHERE repository_id=ANY($1::bigint[])",
-          [ids],
-        )
-      ).rows.map((row) => row.subject_id);
+      const removed = await sourceSuppressions(tx, ids);
       const corrections = (
         await tx.query(
           "SELECT artifact_id,document FROM leaderboard_pipeline.corrections WHERE repository_id=ANY($1::bigint[])",
@@ -390,6 +432,7 @@ export async function createPipeline(options) {
           isSynthetic: dataMode === "synthetic",
           assertAuthorized: () => assertRunConfiguration(),
           documentationPolicies: config.documentationPolicies ?? [],
+          researchPolicies: config.researchPolicies ?? [],
           ...(options.githubEnrich ? { enrich: options.githubEnrich } : {}),
         })
       : null);
@@ -665,6 +708,7 @@ export async function createPipeline(options) {
         if (cached.document.isSynthetic !== (dataMode === "synthetic")) fail("normalization_data_mode_mismatch");
         assertDataMode(cached.document);
         if (hasDispatchEvidence(cached.document, dispatch, row)) {
+          await retainSourceArtifacts(db, row.fact_key, cached.document);
           outputs.push(cached.document);
           continue;
         }
@@ -767,13 +811,16 @@ export async function createPipeline(options) {
             )
           : [],
       };
-      await db.query(
-        `INSERT INTO leaderboard_pipeline.normalizations (fact_key,policy_signature,document,document_hash)
+      await db.transaction(async (tx) => {
+        await tx.query(
+          `INSERT INTO leaderboard_pipeline.normalizations (fact_key,policy_signature,document,document_hash)
         VALUES ($1,$2,$3::jsonb,$4) ON CONFLICT (fact_key,policy_signature) DO UPDATE
         SET document=EXCLUDED.document,document_hash=EXCLUDED.document_hash
         WHERE normalizations.document_hash=$5`,
-        [row.fact_key, signature, JSON.stringify(document), digest(document), cached?.document_hash ?? null],
-      );
+          [row.fact_key, signature, JSON.stringify(document), digest(document), cached?.document_hash ?? null],
+        );
+        await retainSourceArtifacts(tx, row.fact_key, document);
+      });
       outputs.push(document);
     }
     return outputs;
@@ -928,7 +975,13 @@ export async function createPipeline(options) {
     );
     // Only persisted provider normalizations can restore identity; recognition overlays are transient.
     const normalizationHashes = [...new Set(outputs.map(digest))].sort();
-    const suppressedArtifactIds = new Set(outputs.flatMap((output) => output.suppressArtifactIds ?? []));
+    const suppressedArtifactIds = new Set([
+      ...outputs.flatMap((output) => output.suppressArtifactIds ?? []),
+      ...(await sourceSuppressions(
+        db,
+        repos.map((repo) => repo.id),
+      )),
+    ]);
     if (recognitionBindings.length) {
       const combined = {
         facts: outputs.flatMap((o) => o.facts),
@@ -1243,6 +1296,13 @@ export async function createPipeline(options) {
           )
         )
           fail("source_revoked_before_publication");
+        const removed = new Set(
+          await sourceSuppressions(
+            tx,
+            repos.map((repo) => repo.id),
+          ),
+        );
+        if (facts.some((fact) => removed.has(fact.artifactId))) fail("source_suppressed_before_publication");
         const current = (
           await tx.query("SELECT snapshot_id,revision FROM leaderboard_pipeline.heads WHERE scope_key=$1", [
             scopeKey(scope),
@@ -1410,7 +1470,7 @@ export async function createPipeline(options) {
             return null;
           const removed = (
             await tx.query(
-              `SELECT subject_id FROM leaderboard_ingestion.object_suppressions WHERE repository_id=ANY($1::bigint[])
+              `${sourceSuppressionQuery}
       UNION SELECT artifact_id AS subject_id FROM leaderboard_pipeline.corrections WHERE repository_id=ANY($1::bigint[])`,
               [selected.repository_ids],
             )
