@@ -194,3 +194,48 @@ test("unknown card values stay unavailable while an explicit measured zero and z
     field(response.body, "Samples", "0", image);
   }
 });
+
+test("card source counts describe distinct public links without collapsing review evidence", async (t) => {
+  for (const sourceCount of [1, 2, 3]) {
+    await t.test(`${sourceCount} distinct sources`, async (t) => {
+      const value = fixture("review_rounds");
+      const entries = value.selected.evidence.filter((entry) => entry.contribution.actorId === "101");
+      const artifacts = entries.slice(0, sourceCount).map((entry) => structuredClone(entry.artifact));
+      for (const [index, entry] of entries.entries()) {
+        entry.artifact = structuredClone(artifacts[index % sourceCount]);
+        entry.contribution.artifactId = entry.artifact.stableId;
+        entry.contribution.roles = ["reviewer"];
+      }
+      const original = structuredClone(value);
+      const { app } = harness(t, value);
+      const html = await app.inject(url("review_rounds"));
+      const image = await app.inject(url("review_rounds", true));
+      assert.equal(html.statusCode, 200, html.body);
+      assert.equal(image.statusCode, 200, image.body);
+      const sourceList = html.body.split("<h2>Public sources</h2>")[1];
+      assert.equal((sourceList.match(/<li>/g) ?? []).length, sourceCount);
+      for (const artifact of artifacts) assert.ok(sourceList.includes(artifact.publicUrl));
+      const expected =
+        `Source: ${artifacts[0].publicUrl}` + (sourceCount > 1 ? ` (+${sourceCount - 1} more in portfolio)` : "");
+      assert.ok(image.body.includes(`${expected}</text>`), image.body);
+      assert.ok(image.body.split("</desc>")[0].includes(expected), "accessible source count agrees with visible text");
+      if (sourceCount === 1) assert.doesNotMatch(image.body, /more in portfolio/);
+      for (const response of [html, image]) {
+        assert.ok(response.body.includes("14 (partial)"));
+        assert.equal(response.headers["cache-control"], "no-store");
+      }
+      const profile = await app.inject("/api/v1/contributors/101?metric=review_rounds&snapshot=synthetic-pending-1");
+      assert.equal(profile.statusCode, 200, profile.body);
+      assert.equal(profile.json().results[0].value, 14);
+      assert.equal(profile.json().evidenceCount, 14);
+      assert.equal(new Set(profile.json().evidenceIds).size, 14);
+      assert.deepEqual(value, original, "source presentation must not rewrite stored evidence or counts");
+      value.controls.suppressedArtifactIds = [artifacts[0].stableId];
+      for (const image of [false, true]) {
+        const suppressed = await app.inject(url("review_rounds", image));
+        assert.equal(suppressed.statusCode, 404);
+        assert.doesNotMatch(suppressed.body, /synthetic-repo|Source:|Public sources/);
+      }
+    });
+  }
+});

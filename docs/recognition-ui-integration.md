@@ -34,9 +34,13 @@ current suppression can make a pinned pending count unknown before rendering.
 
 HTML uses semantic definition terms and descriptions. Passive SVG images include
 the same context in visible text and their accessible description; the canvas
-height includes every added line. Existing text/output bounds, escaping, dated
-snapshot labels, no-store responses, framing restrictions and current privacy
-checks remain in force. This presentation does not supply missing denominator
+height includes every added line. Both formats derive their source summaries from
+distinct validated public URLs in first-observed order. Several review rounds may
+share one source page; the SVG's additional-source count describes the other
+distinct URLs, while the contribution values and proof records retain their own
+counts and identities. Existing text/output bounds, escaping, dated snapshot
+labels, no-store responses, framing restrictions and current privacy checks remain
+in force. This presentation does not supply missing denominator
 evidence, authorize ranking a descriptive measure or establish a live service.
 
 ## Validation and remaining browser integration

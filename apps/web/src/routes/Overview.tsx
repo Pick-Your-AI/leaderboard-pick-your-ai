@@ -2,7 +2,7 @@ import React from "react";
 import { RankCell } from "../components/BoardTable.tsx";
 import { PageHeader } from "../components/Layout.tsx";
 import { PersonName, ReceiptRow } from "../components/Receipt.tsx";
-import { ScopeBar } from "../components/ScopeBar.tsx";
+import { ReferenceScope, ScopeBar } from "../components/ScopeBar.tsx";
 import {
   CoverageLabel,
   EmptyState,
@@ -196,6 +196,7 @@ export function LeaderboardsPage() {
           or rule.
         </p>
       </PageHeader>
+      <ReferenceScope />
       {params.family && !family && (
         <div className="notice notice-warn" role="alert">
           <p className="notice-title">Unknown family "{params.family}". Showing all families.</p>
