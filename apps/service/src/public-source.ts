@@ -555,6 +555,8 @@ export function projectRead(
       compareSourceInstants(coverage.windowStart, scope.start) <= 0 &&
       coverage.windowEnd !== null &&
       compareSourceInstants(coverage.windowEnd, scope.end) >= 0 &&
+      coverage.sourceWatermark !== null &&
+      compareSourceInstants(coverage.sourceWatermark, scope.end) >= 0 &&
       coverage.missingPages === 0 &&
       coverage.permissionsMissing.length === 0 &&
       coverage.sourceErrors.length === 0;

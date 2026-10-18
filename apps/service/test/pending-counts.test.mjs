@@ -153,7 +153,13 @@ test("zero is measured only with complete bounded coverage, and pending dates ob
   input.selected.scope.start = start;
   input.selected.scope.end = end;
   const row = input.selected.rows.find((row) => row.actorId === "101");
-  Object.assign(row.result.coverage, { state: "complete", windowStart: start, windowEnd: end, knownStart: start });
+  Object.assign(row.result.coverage, {
+    state: "complete",
+    windowStart: start,
+    windowEnd: end,
+    knownStart: start,
+    sourceWatermark: end,
+  });
   row.pending = {
     schemaVersion: "leaderboard-pending/v1",
     state: "measured",
@@ -181,7 +187,13 @@ test("a sub-millisecond coverage start gap cannot certify measured pending zero"
     input.selected.scope.start = start;
     input.selected.scope.end = end;
     const row = input.selected.rows.find((row) => row.actorId === "101");
-    Object.assign(row.result.coverage, { state: "complete", windowStart: start, windowEnd: end, knownStart: start });
+    Object.assign(row.result.coverage, {
+      state: "complete",
+      windowStart: start,
+      windowEnd: end,
+      knownStart: start,
+      sourceWatermark: end,
+    });
     row.pending = {
       schemaVersion: "leaderboard-pending/v1",
       state: "measured",
