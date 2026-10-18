@@ -33,17 +33,28 @@ The retained clocks consume the metric engine's existing explicit UTC precision 
 
 Only `{actorId, state, delta, reason}` is added to visible rows. States are `comparable`, `new_entrant`, and `unavailable`. New entrants have a null delta; unavailable comparisons also have a null delta. Private signatures, receipt contents, backfill identifiers, hidden actor IDs and audit records are not public response or export fields.
 
+## Persisted reconciliation lineage
+
+The pipeline's private `backfillRevision` is a versioned digest of its normalization signature, repository-scoped imported source-fact identities and the captured corrections observed by the frozen observation cutoff. Ordinary `reconcile` run IDs and normalized output contents are excluded. A new timely issue can change the dataset and its measured value without being reported as an import.
+
+Imported history comes from immutable `source_facts` joined to the explicit `backfill` or `audit` run that first retained each fact. The digest binds each ordered `(first_run_id, fact_key)` pair, rather than only the run ID. Another committed page of the same import therefore changes the lineage. A committed page remains part of it if a later page fails or a current-state refresh replaces the selected source revision. Restart and mutable run completion state cannot erase that provenance. Duplicate audits, empty scans and failures before any committed fact introduce no new history identity.
+
+The query uses the publication's observation cutoff, including the persisted cutoff reused by webhook dispatch. Source facts first observed after that boundary cannot change the earlier import set. The correction component sorts a separate list of fact digests; it preserves the existing captured correction order and keeps later corrections in the full private input. Those later facts remain excluded from the earlier epoch while the existing exact dispatch-input fence can still reject a changed unconfirmed replay. Stored snapshots and explanation receipts are never rewritten to acquire a new marker. Comparisons across the old output-digest format and the versioned lineage are conservatively unavailable.
+
+The cumulative imported-history read admits at most 10,000 retained source facts per publication scope and rejects the 10,001st with `reconciliation_history_budget_exceeded`. This includes obsolete imported current-state revisions, not only the currently selected normalization set. The implementation does not truncate that history or substitute a constant marker. A deployment reaching this bound needs a separately reviewed durable lineage/retention design under [#95](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/95); deleting provenance or increasing the limit without resource evidence is not an automatic recovery.
+
+This lineage is an invalidation input, not a complete-coverage or completed-import receipt. Existing late-evidence and changed/removed evidence-signature checks still detect historical changes discovered through ordinary reconciliation. Source capability, publication windows, coverage and current privacy authority remain independently required.
+
 ## Current implementation limits
 
 The pipeline currently publishes fixed custom scopes or all-time scopes with incomplete historical coverage. This change preserves those facts: it does not certify historical completeness, change publication-window semantics or produce artificial progress. Positive movement/new-entrant API tests use actual engine-generated synthetic named-period aggregates with complete synthetic coverage. The actual pipeline tests use two persisted fixed-window snapshots and assert `insufficient_history`.
 
-The current publisher also uses a digest of normalized outputs as its conservative backfill revision, so ordinary new activity changes that marker. A truthful positive-movement pipeline needs a persisted reconciliation/coverage receipt whose epoch is stable across ordinary ingestion and changes at verified import/correction/rebuild boundaries. No such connected complete-coverage producer is claimed here; a constant or a renamed collection-run ID would not supply that evidence. Existing late-evidence and correction-signature checks remain required.
-
-Named-period publication integration, that authoritative reconciliation/coverage epoch, and remote Web presentation remain separate unfinished integration work under #75/#91/#97. This backend slice alone does not close #97, and no production deployment requirement has been added to its automated-validation gate.
+Named-period publication integration, a connected complete-coverage producer and remote Web presentation remain separate unfinished integration work under #75/#91/#97. The persisted reconciliation lineage corrects the ordinary-ingestion marker boundary but supplies none of those missing capabilities. This backend slice alone does not close #97, and no production deployment requirement has been added to its automated-validation gate.
 
 ## Validation
 
 - `node --test apps/service/test/rank-comparison.test.mjs`: compatible engine receipts, entrant state, partial coverage, changed policies/backfill, corrections, privacy on both snapshots, pagination, query bounds and safe JSON/CSV output.
 - `node --test --test-concurrency=1 apps/pipeline/test/rank-comparison.test.mjs`: actual persistence/restart, immutable legacy replay, shared transaction/no nested connection, authority changes during pairing and confirmed-digest tamper rejection.
+- `node --test --test-concurrency=1 apps/pipeline/test/reconciliation-lineage*.test.mjs`: actual ordinary ingestion, correction capture and retry, partial/failed/resumed imports, current-state refresh, audit, frozen cutoffs and cumulative history overflow, while every published coverage record remains partial.
 
 Build workspace packages first. Fixtures are synthetic; their success establishes these executable invariants, not real-source accuracy or coverage.
