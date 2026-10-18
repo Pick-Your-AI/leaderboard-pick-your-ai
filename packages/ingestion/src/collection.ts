@@ -26,6 +26,8 @@ export interface ScanRequest {
 }
 export interface SourceFact {
   subjectId: string;
+  /** Collected native issue/PR node ID for a Project-history event. */
+  historySubjectId?: string;
   sourceRevision: string;
   sourceUrl: string;
   /** Snapshot state never establishes a transition's actor or occurrence time. */
@@ -69,6 +71,7 @@ function cursor(value: string | null): void {
 }
 function normalizeFact(value: SourceFact): SourceFact {
   id(value.subjectId);
+  if (value.historySubjectId !== undefined) id(value.historySubjectId);
   id(value.sourceRevision);
   const url = new URL(value.sourceUrl);
   if (
@@ -95,6 +98,7 @@ function normalizeFact(value: SourceFact): SourceFact {
   // Pick fields explicitly. Repository text and adapter extras are never retained or executed.
   return {
     subjectId: value.subjectId,
+    ...(value.historySubjectId !== undefined ? { historySubjectId: value.historySubjectId } : {}),
     sourceRevision: value.sourceRevision,
     sourceUrl: url.href,
     evidence: value.evidence,
