@@ -323,7 +323,7 @@ test("relationship collection and normalization remain issue-only", async () => 
 test("duplicate subject inventory cannot establish a complete Project status count", async () => {
   const h = harness();
   h.state.inventory.push(h.state.inventory[1]);
-  await assert.rejects(h.source.readPage(request), /history_subject_unverified/);
+  await assert.rejects(h.source.readPage(request), /project_subject_identity_unverified/);
 });
 
 test("Project history binds the REST node ID and rejects missing or reused stable inventory identities", async () => {
@@ -337,10 +337,13 @@ test("Project history binds the REST node ID and rejects missing or reused stabl
     (h) => {
       delete h.state.inventory[1].node_id;
     },
+    (h) => {
+      h.state.inventory[1] = null;
+    },
   ]) {
     const h = harness();
     change(h);
-    await assert.rejects(h.source.readPage(request), /history_subject_unverified|project_subject_identity_unverified/);
+    await assert.rejects(h.source.readPage(request), /project_subject_identity_unverified/);
   }
 });
 

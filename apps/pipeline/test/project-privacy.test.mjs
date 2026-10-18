@@ -213,6 +213,8 @@ for (const [loss, subjectType] of [
   ["private", "pull_request"],
   ["subject_private", "pull_request"],
   ["subject_identity", "pull_request"],
+  ["inventory_missing_id", "pull_request"],
+  ["inventory_reused_id", "pull_request"],
 ])
   test(`confirmed ${loss} Project revokes current and pinned ${subjectType} publications until a new approved configuration`, async (t) => {
     const h = await harness(t);
@@ -232,6 +234,7 @@ for (const [loss, subjectType] of [
     let publicProject = true;
     let privateSubject = false;
     let changedSubject = false;
+    let inventoryLoss = null;
     const event = () => ({
       id: "E_synthetic",
       __typename: "ProjectV2ItemStatusChangedEvent",
@@ -244,15 +247,18 @@ for (const [loss, subjectType] of [
     const current = () => ({ ...stableEvent, project: { ...stableEvent.project, public: publicProject } });
     const client = {
       rest: async () => ({ id: 2, private: false }),
-      scanRest: async (o) =>
-        o.select([
-          {
-            id: 1,
-            node_id: subjectType === "pull_request" ? "PR_synthetic" : "I_synthetic",
-            number: 1,
-            ...(subjectType === "pull_request" ? { pull_request: {} } : {}),
-          },
-        ]),
+      scanRest: async (o) => {
+        const subject = {
+          id: 1,
+          node_id: subjectType === "pull_request" ? "PR_synthetic" : "I_synthetic",
+          number: 1,
+          ...(subjectType === "pull_request" ? { pull_request: {} } : {}),
+        };
+        if (inventoryLoss === "inventory_missing_id") delete subject.node_id;
+        return o.select(
+          inventoryLoss === "inventory_reused_id" ? [subject, { ...subject, id: 2, number: 2 }] : [subject],
+        );
+      },
       scanGraphql: async (o) =>
         o.select({
           repository: {
@@ -292,6 +298,7 @@ for (const [loss, subjectType] of [
         }, options);
     if (loss === "subject_private") privateSubject = true;
     else if (loss === "subject_identity") changedSubject = true;
+    else if (loss.startsWith("inventory_")) inventoryLoss = loss;
     else publicProject = loss === "hidden" ? null : false;
     await runtime
       .runOnce()
@@ -321,6 +328,7 @@ for (const [loss, subjectType] of [
     publicProject = true;
     privateSubject = false;
     changedSubject = false;
+    inventoryLoss = null;
     await assert.rejects(runtime.runOnce(), /project_source_scope_requires_reapproval/);
     assert.notEqual((await runtime.app.inject(url)).statusCode, 200);
     const restarted = await createPipeline({ ...h.options, config, githubClient: client, source: undefined });
