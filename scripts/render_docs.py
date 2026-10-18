@@ -185,6 +185,8 @@ Views organize the same issue set. Dependency views use genuine prerequisites; s
 
 [Full definitions and ingestion policy](../planning/metrics-and-ingestion.json) · [Metric-to-package map](../planning/metric-backlog-coverage.json)
 
+The [metric and recognition policy decision](metric-recognition-policy.md) records default evidence lenses, ranking, eligibility, corrections and versions. Its [98-definition review](metric-definition-review.md) retains each source restriction; neither document enables a metric or supplies a live-source receipt.
+
 The catalog defines {len(metrics['metrics'])} possible measures across {len(families)} families. A defined measure is not automatically available or safe to rank. Enable each measure only after its source, identity, eligibility, privacy and acceptance gates pass. Unsupported and incomplete data are explicit states; they must not be displayed as zero contribution.
 
 {table(['Family', 'Definitions'], sorted(families.items()))}
@@ -227,6 +229,8 @@ The default time window is the last 30 days. Support 7, 30 and 90 days, all-time
 Discover every attributable contributor through the searchable directory, including people whose observed work does not qualify for a ranking. Show evidence-backed portfolios rather than only podiums. Research, triage, review, accessibility and maintenance must be as discoverable as code. No inactivity lists, employment evaluation, compensation decisions or pressure-inducing streaks are part of this product.
 
 ## Public journeys
+
+The [audience and product-success decision](product-journeys.md) defines measurable acceptance scenarios for all five audiences, evaluates discovery and evidence understanding, and reviews examples from every current repository and Project. Its targets are an evaluation protocol, not a claim of measured usability or public-service acceptance.
 
 1. A visitor selects a contribution category, period and source scope, then opens a contributor's evidence.
 2. A contributor shares a portfolio with contribution roles, source links, accepted outcomes and coverage caveats.
@@ -375,6 +379,8 @@ All {ui_map['counts']['ui_children']} UI source items map into the existing LB w
 
 Recognition exists to make work discoverable and attributable. It is not a measure of a person's worth or a performance-management system. Activity volume, accepted outcomes and editorial recognition require different labels and evidence.
 
+The [evidence and contributor-rights policy](evidence-contributor-rights.md) defines source admission, voluntary consent, corrections, opt-out, appeals, retention and attributable decisions. Its adoption is separate from source activation, actual deletion and operating acceptance.
+
 ## Ownership and policy changes
 
 GitHub Assignees own delivery work. The plan's owner roles describe required expertise; they do not assign a person. Accept an owner before work is Ready. Source repository owners retain authority over research, code and release acceptance. Leaderboard moderators cannot declare upstream deliverables complete.
@@ -383,13 +389,13 @@ Version metric definitions, identity rules, line classification and eligibility 
 
 ## Evidence and correction
 
-Observe raw activity without inferring its quality. Review receipts when recognition requires acceptance, mentoring, design contribution, source verification or other qualitative judgment. Document the artifact, participants, roles, occurrence date, submitter, independent reviewer, policy version and public summary. Reviewers declare conflicts and do not approve their own disputed recognition.
+Observe raw activity without inferring its quality. Review receipts when recognition requires acceptance, mentoring, design contribution, source verification or other qualitative judgment. Document the artifact, participants, roles, occurrence date, submitter, independent reviewer, policy version and public summary. Reviewers declare conflicts and cannot accept claims submitted by themselves or listing them as collaborators. Appeals and rollbacks require a reviewer who has made no earlier decision on that receipt.
 
-Provide a functioning correction and appeal route with a submission receipt. Preserve an auditable decision trail while minimizing personal data. Withdrawal, duplicate evidence and upheld corrections invalidate derived counts across every affected snapshot, export and cache. Do not promise response times until an operator accepts the commitment.
+Provide a functioning correction and appeal route with a submission receipt. Preserve an auditable decision trail while minimizing personal data. Withdrawal, duplicate evidence and upheld corrections invalidate derived counts across affected service-controlled snapshots, exports and caches. Explain that independently downloaded copies are outside the service's deletion control. Do not promise response times until an operator accepts the commitment.
 
 ## Privacy and consent
 
-Use approved public repositories and Project fields. Never publish commit emails, private issue content, security findings or inferred identities. Verified opt-out and deletion propagate to directory, rankings, profiles, live displays, embeds, caches and exports. Separate authenticated controls from public data. A source becoming private triggers suppression before later enrichment.
+Use approved public repositories and Project fields. Never publish commit emails, private issue content, security findings or inferred identities. Verified opt-out and suppression apply across all enabled service-controlled public surfaces, including historical views. Report actual payload deletion, backup expiry and remaining cleanup separately. Separate authenticated controls from public data. A source becoming private triggers suppression before later enrichment.
 
 ## Counting safeguards
 
@@ -397,7 +403,7 @@ Distinct contribution roles can share an artifact, but a repeated event or impor
 
 ## Decision register
 
-The dedicated repository boundary has been selected. Other recommendations below remain proposals until their responsible roles accept them. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
+The dedicated repository boundary has been selected. The [metric and recognition decision](metric-recognition-policy.md) and its [definition review](metric-definition-review.md) specify this project's policy choices; review and merge record their acceptance. Each register entry retains its unresolved source, role or operating evidence. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
 
 {json_detail(decisions)}
 
