@@ -31,8 +31,6 @@ const canonical = (value) =>
       : JSON.stringify(value);
 const digest = (value) => createHash("sha256").update(canonical(value)).digest("hex");
 const policyDigest = (value) => createHash("sha256").update(value).digest("hex");
-const scopeKey = (scope) =>
-  JSON.stringify([scope.organization, scope.repository, scope.workstream, scope.start, scope.end]);
 const copy = (value) => structuredClone(value);
 // Private preview records retain labels only. Provider bindings stay in the
 // restricted normalization store and are restored transiently before engine use.
@@ -174,12 +172,15 @@ export async function createPipeline(options) {
   if (
     !c?.ingestion?.CollectionStore ||
     !c?.metrics?.aggregateMetric ||
+    !c?.contracts?.canonicalPublicScope ||
+    !c?.contracts?.publicScopeKey ||
     !c?.service?.createService ||
     !controlsStore?.read ||
     !controlsStore?.transaction ||
     !db?.transaction
   )
     fail("pipeline_components_required");
+  const scopeKey = c.contracts.publicScopeKey;
   const dataMode = options.dataMode ?? "public";
   if (!["public", "synthetic"].includes(dataMode)) fail("invalid_pipeline_data_mode");
   const assertDataMode = (value) => {
@@ -667,6 +668,7 @@ export async function createPipeline(options) {
         fail("registry_definition_version_mismatch");
     }
     for (const scope of config.scopes) {
+      const canonicalScope = c.contracts.canonicalPublicScope(scope);
       if (
         scope.organization !== config.organization ||
         !["repository", "workstream", "start", "end"].every((key) => key in scope)
@@ -677,7 +679,15 @@ export async function createPipeline(options) {
       if (scope.workstream !== null) required(scope.workstream, "invalid_workstream_scope");
       if ((scope.start === null) !== (scope.end === null)) fail("incomplete_public_window");
       if (scope.start !== null && utc(scope.start) >= utc(scope.end)) fail("invalid_public_window");
+      const approvedProjects = new Set(
+        config.repositories
+          .filter((repo) => scope.repository === null || String(repo.id) === scope.repository)
+          .flatMap((repo) => repo.allowedProjectIds ?? []),
+      );
+      if ((canonicalScope.projects ?? []).some((id) => !approvedProjects.has(id))) fail("unapproved_scope_project");
     }
+    if (new Set(config.scopes.map(scopeKey)).size !== config.scopes.length)
+      fail("duplicate_public_scope_configuration");
     return true;
   }
   const configuredScope = (scope) => config.scopes.some((item) => scopeKey(item) === scopeKey(scope));
@@ -1121,6 +1131,7 @@ export async function createPipeline(options) {
   }
   async function publish(scope, cutoff, observationCutoff, dispatch) {
     assertRunConfiguration();
+    scope = c.contracts.canonicalPublicScope(scope);
     if (!configuredScope(scope)) fail("scope_not_approved");
     const repos = repositoriesFor(scope);
     const generations = (
@@ -1320,11 +1331,11 @@ export async function createPipeline(options) {
     const engineScope = {
       ...window,
       repos: repos.map((repo) => String(repo.id)),
-      projects: [],
+      projects: scope.projects ?? [],
       workstreams: scope.workstream === null ? [] : [scope.workstream],
       roles: [],
       actors: "all",
-      context: "event",
+      context: scope.context ?? "event",
     };
     const state = controlsStore.read();
     assertRunConfiguration();
@@ -1694,7 +1705,7 @@ export async function createPipeline(options) {
   }
   const source = {
     async readComparison(scope, pin, previous, signal) {
-      if (["organization", "repository", "workstream"].some((key) => scope[key] !== previous.scope[key])) return null;
+      if (c.contracts.publicScopeFilterKey(scope) !== c.contracts.publicScopeFilterKey(previous.scope)) return null;
       // Both reads reuse this transaction. Source locks remain held through the
       // final authority query, including expanded retained-source revocations.
       return db.transaction(async (tx) => {
