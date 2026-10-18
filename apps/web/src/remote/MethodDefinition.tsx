@@ -13,7 +13,7 @@ const labels: Record<string, string> = {
 };
 const label = (key: string) =>
   Object.hasOwn(labels, key)
-    ? labels[key]
+    ? labels[key]!
     : /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/.test(key)
       ? key.replaceAll("_", " ").replace(/^./, (first) => first.toUpperCase())
       : key;
