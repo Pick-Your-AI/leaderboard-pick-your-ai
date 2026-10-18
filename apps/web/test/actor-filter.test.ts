@@ -11,7 +11,7 @@ test("account kind and known execution are independent, with no inferred manual 
   assert.equal(matchesActorFilter(actor("user"), "automation"), false);
   assert.equal(matchesActorFilter(actor("user", "automated"), "user"), true);
   assert.equal(matchesActorFilter(actor("user", "automated"), "automation"), true);
-  for (const kind of ["bot", "github_app", "system"] as const) {
+  for (const kind of ["bot", "github_app", "service_account", "system"] as const) {
     assert.equal(matchesActorFilter(actor(kind), "user"), false);
     assert.equal(matchesActorFilter(actor(kind), "automation"), true);
   }

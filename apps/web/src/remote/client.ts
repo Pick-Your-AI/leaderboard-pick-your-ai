@@ -376,12 +376,13 @@ export function validateExport(value: unknown, selected: Selection): void {
     if (pageActors.has(actorId)) throw new ReadFailure(502, "invalid_export_response");
     pageActors.add(actorId);
     if (row.login !== null) string(row.login);
+    // Legacy v1 exports may omit these labels; present labels must never certify
+    // unsupported kinds or manual execution. Absence remains unknown.
+    const actorKind = Object.hasOwn(row, "actorKind") ? actorKindSchema.parse(row.actorKind) : null;
+    const executionMode = Object.hasOwn(row, "executionMode") ? executionModeSchema.parse(row.executionMode) : null;
     if (
       filter !== "all" &&
-      !matchesActorFilter(
-        { kind: actorKindSchema.parse(row.actorKind), executionMode: executionModeSchema.parse(row.executionMode) },
-        filter,
-      )
+      (actorKind === null || executionMode === null || !matchesActorFilter({ kind: actorKind, executionMode }, filter))
     )
       throw new ReadFailure(502, "api_actor_filter_mismatch");
     if (result.metricId !== metric.id || (row.rank !== null && (integer(row.rank) < 1 || ranking?.rank === false)))

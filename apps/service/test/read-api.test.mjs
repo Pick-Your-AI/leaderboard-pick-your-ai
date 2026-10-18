@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createService } from "../dist/app.js";
 import { startLiveUpdates } from "../dist/live-client.js";
+import { selection, validateExport } from "../../web/src/remote/client.ts";
 
 const at = "2026-10-17T12:00:00.000Z";
 const scope = { organization: "Pick-Your-AI", repository: null, workstream: null, start: null, end: null };
@@ -173,6 +174,16 @@ test("actor selections narrow all public views without treating user accounts as
     );
     assert.equal(json.evidence.length, ids.length);
     assert.equal(json.rows.find((row) => row.actorId === "bob").executionMode, "automated");
+    const selected = selection(`?actors=${actors}&metric=pr_opened&snapshot=public-1`);
+    assert.doesNotThrow(() => validateExport(json, selected));
+    const missingLabels = structuredClone(json);
+    delete missingLabels.rows[0].actorKind;
+    delete missingLabels.rows[0].executionMode;
+    if (actors === "all") assert.doesNotThrow(() => validateExport(missingLabels, selected));
+    else assert.throws(() => validateExport(missingLabels, selected), /api_actor_filter_mismatch/);
+    const invalidKind = structuredClone(json);
+    invalidKind.rows[0].actorKind = "manual";
+    assert.throws(() => validateExport(invalidKind, selected));
     const csv = await app.inject(`/api/v1/exports?metric=pr_opened&actors=${actors}&format=csv`);
     assert.equal(csv.statusCode, 200);
     assert.equal(csv.headers["x-leaderboard-actor-filter"], actors);
@@ -960,6 +971,41 @@ test("legacy portfolio and detail routes also restrict categories to published p
   assert.deepEqual((await h.app.inject("/api/v1/contributors?category=documentation")).json().contributors, []);
   assert.deepEqual((await h.app.inject("/api/v1/contributors/alice?category=documentation")).json().timeline, []);
   assert.deepEqual((await h.app.inject("/api/v1/evidence/e-alice")).json().contribution.metricIds, ["pr_opened"]);
+});
+
+test("service-account classification survives public projection without private review evidence", async (t) => {
+  const h = harness(t);
+  h.data.selected.actors[0].actor.kind = "service_account";
+  h.data.selected.actors[0].serviceAccountClassification = {
+    classificationId: "PRIVATE_CLASSIFICATION_ID",
+    reviewerActorId: "PRIVATE_REVIEWER",
+    evidenceIds: ["PRIVATE_CONFIG_EVIDENCE"],
+  };
+  const board = await h.app.inject(boardUrl);
+  assert.equal(board.statusCode, 200, board.body);
+  const serviceAccount = board.json().rows.find((row) => row.actorId === "alice");
+  assert.equal(serviceAccount.actor.kind, "service_account");
+  assert.equal(serviceAccount.actor.executionMode, "unknown");
+  const profile = await h.app.inject("/api/v1/contributors/alice");
+  assert.equal(profile.statusCode, 200, profile.body);
+  assert.equal(profile.json().actor.kind, "service_account");
+  assert.doesNotMatch(board.body + profile.body, /PRIVATE_|serviceAccountClassification|manual/);
+  const automated = (await h.app.inject(`${boardUrl}&actors=automation`)).json();
+  assert.deepEqual(
+    automated.rows.map((row) => row.actorId),
+    ["alice"],
+  );
+  assert.equal(automated.rows[0].actor.executionMode, "unknown");
+  const users = (await h.app.inject(`${boardUrl}&actors=user`)).json();
+  assert.deepEqual(
+    users.rows.map((row) => row.actorId),
+    ["bob", "carol"],
+  );
+  assert.equal((await h.app.inject("/api/v1/evidence/e-alice?actors=user")).statusCode, 404);
+  assert.equal((await h.app.inject("/api/v1/evidence/e-alice?actors=automation")).statusCode, 200);
+  // A raw actor cannot accidentally serialize internal receipt fields as public profile fields.
+  h.data.selected.actors[0].actor.serviceAccountClassification = h.data.selected.actors[0].serviceAccountClassification;
+  assert.equal((await h.app.inject(boardUrl)).statusCode, 503);
 });
 
 test("share cards are scoped, dated, source-linked and deny external framing", async (t) => {
