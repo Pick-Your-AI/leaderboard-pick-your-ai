@@ -177,6 +177,7 @@ export function createGithubCollectionSource({
           values.push(
             ...records.map((record) => ({
               node_id: record.event.id,
+              ...(request.family === "project_history" ? { history_subject_id: record.subject.id } : {}),
               html_url: record.subject.url,
               source_revision: typedHistoryRevision(record),
               created_at: record.event.createdAt,
@@ -339,6 +340,7 @@ export function createGithubCollectionSource({
           throw new Error("source_identity_or_revision_unverified");
         return {
           subjectId,
+          ...(request.family === "project_history" ? { historySubjectId: value.history_subject_id } : {}),
           sourceRevision: revision,
           sourceUrl: value.html_url,
           evidence: ["timelines", "project_history", "relationships"].includes(request.family)

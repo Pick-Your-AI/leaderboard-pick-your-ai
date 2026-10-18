@@ -71,7 +71,15 @@ The Project-status inventory includes open and closed issues and PRs, then selec
 the explicit issue or pullRequest timeline and verifies its exact repository,
 subject URL and event revision again during normalization. Collection binds the
 REST node identity to every GraphQL page; normalization also requires one stable
-subject across fresh and resumed pages. Typed-history checkpoints use a new
+subject across fresh and resumed pages. The minimized collected fact retains that
+native issue/PR ID separately from its event ID. Hydration must match the collected
+ID, including when every later page consistently names a different subject at the
+same URL. Ordinary event-revision drift remains uncredited until a fresh collection
+verifies the new revision; it does not establish a subject-scope loss.
+Legacy facts without the collected native ID remain uncredited until recollected.
+A private Project-only normalization version prevents older cached results from
+bypassing this binding, without changing frozen comparison policy signatures or
+relationship behavior. Typed-history checkpoints use a new
 identity-verification namespace so older completed scans cannot bypass these checks.
 It uses a separate
 inventory checkpoint from older issue-only scans; a completed legacy checkpoint
