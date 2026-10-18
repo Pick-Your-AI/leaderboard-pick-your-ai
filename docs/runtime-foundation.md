@@ -1,5 +1,7 @@
 # Local runtime implementation
 
+The [Project and workstream context contract](project-workstream-contexts.md) describes stable-ID mappings, complete current membership snapshots, historical unknowns and frozen counting behavior.
+
 This guide describes the local runtime implementation for the foundation work tracked by [LB-02.07](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/31), [LB-02.06](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/35), and [LB-02.05](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/34). Source code and scoped automated evidence are available; architecture acceptance, production readiness, source authorization and deployment still require their own delivery evidence.
 
 ## Toolchain and workspaces
