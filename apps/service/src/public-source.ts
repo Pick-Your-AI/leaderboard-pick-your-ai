@@ -384,6 +384,10 @@ export function projectRead(
     if (previous !== undefined && previous !== visibility) return reject();
     seen.set(key, visibility);
   };
+  const identityByContribution = new Map<
+    string,
+    Pick<Contribution, "actorId" | "artifactId"> & { signature: string }
+  >();
   const metadataByContribution = new Map<string, string>();
   const documentationClassificationByContribution = new Map<string, string>();
   const projectEvidence = (entries: PublicEvidence[]) =>
@@ -427,6 +431,34 @@ export function projectRead(
             (metricId) => !disabled.has(metricId) && ranking.some((policy) => policy.metricId === metricId),
           ),
         };
+        // One proof ID cannot change its fact, attribution or eligibility by collection.
+        // Effective/source clocks and legacy reason labels are collection-specific;
+        // compare parsed identities and public sets without rewriting their output order.
+        const signature = JSON.stringify([
+          contribution.canonicalEventId,
+          [...new Set(contribution.roles)].sort(),
+          contribution.qualification,
+          [...new Set(contribution.metricIds)].sort(),
+        ]);
+        const previousIdentity = identityByContribution.get(contribution.contributionId);
+        if (
+          previousIdentity !== undefined &&
+          (previousIdentity.signature !== signature ||
+            (previousIdentity.actorId !== null &&
+              contribution.actorId !== null &&
+              previousIdentity.actorId !== contribution.actorId) ||
+            (previousIdentity.artifactId !== null &&
+              contribution.artifactId !== null &&
+              previousIdentity.artifactId !== contribution.artifactId))
+        )
+          return reject();
+        // Missing attribution stays unknown and is filtered below; it cannot
+        // erase a known identity before a later conflicting copy is checked.
+        identityByContribution.set(contribution.contributionId, {
+          signature,
+          actorId: previousIdentity?.actorId ?? contribution.actorId,
+          artifactId: previousIdentity?.artifactId ?? contribution.artifactId,
+        });
         if (!date(entry.occurredAt) || (entry.sourceRevision !== null && !id(entry.sourceRevision))) return reject();
         const metadata =
           entry.evidenceMetadata === undefined ? undefined : publicEvidenceMetadataSchema.parse(entry.evidenceMetadata);
