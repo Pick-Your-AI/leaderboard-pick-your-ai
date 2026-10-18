@@ -42,6 +42,31 @@ Evidence submission requires `{ kind: 'evidence', locator, category, collaborato
 
 Review requires `{ version, decision, reason, conflict: false }`. Acceptance additionally requires `sourceReviewedPublic: true` and `policyVersion`, expressing an accountable reviewer's actual source/policy review. It cannot be performed by the submitter or a listed collaborator, including someone who declined attribution. An appeal or rollback requires a reviewer who did not make any earlier decision on that receipt. Accepted duplicate evidence with the same owner, locator, category and scope is blocked; use `decision: 'merge'` with `duplicateOf` pointing to an already accepted canonical receipt. Different scopes are not silently merged. No upstream GitHub object is modified.
 
+Locale acceptance also requires an explicit reviewed target in the acceptance input:
+`localization: { targetFactId, sourceRevision, locale, category, policyVersion }`.
+The reviewer form provides these fields behind its locale-review checkbox. The
+target names the actual observed contribution and immutable merge SHA, its
+canonical language tag, content category and documentation classification policy.
+The classification policy is distinct from the outer accepted metric policy.
+Only an authenticated independent acceptance action can record this target;
+submission, rejection, rollback and duplicate-merge inputs reject it. All five
+fields must be bounded canonical strings, with no extra fields or inferred values.
+
+The real acceptance audit stores that target with the reviewed request owner,
+locator, category, scope, current request version and receipt ID. The pipeline
+matches it against the current protected locale selector and exact public source,
+requires a decision no earlier than the merge, and verifies one unchanged audit
+entry. An earlier generic receipt cannot qualify locale work, and changing the
+configuration cannot redirect a recorded language or source revision. The owner
+must amend changed evidence and an independent reviewer must review it again.
+These private audit fields are omitted from `/controls/public` and public evidence.
+When a declared collaborator changes consent after locale acceptance, the receipt
+returns to pending review and its stale metric policy is cleared in the same
+transaction. The earlier target and decision remain in the private audit. The
+reviewer can then accept the current version directly; no unrelated owner appeal
+or amendment is required. Repeating the same consent leaves an accepted locale
+receipt and its version unchanged. Other evidence consent behavior is preserved.
+
 Correction, privacy and identity requests use `{ kind, detail, locator? }`. They are durable **pending** private receipts. Privacy/identity requests are accessible only to their owner or the `privacy` role; ordinary evidence reviewers cannot read them. They cannot be marked accepted/applied by the generic review API because the downstream correction/identity capability has not been integrated. This prevents a stored form from falsely claiming a correction was applied. Self-service suppression has a separate actual application path and receipt. Do not send a privacy request to a public GitHub issue. A safe staffed alternative for someone unable to authenticate still requires an accepted owner and verified private destination; none is invented here.
 
 ## Transactional publication

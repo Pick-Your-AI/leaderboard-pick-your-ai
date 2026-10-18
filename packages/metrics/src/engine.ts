@@ -40,6 +40,8 @@ export interface MetricFact {
   outcome?: "merged" | "closed_unmerged" | "pending";
   readyAt?: string | null;
   firstReviewAt?: string | null;
+  /** Exact observed locale fact whose accepted representation replaces current portfolio display. */
+  recognitionSourceFactId?: string;
 }
 export interface EngineActor {
   id: string;
@@ -216,6 +218,13 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
     policy.rankedStates.some((state) => !["observed", "qualified", "reviewed"].includes(state))
   )
     throw new Error("Exactly one evidence class is required; observed, qualified and reviewed values stay separate");
+  if (
+    policy.metricId === "localization" &&
+    (policy.rankedStates[0] === "observed" || policy.groupBy !== "canonical" || policy.dateBasis !== "occurredAt")
+  )
+    throw new Error(
+      "Localization accepted units require independent acceptance, canonical language/category grouping and the source merge clock",
+    );
   if (
     !policy.roles.length ||
     policy.roles.some((role) => !knownRoles.includes(role) || role === "unknown") ||
@@ -585,7 +594,7 @@ export function selectPortfolioFacts(
 ): MetricFact[] {
   validateMetricPolicy(policy);
   const scope = canonicalScope(requestedScope);
-  return prepare(
+  const selected = prepare(
     input,
     {
       ...policy,
@@ -597,6 +606,31 @@ export function selectPortfolioFacts(
     },
     scope,
   ).facts.filter((fact) => fact.role !== "unknown" && fact.occurredAt !== null);
+  const observed = new Map(selected.filter((fact) => fact.state === "observed").map((fact) => [fact.id, fact]));
+  const acceptedSources = new Set<string>();
+  for (const fact of selected) {
+    if (
+      fact.metricId !== "localization" ||
+      !["qualified", "reviewed"].includes(fact.state) ||
+      !fact.recognitionSourceFactId
+    )
+      continue;
+    const source = observed.get(fact.recognitionSourceFactId);
+    if (
+      source?.metricId === "localization" &&
+      source.actorId === fact.actorId &&
+      source.artifactId === fact.artifactId &&
+      source.repoId === fact.repoId &&
+      source.role === fact.role &&
+      source.rawState === fact.rawState &&
+      source.occurredAt === fact.occurredAt &&
+      source.observedAt === fact.observedAt
+    )
+      acceptedSources.add(source.id);
+  }
+  // Keep both immutable facts for audit and recomputation, but expose one current
+  // locale activity unit. An unaccepted or unrelated language remains observed.
+  return selected.filter((fact) => !acceptedSources.has(fact.id));
 }
 
 export function aggregateMetric(
