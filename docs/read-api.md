@@ -57,10 +57,13 @@ The public projection revalidates contracts, copies allowlisted fields, removes
 hidden/deleted/unlinked actors and non-public/ineligible evidence, and applies the
 current suppression overlay before every response. Actor IDs must be unique across
 the complete provider actor list, before hidden, deleted, unlinked or unresolved
-records are removed. A contradictory public copy cannot survive by discarding its
-non-public counterpart; duplicate identities reject the read, including historical
-pins and conditional responses. Unique non-public actors remain suppressed without
-withholding unrelated contributors. Removing an artifact removes
+records are removed. Contribution IDs must likewise be unique within the provider's
+primary evidence collection before non-public or ineligible proof is removed.
+A contradictory public copy cannot survive by discarding its non-public counterpart;
+duplicate identities reject the read, including historical pins and conditional
+responses. Legitimate matching proof in separate primary and portfolio collections
+is still supported. Unique non-public actors remain suppressed without withholding
+unrelated contributors. Removing an artifact removes
 its dependent aggregate row; the service never subtracts evidence counts from
 ratios or weighted values. Public URLs must be HTTPS GitHub repository URLs without
 userinfo or query parameters; fragments are restricted to GitHub's numeric public

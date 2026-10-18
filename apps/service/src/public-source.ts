@@ -433,6 +433,10 @@ export function projectRead(
             (entry.occurredAt !== null && compareSourceInstants(entry.occurredAt, scope.start) >= 0)) &&
           (scope.end === null || (entry.occurredAt !== null && compareSourceInstants(entry.occurredAt, scope.end) < 0)),
       );
+  // As with actors, a non-public duplicate must not disappear before the
+  // uniqueness check and leave its conflicting public proof readable.
+  if (new Set(selected.evidence.map((entry) => entry.contribution.contributionId)).size !== selected.evidence.length)
+    return reject();
   const evidence = projectEvidence(selected.evidence);
   const portfolioInput = selected.portfolioEvidence ?? [];
   const portfolioMetadata = new Map(
@@ -519,7 +523,6 @@ export function projectRead(
     return parsed;
   }
   const evidenceMap = new Map(evidence.map((entry) => [entry.contribution.contributionId, entry]));
-  if (evidenceMap.size !== evidence.length) return reject();
   let evidenceReferenceCount = 0;
   const rows = selected.rows
     .map((entry) => {

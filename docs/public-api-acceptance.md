@@ -2,8 +2,8 @@
 
 Scope: [LB-12, issue #13](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/13).
 The five native work packages have reviewed automated implementation receipts.
-This review verifies their combined public API outcome and corrects one remaining
-actor-privacy ambiguity before the epic is reconciled as completed.
+This review verifies their combined public API outcome and corrects actor and
+proof privacy ambiguities before the epic is reconciled as completed.
 
 ## Accepted work-package outcomes
 
@@ -21,19 +21,25 @@ current controls atomically. The API does not turn raw ingestion documents into
 public data or infer source approval from a URL. All children retain their native
 relationships, original acceptance criteria and separately qualified receipts.
 
-## Actor ambiguity found during combined review
+## Privacy ambiguities found during combined review
 
 The previous projection checked duplicate actor IDs only after privacy filtering.
 A provider could return a public/resolved actor and another representation of the
 same ID marked hidden, deleted, unlinked or unresolved. Filtering removed the
 non-public representation, leaving the public copy eligible for publication.
 
-Uniqueness is now checked against the full bounded provider actor list first.
-Duplicate IDs produce the existing generic `503 public_projection_unavailable`
+Primary evidence had the same ordering problem: a schema-valid private, unknown,
+deleted or unavailable copy of a contribution could be discarded before duplicate
+contribution IDs were checked, leaving its public counterpart readable.
+
+Uniqueness is now checked against the full bounded provider actor list and primary
+evidence collection first. Duplicate IDs produce the existing generic `503 public_projection_unavailable`
 response with `Cache-Control: no-store`. The API does not select a preferred copy,
 reuse an earlier conditional response or disclose conflicting identity metadata.
-An ordinary unique hidden actor still removes only that actor and its dependent
-evidence; unrelated contributors remain available. Actor node/database-ID
+An ordinary unique hidden actor or private proof still removes only the affected
+actor/aggregate and dependent evidence; unrelated contributors remain available.
+Matching proof in separate primary and portfolio collections remains valid, since
+each collection has its own purpose and its own uniqueness boundary. Actor node/database-ID
 canonicalization and account linking retain their separate #36 scope.
 
 Nine synthetic regressions in `apps/service/test/public-actor-ambiguity.test.mjs`
@@ -44,6 +50,13 @@ accepted source, eight cases failed at the intended ambiguity assertions and the
 control passed. With the correction, all nine pass with no skipped cases.
 Update notices intentionally use current scope only; the test does not invent a
 historical SSE protocol.
+
+Seven additional synthetic cases in `apps/service/test/public-evidence-ambiguity.test.mjs`
+cover all four non-public artifact dispositions in both input orders, pinned
+conditional proof/board/export denial, unique-private-proof suppression and
+legitimate primary/portfolio overlap. Before the evidence correction, five cases
+failed at the intended visibility assertions and both controls passed. All sixteen
+actor and evidence cases pass together after the two corrections, with no skips.
 
 ## Verification and acceptance boundary
 
