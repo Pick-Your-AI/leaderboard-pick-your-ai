@@ -74,6 +74,13 @@ Real source approval, public permission probes, independent evidence review and
 launch gates remain external acceptance prerequisites. None of these issues is
 closed by synthetic tests alone.
 
+Approved trusted enrichment also supports [revision-bound research record
+candidates](research-record-adapter.md). A configured record path and verified
+Git blob create a pending decision-record version with an exact source link;
+independent private review is required before accepted credit. Generated/imported
+contracts, synthetic notes and PR merge status cannot establish research findings.
+Classification configuration participates in normalization cache identity.
+
 Confirmed Project privacy or authorization loss denies the repository's current
 and pinned publications. Every approved Project receives an explicit public-node
 probe, even when histories or memberships omit it. Collection and normalization

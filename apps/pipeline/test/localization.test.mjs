@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createPipeline } from "../src/index.mjs";
+import { normalizationDocumentVersion } from "../src/private-attribution.mjs";
+import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
+import { record as recordControlsDecision } from "../../controls/src/store.mjs";
 import { components, harness, publicScope } from "./harness.mjs";
 
-async function localizationHarness(t) {
+async function localizationHarness(t, configure = () => {}) {
   const now = Math.floor(Date.now() / 1000) * 1000;
   const ago = (days) => new Date(now - days * 86_400_000).toISOString();
   const before = "b".repeat(40),
@@ -71,6 +74,7 @@ async function localizationHarness(t) {
         },
       ];
       config.scopes = [publicScope, mergeWindow, reviewWindow];
+      configure(config);
     },
     enrichmentFactory(client, slug) {
       return async (input) => ({
@@ -102,6 +106,29 @@ async function localizationHarness(t) {
     },
   });
   return { ...h, ago, after, mergedAt, mergeWindow, reviewWindow, payload };
+}
+
+function acceptLocale(h) {
+  const binding = h.config.recognitionBindings[0];
+  h.controlsStore.transaction((state) => {
+    const request = {
+      id: "synthetic-locale-cache-request",
+      version: 0,
+      kind: "evidence",
+      status: "accepted",
+      owner: "101",
+      category: binding.category,
+      scope: binding.scope,
+      policyVersion: binding.policyVersion,
+      locator: h.payload.html_url,
+      collaborators: {},
+      history: [],
+    };
+    recordControlsDecision(state, request, "202", "accepted", Date.parse(h.ago(0.5)), {
+      policyVersion: binding.policyVersion,
+    });
+    state.requests[request.id] = request;
+  });
 }
 
 test("localization keeps raw portfolio separate from exact independently accepted locale units and current suppression", async (t) => {
@@ -256,3 +283,174 @@ test("restarted normalization reclassifies changed and removed documentation pol
     }
   }
 });
+
+test("a fully classified cache from before locale emission is retained for frozen history and reprojected after restart", async (t) => {
+  const h = await localizationHarness(t, (config) => {
+    config.recognitionBindings = [];
+  });
+  await h.runtime.stop();
+  h.options.authorizePolicyPreview = async () => true;
+  // The earlier adapter accepted the full policy object but only interpreted
+  // documentation paths. Model that source projection through the real
+  // normalizer with locale interpretation disabled, retaining the full host config.
+  const oldProjection = await createPipeline({
+    ...h.options,
+    normalizer: components.github.createGithubEvidenceNormalizer({
+      client: h.options.githubClient,
+      source: h.options.sourceId,
+      allowedRepositoryIds: [2],
+      isSynthetic: true,
+      documentationPolicies: h.config.documentationPolicies.map(({ localizationPaths, ...policy }) => policy),
+      enrich: h.options.githubEnrich,
+    }),
+  });
+  const cutoff = h.ago(0);
+  const publication = (await oldProjection.runOnce({ cutoff })).publications[0];
+  const saved = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows[0];
+  assert.ok(saved.document.facts.some((fact) => fact.metricId === "documentation"));
+  assert.equal(
+    saved.document.facts.some((fact) => fact.metricId === "localization"),
+    false,
+  );
+  const legacySignature = comparisonHash([
+    normalizationDocumentVersion,
+    comparisonHash([
+      "current-state-selection-v2",
+      "synthetic",
+      h.config.policies.map((entry) => entry.signature),
+      { documentation: h.config.documentationPolicies, research: [] },
+    ]),
+  ]);
+  await h.db.query(
+    "UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1 WHERE fact_key=$2 AND policy_signature=$3",
+    [legacySignature, saved.fact_key, saved.policy_signature],
+  );
+  await oldProjection.stop();
+  await h.reopenDatabase();
+  const restarted = await createPipeline(h.options);
+  t.after(() => restarted.stop());
+  const preview = () =>
+    restarted.previewPolicy({
+      snapshotId: publication.snapshotId,
+      policy: { ...h.config.policies[0].policy, version: "synthetic-before-locale-preview", rank: false },
+      operatorId: "201",
+    });
+  const historic = (await preview()).comparison.before;
+  // A fresh run gets its own event cutoff; exact historical dispatches cannot
+  // replace an earlier explanation when newly classified inputs have changed.
+  const freshCutoff = new Date(Date.parse(cutoff) + 1).toISOString();
+  const current = (await restarted.runOnce({ cutoff: freshCutoff })).publications[0];
+  const read = await restarted.source.read(publicScope, current.snapshotId, new AbortController().signal);
+  const localeEvidence = read.selected.portfolioEvidence.filter((entry) =>
+    entry.contribution.metricIds.includes("localization"),
+  );
+  assert.equal(localeEvidence.length, 2);
+  assert.ok(localeEvidence.every((entry) => entry.activityState === "observed"));
+  const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.find((row) => row.policy_signature === legacySignature).document, saved.document);
+  assert.equal(
+    rows
+      .find((row) => row.policy_signature !== legacySignature)
+      .document.facts.filter((fact) => fact.metricId === "localization").length,
+    2,
+  );
+  assert.deepEqual((await preview()).comparison.before, historic);
+});
+
+for (const withResearch of [false, true])
+  test(`frozen locale identities require every active classification policy with research ${withResearch ? "enabled" : "absent"}`, async (t) => {
+    const h = await localizationHarness(t, (config) => {
+      if (withResearch)
+        config.researchPolicies = [
+          {
+            repositoryId: 2,
+            version: "synthetic-research-cache-v1",
+            recordPaths: ["research/"],
+            generatedPaths: [],
+            importedPaths: [],
+            syntheticPaths: [],
+          },
+        ];
+    });
+    acceptLocale(h);
+    h.options.authorizePolicyPreview = async () => true;
+    const cutoff = h.ago(0);
+    const publication = (await h.runtime.runOnce({ cutoff })).publications[0];
+    const saved = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows[0];
+    const policySignatures = h.config.policies.map((entry) => entry.signature);
+    const unclassified = comparisonHash(["current-state-selection-v1", "synthetic", policySignatures]);
+    const documentationOnly = comparisonHash([
+      normalizationDocumentVersion,
+      unclassified,
+      h.config.documentationPolicies,
+    ]);
+    const missingBindings = [
+      ["unclassified original format", unclassified],
+      ["unclassified attribution format", comparisonHash([normalizationDocumentVersion, unclassified])],
+    ];
+    if (withResearch) {
+      missingBindings.push(["documentation-only format omits research", documentationOnly]);
+      const researchOnly = comparisonHash([
+        "current-state-selection-v2",
+        "synthetic",
+        policySignatures,
+        { documentation: [], research: h.config.researchPolicies },
+      ]);
+      missingBindings.push(
+        ["research-only format omits documentation", researchOnly],
+        [
+          "research-only attribution format omits documentation",
+          comparisonHash([normalizationDocumentVersion, researchOnly]),
+        ],
+      );
+    }
+    await h.runtime.stop();
+    await h.reopenDatabase();
+    const restarted = await createPipeline(h.options);
+    t.after(() => restarted.stop());
+    const preview = () =>
+      restarted.previewPolicy({
+        snapshotId: publication.snapshotId,
+        policy: { ...h.config.policies[0].policy, version: "synthetic-locale-cache-preview", rank: false },
+        operatorId: "201",
+      });
+    assert.equal((await preview()).comparison.before.rows.find((row) => row.actorId === "101").value, 1);
+    let currentSignature = saved.policy_signature;
+    async function replaceSignature(signature) {
+      await h.db.query(
+        "UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1 WHERE fact_key=$2 AND policy_signature=$3",
+        [signature, saved.fact_key, currentSignature],
+      );
+      currentSignature = signature;
+    }
+    // Identical normalized bytes and a recorded hash cannot replace omitted
+    // classification authority, in either pre-attribution cache generation.
+    for (const [name, signature] of missingBindings) {
+      await replaceSignature(signature);
+      await assert.rejects(preview(), /identity evidence unavailable/, name);
+    }
+    await replaceSignature(saved.policy_signature);
+    assert.equal((await preview()).comparison.before.rows.find((row) => row.actorId === "101").value, 1);
+    if (!withResearch) {
+      // This exact standalone locale format did bind the complete active docs
+      // policy. Historical replay stays valid while fresh runs use the joint key.
+      await replaceSignature(documentationOnly);
+      assert.equal((await preview()).comparison.before.rows.find((row) => row.actorId === "101").value, 1);
+      await restarted.runOnce({ cutoff });
+      const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
+      assert.equal(rows.length, 2);
+      assert.deepEqual(rows.find((row) => row.policy_signature === documentationOnly).document, saved.document);
+      assert.deepEqual(rows.find((row) => row.policy_signature === saved.policy_signature).document, saved.document);
+      assert.equal((await preview()).comparison.before.rows.find((row) => row.actorId === "101").value, 1);
+      const board = (await restarted.app.inject("/api/v1/boards?metric=localization")).json();
+      assert.equal(board.rows[0].result.value, 1);
+      const proof = await restarted.app.inject(
+        `/api/v1/evidence/${board.rows[0].evidenceIds[0]}?snapshot=${board.snapshotId}`,
+      );
+      assert.equal(proof.statusCode, 200, proof.body);
+      assert.equal(proof.json().occurredAt, h.mergedAt);
+      assert.ok(proof.json().contribution.reasonCodes.includes("locale:fr"));
+      assert.equal(proof.body.includes("synthetic-locale-cache-request"), false);
+    }
+  });

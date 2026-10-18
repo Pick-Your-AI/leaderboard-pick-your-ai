@@ -15,6 +15,7 @@ import {
   activityIndex,
   activityPageByteLimit,
   activityPreviewLimit,
+  newest,
   publicPortfolio as portfolio,
 } from "./activity.js";
 import {
@@ -565,8 +566,7 @@ export function createService(options: ServiceOptions = {}) {
       .filter((entry) => entry.contribution.actorId === actor.actorId)
       .sort(
         (a, b) =>
-          (b.occurredAt === null ? -Infinity : Date.parse(b.occurredAt)) -
-            (a.occurredAt === null ? -Infinity : Date.parse(a.occurredAt)) ||
+          newest(a.occurredAt, b.occurredAt) ||
           (a.contribution.contributionId < b.contribution.contributionId
             ? -1
             : a.contribution.contributionId > b.contribution.contributionId

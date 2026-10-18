@@ -14,6 +14,22 @@ A verified pipeline configuration may include `documentationPolicies`, each cont
 
 No policy or no trusted diff enrichment means no documentation fact. All configured policies are copied and validated when the normalizer is built. Duplicate repository policies are rejected. Changing classification requires a newly reviewed/versioned pipeline configuration; it must not silently reuse an old configuration or mutate a frozen publication.
 
+Normalization cache identity binds the complete documentation and research
+classification policies, including locale rules. Changing or removing a rule
+invalidates the cache for the next authorized run, even if a policy version was
+mistakenly left unchanged. A frozen identity replay still requires its exact
+document hash and matching source, mode and complete classification signature.
+The earlier documentation-only cache format remains eligible for that historical
+replay only when no research policy is configured; its signature cannot stand in
+for an omitted research classification. Unclassified legacy signatures cannot
+authorize replay under active documentation or research policies. Fresh runs use
+the current combined classification key and preserve retained historical bytes.
+When documentation policies are active, the current key also identifies the
+documentation/locale projection. This recomputes earlier caches that lacked the
+future-merge check or bound locale rules before the adapter could emit locale
+facts; their exact frozen history remains replayable without acquiring newly
+classified units retroactively.
+
 ### Explicit locale rules
 
 Optional `localizationPaths` entries contain `locale`, `category`, and nonempty
@@ -64,7 +80,7 @@ The enrichment supplies the existing `GithubEvidenceEnvelope.integration` contra
 
 ## Counting and evidence
 
-The adapter requires a public merged PR, proven merge time, merge commit matching the diff's `after` SHA, matching diff before/after, and target/default branch agreement. Enriched repository and source revision must match the collected fact. Incomplete diffs never produce documentation participation. The resulting evidence links to the PR and immutable merge commit revision.
+The adapter requires a public merged PR, proven merge time no later than its observation, merge commit matching the diff's `after` SHA, matching diff before/after, and target/default branch agreement. A reported future merge produces no documentation or locale unit, even with otherwise matching revision pins. Enriched repository and source revision must match the collected fact. Incomplete diffs never produce documentation participation. The resulting evidence links to the PR and immutable merge commit revision.
 
 Known generated/imported/vendor/binary/lock/formatting-only content is excluded. Explicit research paths are excluded even when nested within configured docs paths. Renames from excluded research/generated/imported paths remain excluded. A substantive addition or deletion can establish participation; a zero-change move cannot. Eligible path count, line count and assertion count never determine the metric value: one canonical PR/category/actor unit is emitted, regardless of how many eligible files or lines changed.
 
@@ -90,3 +106,13 @@ or ambiguous mappings, noncanonical and undetermined language tags, rename exclu
 separate acceptance, policy freezing and current suppression of pinned public
 proof. The tests use synthetic sources and do not establish real translation
 quality, reviewer language proficiency or an approved production locale policy.
+
+Database-restart regressions cover both documentation-only and combined
+documentation/research configurations. They retain exact historical document
+bytes, reject signatures missing either active classification, and verify that a
+fully bound historical documentation cache can be replayed before a fresh run
+recomputes it under the current combined key. Accepted locale proof continues to
+use the source merge clock and bounded public labels after migration.
+Another restart regression models the earlier documentation projection, verifies
+that fresh normalization adds the configured observed locale units, and preserves
+the historical document and policy-preview result unchanged.

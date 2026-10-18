@@ -8,7 +8,8 @@ import { harness, components, ago, clock } from "./harness.mjs";
 
 const artifactId = "SYNTHETIC_PR_ASSISTED";
 const boardUrl = "/api/v1/boards?metric=pr_merged";
-const privateFields = /assistance|participation|Claude|5\.5|synthetic-model|example\.invalid|manual/;
+// Match the whole private version without treating ISO timestamp seconds as attribution.
+const privateFields = /assistance|participation|Claude|(?<![\d.])5\.5(?![\d.])|synthetic-model|example\.invalid|manual/;
 
 async function assistedHarness(t) {
   let enrichCalls = 0;
@@ -138,7 +139,7 @@ test("declared model/version and conserved participation survive collection, cac
 });
 
 for (const legacyKind of ["without_private_fields", "without_documentation_policy"])
-  test(`legacy cache ${legacyKind} recomputes while exact frozen identity replay remains authorized`, async (t) => {
+  test(`earlier cache ${legacyKind} follows the current projection while exact frozen identity replay remains authorized`, async (t) => {
     const h = await assistedHarness(t);
     const cutoff = clock();
     const publication = (await h.runtime.runOnce({ cutoff })).publications[0];
@@ -157,6 +158,7 @@ for (const legacyKind of ["without_private_fields", "without_documentation_polic
       legacyKind === "without_private_fields"
         ? legacyPolicySignature
         : comparisonHash([normalizationDocumentVersion, legacyPolicySignature]);
+    const isCurrentProjection = legacySignature === saved.policy_signature;
     const legacyHash = comparisonHash(legacy);
     await h.db.query(
       "UPDATE leaderboard_pipeline.normalizations SET policy_signature=$1,document=$2::jsonb,document_hash=$3 WHERE fact_key=$4",
@@ -190,11 +192,11 @@ for (const legacyKind of ["without_private_fields", "without_documentation_polic
       "f".repeat(64),
     ]);
     await restarted.runOnce({ cutoff });
-    assert.equal(h.enrichCalls(), 2);
+    assert.equal(h.enrichCalls(), isCurrentProjection ? 1 : 2);
     const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
-    assert.equal(rows.length, 2);
+    assert.equal(rows.length, isCurrentProjection ? 1 : 2);
     assert.deepEqual(rows.find((row) => row.policy_signature === legacySignature).document, legacy);
-    assert.deepEqual(rows.find((row) => row.policy_signature !== legacySignature).document.assistance, [
+    assert.deepEqual(rows.find((row) => row.policy_signature === saved.policy_signature).document.assistance, [
       { artifactId, model: "Claude Opus", version: "5.5" },
     ]);
     assert.ok((await preview()).comparison.before.rows.some((row) => row.actorId === "101"));

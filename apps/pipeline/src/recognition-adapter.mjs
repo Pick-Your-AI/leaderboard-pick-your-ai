@@ -65,7 +65,13 @@ export function materializeRecognition(
         (p) =>
           p.policy.metricId === binding.metricId &&
           p.policy.version === binding.policyVersion &&
-          p.policy.dateBasis === (binding.metricId === "localization" ? "occurredAt" : "acceptedAt"),
+          (binding.metricId === "localization"
+            ? p.policy.dateBasis === "occurredAt"
+            : p.policy.dateBasis === "acceptedAt" ||
+              (binding.metricId === "decision_records" &&
+                binding.sourceMetricId === "decision_records" &&
+                p.policy.dateBasis === "occurredAt" &&
+                p.policy.groupBy === "actor_artifact")),
       )
     )
       throw new Error("recognition_policy_not_configured");

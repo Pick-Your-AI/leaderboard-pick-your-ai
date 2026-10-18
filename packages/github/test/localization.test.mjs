@@ -174,6 +174,31 @@ test("locale units require the exact public default-branch merge and matching co
   }
 });
 
+test("documentation and locale units require a merge observed at or after its source instant", () => {
+  const input = envelope([file("docs/fr/one.md")]);
+  input.observedAt = "2026-10-07T10:00:00.000Z";
+  input.payload.pull_request.merged_at = "2026-10-07T10:00:00.001Z";
+  const future = normalizeGithubObservation(input, policy);
+  assert.deepEqual(
+    future.facts.filter((fact) => ["documentation", "localization"].includes(fact.metricId)),
+    [],
+  );
+  assert.deepEqual(
+    future.evidence.filter((entry) =>
+      entry.contribution.metricIds.some((metric) => ["documentation", "localization"].includes(metric)),
+    ),
+    [],
+  );
+  assert.ok(future.reasons.includes("documentation_merged_revision_unverified"));
+  for (const sourceTime of ["2026-10-07T10:00:00.000Z", "2026-10-07T10:00:00Z", "2026-10-07T09:59:59.999Z"]) {
+    input.payload.pull_request.merged_at = sourceTime;
+    const current = normalizeGithubObservation(input, policy);
+    assert.equal(current.facts.filter((fact) => fact.metricId === "documentation").length, 1, sourceTime);
+    assert.equal(localizationFacts(current).length, 1, sourceTime);
+    assert.ok(localizationFacts(current).every((fact) => fact.occurredAt === new Date(sourceTime).toISOString()));
+  }
+});
+
 test("ambiguous locale/category mappings and malformed or noncanonical language tags fail closed", () => {
   for (const localizationPaths of [
     [{ locale: "FR", category: "documentation", paths: ["docs/fr/"] }],
