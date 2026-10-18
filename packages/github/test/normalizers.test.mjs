@@ -6,6 +6,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import test from "node:test";
 import {
   normalizeGithubObservation,
+  githubReviewRevision,
+  githubDiscussionRevision,
   applyRecognitionReceipt,
   groupTriageTransitions,
   parseDeclaredCoauthorTrailers,
@@ -938,4 +940,228 @@ test("pending, unknown and observed facts retain independent canonical evidence 
     metrics(normalizeGithubObservation(envelope({ frozenCutoff: "2026-10-06T10:00:00Z" })), "pr_accepted_rate").length,
     0,
   );
+});
+
+test("review hydration proves first participation only from a complete consistent cohort", async () => {
+  const review = {
+    id: 51,
+    user: fixture.reviewer,
+    state: "APPROVED",
+    commit_id: "a".repeat(40),
+    submitted_at: at,
+    html_url: `${fixture.pull_request.html_url}#pullrequestreview-51`,
+  };
+  const earlier = { ...review, id: 50, state: "COMMENTED", submitted_at: "2026-10-02T10:00:00Z" };
+  const input = {
+    repository: { id: 2, slug: "synthetic-owner/repository" },
+    family: "reviews",
+    factKey: "synthetic-review",
+    observedAt,
+    policyVersion: "synthetic/v1",
+    fact: {
+      subjectId: "51",
+      sourceRevision: githubReviewRevision(review),
+      sourceUrl: review.html_url,
+      evidence: "current_state",
+      actorId: null,
+      occurredAt: null,
+      state: "present",
+    },
+  };
+  let cohort = [review, earlier];
+  const client = {
+    rest: async (_source, path) =>
+      path.endsWith("reviews/51") ? review : path.endsWith("pulls/10") ? pr() : fixture.repository,
+    scanRest: async () => cohort,
+  };
+  const normalize = createGithubEvidenceNormalizer({
+    client,
+    source: "synthetic",
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+  });
+  const out = await normalize(input);
+  assert.equal(metrics(out, "prs_reviewed").length, 1);
+  assert.equal(metrics(out, "prs_reviewed")[0].occurredAt, "2026-10-02T10:00:00.000Z");
+  assert.equal(metrics(out, "review_rounds").length, 1);
+  assert.equal(metrics(out, "first_reviews").length, 0);
+  for (const invalid of [
+    [review, earlier, earlier],
+    [review, { ...earlier, submitted_at: null }],
+    [review, { ...earlier, user: null }],
+    [review, { ...earlier, commit_id: null }],
+    [{ ...review, commit_id: "b".repeat(40) }],
+  ]) {
+    cohort = invalid;
+    const result = await normalize(input);
+    assert.equal(metrics(result, "prs_reviewed").length, 0);
+    assert.equal(metrics(result, "review_rounds").length, 0);
+  }
+  client.scanRest = async () => {
+    throw Error("page budget exceeded");
+  };
+  await assert.rejects(normalize(input), /page budget exceeded/);
+});
+
+test("Discussion authors and answer selectors remain distinct with explicit selected-revision proof", () => {
+  const discussion = {
+    id: "D_synthetic",
+    url: "https://github.com/synthetic-owner/repository/discussions/4",
+    createdAt: at,
+    updatedAt: at,
+    author: fixture.author,
+    answerChosenAt: at,
+    answerChosenBy: fixture.merger,
+    answer: { id: "DC_synthetic", isAnswer: true, author: fixture.reviewer },
+  };
+  const base = envelope({ family: "discussion", action: "snapshot", payload: discussion });
+  const unselected = normalizeGithubObservation(base);
+  assert.equal(metrics(unselected, "discussions_started")[0].actorId, "101");
+  assert.equal(metrics(unselected, "discussion_answers").length, 0);
+  const selected = normalizeGithubObservation({ ...base, discussionAnswerSelection: { verified: true } });
+  const answer = metrics(selected, "discussion_answers")[0];
+  assert.equal(answer.actorId, "303");
+  assert.equal(answer.acceptedBy, "202");
+  assert.equal(answer.state, "observed");
+  assert.equal(metrics(selected, "helpful_feedback").length, 0);
+  const removed = normalizeGithubObservation({
+    ...base,
+    payload: { ...discussion, answer: null },
+    discussionAnswerSelection: { verified: true },
+  });
+  assert.equal(metrics(removed, "discussion_answers").length, 0);
+});
+
+test("Discussion hydration validates capability, public identity and exact revision", async () => {
+  let repo = {
+    databaseId: 2,
+    isPrivate: false,
+    hasDiscussionsEnabled: true,
+    discussion: {
+      id: "D_synthetic",
+      url: "https://github.com/synthetic-owner/repository/discussions/4",
+      createdAt: at,
+      updatedAt: at,
+      author: fixture.author,
+      answer: null,
+    },
+  };
+  const normalize = createGithubEvidenceNormalizer({
+    client: { rest: async () => fixture.repository, graphql: async () => ({ repository: repo }) },
+    source: "synthetic",
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+  });
+  const input = {
+    repository: { id: 2, slug: "synthetic-owner/repository" },
+    family: "discussions",
+    factKey: "synthetic-discussion",
+    observedAt,
+    policyVersion: "synthetic/v1",
+    fact: {
+      subjectId: "D_synthetic",
+      sourceRevision: githubDiscussionRevision(repo.discussion),
+      sourceUrl: repo.discussion.url,
+      evidence: "current_state",
+      actorId: null,
+      occurredAt: null,
+      state: "present",
+    },
+  };
+  const normalized = await normalize(input);
+  assert.equal(metrics(normalized, "discussions_started").length, 1);
+  assert.equal(normalized.observations[0].source, "github_graphql");
+  repo = { ...repo, hasDiscussionsEnabled: false };
+  assert.match((await normalize(input)).reasons[0], /unavailable/);
+  repo = {
+    ...repo,
+    hasDiscussionsEnabled: true,
+    discussion: { ...repo.discussion, updatedAt: "2026-10-09T00:00:00Z" },
+  };
+  assert.match((await normalize(input)).reasons[0], /revision_unverified/);
+});
+
+test("mutable review and Discussion revisions include retractions and selection changes", () => {
+  const review = { id: 1, state: "APPROVED", submitted_at: at, body: "synthetic", user: fixture.reviewer };
+  assert.notEqual(githubReviewRevision(review), githubReviewRevision({ ...review, state: "DISMISSED" }));
+  assert.notEqual(githubReviewRevision(review), githubReviewRevision({ ...review, body: "edited synthetic" }));
+  const discussion = {
+    id: "D_synthetic",
+    updatedAt: at,
+    answerChosenAt: at,
+    answer: { id: "A1", isAnswer: true, author: fixture.author },
+    answerChosenBy: fixture.merger,
+  };
+  assert.notEqual(githubDiscussionRevision(discussion), githubDiscussionRevision({ ...discussion, answer: null }));
+  assert.notEqual(
+    githubDiscussionRevision(discussion),
+    githubDiscussionRevision({ ...discussion, answer: { ...discussion.answer, id: "A2" } }),
+  );
+});
+
+test("repository issue-event hydration preserves actor clocks without inferring metadata identity", async () => {
+  const event = {
+    id: 901,
+    event: "assigned",
+    created_at: at,
+    actor: fixture.merger,
+    assignee: fixture.reviewer,
+    issue: issue(),
+  };
+  const { githubTimelineRevision } = await import("../dist/index.js");
+  const normalize = createGithubEvidenceNormalizer({
+    client: { rest: async (_source, endpoint) => (endpoint.includes("/events/") ? event : fixture.repository) },
+    source: "synthetic",
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+  });
+  const input = {
+    repository: { id: 2, slug: "synthetic-owner/repository" },
+    family: "timelines",
+    factKey: "synthetic-event",
+    observedAt,
+    policyVersion: "synthetic/v1",
+    fact: {
+      subjectId: "901",
+      sourceRevision: githubTimelineRevision(event),
+      sourceUrl: event.issue.html_url,
+      evidence: "observed_transition",
+      actorId: "202",
+      occurredAt: at,
+      state: "present",
+    },
+  };
+  const out = await normalize(input);
+  assert.equal(metrics(out, "assignments_coordinated")[0].actorId, "202");
+  assert.equal(metrics(out, "assignments_coordinated")[0].occurredAt, "2026-10-07T10:00:00.000Z");
+  assert.equal(metrics(out, "assignments_coordinated")[0].state, "observed");
+  const wrongSubject = await normalize({
+    ...input,
+    fact: { ...input.fact, sourceUrl: "https://github.com/synthetic-owner/repository/issues/21" },
+  });
+  assert.match(wrongSubject.reasons[0], /timeline_subject_scope_unverified/);
+  event.actor = null;
+  const unknown = await normalize({ ...input, fact: { ...input.fact, sourceRevision: githubTimelineRevision(event) } });
+  assert.equal(metrics(unknown, "assignments_coordinated")[0].actorId, null);
+  assert.equal(metrics(unknown, "assignments_coordinated")[0].state, "unknown");
+});
+
+test("native issue events in the same second remain distinct while replays deduplicate", () => {
+  const input = envelope({
+    family: "triage",
+    action: "assigned",
+    payload: { issue: issue(), actor: fixture.merger, assignee: fixture.reviewer },
+    proof: {
+      verified: true,
+      source: "github_rest",
+      revision: at,
+      eventId: "github:2:issue-event:901",
+      isSynthetic: true,
+    },
+  });
+  const first = normalizeGithubObservation(input);
+  const replay = normalizeGithubObservation(input);
+  const next = normalizeGithubObservation({ ...input, proof: { ...input.proof, eventId: "github:2:issue-event:903" } });
+  assert.equal(metrics(first, "assignments_coordinated")[0].id, metrics(replay, "assignments_coordinated")[0].id);
+  assert.notEqual(metrics(first, "assignments_coordinated")[0].id, metrics(next, "assignments_coordinated")[0].id);
 });
