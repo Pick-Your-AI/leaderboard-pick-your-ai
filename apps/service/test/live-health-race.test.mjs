@@ -36,15 +36,20 @@ for (const variant of ["new-snapshot", "same-revision-policy"]) {
             assert.equal(options.headers["If-None-Match"], '"health-one"');
             second.resolve();
             if (kind === "json")
-              return {
-                ok: true,
-                status: 200,
-                headers: new Headers({ ETag: '"old"' }),
-                json: () => {
-                  jsonStarted.resolve();
-                  return pending.promise;
-                },
-              };
+              return new Response(
+                new ReadableStream(
+                  {
+                    async pull(controller) {
+                      jsonStarted.resolve();
+                      const body = await pending.promise;
+                      controller.enqueue(new TextEncoder().encode(JSON.stringify(body)));
+                      controller.close();
+                    },
+                  },
+                  { highWaterMark: 0 },
+                ),
+                { headers: { ETag: '"old"' } },
+              );
             return pending.promise;
           }
           third.resolve(options);
