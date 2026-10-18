@@ -180,6 +180,8 @@ export async function createPipeline(options) {
           allowedRepositoryIds: config.repositories.map((repo) => repo.id),
           isSynthetic: dataMode === "synthetic",
           assertAuthorized: () => assertRunConfiguration(),
+          documentationPolicies: config.documentationPolicies ?? [],
+          ...(options.githubEnrich ? { enrich: options.githubEnrich } : {}),
         })
       : null);
   let stopped = false;

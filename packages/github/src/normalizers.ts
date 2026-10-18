@@ -1,3 +1,4 @@
+import { classifyDocumentation, validateDocumentationPolicy, type DocumentationPathPolicy } from "./documentation.js";
 import { createHash } from "node:crypto";
 import { GithubReadClient } from "./client.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
@@ -342,7 +343,10 @@ function resourceId(payload: Record<string, unknown>, kind: string, repoId: numb
 }
 
 /** Normalize explicit public source facts. No field is taken from arbitrary user text. */
-export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): NormalizedGithubResult {
+export function normalizeGithubObservation(
+  envelope: GithubEvidenceEnvelope,
+  documentationPolicy?: DocumentationPathPolicy,
+): NormalizedGithubResult {
   const out = result();
   const { repository, proof } = envelope;
   out.isSynthetic = proof.isSynthetic === true;
@@ -885,6 +889,38 @@ export function normalizeGithubObservation(envelope: GithubEvidenceEnvelope): No
       }
     }
   }
+  if (documentationPolicy && envelope.family === "pull_request") {
+    validateDocumentationPolicy(documentationPolicy);
+    const mergedAt = time(resource.merged_at);
+    if (
+      documentationPolicy.repositoryId !== repository.id ||
+      !integration?.diff ||
+      resource.merged !== true ||
+      !mergedAt ||
+      resource.merge_commit_sha !== integration.after ||
+      !object(resource.base) ||
+      resource.base.ref !== integration.targetBranch ||
+      integration.targetBranch !== integration.defaultBranch ||
+      repository.defaultBranch !== integration.defaultBranch ||
+      integration.diff.before !== integration.before ||
+      integration.diff.after !== integration.after ||
+      !text(integration.canonicalChangeId)
+    ) {
+      out.reasons.push("documentation_merged_revision_unverified");
+    } else {
+      const classification = classifyDocumentation(integration.diff, documentationPolicy);
+      out.reasons.push(...classification.reasons);
+      if (classification.eligible) {
+        const fact = emit("documentation", author, "author", mergedAt, `${repository.id}:${id}:documentation`, {
+          rawState: "merged_documentation_participation_not_reviewed_quality",
+        });
+        const evidence = out.evidence.find((entry) => entry.contribution.contributionId === fact.id)!;
+        evidence.sourceRevision = integration.after;
+        evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
+        evidence.contribution.reasonCodes.push(`documentation_path_policy:${documentationPolicy.version}`);
+      }
+    }
+  }
   for (const link of envelope.lineage ?? []) {
     if (link.sourceIds.length && link.evidenceIds.length && text(link.targetId))
       out.lineage.push(structuredClone(link));
@@ -1020,10 +1056,15 @@ export interface GithubEvidenceNormalizerOptions {
   authorizedReviewerIds?: readonly string[];
   /** Bound the complete review cohort scan; exhaustion never establishes participation. */
   maxReviewPages?: number;
+  documentationPolicies?: readonly DocumentationPathPolicy[];
 }
 
 /** Read-only collection-to-metric adapter. Lossy snapshots are hydrated rather than guessed. */
 export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizerOptions) {
+  const documentationPolicies = structuredClone(options.documentationPolicies ?? []);
+  for (const policy of documentationPolicies) validateDocumentationPolicy(policy);
+  if (new Set(documentationPolicies.map((policy) => policy.repositoryId)).size !== documentationPolicies.length)
+    throw new Error("Ambiguous documentation repository policy");
   return async (input: CollectionNormalizerInput): Promise<NormalizedGithubResult> => {
     const none = (reason: string) => ({ ...result(), isSynthetic: options.isSynthetic === true, reasons: [reason] });
     if (!options.allowedRepositoryIds.includes(input.repository.id))
@@ -1130,10 +1171,18 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         enriched.proof.revision !== input.fact.sourceRevision
       )
         return none("enrichment_scope_or_revision_mismatch");
-      normalized = normalizeGithubObservation({
-        ...enriched,
-        proof: { ...enriched.proof, isSynthetic: options.isSynthetic === true || enriched.proof.isSynthetic === true },
-      });
+      normalized = normalizeGithubObservation(
+        {
+          ...enriched,
+          proof: {
+            ...enriched.proof,
+            isSynthetic: options.isSynthetic === true || enriched.proof.isSynthetic === true,
+          },
+        },
+        input.family === "pull_requests"
+          ? documentationPolicies.find((policy) => policy.repositoryId === input.repository.id)
+          : undefined,
+      );
     } else {
       const sourceUrl = url(input.fact.sourceUrl.split("#")[0], input.repository.slug);
       if (!sourceUrl) return none("untrusted_collection_source_url");

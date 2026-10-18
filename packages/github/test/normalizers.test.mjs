@@ -1165,3 +1165,124 @@ test("native issue events in the same second remain distinct while replays dedup
   assert.equal(metrics(first, "assignments_coordinated")[0].id, metrics(replay, "assignments_coordinated")[0].id);
   assert.notEqual(metrics(first, "assignments_coordinated")[0].id, metrics(next, "assignments_coordinated")[0].id);
 });
+
+const documentationPolicy = {
+  repositoryId: 2,
+  version: "docs-v1",
+  documentationPaths: ["docs/"],
+  researchPaths: ["docs/research/"],
+  generatedPaths: ["docs/reference/"],
+  importedPaths: ["docs/imports/"],
+};
+const documentationEnvelope = (files) =>
+  envelope({
+    payload: { repository: fixture.repository, pull_request: { ...pr(), merge_commit_sha: after } },
+    integration: {
+      before,
+      after,
+      targetBranch: "main",
+      defaultBranch: "main",
+      canonicalChangeId: "doc-change",
+      commitShas: [after],
+      diff: { before, after, complete: true, files },
+    },
+  });
+
+test("documentation counts one merged PR/category with pinned evidence, never lines or accepted quality", () => {
+  const value = documentationEnvelope([
+    { path: "docs/guide.md", additions: 10, deletions: 1 },
+    { path: "docs/example.md", additions: 1000, deletions: 0 },
+  ]);
+  const out = normalizeGithubObservation(value, documentationPolicy);
+  const docs = metrics(out, "documentation");
+  assert.equal(docs.length, 1);
+  assert.equal(docs[0].actorId, "101");
+  assert.equal(docs[0].role, "author");
+  assert.equal(docs[0].state, "observed");
+  assert.equal(docs[0].acceptedAt, null);
+  assert.equal(docs[0].quantity, undefined);
+  const evidence = out.evidence.find((entry) => entry.contribution.contributionId === docs[0].id);
+  assert.equal(evidence.sourceRevision, after);
+  assert.equal(evidence.sourceRevisionUrl, `https://github.com/synthetic-owner/repository/commit/${after}`);
+  value.integration.diff.files[0].additions = 100000;
+  assert.equal(metrics(normalizeGithubObservation(value, documentationPolicy), "documentation")[0].id, docs[0].id);
+  assert.deepEqual(metrics(normalizeGithubObservation(value), "documentation"), []);
+  const accepted = applyRecognitionReceipt(
+    out,
+    {
+      id: "synthetic-review",
+      verified: true,
+      metricId: "documentation",
+      actorId: "101",
+      reviewerId: "303",
+      acceptedAt: observedAt,
+      decision: "accepted",
+      targetFactId: docs[0].id,
+      evidenceIds: [docs[0].id],
+    },
+    ["303"],
+  );
+  assert.equal(metrics(accepted, "documentation").filter((f) => f.state === "qualified").length, 1);
+  assert.equal(docs[0].state, "observed");
+});
+
+test("documentation excludes generated/imported/research/formatting and incomplete or mismatched integrations", () => {
+  for (const file of [
+    { path: "docs/auto.md", generated: true },
+    { path: "docs/copy.md", imported: true },
+    { path: "docs/research/note.md" },
+    { path: "docs/reference/api.md" },
+    { path: "docs/imports/tutorial.md" },
+    { path: "docs/format.md", formattingOnly: true },
+    { path: "docs/copy.md", previousPath: "docs/research/note.md" },
+  ]) {
+    const out = normalizeGithubObservation(
+      documentationEnvelope([{ additions: 1, deletions: 0, ...file }]),
+      documentationPolicy,
+    );
+    assert.deepEqual(metrics(out, "documentation"), []);
+    assert.ok(out.reasons.some((reason) => reason.startsWith("documentation_excluded_")));
+  }
+  for (const mutate of [
+    (v) => (v.integration.diff.complete = false),
+    (v) => (v.payload.pull_request.merged = false),
+    (v) => (v.payload.pull_request.merge_commit_sha = before),
+    (v) => (v.integration.targetBranch = "feature"),
+    (v) => (v.repository.defaultBranch = "other"),
+    (v) => (v.integration.diff.after = before),
+  ]) {
+    const value = documentationEnvelope([{ path: "docs/guide.md", additions: 1, deletions: 0 }]);
+    mutate(value);
+    assert.deepEqual(metrics(normalizeGithubObservation(value, documentationPolicy), "documentation"), []);
+  }
+  assert.throws(() =>
+    normalizeGithubObservation(documentationEnvelope([]), { ...documentationPolicy, documentationPaths: ["../docs/"] }),
+  );
+});
+
+test("configured documentation enrichment stays disabled without policy and binds collection revision", async () => {
+  const value = documentationEnvelope([{ path: "docs/guide.md", additions: 0, deletions: 2 }]);
+  const input = {
+    repository: { id: 2, slug: "synthetic-owner/repository" },
+    family: "pull_requests",
+    factKey: "synthetic-doc",
+    fact: { subjectId: "PR_synthetic_10", sourceUrl: fixture.pull_request.html_url, sourceRevision: at },
+    observedAt,
+    policyVersion: "source-v1",
+  };
+  const options = {
+    client: {},
+    source: "synthetic-source",
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+    enrich: async () => value,
+  };
+  assert.deepEqual(metrics(await createGithubEvidenceNormalizer(options)(input), "documentation"), []);
+  const enabled = createGithubEvidenceNormalizer({ ...options, documentationPolicies: [documentationPolicy] });
+  assert.equal(metrics(await enabled(input), "documentation").length, 1);
+  value.proof.revision = "another-revision";
+  assert.deepEqual(metrics(await enabled(input), "documentation"), []);
+  assert.throws(() =>
+    createGithubEvidenceNormalizer({ ...options, documentationPolicies: [documentationPolicy, documentationPolicy] }),
+  );
+});
