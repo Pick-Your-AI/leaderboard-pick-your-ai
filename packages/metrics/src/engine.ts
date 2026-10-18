@@ -2,6 +2,7 @@ import {
   actorKindSchema,
   compareSourceInstants,
   contributionRoleSchema,
+  coverageSchema,
   executionModeSchema,
   serviceAccountClassificationSchema,
   type ServiceAccountClassification,
@@ -309,6 +310,9 @@ export function resolveMetricWindow(
 /** Necessary source coverage only; qualification and release authority remain separate. */
 export function hasCompleteSourceCoverage(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): boolean {
   if (scope.from === null) return false; // Known history is not proof of complete all-time history.
+  // Source coverage retains its contract clocks; metric scopes remain normalized UTC.
+  instant(scope.from);
+  instant(scope.to);
   const repos = scope.repos.length ? scope.repos : input.repositoryIds;
   if (!repos.length) return false;
   return repos.every(
@@ -320,14 +324,15 @@ export function hasCompleteSourceCoverage(input: FrozenInput, policy: MetricPoli
             item.scopeId === repo &&
             item.source === source &&
             item.state === "complete" &&
+            coverageSchema.safeParse(item).success &&
             item.windowStart !== null &&
-            instant(item.windowStart) <= instant(scope.from!) &&
+            compareSourceInstants(item.windowStart, scope.from!) <= 0 &&
             item.windowEnd !== null &&
-            instant(item.windowEnd) >= instant(scope.to) &&
+            compareSourceInstants(item.windowEnd, scope.to) >= 0 &&
             typeof item.sourceWatermark === "string" &&
             compareSourceInstants(item.sourceWatermark, scope.to) >= 0 &&
             item.knownStart !== null &&
-            instant(item.knownStart) <= instant(scope.from!) &&
+            compareSourceInstants(item.knownStart, scope.from!) <= 0 &&
             item.missingPages === 0 &&
             item.permissionsMissing.length === 0 &&
             item.sourceErrors.length === 0,
