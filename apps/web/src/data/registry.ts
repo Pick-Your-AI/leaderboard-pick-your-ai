@@ -1,28 +1,21 @@
 import type { MetricDefinition } from "@pick-your-ai/contracts";
-import { metricDefinitionsV1, metricRegistryV1 } from "@pick-your-ai/metrics";
+import {
+  getLeadMetrics,
+  getMetricUi,
+  getMetricGroupingPolicy,
+  getRegistryDepartments,
+  metricDefinitionsV1,
+  metricRegistryV1,
+} from "@pick-your-ai/metrics";
 
 export const registry = metricRegistryV1;
 export const metrics: readonly MetricDefinition[] = metricDefinitionsV1;
 
-/**
- * Registry families in contribution-lifecycle order. The labels are prototype
- * display names. Department assignment is still an unresolved registry field
- * (ui_metadata), so the UI groups by the registry's own family and says so.
- */
-export const families = [
-  { id: "research", label: "Research" },
-  { id: "issues", label: "Issues" },
-  { id: "triage", label: "Triage and stewardship" },
-  { id: "delivery", label: "Code delivery" },
-  { id: "review", label: "Review" },
-  { id: "craft", label: "Craft and quality" },
-  { id: "lines", label: "Lines of change" },
-  { id: "operations", label: "Operations and maintenance" },
-  { id: "community", label: "Community" },
-  { id: "breadth", label: "Breadth and milestones" },
-] as const;
-
-export type FamilyId = (typeof families)[number]["id"];
+/** UI departments reuse metric families; they do not assign team ownership. */
+export const families = getRegistryDepartments(registry);
+export type FamilyId = string;
+export { getMetricUi, getMetricGroupingPolicy };
+export const leadMetrics = (surface: "overview" | "wall") => getLeadMetrics(surface, registry);
 
 export function familyLabel(id: string): string {
   return families.find((family) => family.id === id)?.label ?? id;
@@ -67,7 +60,8 @@ export function searchMetrics(query: string, family: string | null = null): Metr
         metric.definition.unit,
         metric.counting_rule,
         metric.attribution,
-        familyLabel(metric.family),
+        familyLabel(getMetricUi(metric.id)?.department ?? metric.family),
+        ...(getMetricUi(metric.id)?.synonyms ?? []),
       ].join(" "),
     );
     return terms.every((term) => haystack.includes(term));

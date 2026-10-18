@@ -199,7 +199,10 @@ export function serializeScope(scope: Scope, extra: Record<string, string | null
   if (scope.density !== defaultScope.density) params.set("density", scope.density);
   for (const key of Object.keys(extra).sort()) {
     const value = extra[key];
-    if (value !== null && value !== undefined && value !== "") params.set(key, value);
+    // Empty semantic selections are invalid requests, not absent defaults.
+    // Preserve them through unrelated scope changes until explicitly corrected.
+    const preserveEmpty = key === "state" || key === "date_basis" || key === "boards";
+    if (value !== null && value !== undefined && (value !== "" || preserveEmpty)) params.set(key, value);
   }
   const text = params.toString();
   return text ? `?${text}` : "";
