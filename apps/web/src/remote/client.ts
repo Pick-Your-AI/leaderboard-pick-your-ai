@@ -48,6 +48,7 @@ export class ReadFailure extends Error {
   }
 }
 const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
+const maxPublicRequestTargetBytes = 48 * 1024;
 const scopeKeys = ["organization", "repository", "workstream", "start", "end"] as const;
 const supported = new Set([
   "actors",
@@ -83,7 +84,7 @@ export interface Selection extends PublicScope {
   timeZone?: string;
 }
 export function selection(query: string): Selection {
-  if (query.length > 4096) throw new ReadFailure(400, "selection_too_large");
+  if (query.length > maxPublicRequestTargetBytes) throw new ReadFailure(400, "selection_too_large");
   const params = new URLSearchParams(query);
   for (const key of params.keys())
     if (!supported.has(key) || params.getAll(key).length !== 1)
@@ -281,7 +282,8 @@ async function readBytes(response: Response, signal: AbortSignal): Promise<Uint8
 function publicRequestURL(base: string, path: string, params: URLSearchParams): string {
   const value = `${base}/${path}${params.size ? `?${params}` : ""}`;
   const url = new URL(value, "https://request.invalid");
-  if (url.pathname.length + url.search.length > 4096) throw new ReadFailure(414, "query_too_large");
+  if (url.pathname.length + url.search.length > maxPublicRequestTargetBytes)
+    throw new ReadFailure(414, "query_too_large");
   return value;
 }
 /** Budget both complete live request targets before a subscription can create any transport. */
