@@ -1,31 +1,39 @@
+import { canonicalPublicScope, publicScopeKey, publicScopeFilterKey } from "@pick-your-ai/contracts";
+
 const named = new Set(["7d", "30d", "90d", "month", "quarter", "year"]);
 const fail = (code) => {
   throw new Error(code);
 };
-const key = (scope) => JSON.stringify([scope.organization, scope.repository, scope.workstream, scope.start, scope.end]);
-const sameLens = (left, right) =>
-  ["organization", "repository", "workstream"].every((field) => left[field] === right[field]);
+const key = publicScopeKey;
+const sameLens = (left, right) => publicScopeFilterKey(left) === publicScopeFilterKey(right);
+
+/** Period is approved template metadata, never a field in a public scope. */
+export function publicScopeFromTemplate(template) {
+  if (template === null || typeof template !== "object" || Array.isArray(template)) fail("invalid_public_scope");
+  const { period, ...scope } = template;
+  return canonicalPublicScope(scope);
+}
 
 /** Opt-in templates remain part of the host's approved configuration. Existing
  * exact scopes never acquire a named period merely because their lengths match. */
 export function validatePublicationPeriods(scopes) {
   const keys = new Set();
-  for (const scope of scopes) {
-    if (scope.period !== undefined && ![...named, "all", "custom"].includes(scope.period))
-      fail("invalid_public_period");
-    if ((named.has(scope.period) || scope.period === "all") && (scope.start !== null || scope.end !== null))
+  for (const template of scopes) {
+    const period = template?.period;
+    if (period !== undefined && ![...named, "all", "custom"].includes(period)) fail("invalid_public_period");
+    const scope = publicScopeFromTemplate(template);
+    if ((named.has(period) || period === "all") && (scope.start !== null || scope.end !== null))
       fail("named_period_requires_unresolved_bounds");
-    if (scope.period === "custom" && scope.start === null) fail("custom_period_requires_bounds");
-    const identity = named.has(scope.period)
-      ? JSON.stringify([scope.organization, scope.repository, scope.workstream, scope.period])
-      : key(scope);
+    if (period === "custom" && scope.start === null) fail("custom_period_requires_bounds");
+    const identity = named.has(period) ? JSON.stringify([publicScopeFilterKey(scope), period]) : key(scope);
     if (keys.has(identity)) fail("duplicate_public_scope");
     keys.add(identity);
   }
 }
 
 export function resolvePublicationWindow(template, cutoff, resolveMetricWindow) {
-  const { period, ...scope } = template;
+  const scope = publicScopeFromTemplate(template);
+  const { period } = template;
   let window;
   if (named.has(period)) {
     // The existing public query requires .000Z. Reject, never round/truncate an
@@ -54,12 +62,14 @@ export function resolvePublicationWindows(templates, cutoff, resolveMetricWindow
 /** A read can select a retained window, never compute or authorize a new one.
  * Ambiguous labels fail closed even if the current configuration was changed. */
 export function approvedPublicationScope(templates, scope, resolveMetricWindow) {
+  const selected = canonicalPublicScope(scope);
   const matches = templates.filter((template) => {
-    if (!sameLens(template, scope)) return false;
-    if (!named.has(template.period)) return key(template) === key(scope);
-    if (scope.start === null || scope.end === null) return false;
+    const approved = publicScopeFromTemplate(template);
+    if (!sameLens(approved, selected)) return false;
+    if (!named.has(template.period)) return key(approved) === key(selected);
+    if (selected.start === null || selected.end === null) return false;
     try {
-      return key(resolvePublicationWindow(template, scope.end, resolveMetricWindow).scope) === key(scope);
+      return key(resolvePublicationWindow(template, selected.end, resolveMetricWindow).scope) === key(selected);
     } catch {
       return false;
     }
