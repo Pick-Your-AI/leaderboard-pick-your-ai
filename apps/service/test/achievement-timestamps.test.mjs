@@ -137,16 +137,31 @@ test("coverage that starts after the requested start cannot certify the selected
 });
 
 test("earliest awards use source instants and stable evidence IDs when instants tie", async (t) => {
-  for (const times of [
-    ["2026-10-17T10:00:00.100Z", "2026-10-17T10:00:00Z"],
-    ["2026-10-17T09:00:00-02:00", "2026-10-17T10:00:00Z"],
-    ["2026-10-17T10:00:00.000Z", "2026-10-17T06:00:00-04:00"],
+  for (const [times, expected] of [
+    [["2026-10-17T10:00:00.100Z", "2026-10-17T10:00:00Z"], 1],
+    [["2026-10-17T09:00:00-02:00", "2026-10-17T10:00:00Z"], 1],
+    [["2026-10-17T10:00:00.000Z", "2026-10-17T06:00:00-04:00"], 0],
+    [["2026-10-17T10:00:00.0009Z", "2026-10-17T10:00:00.0001Z"], 1],
+    [["2026-10-17T10:00:00.1000Z", "2026-10-17T06:00:00.1-04:00"], 0],
   ]) {
     const { data, selected } = await read(t, fixture(times));
-    const expected = Date.parse(times[0]) === Date.parse(times[1]) ? 0 : 1;
+    assert.equal(data.achievements.length, 2);
     for (const award of data.achievements) assert.deepEqual(award.evidenceIds, [`synthetic-evidence-${expected}`]);
     const parsed = achievements(data, selected, "synthetic-actor");
     assert.equal(parsed.achievements[0].occurredAt, times[expected]);
+  }
+});
+
+test("sub-millisecond coverage gaps cannot certify a later snapshot cutoff", async (t) => {
+  for (const field of ["windowEnd", "sourceWatermark"]) {
+    const value = fixture();
+    value.selected.snapshot.generatedAt = "2026-10-17T12:00:00.0009Z";
+    value.head.publishedAt = value.selected.snapshot.generatedAt;
+    value.selected.snapshot.coverage[0].windowEnd = "2026-10-17T12:00:00.001Z";
+    value.selected.snapshot.coverage[0].sourceWatermark = "2026-10-17T12:00:00.001Z";
+    value.selected.snapshot.coverage[0][field] = "2026-10-17T08:00:00.0001-04:00";
+    const { data } = await read(t, value);
+    assert.deepEqual(data.achievements, [], field);
   }
 });
 
