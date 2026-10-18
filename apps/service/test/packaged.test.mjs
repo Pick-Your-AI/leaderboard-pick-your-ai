@@ -12,6 +12,29 @@ const require = createRequire(import.meta.url);
 const execute = promisify(execFile);
 const repository = fileURLToPath(new URL("../../../", import.meta.url));
 
+test("the browser live-client export loads from dist without server dependencies or source", async (t) => {
+  const temporary = await mkdtemp(join(resolve(tmpdir()), "leaderboard-live-package-"));
+  t.after(async () => {
+    assert.equal(dirname(temporary), resolve(tmpdir()));
+    assert.ok(temporary.includes("leaderboard-live-package-"));
+    await rm(temporary, { recursive: true, force: true });
+  });
+  const service = join(temporary, "node_modules", "@pick-your-ai", "service");
+  await mkdir(join(service, "dist"), { recursive: true });
+  for (const file of ["package.json", "dist/live-client.js", "dist/live-client.d.ts"])
+    await cp(join(repository, "apps", "service", file), join(service, file));
+  const result = await execute(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      "const { startLiveUpdates } = await import('@pick-your-ai/service/live-client'); console.log(typeof startLiveUpdates);",
+    ],
+    { cwd: temporary, timeout: 15000 },
+  );
+  assert.equal(result.stdout.trim(), "function");
+});
+
 test("built service starts from dist-only workspace packages with no metrics source tree", async (t) => {
   const temporary = await mkdtemp(join(resolve(tmpdir()), "leaderboard-api-package-"));
   t.after(async () => {
