@@ -78,8 +78,23 @@ export interface PublishedSnapshot {
   methodology?: { metricId: string; policyVersion: string; policySignature: string; policyLink: string | null }[];
   diagnostics?: PublicDiagnostic[];
 }
+/** Current receipts for an authorized repository, separate from frozen source coverage.
+ * No source connectivity, historical completeness or publication success is implied.
+ */
+export interface PublicSourceHealth {
+  scopeId: string;
+  state: "reconciled" | "no_activity_in_window" | "collecting" | "degraded" | "unknown";
+  lastAttemptAt: string | null;
+  lastSuccessfulSync: string | null;
+  reconciledThrough: string | null;
+  /** Age of oldest unfinished retained supported webhook receipt, not delivery latency. */
+  webhookLagSeconds: number | null;
+  webhookState: "idle" | "pending" | "degraded" | "unknown";
+}
 /** Current controls must be read atomically even for a historical snapshot. */
 export interface PublicRead {
+  /** Must be scoped and read under the same current source authorization as selected. */
+  currentSourceHealth?: PublicSourceHealth[];
   /** Applied only after current privacy projection; never a source authorization. */
   actorFilter?: ActorFilter;
   head: { snapshotId: string; revision: number; publishedAt: string };
@@ -96,6 +111,10 @@ export interface PublicSnapshotSource {
    * Implementations must honor signal cancellation and enforce current controls.
    */
   read(scope: PublicScope, snapshotId: string | null, signal: AbortSignal): Promise<PublicRead | null>;
+  /** Optional current diagnostics with the identical publication/privacy boundary.
+   * Ordinary board and evidence reads need not scan the operational receipt stores.
+   */
+  readHealth?(scope: PublicScope, snapshotId: string | null, signal: AbortSignal): Promise<PublicRead | null>;
 }
 export const unavailableSource: PublicSnapshotSource = {
   async read() {
@@ -241,6 +260,42 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
   const disabled = new Set(disabledMetrics.map((entry) => entry.id));
   if (new Set(ranking.map((entry) => entry.metricId)).size !== ranking.length) return reject();
   const snapshot = snapshotSchema.parse(selected.snapshot);
+  if (
+    input.currentSourceHealth !== undefined &&
+    (!Array.isArray(input.currentSourceHealth) || input.currentSourceHealth.length > 100)
+  )
+    return reject();
+  const currentSourceHealth = input.currentSourceHealth?.map((entry) => {
+    if (
+      !entry ||
+      !id(entry.scopeId) ||
+      !snapshot.coverage.some(
+        (coverage) => coverage.scopeId === entry.scopeId && coverage.source.startsWith("github_"),
+      ) ||
+      (scope.repository !== null && scope.repository !== entry.scopeId) ||
+      !["reconciled", "no_activity_in_window", "collecting", "degraded", "unknown"].includes(entry.state) ||
+      !["idle", "pending", "degraded", "unknown"].includes(entry.webhookState) ||
+      ![entry.lastAttemptAt, entry.lastSuccessfulSync, entry.reconciledThrough].every(date) ||
+      (entry.webhookLagSeconds !== null &&
+        (!Number.isSafeInteger(entry.webhookLagSeconds) || entry.webhookLagSeconds < 0)) ||
+      (entry.webhookState === "unknown" && entry.webhookLagSeconds !== null)
+    )
+      return reject();
+    return {
+      scopeId: entry.scopeId,
+      state: entry.state,
+      lastAttemptAt: entry.lastAttemptAt,
+      lastSuccessfulSync: entry.lastSuccessfulSync,
+      reconciledThrough: entry.reconciledThrough,
+      webhookLagSeconds: entry.webhookLagSeconds,
+      webhookState: entry.webhookState,
+    };
+  });
+  if (
+    currentSourceHealth &&
+    new Set(currentSourceHealth.map((entry) => entry.scopeId)).size !== currentSourceHealth.length
+  )
+    return reject();
   const controls = input.controls;
   if (
     !id(controls.version) ||
@@ -523,6 +578,7 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
   });
   return {
     head: { snapshotId: input.head.snapshotId, revision: input.head.revision, publishedAt: input.head.publishedAt },
+    ...(currentSourceHealth === undefined ? {} : { currentSourceHealth }),
     controls: { version: controls.version, suppressedActorIds: [], suppressedArtifactIds: [], revokedSnapshotIds: [] },
     selected: {
       approvedPublic: true,
