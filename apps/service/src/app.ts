@@ -182,7 +182,7 @@ export function createService(options: ServiceOptions = {}) {
         }),
       ]);
       if (result === null) fail(pin ? 410 : 503, pin ? "snapshot_expired_refetch" : "public_snapshot_unavailable");
-      const projected = projectRead(result, scope, pin);
+      const projected = projectRead(result, scope, pin, registry.metrics);
       if (projected.selected.snapshot.metricDefinitionVersion !== registry.policy_version)
         fail(409, "metric_definition_unavailable");
       const knownMetrics = new Set(registry.metrics.map((metric) => metric.id));

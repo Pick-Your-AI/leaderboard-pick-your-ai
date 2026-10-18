@@ -370,6 +370,12 @@ function selectedActor(value: unknown, selected: Selection): Actor {
   if (!matchesActorFilter(actor, selected.actors ?? "all")) throw new ReadFailure(502, "api_actor_filter_mismatch");
   return actor;
 }
+function descriptiveMetric(metric: MetricDefinition): boolean {
+  return (
+    metric.definition.release_eligibility === "descriptive-only" ||
+    ["ratio", "median_and_p75_of_elapsed_hours"].includes(metric.definition.aggregation)
+  );
+}
 /** Validate the minimized export contract, which intentionally has no actor profile or live head. */
 export function validateExport(value: unknown, selected: Selection): void {
   const data = object(value),
@@ -390,7 +396,9 @@ export function validateExport(value: unknown, selected: Selection): void {
   const ranking = data.ranking === null ? null : object(data.ranking);
   if (
     ranking &&
-    (!["ascending", "descending"].includes(String(ranking.direction)) || typeof ranking.rank !== "boolean")
+    (!["ascending", "descending"].includes(String(ranking.direction)) ||
+      typeof ranking.rank !== "boolean" ||
+      (descriptiveMetric(metric) && ranking.rank !== false))
   )
     throw new ReadFailure(502, "invalid_export_response");
   array(data.coverage, 500).forEach((item) => coverageSchema.parse(item));
@@ -443,7 +451,10 @@ export function validateExport(value: unknown, selected: Selection): void {
       (actorKind === null || executionMode === null || !matchesActorFilter({ kind: actorKind, executionMode }, filter))
     )
       throw new ReadFailure(502, "api_actor_filter_mismatch");
-    if (result.metricId !== metric.id || (row.rank !== null && (integer(row.rank) < 1 || ranking?.rank === false)))
+    if (
+      result.metricId !== metric.id ||
+      (row.rank !== null && (integer(row.rank) < 1 || ranking?.rank === false || descriptiveMetric(metric)))
+    )
       throw new ReadFailure(502, "invalid_export_response");
     if (row.pending !== undefined)
       for (const id of pendingCountSchema.parse(row.pending).evidenceIds) {
@@ -572,7 +583,10 @@ export function board(value: unknown, selected: Selection): Board {
   const metric = metricDefinitionSchema.parse(data.metric);
   if (
     metric.id !== selected.metric ||
-    (method && (!["ascending", "descending"].includes(String(method.direction)) || typeof method.rank !== "boolean"))
+    (method &&
+      (!["ascending", "descending"].includes(String(method.direction)) ||
+        typeof method.rank !== "boolean" ||
+        (descriptiveMetric(metric) && method.rank !== false)))
   )
     throw new ReadFailure(502, "api_metric_mismatch");
   return {
@@ -582,7 +596,10 @@ export function board(value: unknown, selected: Selection): Board {
     rows: array(data.rows, 100).map((value) => {
       const row = object(value),
         result = metricResultSchema.parse(row.result);
-      if (result.metricId !== metric.id || (row.rank !== null && (integer(row.rank) < 1 || method?.rank === false)))
+      if (
+        result.metricId !== metric.id ||
+        (row.rank !== null && (integer(row.rank) < 1 || method?.rank === false || descriptiveMetric(metric)))
+      )
         throw new ReadFailure(502, "invalid_api_response");
       return {
         rank: row.rank === null ? null : integer(row.rank),

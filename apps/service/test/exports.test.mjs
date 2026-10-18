@@ -11,7 +11,7 @@ const scope = {
   start: "2026-10-01T00:00:00.000Z",
   end: "2026-11-01T00:00:00.000Z",
 };
-const params = new URLSearchParams({ ...scope, metric: "pr_opened", snapshot: "public-1" });
+const params = new URLSearchParams({ ...scope, metric: "pr_merged", snapshot: "public-1" });
 const exportUrl = `/api/v1/exports?${params}`;
 const coverage = {
   schemaVersion: "leaderboard/v1",
@@ -59,7 +59,7 @@ function fixture() {
       actorId,
       roles: ["author"],
       qualification: "eligible",
-      metricIds: ["pr_opened"],
+      metricIds: ["pr_merged"],
       reasonCodes: ["eligible"],
     },
     occurredAt: at,
@@ -88,14 +88,14 @@ function fixture() {
         actorId,
         result: {
           schemaVersion: "leaderboard/v1",
-          metricId: "pr_opened",
+          metricId: "pr_merged",
           state: "measured",
           value: index < 2 ? 2 : 1,
           coverage: structuredClone(coverage),
         },
         evidenceIds: [`e-${actorId}`],
       })),
-      ranking: [{ metricId: "pr_opened", direction: "descending" }],
+      ranking: [{ metricId: "pr_merged", direction: "descending" }],
     },
   };
 }
@@ -202,7 +202,7 @@ test("CSV metadata and metric rows preserve versions, source mapping and half-op
   assert.equal(metadata.computation_version, "synthetic-only");
   for (const key of ["organization", "repository", "workstream", "start", "end"])
     assert.equal(metadata[key], scope[key]);
-  assert.equal(JSON.parse(metadata.metric_definition).id, "pr_opened");
+  assert.equal(JSON.parse(metadata.metric_definition).id, "pr_merged");
   assert.equal(metadata.total_rows, "3");
   assert.equal(metadata.page_rows, "3");
   assert.deepEqual(
@@ -417,7 +417,7 @@ test("unapproved publications and unsupported title/body fields never become pub
 test("exports retain current-main diagnostic semantics only for the selected visible page", async (t) => {
   const h = harness(t);
   h.data.selected.diagnostics = ["alice", "bob", "carol"].map((actorId) => ({
-    metricId: "pr_opened",
+    metricId: "pr_merged",
     actorId,
     numerator: 2,
     denominator: 3,
