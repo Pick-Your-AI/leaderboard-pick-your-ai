@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aggregateMetric, metricDefinitionsV1, stableJSON } from "../dist/index.js";
+import { aggregateMetric, metricDefinitionsV1, getMetricGroupingPolicy, stableJSON } from "../dist/index.js";
 
 // Synthetic normalized facts only. These do not certify source qualification,
 // acceptance receipts, or an approved/public policy for any registry definition.
@@ -39,6 +39,7 @@ const coverage = {
   sourceErrors: [],
 };
 function policy(metric) {
+  const grouping = getMetricGroupingPolicy(metric.id);
   return {
     metricId: metric.id,
     version: "synthetic-audit/v1",
@@ -52,6 +53,16 @@ function policy(metric) {
     sources: ["github_rest"],
     minimumSamples: 1,
     rank: false,
+    ...(grouping
+      ? {
+          dateBasis: grouping.date_basis,
+          rankedStates: [grouping.state],
+          roles: ["triager"],
+          groupBy: grouping.group_by,
+          groupingSeconds: grouping.grouping_seconds,
+          groupingPolicyVersion: grouping.version,
+        }
+      : {}),
   };
 }
 function fact(metric, id, patch = {}) {
@@ -78,6 +89,16 @@ function fact(metric, id, patch = {}) {
     outcome: "merged",
     readyAt: at,
     firstReviewAt: "2026-10-05T02:00:00Z",
+    ...(getMetricGroupingPolicy(metric.id)
+      ? {
+          role: "triager",
+          state: "observed",
+          acceptedAt: null,
+          acceptanceReceipt: null,
+          acceptedBy: null,
+          rawState: "labeled:synthetic-bug",
+        }
+      : {}),
     ...patch,
   };
 }
@@ -120,9 +141,13 @@ for (const metric of metricDefinitionsV1.filter((metric) => aggregations[metric.
       included,
       { ...included, id: "duplicate-adapter" },
       fact(metric, "other-actor", { actorId: "b", subjectActorId: "b" }),
-      fact(metric, "self-accepted", { acceptedBy: "a" }),
+      fact(
+        metric,
+        "invalid-eligibility",
+        getMetricGroupingPolicy(metric.id) ? { rawState: undefined } : { acceptedBy: "a" },
+      ),
       fact(metric, "excluded", { state: "excluded" }),
-      fact(metric, "outside", { acceptedAt: to, readyAt: to }),
+      fact(metric, "outside", { occurredAt: to, acceptedAt: to, readyAt: to }),
       fact(metric, "future-observation", { observedAt: "2026-11-02T00:00:00Z" }),
     ];
     const frozen = input(facts);
@@ -142,8 +167,14 @@ for (const metric of metricDefinitionsV1.filter((metric) => aggregations[metric.
     assert.equal(evidence.length, 2);
     assert.ok(evidence.includes("other-actor"));
     assert.ok(evidence.includes("included") || evidence.includes("duplicate-adapter"));
-    assert.ok(result.audit.some((entry) => entry.reason === "missing_independent_acceptance"));
-    assert.equal(result.coverage, "incomplete", "unverified acceptance must prevent complete coverage");
+    assert.ok(
+      result.audit.some(
+        (entry) =>
+          entry.reason ===
+          (getMetricGroupingPolicy(metric.id) ? "unknown_raw_state_or_time" : "missing_independent_acceptance"),
+      ),
+    );
+    assert.equal(result.coverage, "incomplete", "unverified eligibility must prevent complete coverage");
     assert.equal(stableJSON(board(metric, [...facts].reverse())), stableJSON(result));
     assert.equal(stableJSON(frozen), original, "rebuild must not mutate frozen facts");
 

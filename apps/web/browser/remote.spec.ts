@@ -345,7 +345,11 @@ test("descriptive policy stays unranked; API media and supported reference pages
       await page.goto(`${route}?ui=api`);
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       await expect(page.getByRole("status").filter({ hasText: /Loading/ })).toHaveCount(0);
-      if (route !== "/leaderboards")
+      if (route === "/methodology/pr_opened") {
+        await expect(page.getByRole("region", { name: "Snapshot provenance" })).toHaveCount(0);
+        await expect(page.getByText("UI metadata version", { exact: true })).toBeVisible();
+        await expect(page.getByText("No published policy signature supplied for this selection.")).toBeVisible();
+      } else if (route !== "/leaderboards")
         await expect(page.getByRole("region", { name: "Snapshot provenance" })).toBeVisible();
       expect(
         (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
