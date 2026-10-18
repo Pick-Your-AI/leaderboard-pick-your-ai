@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { syntheticRepositoryClient } from "./synthetic-client.mjs";
 import { readTypedIssueHistory, typedHistoryRevision, createGithubEvidenceNormalizer } from "../dist/index.js";
 const repository = { id: 2, slug: "synthetic-owner/repository", allowedProjectIds: ["PVT_allowed"] };
 const subject = { id: "I_synthetic", url: `https://github.com/${repository.slug}/issues/1` };
@@ -39,7 +40,7 @@ test("native parent history normalizes explicit actors and preserves individual 
   const client = clientFor(baseEvent);
   const [record] = await readTypedIssueHistory(options(client));
   const normalize = createGithubEvidenceNormalizer({
-    client,
+    client: syntheticRepositoryClient(repository.id, client),
     source: "synthetic",
     allowedRepositoryIds: [2],
     isSynthetic: true,
@@ -103,7 +104,7 @@ test("Project status values are hydrated only after explicit public Project appr
   const [record] = await readTypedIssueHistory(options(client, "project_history"));
   assert.equal(reads, 1);
   const normalize = createGithubEvidenceNormalizer({
-    client,
+    client: syntheticRepositoryClient(repository.id, client),
     source: "synthetic",
     allowedRepositoryIds: [2],
     isSynthetic: true,

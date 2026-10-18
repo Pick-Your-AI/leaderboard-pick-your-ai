@@ -1,3 +1,4 @@
+import { syntheticCheckpointStore } from "../../../packages/github/test/synthetic-client.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
@@ -47,15 +48,12 @@ function harness({ paginated = false } = {}) {
     apiOrigin: origin,
     token: async () => "synthetic-token",
     maxRetries: 0,
-    checkpoints: {
-      load: async (key) => structuredClone(values.get(key)),
-      save: async (key, value) => values.set(key, structuredClone(value)),
-    },
+    checkpoints: syntheticCheckpointStore(values),
     fetch: async (value, options) => {
       const url = new URL(value);
       let body,
         headers = {};
-      if (url.pathname === `/repos/${repository.slug}`) body = { id: 2, private: false };
+      if (url.pathname === `/repos/${repository.slug}`) body = { id: 2, private: false, full_name: repository.slug };
       else if (url.pathname === `/repos/${repository.slug}/issues`) {
         body = state.inventory;
         if (paginated) {

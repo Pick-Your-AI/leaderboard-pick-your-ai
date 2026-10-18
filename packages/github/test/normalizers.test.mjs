@@ -1,3 +1,4 @@
+import { syntheticRepositoryClient, syntheticCheckpointStore } from "./synthetic-client.mjs";
 import assert from "node:assert/strict";
 import { readFile, mkdtemp, mkdir, writeFile, rename, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
@@ -744,12 +745,7 @@ test("pipeline wrapper hydrates only matching public object/revision and preserv
   const client = new GithubReadClient({
     apiOrigin: "https://api.synthetic.invalid",
     token: async () => undefined,
-    checkpoints: {
-      load: async (key) => memory.get(key),
-      save: async (key, value) => {
-        memory.set(key, structuredClone(value));
-      },
-    },
+    checkpoints: syntheticCheckpointStore(memory),
     fetch: async (url) => {
       calls.push(url);
       return new Response(JSON.stringify(url.endsWith("/issues/20") ? issue() : fixture.repository));
@@ -791,7 +787,7 @@ test("pipeline wrapper hydrates only matching public object/revision and preserv
   const privateClient = new GithubReadClient({
     apiOrigin: "https://api.synthetic.invalid",
     token: async () => undefined,
-    checkpoints: { load: async () => undefined, save: async () => {} },
+    checkpoints: syntheticCheckpointStore(),
     fetch: async (url) =>
       new Response(JSON.stringify(url.endsWith("/issues/20") ? issue() : { ...fixture.repository, private: true })),
   });
@@ -1130,11 +1126,11 @@ test("review hydration proves first participation only from a complete consisten
     },
   };
   let cohort = [review, earlier];
-  const client = {
+  const client = syntheticRepositoryClient(2, {
     rest: async (_source, path) =>
       path.endsWith("reviews/51") ? review : path.endsWith("pulls/10") ? pr() : fixture.repository,
     scanRest: async () => cohort,
-  };
+  });
   const normalize = createGithubEvidenceNormalizer({
     client,
     source: "synthetic",
@@ -1208,7 +1204,10 @@ test("Discussion hydration validates capability, public identity and exact revis
     },
   };
   const normalize = createGithubEvidenceNormalizer({
-    client: { rest: async () => fixture.repository, graphql: async () => ({ repository: repo }) },
+    client: syntheticRepositoryClient(2, {
+      rest: async () => fixture.repository,
+      graphql: async () => ({ repository: repo }),
+    }),
     source: "synthetic",
     allowedRepositoryIds: [2],
     isSynthetic: true,
@@ -1271,7 +1270,9 @@ test("repository issue-event hydration preserves actor clocks without inferring 
   };
   const { githubTimelineRevision } = await import("../dist/index.js");
   const normalize = createGithubEvidenceNormalizer({
-    client: { rest: async (_source, endpoint) => (endpoint.includes("/events/") ? event : fixture.repository) },
+    client: syntheticRepositoryClient(2, {
+      rest: async (_source, endpoint) => (endpoint.includes("/events/") ? event : fixture.repository),
+    }),
     source: "synthetic",
     allowedRepositoryIds: [2],
     isSynthetic: true,
@@ -1441,7 +1442,7 @@ test("configured documentation enrichment stays disabled without policy and bind
     policyVersion: "source-v1",
   };
   const options = {
-    client: {},
+    client: syntheticRepositoryClient(2, {}),
     source: "synthetic-source",
     allowedRepositoryIds: [2],
     isSynthetic: true,
