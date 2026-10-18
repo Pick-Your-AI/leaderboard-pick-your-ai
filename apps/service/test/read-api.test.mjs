@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createService } from "../dist/app.js";
 import { startLiveUpdates } from "../dist/live-client.js";
 import { selection, validateExport, board as parseBoard } from "../../web/src/remote/client.ts";
+import { parseCSVExport } from "../../web/src/remote/csv-export.ts";
 
 const at = "2026-10-17T12:00:00.000Z";
 const scope = { organization: "Pick-Your-AI", repository: null, workstream: null, start: null, end: null };
@@ -1385,8 +1386,15 @@ test("README SVG images are bounded passive dated output and enforce current pin
   assert.equal((await app.inject({ url, headers: { "if-none-match": response.headers.etag } })).statusCode, 404);
 });
 
-test("descriptive metrics reject ranked provider policies across boards, profiles and exports", async (t) => {
-  for (const metricId of ["pr_accepted_rate", "review_wait", "active_periods"]) {
+test("descriptive and spotlight metrics reject ranked provider policies across boards, profiles and exports", async (t) => {
+  for (const metricId of [
+    "pr_accepted_rate",
+    "review_wait",
+    "active_periods",
+    "appreciation",
+    "incidents",
+    "first_contribution",
+  ]) {
     for (const rank of [true, undefined, false]) {
       const value = fixture();
       for (const row of value.selected.rows) row.result.metricId = metricId;
@@ -1431,5 +1439,41 @@ test("descriptive metrics reject ranked provider policies across boards, profile
         assert.throws(() => parse(contradictory, selected));
       }
     }
+  }
+});
+
+test("spotlight board and JSON/CSV clients retain proof and reject invented ranking", async (t) => {
+  for (const metricId of ["appreciation", "incidents", "first_contribution"]) {
+    const value = fixture("public-1", 1, metricId);
+    value.selected.ranking[0].rank = false;
+    const original = structuredClone(value);
+    const { app } = harness(t, value);
+    const selected = selection(`?metric=${metricId}&snapshot=public-1`);
+    const boardResponse = await app.inject(`/api/v1/boards?metric=${metricId}&snapshot=public-1`);
+    assert.equal(boardResponse.statusCode, 200);
+    const boardData = boardResponse.json();
+    assert.doesNotThrow(() => parseBoard(boardData, selected));
+    const jsonResponse = await app.inject(`/api/v1/exports?metric=${metricId}&snapshot=public-1&format=json`);
+    assert.equal(jsonResponse.statusCode, 200);
+    const exported = jsonResponse.json();
+    const csvResponse = await app.inject(`/api/v1/exports?metric=${metricId}&snapshot=public-1&format=csv`);
+    assert.equal(csvResponse.statusCode, 200);
+    const csv = parseCSVExport(csvResponse.body, exported.metric, Number(selected.limit));
+    for (const data of [boardData, exported, csv]) {
+      const parse =
+        data === boardData ? parseBoard : (value, selected) => validateExport(value, selected, exported.metric);
+      assert.doesNotThrow(() => parse(data, selected));
+      assert.deepEqual(
+        data.rows.map((row) => [row.actorId, row.rank, row.result.value, row.evidenceIds]),
+        value.selected.rows.map((row) => [row.actorId, null, row.result.value, row.evidenceIds]),
+      );
+      const forged = structuredClone(data);
+      forged.ranking.rank = true;
+      assert.throws(() => parse(forged, selected), `${metricId}: ranked metadata must not enable a spotlight`);
+      forged.ranking = null;
+      forged.rows[0].rank = 1;
+      assert.throws(() => parse(forged, selected), `${metricId}: an absent policy must not authorize a numeric rank`);
+    }
+    assert.deepEqual(value, original, "reads must preserve the stored unranked evidence");
   }
 });

@@ -394,6 +394,7 @@ function selectedActor(value: unknown, selected: Selection): Actor {
 }
 function descriptiveMetric(metric: MetricDefinition): boolean {
   return (
+    metric.definition.display_policy === "spotlight" ||
     metric.definition.release_eligibility === "descriptive-only" ||
     ["ratio", "median_and_p75_of_elapsed_hours"].includes(metric.definition.aggregation)
   );
