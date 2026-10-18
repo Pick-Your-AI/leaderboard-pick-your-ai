@@ -30,6 +30,8 @@ Repository filters intersect the explicit allowed repository IDs. Project/workst
 
 Complete coverage requires every requested allowed repository and every policy source to have complete, error-free coverage enclosing the entire window and a known history start no later than that window. Missing sources/repos, shortened watermarks, unknown/late history, gaps and ambiguous normalized facts prevent a complete result. Numeric zero is exposed only with complete coverage and no unknown evidence. Empty datasets do not invent zero-valued people. Unbounded all-time coverage is conservatively incomplete. Coverage intervals currently must be supplied as one enclosing record per source/repository; disjoint intervals are not silently joined.
 
+The reconciled `sourceWatermark` must reach the selected exclusive end. Its comparison preserves fractional precision and equivalent source offsets; an absent or unparseable watermark cannot establish completeness. `hasCompleteSourceCoverage` exposes that necessary source check for retained consumers, independently of qualification and public release authority. Positive partial results keep their observed values, evidence and within-snapshot ranks; they cannot certify zero, complete newcomer history or rank movement. The existing frozen `input.cutoff` check separately rejects a selected window extending past that cutoff.
+
 For pending work on an acceptance-clock board, the separate pending column uses occurrence time because acceptance has not occurred. It is an observed pending cohort, not part of the decided or accepted denominator. Rebuilding a frozen input never substitutes ingestion time for a ranked metric's occurrence/acceptance clock.
 
 ## Aggregate lookup and tie bounds
