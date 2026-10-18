@@ -7,6 +7,7 @@ import {
   metricRegistrySchema,
   metricResultSchema,
   sourceEventSchema,
+  pendingCountSchema,
   type Actor,
   type Artifact,
   type Contribution,
@@ -14,6 +15,7 @@ import {
   type MetricDefinition,
   type MetricRegistry,
   type MetricResult,
+  type PendingCount,
 } from "@pick-your-ai/contracts";
 
 export class ReadFailure extends Error {
@@ -299,6 +301,20 @@ export function validateExport(value: unknown, selected: Selection): void {
     if (entry.sourceRevisionUrl !== null && publicLink(string(entry.sourceRevisionUrl)) === null)
       throw new ReadFailure(502, "invalid_export_response");
   }
+  const pendingIds = new Set<string>();
+  for (const value of array(data.pendingEvidence ?? [], 2000)) {
+    const entry = object(value),
+      id = identity(entry.evidenceId);
+    if (pendingIds.has(id) || publicLink(string(entry.sourceUrl)) === null)
+      throw new ReadFailure(502, "invalid_export_response");
+    pendingIds.add(id);
+    if (entry.repositoryId !== null) identity(entry.repositoryId);
+    if (entry.occurredAt !== null) string(entry.occurredAt);
+    if (entry.sourceRevision !== null) string(entry.sourceRevision);
+    if (entry.sourceRevisionUrl !== null && publicLink(string(entry.sourceRevisionUrl)) === null)
+      throw new ReadFailure(502, "invalid_export_response");
+  }
+  const referencedPending = new Set<string>();
   const pageActors = new Set<string>(),
     referencedEvidence = new Set<string>();
   for (const value of rows) {
@@ -310,12 +326,18 @@ export function validateExport(value: unknown, selected: Selection): void {
     if (row.login !== null) string(row.login);
     if (result.metricId !== metric.id || (row.rank !== null && (integer(row.rank) < 1 || ranking?.rank === false)))
       throw new ReadFailure(502, "invalid_export_response");
+    if (row.pending !== undefined)
+      for (const id of pendingCountSchema.parse(row.pending).evidenceIds) {
+        if (!pendingIds.has(id)) throw new ReadFailure(502, "invalid_export_response");
+        referencedPending.add(id);
+      }
     for (const id of array(row.evidenceIds)) {
       const evidenceId = identity(id);
       if (!evidenceIds.has(evidenceId)) throw new ReadFailure(502, "invalid_export_response");
       referencedEvidence.add(evidenceId);
     }
   }
+  if (referencedPending.size !== pendingIds.size) throw new ReadFailure(502, "invalid_export_response");
   if (referencedEvidence.size !== evidenceIds.size) throw new ReadFailure(502, "invalid_export_response");
   for (const entry of diagnostics(data.diagnostics))
     if (entry.metricId !== metric.id || !pageActors.has(entry.actorId))
@@ -377,6 +399,7 @@ export function metadata(value: unknown, selected: Selection): Metadata {
   };
 }
 export interface Diagnostic {
+  pending?: PendingCount;
   metricId: string;
   actorId: string;
   numerator: number | null;
@@ -403,13 +426,21 @@ function diagnostics(value: unknown): Diagnostic[] {
       censored: integer(item.censored),
       missingReadiness: integer(item.missingReadiness),
       p75: number(item.p75),
+      ...(item.pending === undefined ? {} : { pending: pendingCountSchema.parse(item.pending) }),
     };
   });
 }
 export interface Board extends Metadata {
   metric: MetricDefinition;
   ranking: { direction: string; rank: boolean } | null;
-  rows: { rank: number | null; actorId: string; actor: Actor; result: MetricResult; evidenceIds: string[] }[];
+  rows: {
+    rank: number | null;
+    actorId: string;
+    actor: Actor;
+    result: MetricResult;
+    evidenceIds: string[];
+    pending?: PendingCount;
+  }[];
   diagnostics: Diagnostic[];
   totalRows: number;
   nextCursor: string | null;
@@ -438,6 +469,7 @@ export function board(value: unknown, selected: Selection): Board {
         actor: actorSchema.parse(row.actor),
         result,
         evidenceIds: array(row.evidenceIds).map(identity),
+        ...(row.pending === undefined ? {} : { pending: pendingCountSchema.parse(row.pending) }),
       };
     }),
     diagnostics: diagnostics(data.diagnostics),
