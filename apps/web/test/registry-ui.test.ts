@@ -153,6 +153,13 @@ test("rendered methods, paired filters and invalid wall errors consume registry 
       assert.match(html, /leaderboard-ui\/v1/);
       assert.ok(html.includes(getMetricUi(metric.id)!.maturity));
       if (metric.id === "items_triaged") assert.match(html, /triage-raw-state\/v1/);
+      if (["label_taxonomy", "milestone_definitions"].includes(metric.id)) {
+        assert.match(html, /triage-definition-day\/v1/);
+        assert.match(html, /UTC calendar day/);
+        assert.match(html, /source or acceptance/);
+        assert.match(html, /No selectable view; not measured/);
+        assert.doesNotMatch(html, /Raw triage grouping policy/);
+      }
     }
     const filter = render(React.createElement(ScopeBar, { metricId: "pr_merged", timeWindow: null }));
     assert.match(filter, /Unsupported: observed:acceptedAt/);

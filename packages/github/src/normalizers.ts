@@ -419,6 +419,17 @@ function resourceId(payload: Record<string, unknown>, kind: string, repoId: numb
   );
 }
 
+function definitionResourceId(
+  payload: Record<string, unknown>,
+  kind: "label" | "milestone",
+  repoId: number,
+): string | null {
+  const nodeId = text(payload.node_id);
+  if (nodeId) return nodeId;
+  const providerId = positive(payload.id) ? String(payload.id) : text(payload.id);
+  return providerId ? `github:${repoId}:${kind}:${providerId}` : null;
+}
+
 /** Names are bounded current-source labels, never historical titles or rendered Markdown. */
 function collectedTitle(resource: Record<string, unknown>, kind: string, observedAt: string) {
   const raw = resource.title ?? (kind === "release" || kind === "other" ? resource.name : null);
@@ -500,19 +511,37 @@ export function normalizeGithubObservation(
     return out;
   }
   const payload = envelope.payload;
-  const resource = object(payload.pull_request)
-    ? payload.pull_request
-    : object(payload.issue)
-      ? payload.issue
-      : object(payload.review)
-        ? payload.review
-        : object(payload.release)
-          ? payload.release
-          : envelope.action?.startsWith("label_") && object(payload.label)
-            ? payload.label
-            : envelope.action?.startsWith("milestone_") && object(payload.milestone)
-              ? payload.milestone
-              : payload;
+  const observedAction = envelope.action ?? text(payload.action) ?? "snapshot";
+  const sourceAction = envelope.family === "triage" ? canonicalTriageAction(observedAction) : observedAction;
+  const definitionKind =
+    envelope.family === "triage" && sourceAction.startsWith("label_")
+      ? "label"
+      : envelope.family === "triage" && sourceAction.startsWith("milestone_")
+        ? "milestone"
+        : null;
+  const definitionResource = definitionKind ? payload[definitionKind] : null;
+  if (definitionKind && !object(definitionResource)) {
+    out.reasons.push("missing_public_artifact_identity");
+    return out;
+  }
+  // A definition event owns the definition, even when an envelope also carries
+  // issue context. Attached item membership cannot multiply definition credit.
+  const resource =
+    definitionKind && object(definitionResource)
+      ? definitionResource
+      : object(payload.pull_request)
+        ? payload.pull_request
+        : object(payload.issue)
+          ? payload.issue
+          : object(payload.review)
+            ? payload.review
+            : object(payload.release)
+              ? payload.release
+              : envelope.action?.startsWith("label_") && object(payload.label)
+                ? payload.label
+                : envelope.action?.startsWith("milestone_") && object(payload.milestone)
+                  ? payload.milestone
+                  : payload;
   const kind: NormalizedPublicEvidence["artifact"]["kind"] =
     envelope.family === "pull_request" || envelope.family === "review" || envelope.family === "revert"
       ? "pull_request"
@@ -523,12 +552,12 @@ export function normalizeGithubObservation(
           : envelope.family === "project_snapshot" ||
               (envelope.family === "field_change" && envelope.action?.startsWith("project"))
             ? "project"
-            : envelope.family === "discussion" ||
-                envelope.family === "comment" ||
-                (envelope.family === "triage" && /^(?:label|milestone)_/.test(envelope.action ?? ""))
+            : envelope.family === "discussion" || envelope.family === "comment" || definitionKind !== null
               ? "other"
               : "issue";
-  const id = resourceId(resource, kind, repository.id);
+  const id = definitionKind
+    ? definitionResourceId(resource, definitionKind, repository.id)
+    : resourceId(resource, kind, repository.id);
   if (repository.visibility !== "public" || (object(payload.repository) && payload.repository.private !== false)) {
     if (id) out.suppressArtifactIds.push(id);
     out.reasons.push("public_visibility_unverified_or_revoked");
@@ -546,8 +575,6 @@ export function normalizeGithubObservation(
     return out;
   }
   const at = time(envelope.occurredAt);
-  const observedAction = envelope.action ?? text(payload.action) ?? "snapshot";
-  const sourceAction = envelope.family === "triage" ? canonicalTriageAction(observedAction) : observedAction;
   const history =
     envelope.publicHistory?.approvedPublic === true
       ? publicEvidenceHistorySchema.parse(envelope.publicHistory.history)
@@ -1917,7 +1944,7 @@ export function groupTriageTransitions(
     byId.set(event.id, event);
   }
   for (const event of byId.values()) {
-    if (!event.actorId || !time(event.occurredAt)) {
+    if (!text(event.actorId) || !text(event.artifactId) || !time(event.occurredAt)) {
       unknown.push(event.id);
       continue;
     }
@@ -1973,11 +2000,30 @@ export function groupTriageTransitions(
       });
     }
   }
+  const artifacts = new Set<string>();
+  const byActor = new Map<string, { rawActions: number; sessions: number; artifacts: Set<string> }>();
+  for (const session of sessions) {
+    artifacts.add(session.artifactId);
+    const summary = byActor.get(session.actorId) ?? { rawActions: 0, sessions: 0, artifacts: new Set<string>() };
+    summary.rawActions += session.rawActions;
+    summary.sessions += 1;
+    summary.artifacts.add(session.artifactId);
+    byActor.set(session.actorId, summary);
+  }
   return {
     policyVersion: policy.version,
     sessions: sessions.sort((a, b) => a.id.localeCompare(b.id)),
     unknownEventIds: unknown.sort(),
     rawActions: byId.size,
+    distinctArtifacts: artifacts.size,
+    actorSummaries: [...byActor]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([actorId, summary]) => ({
+        actorId,
+        rawActions: summary.rawActions,
+        sessions: summary.sessions,
+        distinctArtifacts: summary.artifacts.size,
+      })),
     qualifiedOutcomes: 0,
     caveat:
       "Grouping and persistence do not prove curation correctness; independent recognition receipts are required.",
