@@ -354,7 +354,13 @@ test("adjacent UTC windows around the DST fallback count each boundary action on
 
 test("engine actor and role enums follow the versioned contracts", () => {
   for (const kind of actorKindSchema.options.filter(kind => kind !== "unknown")) {
-    assert.equal(board([fact("a")], {}, { actors: "all" }, { actors: [actor("a", { kind })] }).rows.length, 1, kind);
+    const id = kind === "service_account" ? "101" : "a";
+    const serviceAccountClassification = kind === "service_account" ? {
+      schemaVersion: "leaderboard-service-account/v1", classificationId: "synthetic-service-account",
+      githubDatabaseId: 101, source: "reviewed_configuration", evidenceIds: ["synthetic-evidence"],
+      reviewerActorId: "202", reviewedAt: from,
+    } : undefined;
+    assert.equal(board([fact("a", { actorId: id })], {}, { actors: "all" }, { actors: [actor(id, { kind, serviceAccountClassification })] }).rows.length, 1, kind);
   }
   for (const role of contributionRoleSchema.options.filter(role => role !== "unknown")) {
     assert.equal(board([fact("a", { role, subjectActorId: "synthetic-other" })], { roles: [role] }).rows.length, 1, role);
