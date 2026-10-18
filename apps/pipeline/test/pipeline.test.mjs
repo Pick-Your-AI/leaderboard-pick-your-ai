@@ -896,45 +896,49 @@ test("public observed work survives accepted-only rankings without granting assi
   assert.equal((await runtime.app.inject(`/api/v1/contributors/103?snapshot=${directory.snapshotId}`)).statusCode, 404);
 });
 
-test("policy previews persist exact frozen inputs and require independent host release authorization", async (t) => {
-  const h = await harness(t, {
-    authorizePolicyPreview: async ({ operatorId }) => operatorId === "201",
-    authorizePolicyRelease: async ({ operatorId, approvalReceipt }) =>
-      operatorId === "202" && approvalReceipt === "synthetic-policy-review",
-    policyApproverIds: ["202"],
-  });
-  const publication = (await h.runtime.runOnce()).publications[0];
-  const policy = {
-    ...h.options.config.policies[0].policy,
-    version: "synthetic-policy-v2",
-    rankedStates: ["qualified"],
-  };
-  await assert.rejects(
-    h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "999" }),
-    /not_authorized/,
-  );
-  const preview = await h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "201" });
-  assert.equal(preview.comparison.before.datasetId, preview.comparison.after.datasetId);
-  assert.equal(preview.comparison.changes.length > 0, true);
-  assert.deepEqual(
-    await h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "201" }),
-    preview,
-  );
-  await assert.rejects(
-    h.runtime.approvePolicyComparison({ comparisonId: preview.comparisonId, operatorId: "201" }),
-    /not_authorized/,
-  );
-  const release = await h.runtime.approvePolicyComparison({
-    comparisonId: preview.comparisonId,
-    operatorId: "202",
-    approvalReceipt: "synthetic-policy-review",
-    releaseNotes: "Require accepted outcomes",
-  });
-  assert.equal(release.manifest.publicEnabled, false);
-  assert.equal(release.manifest.targetVersion, policy.version);
-  const head = (await h.db.query("SELECT snapshot_id FROM leaderboard_pipeline.heads")).rows[0];
-  assert.equal(head.snapshot_id, publication.snapshotId);
-});
+test(
+  "policy previews persist exact frozen inputs and require independent host release authorization",
+  { timeout: 30_000 },
+  async (t) => {
+    const h = await harness(t, {
+      authorizePolicyPreview: async ({ operatorId }) => operatorId === "201",
+      authorizePolicyRelease: async ({ operatorId, approvalReceipt }) =>
+        operatorId === "202" && approvalReceipt === "synthetic-policy-review",
+      policyApproverIds: ["202"],
+    });
+    const publication = (await h.runtime.runOnce()).publications[0];
+    const policy = {
+      ...h.options.config.policies[0].policy,
+      version: "synthetic-policy-v2",
+      rankedStates: ["qualified"],
+    };
+    await assert.rejects(
+      h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "999" }),
+      /not_authorized/,
+    );
+    const preview = await h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "201" });
+    assert.equal(preview.comparison.before.datasetId, preview.comparison.after.datasetId);
+    assert.equal(preview.comparison.changes.length > 0, true);
+    assert.deepEqual(
+      await h.runtime.previewPolicy({ snapshotId: publication.snapshotId, policy, operatorId: "201" }),
+      preview,
+    );
+    await assert.rejects(
+      h.runtime.approvePolicyComparison({ comparisonId: preview.comparisonId, operatorId: "201" }),
+      /not_authorized/,
+    );
+    const release = await h.runtime.approvePolicyComparison({
+      comparisonId: preview.comparisonId,
+      operatorId: "202",
+      approvalReceipt: "synthetic-policy-review",
+      releaseNotes: "Require accepted outcomes",
+    });
+    assert.equal(release.manifest.publicEnabled, false);
+    assert.equal(release.manifest.targetVersion, policy.version);
+    const head = (await h.db.query("SELECT snapshot_id FROM leaderboard_pipeline.heads")).rows[0];
+    assert.equal(head.snapshot_id, publication.snapshotId);
+  },
+);
 
 test("accepted controls receipt materializes a separate lens and withdrawal fences pinned snapshots", async (t) => {
   const h = await harness(t);

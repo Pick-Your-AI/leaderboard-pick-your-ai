@@ -227,11 +227,11 @@ export async function createPipeline(options) {
     operation = pending.catch(() => undefined);
     return pending;
   };
-  async function approved() {
+  async function approved(transaction = db) {
     authorized = Boolean(await verifyConfig(copy(config)));
     if (!authorized) return false;
     assertDataMode(config);
-    const persistedDenials = await db.query(
+    const persistedDenials = await transaction.query(
       "SELECT operation_key FROM leaderboard_pipeline.receipts WHERE kind='project_scope_denial' AND operation_key=ANY($1::text[])",
       [config.repositories.map(projectDenialKey)],
     );
@@ -1025,7 +1025,7 @@ export async function createPipeline(options) {
   }
   const source = {
     async read(scope, pin, signal, transaction) {
-      if (signal.aborted || !(await approved()) || !configuredScope(scope)) return null;
+      if (signal.aborted || !(await approved(transaction ?? db)) || !configuredScope(scope)) return null;
       const readTransaction = transaction ? (work) => work(transaction) : (work) => db.transaction(work);
       return readTransaction(async (tx) => {
         const result = await tx.query(
