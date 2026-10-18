@@ -1,10 +1,11 @@
 import { test, expect } from "@playwright/test";
 
 test("built public document enforces CSP while the application renders", async ({ page }) => {
-  const response = await page.goto("/");
+  const response = await page.goto("/?ui=prototype");
   expect(response?.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
   expect(response?.headers()["x-content-type-options"]).toBe("nosniff");
-  await expect(page.locator("#root")).not.toBeEmpty();
+  await expect(page.getByRole("navigation", { name: "Primary", exact: true })).toBeVisible();
+  await expect(page.locator(".startup-fallback")).toHaveCount(0);
   const meta = page.locator('meta[http-equiv="Content-Security-Policy"]');
   await expect(meta).toHaveAttribute("content", /script-src 'self'/);
   expect(
