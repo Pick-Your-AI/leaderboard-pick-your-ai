@@ -305,7 +305,7 @@ test("long in-budget Project scopes keep overlay controls visible and disclose e
     const project = projects.join(",");
     await page.setViewportSize({ width: 960, height: 540 });
     await page.goto(
-      `/live?${new URLSearchParams({ ui: "api", ...selected, project, mode: "frozen", format: "overlay", boards: "pr_merged" })}`,
+      `/live?${new URLSearchParams({ ui: "api", ...selected, project, mode: "single", format: "overlay", boards: "pr_merged" })}`,
     );
     await expect(page.locator(".api-wall-scope summary")).toContainText("GitHub Projects: 11 selected");
     await expect(page.getByRole("button", { name: "Pause wall", exact: true })).toBeInViewport();
