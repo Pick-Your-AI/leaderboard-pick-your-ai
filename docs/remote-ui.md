@@ -2,6 +2,10 @@
 
 The web entry point defaults to public API mode. Set the non-secret build variable `VITE_PUBLIC_API_BASE` to an approved API base URL/path, or use the default same-origin `/api/v1`. The development Vite server proxies that default path to `127.0.0.1:3001`. Production hosting must supply its own reviewed reverse proxy/routing; Vite development proxy configuration is not a public deployment.
 
+The production build binds its CSP connection allowance to that same resolved Vite configuration, including the selected environment directory, mode-specific files and process-variable overrides. API paths use letters, digits, slashes, underscores and hyphens; an external base must be an explicit HTTPS URL with a DNS/IPv4 host and such a path. Only its normalized origin and optional nondefault port enter `connect-src`. Credentials, query strings, fragments, backslashes, scheme-relative URLs, IPv6 literals and absolute HTTP bases fail the build with an actionable error. Use a relative path for same-origin HTTP development. An empty value uses the documented default. API configuration is never taken from returned source content.
+
+The full content policy travels in the built HTML. Vite preview adds the header-only `frame-ancestors` restriction, `nosniff` and `no-referrer`; it does not recompute the built connection allowance from a later environment. Static hosting must preserve the embedded policy and supply those response headers. If a host additionally sends a full CSP header, its connection sources must match the built policy: multiple policies restrict each other. A changed API destination requires a rebuilt application, the corresponding host policy and separately reviewed CORS. The public controls login link remains a separate top-level navigation.
+
 `?ui=prototype` explicitly selects the existing synthetic design prototype. `?ui=api` explicitly selects the API UI. The browser remembers that explicit choice in `pyai.ui.mode`; `VITE_UI_MODE=prototype` can explicitly select a prototype build. The prototype retains its persistent synthetic notice and separate fixture routes. Its code is dynamically loaded only after selection. Missing configuration, network errors, invalid responses and unavailable source coverage in API mode never select fixtures.
 
 ## Actual read paths
@@ -22,7 +26,7 @@ New publication heads remain held until explicitly applied. Optional follow mode
 
 Requests omit credentials, reject redirects, impose an eight-second deadline and cap decoded bodies at two megabytes. Responses are checked against the leaderboard contracts and exact selection. Text is rendered as escaped React content; source links allow only bounded public GitHub HTTPS artifact/revision URLs. API bases are public configuration, never credentials. Cross-origin HTTPS bases need the hosting/API's separately approved CORS policy; same-origin routing is the default.
 
-If `VITE_PUBLIC_CONTROLS_BASE` is explicitly configured, the corrections page links to that endpoint's supported `/auth/login` entry. The separate same-origin `/account` and `/admin` UI uses authenticated `/controls/*` routes, never the public API base. See [protected controls UI](protected-controls-ui.md) for implemented flows and remaining gates. A configured link does not certify staffing, approval, storage or a working deployment.
+If `VITE_PUBLIC_CONTROLS_BASE` is explicitly configured, the corrections page links to that endpoint's supported `/auth/login` entry. This top-level account navigation may use a separately configured HTTPS origin; it does not configure public fetch or live-update connections. The separate same-origin `/account` and `/admin` UI uses authenticated `/controls/*` routes, never the public API base. See [protected controls UI](protected-controls-ui.md) for implemented flows and remaining gates. A configured link does not certify staffing, approval, storage or a working deployment.
 
 ## Reproducible evidence
 

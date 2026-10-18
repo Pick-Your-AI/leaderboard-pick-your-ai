@@ -9,6 +9,7 @@ export interface LiveOptions {
   basePath?: string;
   onState(state: LiveState): void;
   onSnapshot(notice: { snapshotId: string; revision: number; policyVersion: string }): void;
+  validateHealth?(body: Record<string, unknown>): void;
   fetch?: typeof fetch;
   eventSource?: (url: string) => EventSource;
   document?: Pick<Document, "hidden" | "addEventListener" | "removeEventListener">;
@@ -188,6 +189,7 @@ export function startLiveUpdates(options: LiveOptions): () => void {
         }
         const body = await readHealth(response, activeController.signal);
         if (stopped || current !== generation || currentNotice !== noticeGeneration) return;
+        options.validateHealth?.(body);
         if (body.status !== "recently_reconciled" && body.status !== "stale_or_degraded")
           throw new Error("invalid_health");
         if (typeof body.revision === "number" && body.revision < highestRevision) return;
