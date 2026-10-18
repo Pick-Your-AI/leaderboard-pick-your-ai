@@ -14,13 +14,27 @@ Both diagnostic and replay responses recheck the current session and repository 
 
 `<Operations session={session}/>` is mounted inside the authenticated operator console. It requires repository selection and scoped confirmation, clears private output on visibility/session changes, ignores superseded completions, and never reads operational data from the public API. The parent controls UI retains authority over session state. The mounted integration preserves the separately reviewed evidence amendment workflow. Collection runs and historical receipts explicitly identify their own source generation; they are not relabeled as current-generation evidence.
 
-## Bounded source/time-window host primitive
+## Bounded receive-time replay
 
 `OperatorInbox.previewReplayWindow(window, authorize)` and
-`OperatorInbox.replayWindow(request, authorize)` add a host-only bounded replay
-primitive for #73. They have no HTTP route, UI action, CLI command or scheduler.
-Existing single-delivery controls are unchanged. A preview is read-only and does
-not grant authority to execute a replay.
+`OperatorInbox.replayWindow(request, authorize)` provide the bounded replay
+primitive for #73. The protected operator console exposes an explicit preview and
+confirmation flow through the same opt-in host adapter as single-delivery replay.
+No CLI command or scheduler invokes it. A preview is read-only and does not grant
+authority to execute a replay.
+
+| Protected POST route | Accepted body | Result |
+| --- | --- | --- |
+| `/controls/operations/:repositoryId/replay-window/preview` | `receivedSince`, `receivedUntil`, `limit`, `policyVersion` | Current eligible selection and its opaque revision; no receipt or queue mutation |
+| `/controls/operations/:repositoryId/replay-window` | The same window fields, `expectedRevision`, `reason`, `confirmed: true` | Transactional batch receipt and per-delivery receipts, with queued status |
+
+Both routes require the existing same-origin session, operator role, CSRF token
+and explicit repository grant. Repository identity comes from the authorized route;
+operator identity comes from the authenticated session. Browser-supplied identity
+fields are rejected. A host adapter without the window methods returns unavailable.
+Every response rechecks the initial policy and grant revision after the adapter
+finishes. If a response is lost or authority changes after commit, inspect durable
+receipts under fresh authority before deciding whether further work is needed.
 
 The explicit window fields are:
 
@@ -35,6 +49,17 @@ then delivery ID. Pending, leased and completed records, foreign repositories,
 previous installations and out-of-window deliveries are excluded. Receive time is
 not source occurrence time, and an empty preview does not prove a connected source
 or complete coverage.
+
+The mounted form labels both date inputs as UTC and converts them without using
+the browser's local timezone. It requires a full explicit receive window and limit,
+then shows every selected delivery, exact boundaries, current source generation,
+policy, authorization and selection revisions before a separate confirmation.
+An empty selection offers no queue action. Editing the window clears its prior
+selection and confirmation. The client rejects mismatched scope, generation,
+authority, duplicate delivery IDs or incomplete batch receipts; queued success
+must account for every delivery that was shown. A stale selection, exceeded limit
+or changed authority clears the private result and requires fresh diagnostics.
+Visibility/session changes and superseded requests cannot restore an old preview.
 
 After explicit review, the protected host passes those same window fields plus
 `expectedRevision` (the preview revision), an authenticated `operatorId` derived by
@@ -76,6 +101,8 @@ The focused synthetic suite runs with one embedded database:
 ```sh
 npm run build --workspace @pick-your-ai/ingestion
 node --test --test-concurrency=1 packages/ingestion/test/operator-window.test.mjs packages/ingestion/test/operator.test.mjs
+node --test --test-concurrency=1 apps/controls/test/operations-window.test.mjs apps/web/test/operations-window.test.ts
+npm run test:browser -- operations.spec.ts
 ```
 
 It exercises exact time boundaries, foreign/current installation filtering,
@@ -84,5 +111,15 @@ authority/source/policy, post-write revocation, transaction rollback, audit
 minimization, preserved history and resumed workers producing no duplicate
 observations/outbox records. These tests do not certify production concurrency,
 throughput, complete source coverage or a deployed operational drill.
+
+The window HTTP tests exercise the actual controls server and transactional PGlite
+store: preview without writes, half-open receive boundaries, foreign/current
+installation filtering, overflow and empty selection, stale arrivals, exact
+identity/CSRF/role checks, durable batch readback, duplicate retry refusal and
+authorization loss after the first write rolling back the whole batch. The browser
+journeys use that actual HTTP/database bridge, including keyboard confirmation,
+320px reflow and Axe checks, edited/empty/stale selections, withheld late responses
+and revoked grants. These synthetic checks do not establish production scale,
+live OAuth, collection catch-up, downstream publication or staffed recovery.
 
 Validation covers the real controls HTTP boundary and transactional PostgreSQL-compatible PGlite store, including denied anonymous/non-operator/foreign-repository access, CSRF, confirmation, server-derived identity, changed authority/source/policy, stale replay revisions, single receipt persistence and no payload leakage. Browser integration forwards synthetic authenticated requests through the real controls HTTP server and transactional database adapter, verifies scoped replay and receipt readback, denial clearing, 320px reflow and axe checks. It is not a live OAuth/deployment exercise. Real worker catch-up/publication and a staffed operational drill remain required acceptance evidence.

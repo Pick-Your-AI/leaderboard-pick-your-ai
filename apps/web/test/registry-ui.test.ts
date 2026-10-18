@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { metricRegistryV1, getLeadMetrics, getMetricUi, selectMetricView } from "@pick-your-ai/metrics";
 import { families, metrics, searchMetrics } from "../src/data/registry.ts";
 import { buildSelectedBoard, resolveWallBoards, wallMetricIds } from "../src/data/metric-selection.ts";
@@ -130,7 +131,8 @@ test("rendered methods, paired filters and invalid wall errors consume registry 
   const { renderToStaticMarkup } = await import("react-dom/server");
   const { createServer } = await import("vite");
   const server = await createServer({
-    configFile: "apps/web/vite.config.ts",
+    root: fileURLToPath(new URL("../../..", import.meta.url)),
+    configFile: fileURLToPath(new URL("../vite.config.ts", import.meta.url)),
     server: { middlewareMode: true, ws: false },
     appType: "custom",
   });

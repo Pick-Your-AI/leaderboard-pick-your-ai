@@ -113,6 +113,14 @@
 }
 
 @media (prefers-contrast: more) {
+  :root[data-theme="light"] {
+    --color-text-muted: #1e293b;
+    --color-border: #475569;
+    --color-link: #134e4a;
+  }
+}
+
+@media (prefers-contrast: more) and (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     --color-text-muted: #1e293b;
     --color-border: #475569;
