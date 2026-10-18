@@ -18,6 +18,10 @@ class SourceSecurityCandidateTests(unittest.TestCase):
             "unknown",
             "test and owner role",
             "implemented boundaries",
+            "local receiver verifies signatures",
+            "escaped plain text only",
+            "meta CSP cannot enforce",
+            "does not deploy a host",
             "No app installation or permission grant is authorized",
         ):
             self.assertIn(required.lower(), text.lower())
