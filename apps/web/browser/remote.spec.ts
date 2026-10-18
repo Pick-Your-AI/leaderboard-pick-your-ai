@@ -75,7 +75,7 @@ function snapshot(id = "api-1", revision = 1) {
         snapshotId: id,
         revision,
         generatedAt: at,
-        metricDefinitionVersion: "candidate-0.1.0",
+        metricDefinitionVersion: "candidate-0.1.1",
         computationVersion: "synthetic-http-browser-only",
         coverage: [coverage],
         results: [],

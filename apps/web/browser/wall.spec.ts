@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { metricRegistryV1 } from "@pick-your-ai/metrics";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 const at = "2026-10-18T03:00:00.000Z";
@@ -76,7 +77,7 @@ function snapshot(id = "wall-1", revision = 1) {
         snapshotId: id,
         revision,
         generatedAt: at,
-        metricDefinitionVersion: "candidate-0.1.0",
+        metricDefinitionVersion: metricRegistryV1.policy_version,
         computationVersion: "synthetic-wall-browser-only",
         coverage: [coverage],
         results: [],
