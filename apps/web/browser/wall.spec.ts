@@ -333,6 +333,7 @@ test("frozen wall never advances its snapshot but still removes suppressed contr
   page,
 }) => {
   const api = await service(page);
+  let releaseHealth: (() => void) | undefined;
   try {
     await page.clock.install();
     await page.goto(wall("frozen", "&snapshot=wall-1"));
@@ -340,8 +341,16 @@ test("frozen wall never advances its snapshot but still removes suppressed contr
     await expect(first).toBeVisible();
     await first.focus();
     const calls = api.calls.length;
+    // Finish this focus recheck before publishing the next head. Preserved focus
+    // alone does not mean its health and content responses have both settled.
+    releaseHealth = api.holdHealth();
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect.poll(() => api.calls.length).toBeGreaterThan(calls);
+    await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeDisabled();
+    await expect(first).toBeFocused();
+    releaseHealth();
+    await expect(page.getByRole("button", { name: "Next page", exact: true })).toBeEnabled();
+    await expect(page.getByRole("alert")).toHaveCount(0);
     await expect(first).toBeFocused();
     api.next();
     await elapseWithReads(page, 61_000);
@@ -362,6 +371,7 @@ test("frozen wall never advances its snapshot but still removes suppressed contr
     await expect(page.getByRole("link", { name: /Wall contributor/ })).toHaveCount(0);
     await expect(page.locator("body")).not.toContainText("SENSITIVE_SYNTHETIC_WALL_FAILURE");
   } finally {
+    releaseHealth?.();
     await api.close();
   }
 });
