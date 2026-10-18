@@ -1,3 +1,5 @@
+import { EvidenceDrawer, EvidenceProof, Receipt } from "./Evidence.tsx";
+import { isProofTransition, proofHref, readProof, withoutProof } from "./proof.ts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MetricDefinition, MetricRegistry } from "@pick-your-ai/contracts";
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
@@ -12,10 +14,8 @@ import {
   directory,
   portfolioParameters,
   catalog,
-  evidence,
   exportPage,
   health,
-  metadata,
   parameters,
   profile,
   publicLink,
@@ -285,60 +285,12 @@ function CategoryCounts({ categories, registry }: { categories: CategoryTotal[];
     </ul>
   );
 }
-function Receipt({ value, selected }: { value: Evidence; selected: Selection }) {
-  return (
-    <dl className="receipt">
-      <dt>Contribution</dt>
-      <dd>{value.contribution.contributionId}</dd>
-      <dt>Work state</dt>
-      <dd>{value.activityState === "unknown" ? "Acceptance state unknown" : value.activityState}</dd>
-      <dt>Collected at</dt>
-      <dd>
-        {value.observedAt ?? "Unknown"}. Collection time can be later than the contribution; current corrections and
-        privacy controls apply.
-      </dd>
-      <dt>Qualification</dt>
-      <dd>{value.contribution.qualification}</dd>
-      <dt>Participant roles</dt>
-      <dd>{value.contribution.roles.join(", ")}</dd>
-      <dt>Actor</dt>
-      <dd>
-        {value.contribution.actorId ? (
-          <a data-api-nav href={uiHref(`/contributors/${encodeURIComponent(value.contribution.actorId)}`, selected)}>
-            {value.contribution.actorId}
-          </a>
-        ) : (
-          "Unknown"
-        )}
-      </dd>
-      <dt>Occurrence time</dt>
-      <dd>{value.occurredAt ?? "Unknown; no event time is inferred"}</dd>
-      <dt>Eligibility reasons</dt>
-      <dd>{value.contribution.reasonCodes.join(", ") || "No additional reason code supplied"}</dd>
-      <dt>Source</dt>
-      <dd>
-        <Source href={value.artifact.publicUrl}>Open public source artifact</Source>
-      </dd>
-      <dt>Source revision</dt>
-      <dd>
-        {value.sourceRevision ?? "Unknown"} · <Source href={value.sourceRevisionUrl}>Revision source</Source>
-      </dd>
-      <dt>Measures</dt>
-      <dd>
-        {value.contribution.metricIds.map((id) => (
-          <p key={id}>
-            <a data-api-nav href={uiHref(`/leaderboards/${encodeURIComponent(id)}`, selected, { metric: id })}>
-              {id}
-            </a>
-          </p>
-        ))}
-      </dd>
-    </dl>
-  );
-}
 
 export function RemoteApp() {
   const [url, setUrl] = useState(() => ({ pathname: location.pathname, search: location.search }));
+  const urlRef = useRef(url);
+  urlRef.current = url;
+  const proofOpener = useRef<HTMLElement | null>(null);
   useEffect(() => {
     document.title = `${title(url.pathname)} · PickYour.AI Credits`;
   }, [url.pathname]);
@@ -376,12 +328,16 @@ export function RemoteApp() {
   useEffect(() => () => activeExport.current?.abort(), []);
   useEffect(() => {
     const pop = () => {
+      const next = { pathname: location.pathname, search: location.search };
+      const drawerOnly = isProofTransition(urlRef.current, next);
       active.current?.abort();
       activeExport.current?.abort();
-      setState({ status: "loading" });
-      setHeldPin(null);
-      focusOnLoad.current = true;
-      setUrl({ pathname: location.pathname, search: location.search });
+      if (!drawerOnly) {
+        setState({ status: "loading" });
+        setHeldPin(null);
+        focusOnLoad.current = true;
+      }
+      setUrl(next);
     };
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
@@ -396,6 +352,16 @@ export function RemoteApp() {
   const parsed = useMemo(() => {
     try {
       const selected = selection(url.search);
+      if (
+        selected.proof &&
+        (!selected.snapshot ||
+          !(
+            /^\/leaderboards\/[^/]+$/.test(url.pathname) ||
+            /^\/projects\/[^/]+$/.test(url.pathname) ||
+            url.pathname === "/live"
+          ))
+      )
+        throw new ReadFailure(400, "invalid_proof_selection");
       const project = /^\/projects\/([^/]+)$/.exec(url.pathname);
       const metric = /^\/(?:leaderboards|methodology)\/([^/]+)$/.exec(url.pathname);
       const routeId = (value: string) => {
@@ -492,10 +458,7 @@ export function RemoteApp() {
         };
       if (contribution) {
         const id = decode(contribution[1]!);
-        const raw = await request(parsed.base, `evidence/${encodeURIComponent(id)}`, qs, controller.signal);
-        const value = evidence(raw);
-        if (value.contribution.contributionId !== id) throw new ReadFailure(502, "api_evidence_mismatch");
-        return { kind: "evidence", value: { ...metadata(raw, exact), ...value } };
+        return { kind: "evidence", value: await readProof(parsed.base, id, exact, controller.signal) };
       }
       if (path === "/activity")
         return {
@@ -556,10 +519,10 @@ export function RemoteApp() {
   }, [parsed, heldPin, nonce, selected, url.pathname]);
   useEffect(() => {
     if (state.status !== "loading" && focusOnLoad.current) {
-      heading.current?.focus();
+      if (!selected.proof) heading.current?.focus();
       focusOnLoad.current = false;
     }
-  }, [state]);
+  }, [state, selected.proof]);
   const data = state.status === "ready" ? state.data : null;
   const meta = data && "value" in data ? data.value : null;
   const pending = meta && !selected.snapshot && meta.head.snapshotId !== meta.snapshotId ? meta.head.snapshotId : null;
@@ -574,6 +537,7 @@ export function RemoteApp() {
   useEffect(() => {
     if (
       pending &&
+      !selected.proof &&
       follow &&
       !reduced &&
       !pointerInside &&
@@ -582,7 +546,7 @@ export function RemoteApp() {
       document.visibilityState === "visible"
     )
       apply();
-  }, [pending, follow, reduced, pointerInside, focusInside, apply]);
+  }, [pending, selected.proof, follow, reduced, pointerInside, focusInside, apply]);
   const link = (
     path: string,
     text: string,
@@ -593,6 +557,13 @@ export function RemoteApp() {
     </a>
   );
   const pinned = { ...selected, snapshot: meta?.snapshotId ?? selected.snapshot };
+  const closeProof = useCallback(() => {
+    if (history.state?.apiProofDrawer === true) history.back();
+    else {
+      history.replaceState(null, "", withoutProof(urlRef.current));
+      setUrl({ pathname: location.pathname, search: location.search });
+    }
+  }, []);
   const download = async (format: "json" | "csv") => {
     activeExport.current?.abort();
     const controller = new AbortController();
@@ -621,7 +592,7 @@ export function RemoteApp() {
     <div
       className="remote-app"
       onClick={(event) => {
-        const target = (event.target as Element).closest<HTMLAnchorElement>("a[data-api-nav]");
+        const target = (event.target as Element).closest<HTMLAnchorElement>("a[data-api-nav], a[data-api-proof]");
         if (
           !target ||
           event.defaultPrevented ||
@@ -633,7 +604,18 @@ export function RemoteApp() {
         )
           return;
         event.preventDefault();
-        navigate(target.getAttribute("href")!);
+        if (target.hasAttribute("data-api-proof")) {
+          proofOpener.current = target;
+          // Only a reproducible URL and a drawer marker enter history, never API data.
+          // Switching proofs replaces the open panel, rather than growing a hidden panel stack.
+          if (selected.proof) history.replaceState(history.state, "", target.getAttribute("href")!);
+          else {
+            history.replaceState(null, "", uiHref(url.pathname, pinned, { cursor: selected.cursor }));
+            history.pushState({ apiProofDrawer: true }, "", target.getAttribute("href")!);
+          }
+          setFollow(false);
+          setUrl({ pathname: location.pathname, search: location.search });
+        } else navigate(target.getAttribute("href")!);
       }}
     >
       <a className="skip-link" href="#main">
@@ -713,7 +695,7 @@ export function RemoteApp() {
                   : "Showing the selected publication. Updates are rechecked every 20 seconds while visible."}
             </p>
             {pending && (
-              <button type="button" className="button" onClick={apply}>
+              <button type="button" className="button" onClick={apply} disabled={Boolean(selected.proof)}>
                 Apply new snapshot
               </button>
             )}
@@ -854,7 +836,7 @@ export function RemoteApp() {
                               {row.evidenceIds.length
                                 ? row.evidenceIds.map((id) => (
                                     <p key={id}>
-                                      <a data-api-nav href={uiHref(`/contributions/${encodeURIComponent(id)}`, pinned)}>
+                                      <a data-api-proof href={proofHref(url.pathname, pinned, id)}>
                                         {id}
                                       </a>
                                     </p>
@@ -1025,7 +1007,7 @@ export function RemoteApp() {
               )}
             </>
           )}
-          {data?.kind === "evidence" && <Receipt value={data.value} selected={pinned} />}
+          {data?.kind === "evidence" && <EvidenceProof value={data.value} selected={pinned} />}
           {data?.kind === "unavailable" && (
             <section className="notice notice-info">
               <h2>This capability is not available in this UI</h2>
@@ -1037,6 +1019,22 @@ export function RemoteApp() {
           )}
         </div>
       </main>
+      {selected.proof && !parsed.error && (
+        <EvidenceDrawer
+          key={proofHref(url.pathname, pinned, selected.proof)}
+          base={parsed.base}
+          id={selected.proof}
+          selected={pinned}
+          recheck={nonce}
+          onRecheck={refresh}
+          boardIncludesProof={
+            data?.kind === "board" ? data.value.rows.some((row) => row.evidenceIds.includes(selected.proof!)) : null
+          }
+          parentError={state.status === "error" ? state.error : null}
+          onClose={closeProof}
+          opener={proofOpener.current}
+        />
+      )}
       <footer className="app-footer">
         <div className="footer-inner">
           <p>
