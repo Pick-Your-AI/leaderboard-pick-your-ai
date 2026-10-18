@@ -22,6 +22,7 @@ const selected = selection(
   "?organization=Pick-Your-AI&snapshot=public-1&repository=repo-1&metric=pr_opened&search=alice&category=pr_opened&cursor=old.signature",
 );
 const fixture = () => ({
+  schemaVersion: "leaderboard/v1",
   snapshotId: "public-1",
   revision: 1,
   generatedAt: at,

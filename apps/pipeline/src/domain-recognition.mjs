@@ -15,6 +15,7 @@ const clocks = {
   market_research: "accepted_at",
   evidence_manifests: "accepted_at",
   data_quality: "accepted_at",
+  reproductions: "accepted_at",
   documentation: "merged_at",
   tests: "merged_at",
   regressions_prevented: "accepted_at",
@@ -36,6 +37,7 @@ const authorMetrics = new Set([
   "rights_reviews",
   "evidence_manifests",
   "data_quality",
+  "reproductions",
   "documentation",
   "tests",
 ]);
@@ -195,6 +197,7 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
       "compatibility_proposals",
       "evidence_manifests",
       "data_quality",
+      "reproductions",
     ].includes(metric)
   )
     approvedOwner(domain.ownerIds, decision.actor);
@@ -385,6 +388,66 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
       }
       break;
     }
+    case "reproductions": {
+      object(detail, [
+        "targetKind",
+        "targetId",
+        "scenarioId",
+        "scenarioVersion",
+        "runId",
+        "completedAt",
+        "executionComplete",
+        "scenarioAccepted",
+        "outcome",
+        "scenario",
+        "environment",
+        "result",
+      ]);
+      require(
+        binding.sourceMetricId === "pr_merged" &&
+          candidate.metricId === "pr_merged" &&
+          target.artifact.kind === "pull_request" &&
+          candidate.rawState?.startsWith("target:"),
+      );
+      const exactId = (value) => {
+        id(value);
+        require(value.trim() === value);
+        return value;
+      };
+      // A new result, environment, run or review version does not create a new
+      // accepted scenario. Its source author and canonical target stay bound.
+      unit = [exactId(detail.targetKind), exactId(detail.targetId), exactId(detail.scenarioId)];
+      exactId(detail.scenarioVersion);
+      exactId(detail.runId);
+      require(detail.executionComplete === true && detail.scenarioAccepted === true);
+      choice(detail.outcome, ["reproduced", "not_reproduced", "inconclusive"]);
+      require(
+        instant(detail.completedAt) <= instant(candidate.occurredAt) &&
+          instant(candidate.occurredAt) <= instant(acceptedAt),
+      );
+      const sourcePath = new URL(record.sourceRevisionUrl).pathname.split("/");
+      const hashesByUrl = new Map();
+      for (const pin of [detail.scenario, detail.environment, detail.result]) {
+        object(pin, ["revision", "sourceRevisionUrl", "contentHash"]);
+        require(typeof pin.revision === "string" && [40, 64].includes(pin.revision.length));
+        pinnedGithubUrl(pin.sourceRevisionUrl, pin.revision);
+        require(digest(pin.contentHash).length === 64);
+        const path = new URL(pin.sourceRevisionUrl).pathname.split("/");
+        require(
+          pin.revision === record.sourceRevision &&
+            path[1] === sourcePath[1] &&
+            path[2] === sourcePath[2] &&
+            path[3] === "blob" &&
+            path.slice(1).every((part) => part.length > 0),
+        );
+        // A combined proof artifact may serve several roles, but one exact
+        // immutable URL cannot assert contradictory content hashes.
+        const previous = hashesByUrl.get(pin.sourceRevisionUrl);
+        require(previous === undefined || previous === pin.contentHash);
+        hashesByUrl.set(pin.sourceRevisionUrl, pin.contentHash);
+      }
+      break;
+    }
     case "documentation":
     case "tests":
       object(detail, ["authorship", "category", "substantiveReview"]);
@@ -475,6 +538,7 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
   ];
   if (["catalog_proposals", "pricebook_proposals", "compatibility_proposals"].includes(metric))
     publicReasonCodes.push("reviewed_artifact_not_issue_completion_or_production_publication");
+  if (metric === "reproductions") publicReasonCodes.push("accepted_reproduction_scenario_not_bug_confirmation");
   for (const key of ["evidenceClass", "method", "outcome", "phase", "reviewMethod", "authorship", "disposition"])
     if (Object.hasOwn(detail, key)) publicReasonCodes.push(`domain_${key}:${detail[key]}`);
   return { changesetId, occurredAt, dateBasis: domainDateBasis(metric), publicReasonCodes };

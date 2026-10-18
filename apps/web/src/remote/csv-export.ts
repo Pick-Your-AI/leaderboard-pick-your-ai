@@ -2,9 +2,9 @@ import { stableJSON } from "@pick-your-ai/metrics";
 import type { MetricDefinition } from "@pick-your-ai/contracts";
 import { parseExportJSON } from "./export-json.ts";
 
-// The public-export/v1 renderer quotes every cell and terminates every record
+// Every public-export renderer quotes every cell and terminates every record
 // with CRLF. Read that bounded contract; do not guess a spreadsheet dialect.
-const columns = [
+const legacyColumns = [
   "record_type",
   "export_schema_version",
   "snapshot",
@@ -47,7 +47,22 @@ const columns = [
   "pending",
   "pending_evidence",
 ] as const;
-const metadataEnd = columns.indexOf("actor_id");
+const membershipColumns = ["scope_schema_version", "context", "projects"] as const;
+type Column = (typeof legacyColumns)[number] | (typeof membershipColumns)[number] | "roles";
+const scopedColumns = (roles: boolean): Column[] => {
+  const split = legacyColumns.indexOf("start");
+  return [
+    ...legacyColumns.slice(0, split),
+    ...membershipColumns,
+    ...(roles ? ["roles" as const] : []),
+    ...legacyColumns.slice(split),
+  ];
+};
+const variants: { version: string; columns: readonly Column[] }[] = [
+  { version: "public-export/v1", columns: legacyColumns },
+  { version: "public-export/v2", columns: scopedColumns(false) },
+  { version: "public-export/v3", columns: scopedColumns(true) },
+];
 const formula = (value: string) => /^[\s\p{Cf}]*[=+@-]/u.test(value) || /^[\t\r\n]/u.test(value);
 const protectedText = (value: string) => (formula(value) ? `'${value}` : value);
 const originalText = (value: string) => (value.startsWith("'") && formula(value.slice(1)) ? value.slice(1) : value);
@@ -55,7 +70,10 @@ function invalid(): never {
   throw new Error("invalid_export_csv");
 }
 
-function records(raw: string, rowLimit: number): string[][] {
+function records(
+  raw: string,
+  rowLimit: number,
+): { rows: string[][]; columns: readonly Column[]; version: string; withComparison: boolean } {
   if (!Number.isSafeInteger(rowLimit) || rowLimit < 1 || rowLimit > 100 || raw.length > 2_000_000) invalid();
   const result: string[][] = [];
   let index = 0;
@@ -80,7 +98,7 @@ function records(raw: string, rowLimit: number): string[][] {
       if (!closed || formula(cell) || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(cell)) invalid();
       if (new TextEncoder().encode(cell).byteLength > 256 * 1024) invalid();
       row.push(cell);
-      if (row.length > columns.length) invalid();
+      if (row.length > legacyColumns.length + 6) invalid();
       if (raw[index] === ",") {
         index++;
         continue;
@@ -89,13 +107,21 @@ function records(raw: string, rowLimit: number): string[][] {
       index += 2;
       break;
     }
-    if (row.length !== columns.length) invalid();
     result.push(row);
     if (result.length > rowLimit + 2) invalid();
   }
   const header = result[0];
-  if (result.length < 2 || !header || columns.some((column, index) => header[index] !== column)) invalid();
-  return result.slice(1);
+  const variant = variants.find(
+    ({ columns }) =>
+      header &&
+      (header.length === columns.length ||
+        (header.length === columns.length + 2 &&
+          header[columns.length] === "comparison" &&
+          header[columns.length + 1] === "movement")) &&
+      columns.every((column, index) => header[index] === column),
+  );
+  if (result.length < 2 || !variant || result.some((row) => row.length !== header!.length)) invalid();
+  return { rows: result.slice(1), ...variant, withComparison: header!.length === variant.columns.length + 2 };
 }
 
 function number(cell: string): number {
@@ -120,14 +146,24 @@ function entries(cell: string): Record<string, unknown>[] {
 /** Reconstruct the minimized JSON contract, then use its shared validator. The
  * returned download remains the original CSV bytes, including formula guards. */
 export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, rowLimit: number): unknown {
-  const [metadata, ...data] = records(raw, rowLimit);
+  const parsed = records(raw, rowLimit);
+  const { columns, version, withComparison } = parsed;
+  const [metadata, ...data] = parsed.rows;
+  const metadataEnd = columns.indexOf("actor_id");
   if (!metadata) invalid();
-  const at = (row: string[], column: (typeof columns)[number]): string => {
+  const at = (row: string[], column: Column): string => {
     const value = row[columns.indexOf(column)];
     if (value === undefined) invalid();
     return value;
   };
-  if (metadata[0] !== "metadata" || metadata.slice(metadataEnd).some((cell) => cell !== "")) invalid();
+  if (
+    metadata[0] !== "metadata" ||
+    metadata.slice(metadataEnd, columns.length).some((cell) => cell !== "") ||
+    (withComparison && metadata[columns.length + 1] !== "") ||
+    at(metadata, "export_schema_version") !== version
+  )
+    invalid();
+  const comparison = withComparison ? parseExportJSON(metadata[columns.length]!) : undefined;
   if (
     !expectedMetric ||
     at(metadata, "metric") !== protectedText(expectedMetric.id) ||
@@ -150,6 +186,8 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
   const diagnostics: unknown[] = [];
   const rows = data.map((row) => {
     if (row[0] !== "row" || row.slice(1, metadataEnd).some((cell, index) => cell !== metadata[index + 1])) invalid();
+    if (withComparison && row[columns.length] !== metadata[columns.length]) invalid();
+    const movement = withComparison ? parseExportJSON(row[columns.length + 1]!) : undefined;
     const actorId = originalText(at(row, "actor_id"));
     const diagnosticColumns = [
       "numerator",
@@ -194,9 +232,11 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
       },
       evidenceIds,
       ...(pending === undefined ? {} : { pending }),
+      ...(withComparison ? { movement } : {}),
     };
   });
   return {
+    ...(withComparison ? { comparison } : {}),
     exportSchemaVersion: at(metadata, "export_schema_version"),
     schemaVersion: "leaderboard/v1",
     snapshotId: originalText(at(metadata, "snapshot")),
@@ -211,6 +251,14 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
       workstream: nullableText(at(metadata, "workstream")),
       start: nullableText(at(metadata, "start")),
       end: nullableText(at(metadata, "end")),
+      ...(version === "public-export/v1"
+        ? {}
+        : {
+            schemaVersion: at(metadata, "scope_schema_version"),
+            context: at(metadata, "context"),
+            projects: parseExportJSON(at(metadata, "projects")),
+          }),
+      ...(version === "public-export/v3" ? { roles: parseExportJSON(at(metadata, "roles")) } : {}),
     },
     actorFilter: at(metadata, "actor_filter"),
     metric: parseExportJSON(at(metadata, "metric_definition")),

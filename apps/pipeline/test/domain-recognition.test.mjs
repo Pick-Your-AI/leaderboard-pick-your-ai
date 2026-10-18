@@ -136,6 +136,32 @@ const details = {
     },
     origin: { kind: "prior_contributors", complete: true, contributorIds: ["303"] },
   },
+  reproductions: {
+    targetKind: "issue",
+    targetId: "issue:1",
+    scenarioId: "scenario:1",
+    scenarioVersion: "v1",
+    runId: "run:1",
+    completedAt: occurredAt,
+    executionComplete: true,
+    scenarioAccepted: true,
+    outcome: "reproduced",
+    scenario: {
+      revision: after,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/blob/${after}/reproduction/scenario.md`,
+      contentHash: hash,
+    },
+    environment: {
+      revision: after,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/blob/${after}/reproduction/environment.json`,
+      contentHash: "e".repeat(64),
+    },
+    result: {
+      revision: after,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/blob/${after}/reproduction/result.json`,
+      contentHash: "f".repeat(64),
+    },
+  },
   documentation: { authorship: "authored", category: "guide", substantiveReview: true },
   tests: { authorship: "authored", category: "test_artifact", substantiveReview: true },
   regressions_prevented: {
@@ -266,6 +292,323 @@ function scenario(metric = "catalog_proposals") {
 const run = (s) => materializeRecognition(s.input, s.state, [s.binding], s.policies, applyRecognitionReceipt, cutoff);
 const qualified = (s) =>
   run(s).facts.filter((fact) => fact.metricId === s.binding.metricId && fact.state === "qualified");
+
+for (const outcome of ["reproduced", "not_reproduced", "inconclusive"]) {
+  test(`reproductions: an independently accepted executed ${outcome} scenario contributes without confirming a bug`, () => {
+    const s = scenario("reproductions"),
+      original = structuredClone(s.input);
+    s.record.details.outcome = outcome;
+    const out = run(s),
+      facts = out.facts.filter((fact) => fact.metricId === "reproductions");
+    assert.equal(facts.length, 1);
+    assert.equal(facts[0].acceptedAt, acceptedAt);
+    assert.equal(facts[0].role, "author");
+    assert.equal(
+      out.facts.some((fact) => fact.metricId === "confirmed_bugs"),
+      false,
+    );
+    assert.deepEqual(out.evidence.at(-1).contribution.reasonCodes, [
+      "independent_recognition_receipt",
+      "domain_metric:reproductions",
+      "domain_clock:accepted_at",
+      "accepted_reproduction_scenario_not_bug_confirmation",
+      `domain_outcome:${outcome}`,
+    ]);
+    assert.deepEqual(s.input, original);
+    assert.doesNotMatch(
+      JSON.stringify(out.evidence.at(-1)),
+      /scenario:1|run:1|scenarioVersion|contentHash|private-request/,
+    );
+  });
+}
+
+test("reproductions: generic receipts, unexecuted work and unbound source authority cannot qualify", async (t) => {
+  const cases = [
+    [
+      "missing specialist evidence",
+      (s) => {
+        delete s.binding.domainEvidence;
+      },
+    ],
+    [
+      "missing completed execution",
+      (s) => {
+        s.record.details.executionComplete = false;
+      },
+    ],
+    [
+      "missing scenario acceptance",
+      (s) => {
+        s.record.details.scenarioAccepted = false;
+      },
+    ],
+    [
+      "no result",
+      (s) => {
+        s.record.details.outcome = null;
+      },
+    ],
+    [
+      "unexecuted result",
+      (s) => {
+        s.record.details.outcome = "not_run";
+      },
+    ],
+    [
+      "inferred bug confirmation",
+      (s) => {
+        s.record.details.outcome = "confirmed_bug";
+      },
+    ],
+    [
+      "reviewer lacks affected-owner authority",
+      (s) => {
+        s.binding.domainEvidence.ownerIds = ["303"];
+      },
+    ],
+    [
+      "current collaborator review",
+      (s) => {
+        s.request.collaborators["202"] = "accepted";
+      },
+    ],
+    [
+      "missing audit",
+      (s) => {
+        s.state.audit = [];
+      },
+    ],
+    [
+      "stale request version",
+      (s) => {
+        s.request.version++;
+      },
+    ],
+    [
+      "unsupported commenter attribution",
+      (s) => {
+        s.candidate.role = "commenter";
+      },
+    ],
+    [
+      "unsupported issue source",
+      (s) => {
+        s.evidence.artifact.kind = "issue";
+      },
+    ],
+    [
+      "unmerged PR",
+      (s) => {
+        s.candidate.rawState = "closed_unmerged";
+      },
+    ],
+    [
+      "same-metric generic source",
+      (s) => {
+        s.binding.sourceMetricId = s.candidate.metricId = "reproductions";
+      },
+    ],
+    [
+      "future execution",
+      (s) => {
+        s.record.details.completedAt = acceptedAt;
+      },
+    ],
+    [
+      "finer execution clock",
+      (s) => {
+        s.record.details.completedAt = "2026-10-07T10:00:00.0001Z";
+      },
+    ],
+    [
+      "unknown execution clock",
+      (s) => {
+        s.record.details.completedAt = "unknown";
+      },
+    ],
+    [
+      "future source merge",
+      (s) => {
+        s.candidate.occurredAt = cutoff;
+      },
+    ],
+    [
+      "private extra field",
+      (s) => {
+        s.record.details.privateResult = "PRIVATE_SENTINEL";
+      },
+    ],
+    ...["targetKind", "targetId", "scenarioId", "scenarioVersion", "runId"].flatMap((key) => [
+      [
+        `${key} trailing newline`,
+        (s) => {
+          s.record.details[key] += "\n";
+        },
+      ],
+      [
+        `${key} overlong identity`,
+        (s) => {
+          s.record.details[key] = "a".repeat(201);
+        },
+      ],
+    ]),
+  ];
+  for (const [name, mutate] of cases) {
+    await t.test(name, () => {
+      const s = scenario("reproductions");
+      mutate(s);
+      assert.throws(
+        () => run(s),
+        (error) => /unverified/.test(error.message) && !error.message.includes("PRIVATE_SENTINEL"),
+      );
+    });
+  }
+});
+
+test("reproductions: each scenario, environment and result proof needs the exact collected immutable revision", async (t) => {
+  for (const key of ["scenario", "environment", "result"]) {
+    const cases = [
+      [
+        "missing proof",
+        (s) => {
+          delete s.record.details[key];
+        },
+      ],
+      [
+        "missing hash",
+        (s) => {
+          delete s.record.details[key].contentHash;
+        },
+      ],
+      [
+        "newline hash",
+        (s) => {
+          s.record.details[key].contentHash += "\n";
+        },
+      ],
+      [
+        "mismatched revision",
+        (s) => {
+          s.record.details[key].revision = before;
+        },
+      ],
+      [
+        "mutable revision",
+        (s) => {
+          s.record.details[key].sourceRevisionUrl =
+            `https://github.com/synthetic-owner/repository/blob/main/reproduction/${key}`;
+        },
+      ],
+      [
+        "another immutable version",
+        (s) => {
+          s.record.details[key].revision = before;
+          s.record.details[key].sourceRevisionUrl = s.record.details[key].sourceRevisionUrl.replace(after, before);
+        },
+      ],
+      [
+        "another repository",
+        (s) => {
+          s.record.details[key].sourceRevisionUrl = s.record.details[key].sourceRevisionUrl.replace(
+            "/repository/",
+            "/other/",
+          );
+        },
+      ],
+      [
+        "commit without artifact",
+        (s) => {
+          s.record.details[key].sourceRevisionUrl = s.record.sourceRevisionUrl;
+        },
+      ],
+      [
+        "empty path segment",
+        (s) => {
+          s.record.details[key].sourceRevisionUrl = s.record.details[key].sourceRevisionUrl.replace(
+            "/reproduction/",
+            "/reproduction//",
+          );
+        },
+      ],
+      [
+        "query string",
+        (s) => {
+          s.record.details[key].sourceRevisionUrl += "?raw=1";
+        },
+      ],
+      [
+        "fragment",
+        (s) => {
+          s.record.details[key].sourceRevisionUrl += "#result";
+        },
+      ],
+      [
+        "encoded path",
+        (s) => {
+          s.record.details[key].sourceRevisionUrl += "%2Fprivate";
+        },
+      ],
+    ];
+    for (const [name, mutate] of cases) {
+      await t.test(`${key}: ${name}`, () => {
+        const s = scenario("reproductions");
+        mutate(s);
+        assert.throws(() => run(s), /domain_recognition_evidence_unverified/);
+      });
+    }
+  }
+  const combined = scenario("reproductions");
+  combined.record.details.environment = structuredClone(combined.record.details.scenario);
+  combined.record.details.result = structuredClone(combined.record.details.scenario);
+  assert.equal(
+    qualified(combined).length,
+    1,
+    "One reviewed combined artifact may explicitly carry all three proof roles",
+  );
+  combined.record.details.result.contentHash = "e".repeat(64);
+  assert.throws(() => run(combined), /domain_recognition_evidence_unverified/);
+});
+
+test("reproductions: scenario identity survives reruns, proof and outcome revisions", () => {
+  const s = scenario("reproductions"),
+    original = qualified(s)[0].canonicalKey;
+  s.record.details.scenarioVersion = "v2";
+  s.record.details.runId = "run:2";
+  s.record.details.completedAt = "2026-10-07T09:59:59.999Z";
+  s.record.details.outcome = "not_reproduced";
+  s.record.details.environment.contentHash = "a".repeat(64);
+  s.record.details.result.contentHash = "b".repeat(64);
+  assert.equal(qualified(s)[0].canonicalKey, original);
+  for (const key of ["targetKind", "targetId", "scenarioId"]) {
+    const distinct = scenario("reproductions");
+    distinct.record.details[key] += ":separately-reviewed";
+    assert.notEqual(qualified(distinct)[0].canonicalKey, original);
+  }
+});
+
+test("reproductions: full 64-character source revisions bind all three reviewed artifact roles", () => {
+  const s = scenario("reproductions"),
+    revision = "a".repeat(64);
+  s.input = source((envelope) => {
+    envelope.payload.pull_request.merge_commit_sha = revision;
+    envelope.integration.after = revision;
+    envelope.integration.commitShas = [revision];
+    envelope.integration.diff.after = revision;
+  });
+  s.candidate = s.input.facts.find((fact) => fact.metricId === "pr_merged");
+  s.evidence = s.input.evidence.find((entry) => entry.contribution.contributionId === s.candidate.id);
+  s.record.factId = s.candidate.id;
+  s.record.sourceRevision = revision;
+  s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl;
+  for (const key of ["scenario", "environment", "result"]) {
+    s.record.details[key].revision = revision;
+    s.record.details[key].sourceRevisionUrl = s.record.details[key].sourceRevisionUrl.replace(after, revision);
+  }
+  assert.equal(qualified(s).length, 1);
+  assert.equal(run(s).evidence.at(-1).sourceRevision, revision);
+  s.record.details.environment.revision = after;
+  assert.throws(() => run(s), /domain_recognition_evidence_unverified/);
+});
 
 test("data_quality: an independently accepted correction becomes a qualified canonical unit", () => {
   const s = scenario("data_quality");
@@ -581,11 +924,32 @@ function legacyDomainFingerprint(s, bindings = [s.binding]) {
     .digest("hex");
 }
 
+function beforeReproductionFingerprint(s, bindings = [s.binding]) {
+  const authority = ["localization-review-target/v1", [s.request], [], [JSON.stringify(s.decision)], bindings];
+  if (bindings.some((binding) => binding.metricId === "data_quality")) authority.push("data-quality-recognition/v1");
+  return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
+}
+
+test("reproductions: authority retires generic scenarios while preserving every configuration without reproduction bindings", () => {
+  for (const metric of domainMetricIds) {
+    const s = scenario(metric),
+      current = recognitionFingerprint(s.state, [s.binding]),
+      previous = beforeReproductionFingerprint(s);
+    if (metric === "reproductions") assert.notEqual(current, previous);
+    else assert.equal(current, previous, `${metric}: exact prior authority bytes survive`);
+  }
+  const s = scenario("documentation"),
+    mixed = [s.binding, scenario("data_quality").binding, scenario("reproductions").binding];
+  assert.notEqual(recognitionFingerprint(s.state, mixed), beforeReproductionFingerprint(s, mixed));
+  const unaffected = mixed.slice(0, 2);
+  assert.equal(recognitionFingerprint(s.state, unaffected), beforeReproductionFingerprint(s, unaffected));
+});
+
 test("data_quality: qualifier authority fences legacy correction publications without changing other domain fingerprints", () => {
   for (const metric of domainMetricIds) {
     const s = scenario(metric),
       current = recognitionFingerprint(s.state, [s.binding]);
-    if (metric === "data_quality") assert.notEqual(current, legacyDomainFingerprint(s));
+    if (["data_quality", "reproductions"].includes(metric)) assert.notEqual(current, legacyDomainFingerprint(s));
     else assert.equal(current, legacyDomainFingerprint(s), `${metric}: established publication authority is retained`);
   }
   const mixed = scenario("documentation"),
@@ -612,6 +976,7 @@ const candidateDateBases = {
   market_research: "acceptedAt",
   evidence_manifests: "acceptedAt",
   data_quality: "acceptedAt",
+  reproductions: "acceptedAt",
   documentation: "occurredAt",
   tests: "occurredAt",
   regressions_prevented: "acceptedAt",
@@ -751,6 +1116,9 @@ const exclusions = {
   },
   data_quality: (s) => {
     s.record.details.origin.kind = "unknown";
+  },
+  reproductions: (s) => {
+    s.record.details.executionComplete = false;
   },
   documentation: (s) => {
     s.record.details.authorship = "generated";
@@ -1277,6 +1645,125 @@ test("data_quality: correction provenance stays private and obsolete generic aut
     state.requests[s.request.id].status = "withdrawn";
   });
   assert.equal(await restarted.source.read(publicScope, currentId, new AbortController().signal), null);
+  assert.equal((await restarted.app.inject(`/api/v1/evidence/${proofId}?snapshot=${currentId}`)).statusCode, 410);
+  await assert.rejects(restarted.aggregateExplanations.read(currentId), /authorization_changed/);
+});
+
+test("reproductions: persisted accepted outcomes keep private proof bounded and retire obsolete authority across reopen", async (t) => {
+  const { harness, components, publicScope } = await import("./harness.mjs");
+  const { createPipeline } = await import("../src/runtime.mjs");
+  const s = scenario("reproductions");
+  // These marker-free fictional artifacts exercise the actual public-mode
+  // boundaries without asserting any live source, executed scenario or review.
+  s.record.details.outcome = "inconclusive";
+  s.input = JSON.parse(JSON.stringify(s.input).replace(/synthetic/gi, "fixture"));
+  s.candidate = s.input.facts.find((fact) => fact.id === s.candidate.id);
+  s.evidence = s.input.evidence.find((entry) => entry.contribution.contributionId === s.candidate.id);
+  for (const entry of s.input.evidence) {
+    entry.artifact.publicUrl = entry.artifact.publicUrl.replace("fixture-owner/repository", "example-org/example-repo");
+    if (entry.sourceRevisionUrl)
+      entry.sourceRevisionUrl = entry.sourceRevisionUrl.replace("fixture-owner/repository", "example-org/example-repo");
+    entry.contribution.reasonCodes.push("domain_secret:PRIVATE_REPRODUCTION");
+  }
+  s.request.locator = s.evidence.artifact.publicUrl;
+  s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl;
+  for (const key of ["scenario", "environment", "result"])
+    s.record.details[key].sourceRevisionUrl = s.record.details[key].sourceRevisionUrl.replace(
+      "synthetic-owner/repository",
+      "example-org/example-repo",
+    );
+  const originalSource = structuredClone(s.input);
+  const payload = JSON.parse(JSON.stringify(fixture.pull_request).replace(/synthetic/gi, "fixture"));
+  payload.html_url = s.request.locator;
+  const h = await harness(t, {
+    markerFreeConfig: true,
+    dataMode: "public",
+    payloads: [payload],
+    normalizerFactory: () => async () => structuredClone(s.input),
+    configure(config) {
+      config.recognitionBindings = [s.binding];
+      const policy = {
+        ...config.policies[0].policy,
+        ...s.policies[0].policy,
+        roles: ["author"],
+        unit: components.metrics.getMetricDefinition("reproductions").definition.unit,
+      };
+      config.policies = [
+        { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "fixture-test-approval" },
+      ];
+    },
+  });
+  h.controlsStore.transaction((state) => {
+    state.requests = s.state.requests;
+    state.audit = s.state.audit;
+  });
+  const publication = await h.runtime.runOnce({ cutoff });
+  assert.equal(publication.state, "published");
+  const snapshotId = publication.publications[0].snapshotId;
+  const read = await h.runtime.source.read(publicScope, snapshotId, new AbortController().signal);
+  assert.equal(read.selected.rows[0].result.value, 1);
+  const accepted = read.selected.portfolioEvidence.filter((entry) => entry.activityState === "accepted");
+  assert.equal(accepted.length, 1);
+  const proofId = accepted[0].contribution.contributionId;
+  const expected = [
+    "domain_metric:reproductions",
+    "domain_clock:accepted_at",
+    "accepted_reproduction_scenario_not_bug_confirmation",
+    "domain_outcome:inconclusive",
+  ];
+  const primary = read.selected.evidence.find((entry) => entry.contribution.contributionId === proofId);
+  assert.deepEqual(primary.contribution.reasonCodes, ["independent_recognition_receipt", ...expected]);
+  assert.deepEqual(accepted[0].contribution.reasonCodes, ["public_accepted_work", ...expected]);
+  const proofPath = `/api/v1/evidence/${proofId}?snapshot=${snapshotId}`;
+  const proof = await h.runtime.app.inject(proofPath);
+  assert.equal(proof.statusCode, 200, proof.body);
+  assert.deepEqual(proof.json().contribution.reasonCodes, ["public_accepted_work", ...expected]);
+  const profile = await h.runtime.app.inject(`/api/v1/contributors/101?metric=reproductions&snapshot=${snapshotId}`);
+  assert.equal(profile.statusCode, 200, profile.body);
+  assert.deepEqual(profile.json().timeline[0].contribution.reasonCodes, ["public_accepted_work", ...expected]);
+  for (const value of [JSON.stringify(read.selected), proof.body, profile.body])
+    assert.doesNotMatch(
+      value,
+      /PRIVATE_REPRODUCTION|domain_secret|private-request|private-review-receipt|scenario:1|run:1|scenarioVersion|executionComplete|scenarioAccepted|contentHash|reproduction\/scenario/,
+    );
+  assert.deepEqual(s.input, originalSource);
+  assert.equal(
+    read.selected.methodology.some((entry) => entry.metricId === "confirmed_bugs"),
+    false,
+  );
+  assert.ok(await h.runtime.aggregateExplanations.read(snapshotId));
+  const currentAuthority = recognitionFingerprint(h.controlsStore.read(), [s.binding]);
+  assert.equal(h.controlsStore.read().pipelinePublications[snapshotId].recognitionFingerprint, currentAuthority);
+  assert.notEqual(currentAuthority, beforeReproductionFingerprint(s));
+  h.controlsStore.transaction((state) => {
+    // Preserve all stored documents/proof hashes while substituting the actual
+    // pre-specialist authority format for the same accepted request and binding.
+    state.pipelinePublications[snapshotId].recognitionFingerprint = beforeReproductionFingerprint(s);
+  });
+  assert.equal(await h.runtime.source.read(publicScope, snapshotId, new AbortController().signal), null);
+  assert.equal((await h.runtime.app.inject(proofPath)).statusCode, 410);
+  await h.runtime.stop();
+  await h.reopenDatabase();
+  const restarted = await createPipeline(h.options);
+  t.after(() => restarted.stop());
+  for (const pin of [null, snapshotId])
+    assert.equal(await restarted.source.read(publicScope, pin, new AbortController().signal), null);
+  assert.equal((await restarted.app.inject(proofPath)).statusCode, 410);
+  await assert.rejects(restarted.aggregateExplanations.read(snapshotId), /authorization_changed/);
+  const recomputed = await restarted.runOnce({ cutoff });
+  assert.equal(recomputed.state, "published");
+  const currentId = recomputed.publications[0].snapshotId;
+  const restored = await restarted.source.read(publicScope, currentId, new AbortController().signal);
+  assert.equal(restored.selected.rows[0].result.value, 1);
+  assert.deepEqual(restored.selected.portfolioEvidence[0].contribution.reasonCodes, [
+    "public_accepted_work",
+    ...expected,
+  ]);
+  h.controlsStore.transaction((state) => {
+    state.requests[s.request.id].status = "withdrawn";
+  });
+  for (const pin of [null, snapshotId, currentId])
+    assert.equal(await restarted.source.read(publicScope, pin, new AbortController().signal), null);
   assert.equal((await restarted.app.inject(`/api/v1/evidence/${proofId}?snapshot=${currentId}`)).statusCode, 410);
   await assert.rejects(restarted.aggregateExplanations.read(currentId), /authorization_changed/);
 });

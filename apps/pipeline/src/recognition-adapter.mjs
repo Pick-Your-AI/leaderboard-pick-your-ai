@@ -26,6 +26,8 @@ export function recognitionFingerprint(state, bindings = []) {
   // Earlier generic data-quality receipts did not qualify correction provenance.
   // Retire their publication authority without changing unaffected bindings.
   if (bindings.some((binding) => binding.metricId === "data_quality")) authority.push("data-quality-recognition/v1");
+  // Generic reproduction receipts had no scenario/environment/result boundary.
+  if (bindings.some((binding) => binding.metricId === "reproductions")) authority.push("reproduction-recognition/v1");
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 

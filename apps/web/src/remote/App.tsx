@@ -1,15 +1,18 @@
 import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
+import { PublicScopeControls, PublicScopeProvenance } from "./PublicScope.tsx";
+import { selectionScope } from "./public-scope.ts";
 import { ContributorParticipation } from "./Participation.tsx";
 import { EvidenceDrawer, EvidenceProof, Receipt } from "./Evidence.tsx";
 import { isProofTransition, proofHref, readProof, withoutProof } from "./proof.ts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { actorFilterLabels, type MetricDefinition, type MetricRegistry } from "@pick-your-ai/contracts";
+import { actorFilterLabels, publicScopeKey, type MetricDefinition, type MetricRegistry } from "@pick-your-ai/contracts";
 import { startLiveUpdates, type LiveState } from "@pick-your-ai/service/live-client";
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
 import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
 import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
+import { RankComparisonControls, RankMovementValue } from "./RankComparison.tsx";
 import { TimeZoneOptions, WindowBounds } from "../components/DisplayTimeZone.tsx";
 import { LastVerifiedSnapshot, type SnapshotReference } from "./LastVerifiedSnapshot.tsx";
 import {
@@ -32,9 +35,12 @@ import {
   catalog,
   exportPage,
   health,
+  liveParameters,
+  metadata,
   parameters,
   profile,
   publicLink,
+  rankComparisonPath,
   ReadFailure,
   request,
   selection,
@@ -216,6 +222,7 @@ function Meta({ value, selected }: { value: Metadata; selected: Selection }) {
         {selected.workstream ? ` · workstream ${selected.workstream}` : ""}
         {` · ${actorFilterLabels[value.actorFilter ?? "all"]}`}
       </p>
+      <PublicScopeProvenance scope={value.scope} />
       <WindowBounds start={selected.start} end={selected.end} timeZone={selected.timeZone ?? "UTC"} />
       <a data-api-nav href={uiHref(location.pathname, selected, { snapshot: value.snapshotId })}>
         Permalink to this snapshot
@@ -248,6 +255,8 @@ function Filters({
             "organization",
             "repository",
             "workstream",
+            "context",
+            "project",
             "start",
             "end",
             "snapshot",
@@ -256,10 +265,28 @@ function Filters({
             "search",
             "category",
             "actors",
+            "compare",
+            "compareStart",
+            "compareEnd",
             "tz",
           ]) {
             const value = String(input.get(key) ?? "").trim();
             if (value) params.set(key, value);
+          }
+          const roles = input.getAll("role").map(String);
+          if (roles.length) params.set("role", roles.join(","));
+          // Existing pins and cursors identify one complete scope. An explicitly
+          // changed pin remains reviewable; an unchanged old pin is not reused.
+          try {
+            const next = selection(params.toString(), { comparison: rankComparisonPath(path) });
+            if (
+              publicScopeKey(selectionScope(next)) !== publicScopeKey(selectionScope(selected)) ||
+              (next.actors ?? "all") !== (selected.actors ?? "all")
+            ) {
+              if (next.snapshot === selected.snapshot) params.delete("snapshot");
+            }
+          } catch {
+            // The normal route boundary displays the bounded invalid selection.
           }
           if (isCatalogPath(path)) {
             if (selected.catalogQuery) params.set("q", selected.catalogQuery);
@@ -287,6 +314,7 @@ function Filters({
           automated execution. These views may overlap. Account type and unknown execution do not certify manual work or
           detect AI assistance.
         </p>
+        <PublicScopeControls selected={selected} />
         {(["organization", "repository", "workstream", "start", "end", "snapshot", "limit", "metric"] as const).map(
           (key) => (
             <label key={key}>
@@ -305,6 +333,11 @@ function Filters({
             {path === "/contributors" && <input type="hidden" name="search" value={selected.search ?? ""} />}
           </>
         )}
+        {rankComparisonPath(path) &&
+          selected.compare &&
+          (["compare", "compareStart", "compareEnd"] as const).map((key) => (
+            <input key={key} type="hidden" name={key} value={selected[key] ?? ""} />
+          ))}
         <button className="button" type="submit">
           Read exact scope
         </button>
@@ -424,7 +457,7 @@ export function RemoteApp() {
   useEffect(() => applyThemePreference(theme), [theme]);
   const parsed = useMemo(() => {
     try {
-      const selected = selection(url.search);
+      const selected = selection(url.search, { comparison: rankComparisonPath(url.pathname) });
       validateCatalogRoute(url.pathname, url.search);
       if (
         selected.proof &&
@@ -455,11 +488,17 @@ export function RemoteApp() {
           throw new ReadFailure(400, "conflicting_metric_selection");
         selected.metric = id;
       }
-      return { selected, base: apiBase(import.meta.env.VITE_PUBLIC_API_BASE || "/api/v1"), error: null };
+      const base = apiBase(import.meta.env.VITE_PUBLIC_API_BASE || "/api/v1");
+      const liveScope =
+        isCatalogPath(url.pathname) || /^\/methodology\/[^/]+$/.test(url.pathname)
+          ? null
+          : liveParameters(base, selected).toString();
+      return { selected, base, liveScope, error: null };
     } catch (error) {
       return {
         selected: fallback,
         base: "",
+        liveScope: null,
         error: error instanceof ReadFailure ? error : new ReadFailure(400, "invalid_selection"),
       };
     }
@@ -467,15 +506,13 @@ export function RemoteApp() {
   const { selected } = parsed;
   const refresh = useCallback(() => {
     active.current?.abort();
+    activeExport.current?.abort();
     setChecking(true);
     setNonce((value) => value + 1);
   }, []);
   // Registry-only pages do not require a source snapshot. Snapshot subscriptions
   // follow the current scope, never a historical pin, cursor or proof selection.
-  const liveScope =
-    parsed.error || isCatalogPath(url.pathname) || /^\/methodology\/[^/]+$/.test(url.pathname)
-      ? null
-      : parameters(selected, { snapshot: null }).toString();
+  const liveScope = parsed.liveScope;
   const liveState = live?.base === parsed.base && live.scope === liveScope ? live.value : unknownLiveState;
   useEffect(() => {
     if (liveScope === null) return;
@@ -487,6 +524,9 @@ export function RemoteApp() {
       // A notice invalidates the complete public projection even while a reader
       // holds an older snapshot. Existing hold/apply controls govern reordering.
       onSnapshot: refresh,
+      validateNotice: (body) => {
+        metadata(body, { ...selected, snapshot: null });
+      },
       validateHealth: (body) => {
         health(body, { ...selected, snapshot: null });
       },
@@ -610,6 +650,7 @@ export function RemoteApp() {
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
+          activeExport.current?.abort();
           setChecking(false);
           setState({
             status: "error",
@@ -632,6 +673,7 @@ export function RemoteApp() {
   const apply = useCallback(() => {
     if (pending) {
       active.current?.abort();
+      activeExport.current?.abort();
       setState({ status: "loading" });
       setHeldPin(pending);
       setAnnouncement(`Applying snapshot ${pending}.`);
@@ -680,6 +722,7 @@ export function RemoteApp() {
         controller.signal,
         registryMetric(state.registry, pinned.metric),
       );
+      if (controller.signal.aborted || activeExport.current !== controller) return;
       const href = URL.createObjectURL(blob),
         anchor = document.createElement("a");
       anchor.href = href;
@@ -940,6 +983,15 @@ export function RemoteApp() {
                   Download current CSV page
                 </button>
               </p>
+              {rankComparisonPath(url.pathname) && (
+                <RankComparisonControls
+                  key={`${url.pathname}${url.search}`}
+                  value={data.value.comparison}
+                  selected={pinned}
+                  path={url.pathname}
+                  navigate={navigate}
+                />
+              )}
               {url.pathname.startsWith("/methodology/") ? (
                 <Methods metric={data.value.metric} registry={state.registry} meta={data.value} />
               ) : (
@@ -962,6 +1014,11 @@ export function RemoteApp() {
                           <th scope="col" role="columnheader">
                             Rank
                           </th>
+                          {data.value.comparison && (
+                            <th scope="col" role="columnheader">
+                              Rank movement
+                            </th>
+                          )}
                           <th scope="col" role="columnheader">
                             Contributor
                           </th>
@@ -979,6 +1036,11 @@ export function RemoteApp() {
                             <td role="cell" data-label="Rank">
                               {row.rank === null ? "Unranked" : row.rank}
                             </td>
+                            {data.value.comparison && (
+                              <td role="cell" data-label="Rank movement">
+                                <RankMovementValue value={row.movement} />
+                              </td>
+                            )}
                             <th role="rowheader" scope="row">
                               <a data-api-nav href={uiHref(`/contributors/${encodeURIComponent(row.actorId)}`, pinned)}>
                                 {name(row.actor, row.actorId)}
