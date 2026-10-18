@@ -22,6 +22,7 @@ import {
   metricRegistrySchema,
   metricResultSchema,
   sourceEventSchema,
+  snapshotSchema,
   pendingCountSchema,
   type Actor,
   type Artifact,
@@ -375,6 +376,11 @@ const string = (value: unknown): string => {
   if (typeof value !== "string" || value.length > 4096) throw new ReadFailure(502, "invalid_api_response");
   return value;
 };
+const timestamp = (value: unknown): string => {
+  const parsed = snapshotSchema.shape.generatedAt.safeParse(string(value));
+  if (!parsed.success) throw new ReadFailure(502, "invalid_api_response");
+  return parsed.data;
+};
 const identity = (value: unknown) => {
   const parsed = string(value);
   if (!identifier.test(parsed)) throw new ReadFailure(502, "invalid_api_response");
@@ -616,14 +622,14 @@ export function metadata(value: unknown, selected: Selection): Metadata {
     actorFilter: actorSelection(data, selected),
     snapshotId,
     revision: integer(data.revision),
-    generatedAt: string(data.generatedAt),
+    generatedAt: timestamp(data.generatedAt),
     metricDefinitionVersion: identity(data.metricDefinitionVersion),
     computationVersion: identity(data.computationVersion),
     policyVersion: identity(data.policyVersion),
     head: {
       snapshotId: identity(head.snapshotId),
       revision: integer(head.revision),
-      publishedAt: string(head.publishedAt),
+      publishedAt: timestamp(head.publishedAt),
     },
     coverage: array(data.coverage, 500).map((item) => coverageSchema.parse(item)),
     methodology: array(data.methodology ?? [], 98).map((value) => {
