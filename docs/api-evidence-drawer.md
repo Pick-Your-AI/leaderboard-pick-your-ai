@@ -14,9 +14,9 @@ A drawer always uses its opening snapshot. Publication following and “Apply ne
 
 ## Contract limits and remaining acceptance
 
-The current public evidence contract supplies contribution/artifact identifiers, artifact kind, public source/revision links, qualification/reason codes, actor ID and roles, metric IDs, occurrence time, activity state and collection time. It does **not** supply an artifact title, source action discriminator, an acceptance timestamp, a revision-history list or public correction-history projection. The UI labels those gaps. It does not equate eligibility, collection or snapshot publication with acceptance, and does not say that a missing correction history means “none.” Generated/imported/reverted exclusions are explained only to the extent the API supplies qualification/reason codes; no exclusion is reconstructed from a title or artifact type.
+The optional strict [`leaderboard-evidence/v1` metadata projection](public-evidence-metadata.md) supplies bounded as-collected titles, credited-fact actions, separate source/collection clocks, receipt-qualified acceptance time, and explicitly public partial revision/correction records. Legacy or unprovided data remains visibly unknown. It does not equate eligibility, collection or snapshot publication with acceptance, and does not say that missing correction history means “none.” Generated/imported/reverted exclusions are explained only to the extent the API supplies qualification/reason codes.
 
-These contract gaps remain part of #116 acceptance, along with real-source verification, two representative assistive-technology walkthroughs, real mobile-device interaction and participant/owner acceptance. This change does not expand the provider projection or alter publication, privacy or acceptance policies. No issue is claimed closed.
+The default hydration adapter does not invent historic titles or public revision/correction records. Real-source verification, permitted public history/receipt provenance, two representative assistive-technology walkthroughs, real mobile-device interaction and participant/owner acceptance remain open. This change does not alter publication, privacy or acceptance policies. No issue is claimed closed.
 
 ## Reproducible checks
 

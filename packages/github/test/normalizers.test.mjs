@@ -939,3 +939,115 @@ test("pending, unknown and observed facts retain independent canonical evidence 
     0,
   );
 });
+
+test("public labels are bounded as-collected text and actions describe each credited fact rather than its envelope", () => {
+  const payload = pr();
+  payload.title = '<img src=x onerror="alert(1)">\n' + "x".repeat(300);
+  payload.body = "PRIVATE BODY";
+  const out = normalizeGithubObservation(envelope({ action: "snapshot", payload: { pull_request: payload } }));
+  const opening = out.evidence.find((entry) => entry.contribution.metricIds.includes("pr_opened"));
+  const merge = out.evidence.find((entry) => entry.contribution.metricIds.includes("pr_merged"));
+  assert.equal(opening.evidenceMetadata.sourceAction, "artifact_created");
+  assert.equal(merge.evidenceMetadata.sourceAction, "pull_request_merged");
+  assert.equal(opening.evidenceMetadata.artifactTitle.value.length, 200);
+  assert.equal(opening.evidenceMetadata.artifactTitle.basis, "as_collected");
+  assert.equal(opening.evidenceMetadata.artifactTitle.collectedAt, new Date(observedAt).toISOString());
+  assert.equal(opening.evidenceMetadata.sourceOccurredAt, opening.occurredAt);
+  assert.equal(opening.evidenceMetadata.acceptedAt, null);
+  assert.deepEqual(opening.evidenceMetadata.history, { coverage: "not_supplied", records: [] });
+  assert.equal(JSON.stringify(out.evidence).includes("PRIVATE BODY"), false);
+  const issueOut = normalizeGithubObservation(
+    envelope({ family: "issue", action: "closed", payload: { issue: issue(), sender: fixture.merger } }),
+  );
+  assert.equal(
+    issueOut.evidence.find((entry) => entry.contribution.metricIds.includes("issues_opened")).evidenceMetadata
+      .sourceAction,
+    "artifact_created",
+  );
+  assert.equal(
+    issueOut.evidence.find((entry) => entry.contribution.metricIds.includes("issue_closure_stewardship"))
+      .evidenceMetadata.sourceAction,
+    "issue_closed",
+  );
+});
+
+test("only independently accepted recognition exposes an acceptance clock and no private receipt identifier", () => {
+  const closed = { ...pr(), merged: false, merged_at: null };
+  const raw = normalizeGithubObservation(
+    envelope({
+      payload: { pull_request: closed },
+      decisionCohort: { verified: true, asOf: observedAt, outcome: "closed_unmerged", decisionAt: at },
+    }),
+  );
+  const decision = raw.evidence.find((entry) => entry.contribution.metricIds.includes("pr_accepted_rate"));
+  assert.equal(metrics(raw, "pr_accepted_rate")[0].acceptedAt, new Date(at).toISOString());
+  assert.equal(decision.evidenceMetadata.acceptedAt, null);
+  assert.equal(decision.evidenceMetadata.sourceAction, "pull_request_closed_unmerged");
+  const target = raw.facts.find((fact) => fact.metricId === "pr_opened");
+  const receipt = {
+    id: "private-review-receipt",
+    verified: true,
+    metricId: "pr_opened",
+    actorId: target.actorId,
+    reviewerId: "202",
+    acceptedAt: observedAt,
+    decision: "accepted",
+    targetFactId: target.id,
+    evidenceIds: ["private-supporting-evidence"],
+  };
+  const accepted = applyRecognitionReceipt(raw, receipt, ["202"]).evidence.at(-1);
+  assert.equal(accepted.evidenceMetadata.acceptedAt, new Date(observedAt).toISOString());
+  assert.equal(accepted.evidenceMetadata.sourceAction, "recognition_accepted");
+  assert.equal(accepted.evidenceMetadata.sourceOccurredAt, target.occurredAt);
+  assert.equal(accepted.evidenceMetadata.activityState, "accepted");
+  assert.doesNotMatch(JSON.stringify(accepted), /private-review-receipt|private-supporting-evidence/);
+  const rejected = applyRecognitionReceipt(raw, { ...receipt, decision: "rejected" }, ["202"]).evidence.at(-1);
+  assert.equal(rejected.evidenceMetadata.acceptedAt, null);
+  assert.throws(() => applyRecognitionReceipt(raw, { ...receipt, reviewerId: target.actorId }, [target.actorId]));
+});
+
+test("revision and correction records require explicit minimized public host input; payload history never qualifies", () => {
+  const history = {
+    coverage: "partial",
+    records: [
+      {
+        kind: "source_revision",
+        revision: "a".repeat(40),
+        occurredAt: null,
+        publicUrl: `https://github.com/synthetic-owner/repository/commit/${"a".repeat(40)}`,
+      },
+      {
+        kind: "correction",
+        occurredAt: at,
+        publicUrl: "https://github.com/synthetic-owner/repository/issues/1#issuecomment-2",
+      },
+    ],
+  };
+  const input = envelope({ publicHistory: { approvedPublic: true, history } });
+  const out = normalizeGithubObservation(input);
+  assert.deepEqual(out.evidence[0].evidenceMetadata.history, history);
+  history.records[1].publicUrl = "https://evil.invalid/private";
+  assert.throws(() => normalizeGithubObservation(input));
+  const payloadHistory = normalizeGithubObservation(
+    envelope({
+      payload: {
+        pull_request: { ...pr(), history: { coverage: "complete", records: [] }, correctionReceipt: "private" },
+      },
+    }),
+  );
+  assert.deepEqual(payloadHistory.evidence[0].evidenceMetadata.history, { coverage: "not_supplied", records: [] });
+  assert.throws(() =>
+    normalizeGithubObservation(
+      envelope({ publicHistory: { approvedPublic: true, history: { coverage: "complete", records: [] } } }),
+    ),
+  );
+});
+
+test("an unresolved readiness cohort does not claim a proven readiness action", () => {
+  const out = normalizeGithubObservation(
+    envelope({ reviewCohort: { verified: true, firstReadyAt: null, firstSubmittedReviewAt: at } }),
+  );
+  const wait = out.evidence.find((entry) => entry.contribution.metricIds.includes("review_wait"));
+  assert.equal(wait.evidenceMetadata.sourceAction, "unknown");
+  assert.equal(wait.evidenceMetadata.sourceOccurredAt, null);
+});

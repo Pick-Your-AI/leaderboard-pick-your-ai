@@ -1,5 +1,6 @@
 import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
 import { requireThat } from "../../controls/src/store.mjs";
+import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-metadata.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createGithubCollectionSource } from "./github-source.mjs";
 import { createHash } from "node:crypto";
@@ -682,7 +683,7 @@ export async function createPipeline(options) {
             c.metrics.stableJSON([entry.artifact, entry.contribution, entry.occurredAt])
         )
           fail("conflicting_evidence_metadata");
-        if (!previous) evidence.set(id, entry);
+        evidence.set(id, selectEvidenceMetadata(previous, entry));
       }
     }
     const corrections = (
@@ -806,6 +807,7 @@ export async function createPipeline(options) {
               activityState: "pending",
               sourceRevision: original.sourceRevision,
               sourceRevisionUrl: original.sourceRevisionUrl,
+              ...materializeEvidenceMetadata(original, fact),
             },
           ];
         }),
@@ -836,6 +838,7 @@ export async function createPipeline(options) {
           activityState,
           sourceRevision: original.sourceRevision,
           sourceRevisionUrl: original.sourceRevisionUrl,
+          ...materializeEvidenceMetadata(original, fact),
         },
       ];
     });
@@ -844,9 +847,11 @@ export async function createPipeline(options) {
     // Evidence period filtering follows the metric's declared clock, with raw time preserved upstream.
     for (const entry of publicEvidence) {
       const fact = facts.find((fact) => fact.id === entry.contribution.contributionId);
-      if (fact)
+      if (fact) {
         entry.occurredAt =
           fact[config.policies.find((item) => item.policy.metricId === fact.metricId).policy.dateBasis];
+        Object.assign(entry, materializeEvidenceMetadata(entry, fact));
+      }
     }
     const content = {
       approvedPublic: true,

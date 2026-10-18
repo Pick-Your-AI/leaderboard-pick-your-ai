@@ -208,3 +208,45 @@ test("board suppression withdraws focused proof before a slower evidence recheck
     await api.close();
   }
 });
+
+for (const accepted of [false, true]) {
+  test(`versioned ${accepted ? "accepted" : "observed"} metadata is literal and identical in drawer, permanent route and activity proof`, async ({
+    page,
+  }) => {
+    const api = await evidenceService(page);
+    try {
+      api.withMetadata(accepted);
+      await page.setViewportSize({ width: 320, height: 850 });
+      await page.goto(board);
+      await page.getByRole("link", { name: "e-api-a", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Contribution evidence" });
+      await expect(dialog.locator("[data-evidence-body]")).toBeVisible();
+      const receipt = await dialog.locator("[data-evidence-body]").innerText();
+      expect(receipt).toContain('<img src=x onerror="window.proofInjected=true"> Collected title');
+      expect(receipt).toContain("not an event-time title");
+      expect(receipt).toContain(accepted ? "recognition accepted" : "artifact created");
+      expect(receipt).toContain("Partial public history only");
+      expect(receipt).toContain("Public correction");
+      expect(receipt).toContain("Source revision abcdef");
+      expect(receipt).toContain(accepted ? "2026-10-15T12:00:00.000Z" : "No acceptance time is supplied");
+      await expect(dialog.locator("img, script")).toHaveCount(0);
+      expect(await page.evaluate(() => (window as Window & { proofInjected?: boolean }).proofInjected)).toBeUndefined();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+      await dialog.getByRole("link", { name: "Open as a full page" }).click();
+      await expect(page.locator("[data-evidence-body]")).toHaveText(receipt, { useInnerText: true });
+      await page.goto("/activity?ui=api&snapshot=api-1");
+      await page
+        .locator("ol[aria-label='Public activity groups'] > li")
+        .filter({ has: page.getByRole("link", { name: "Synthetic API A", exact: true }) })
+        .getByRole("link", { name: /Explore .* source proofs/ })
+        .click();
+      await expect(page.locator("[data-evidence-body]").first()).toHaveText(receipt, { useInnerText: true });
+      api.suppressArtifact();
+      await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await expect(page.locator("[data-evidence-body]")).toHaveCount(0);
+      await expect(page.getByText("Collected title", { exact: false })).toHaveCount(0);
+    } finally {
+      await api.close();
+    }
+  });
+}

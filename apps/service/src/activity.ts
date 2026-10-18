@@ -19,8 +19,8 @@ export function publicPortfolio(read: PublicRead, category: string | null): Port
     read.selected.portfolioEvidence ??
     read.selected.evidence.map((entry) => ({
       ...entry,
-      activityState: "unknown" as const,
-      observedAt: null,
+      activityState: entry.evidenceMetadata?.activityState ?? ("unknown" as const),
+      observedAt: entry.evidenceMetadata?.observedAt ?? null,
     }));
   return entries.filter(
     (entry) =>

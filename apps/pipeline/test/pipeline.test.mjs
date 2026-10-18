@@ -82,6 +82,7 @@ async function harness(t, extra = {}) {
     {
       id: 1001,
       node_id: "SYNTHETIC_ISSUE_1",
+      title: "Synthetic collected issue title",
       number: 1,
       html_url: `https://github.com/${slug}/issues/1`,
       created_at: ago(2),
@@ -240,6 +241,16 @@ test("actual source transport, collection, normalizer, metric engine and API pre
       ["102", 1, 1],
     ],
   );
+  const id = board.rows.find((row) => row.actorId === "101").evidenceIds[0];
+  const proof = (await h.runtime.app.inject(`/api/v1/evidence/${id}?snapshot=${board.snapshotId}`)).json();
+  assert.equal(proof.evidenceMetadata.schemaVersion, "leaderboard-evidence/v1");
+  assert.equal(proof.evidenceMetadata.artifactTitle.value, "Synthetic collected issue title");
+  assert.equal(proof.evidenceMetadata.artifactTitle.basis, "as_collected");
+  assert.equal(proof.evidenceMetadata.sourceAction, "artifact_created");
+  assert.equal(proof.evidenceMetadata.acceptedAt, null);
+  assert.equal(proof.evidenceMetadata.observedAt, proof.observedAt);
+  assert.equal(proof.evidenceMetadata.sourceOccurredAt, proof.occurredAt);
+  assert.deepEqual(proof.evidenceMetadata.history, { coverage: "not_supplied", records: [] });
   assert.equal(board.coverage[0].state, "partial");
   assert.match(board.computationVersion, /^synthetic-pipeline-/);
   assert.equal(board.methodology[0].policyVersion, "synthetic-policy-v1");

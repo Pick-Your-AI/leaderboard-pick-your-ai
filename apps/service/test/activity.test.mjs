@@ -193,7 +193,7 @@ test("activity reads observed-only, pending and independently accepted evidence 
   assert.equal(body.groups[2].latestOccurredAt, null);
   assert.equal(body.groups[2].lastCollectedAt, null);
   assert.equal(body.groups[2].unknownCollectionCount, 1);
-  assert.equal(body.correctionHistory, "not_supplied");
+  assert.equal(body.correctionHistory, "per_proof");
   assert.ok(!/("rank"|"value"|"score"|"engagement")/.test(response.body));
   assert.deepEqual((await app.inject("/api/v1/boards?metric=pr_opened")).json().rows, []);
   const legacy = fixture();
