@@ -9,7 +9,7 @@ export function githubOAuthProvider({ clientId, clientSecret, fetcher = fetch })
     500,
     "Separate OAuth client secret required",
   );
-  async function request(url, options) {
+  async function request(url, options, expectedStatus) {
     const response = await fetcher(url, { ...options, redirect: "error", signal: AbortSignal.timeout(10_000) });
     requireThat(response.ok, 502, "Identity provider unavailable");
     const chunks = [];
@@ -22,7 +22,13 @@ export function githubOAuthProvider({ clientId, clientSecret, fetcher = fetch })
       }
     // Reject damaged provider bytes without changing the existing BOM policy.
     const raw = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks));
-    return raw ? JSON.parse(raw) : {};
+    const value = raw ? JSON.parse(raw) : {};
+    requireThat(
+      expectedStatus === undefined || response.status === expectedStatus,
+      502,
+      "Identity provider unavailable",
+    );
+    return value;
   }
   return {
     authorizationURL({ state, challenge, redirectURI }) {
@@ -64,15 +70,20 @@ export function githubOAuthProvider({ clientId, clientSecret, fetcher = fetch })
         requireThat(Number.isSafeInteger(user.id) && user.id > 0, 502, "Stable identity unavailable");
         return { actorId: actorId(String(user.id)) };
       } finally {
-        await request(`https://api.github.com/applications/${clientId}/token`, {
-          method: "DELETE",
-          headers: {
-            accept: "application/vnd.github+json",
-            "content-type": "application/json",
-            authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+        // GitHub documents 204 as completion; other 2xx statuses do not satisfy this adapter's contract.
+        await request(
+          `https://api.github.com/applications/${clientId}/token`,
+          {
+            method: "DELETE",
+            headers: {
+              accept: "application/vnd.github+json",
+              "content-type": "application/json",
+              authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+            },
+            body: JSON.stringify({ access_token: token.access_token }),
           },
-          body: JSON.stringify({ access_token: token.access_token }),
-        });
+          204,
+        );
       }
     },
   };
