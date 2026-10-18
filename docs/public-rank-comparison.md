@@ -75,6 +75,6 @@ Named-period publication integration and a connected complete-coverage producer 
 - `node --test --test-concurrency=1 apps/pipeline/test/reconciliation-recovery.test.mjs`: a synthetic prior-producer marker passes through the actual SQL publisher before interrupted private confirmation; database restart recovers the exact receipt, while missing, altered or substituted frozen records stay unavailable. The existing webhook-dispatch cases separately retain later-correction denial.
 
 - `node --test apps/web/test/rank-comparison-client.test.mjs`: actual engine/service movement and tied cursor pages; strict board and JSON/CSV intake; malformed, private, mismatched and stale export inputs; exact URL scope isolation.
-- `npm run test:browser -- --grep "rank comparison"`: real-handler baseline selection, visible movement, evidence/history, privacy and response-lifetime journeys. The shared fixture is [rank-comparison.mjs](../tests/fixtures/rank-comparison.mjs); it derives movement from the metric engine with explicitly synthetic actors and evidence.
+- `npm run test:browser -- rank-comparison.spec.ts`: real-handler baseline selection, visible movement, evidence/history, privacy and response-lifetime journeys. The shared fixture is [rank-comparison.mjs](../tests/fixtures/rank-comparison.mjs); it derives movement from the metric engine with explicitly synthetic actors and evidence.
 
 Build workspace packages first. Fixtures are synthetic; their success establishes these executable invariants, not real-source accuracy or coverage.

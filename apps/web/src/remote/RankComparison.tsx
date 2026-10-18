@@ -23,10 +23,21 @@ export function RankMovementValue({ value }: { value: RankMovement | undefined }
   if (!value) return <>Comparison unavailable</>;
   if (value.state === "new_entrant") return <>New entrant; no previous rank</>;
   if (value.state === "unavailable")
-    return <>Unavailable: {reasons[value.reason] ?? "The service cannot establish compatible history (" + value.reason + ")."}</>;
+    return (
+      <>
+        Unavailable:{" "}
+        {reasons[value.reason] ?? "The service cannot establish compatible history (" + value.reason + ")."}
+      </>
+    );
   if (value.delta === 0) return <>Rank unchanged</>;
   const count = Math.abs(value.delta);
-  return <>{value.delta > 0 ? "Up " : "Down "}{count}{count === 1 ? " rank" : " ranks"}</>;
+  return (
+    <>
+      {value.delta > 0 ? "Up " : "Down "}
+      {count}
+      {count === 1 ? " rank" : " ranks"}
+    </>
+  );
 }
 
 export function RankComparisonControls({
@@ -80,7 +91,9 @@ export function RankComparisonControls({
               setError(null);
               navigate(href);
             } catch {
-              setError("Use a valid snapshot ID and either leave both dates blank or enter a UTC interval of at most 366 days.");
+              setError(
+                "Use a valid snapshot ID and either leave both dates blank or enter a UTC interval of at most 366 days.",
+              );
             }
           }}
         >
@@ -90,18 +103,28 @@ export function RankComparisonControls({
           </label>
           <label>
             Baseline start (UTC)
-            <input name="compareStart" placeholder="2026-09-17T00:00:00.000Z" defaultValue={selected.compareStart ?? ""} />
+            <input
+              name="compareStart"
+              placeholder="2026-09-17T00:00:00.000Z"
+              defaultValue={selected.compareStart ?? ""}
+            />
           </label>
           <label>
             Baseline end (UTC)
             <input name="compareEnd" placeholder="2026-10-17T00:00:00.000Z" defaultValue={selected.compareEnd ?? ""} />
           </label>
-          <button className="button" type="submit">Compare ranks</button>
+          <button className="button" type="submit">
+            Compare ranks
+          </button>
           {selected.compare && (
             <button
               className="button button-ghost"
               type="button"
-              onClick={() => navigate(uiHref(path, { ...selected, compare: null, compareStart: null, compareEnd: null, cursor: null }))}
+              onClick={() =>
+                navigate(
+                  uiHref(path, { ...selected, compare: null, compareStart: null, compareEnd: null, cursor: null }),
+                )
+              }
             >
               Clear rank comparison
             </button>

@@ -142,7 +142,12 @@ test("actual engine and service comparison retains upward, downward, neutral and
   assert.deepEqual(parsed.comparison.scope, h.previousScope);
   assert.equal(parsed.totalRows, 5);
   const actors = new Map(parsed.rows.map((row) => [row.actorId, row]));
-  for (const [id, rank, delta] of [["b", 1, 1], ["a", 2, -1], ["d", 3, 0], ["e", 3, 0]]) {
+  for (const [id, rank, delta] of [
+    ["b", 1, 1],
+    ["a", 2, -1],
+    ["d", 3, 0],
+    ["e", 3, 0],
+  ]) {
     const actorId = h.actorIds[id];
     assert.equal(actors.get(actorId).rank, rank);
     assert.deepEqual(actors.get(actorId).movement, { actorId, state: "comparable", delta, reason: null });
@@ -158,10 +163,18 @@ test("actual engine and service comparison retains upward, downward, neutral and
   const csv = parseCSVExport(h.csv, metric, Number(h.selected.limit));
   validateExport(csv, h.selected, metric);
   assert.deepEqual(csv.comparison, h.json.comparison);
-  assert.deepEqual(csv.rows.map((row) => [row.actorId, row.rank, row.movement]), h.json.rows.map((row) => [row.actorId, row.rank, row.movement]));
+  assert.deepEqual(
+    csv.rows.map((row) => [row.actorId, row.rank, row.movement]),
+    h.json.rows.map((row) => [row.actorId, row.rank, row.movement]),
+  );
   for (const value of [h.board, h.json, csv]) {
     const encoded = JSON.stringify(value);
-    for (const privateField of ["private-acceptance-secret", "private-rank-evidence", "backfillRevision", "evidenceSignatures"])
+    for (const privateField of [
+      "private-acceptance-secret",
+      "private-rank-evidence",
+      "backfillRevision",
+      "evidenceSignatures",
+    ])
       assert.equal(encoded.includes(privateField), false);
   }
 });
@@ -172,7 +185,10 @@ test("publication generation time does not invent a different comparison-cutoff 
     pair.previous.head.publishedAt = "2026-10-18T00:00:01.000Z";
   });
   assert.equal(h.board.comparison.generatedAt > h.board.generatedAt, true);
-  assert.equal(board(h.board, h.selected).rows.some((row) => row.movement.state === "comparable"), true);
+  assert.equal(
+    board(h.board, h.selected).rows.some((row) => row.movement.state === "comparable"),
+    true,
+  );
   validateExport(h.json, h.selected, metric);
   validateExport(parseCSVExport(h.csv, metric, 50), h.selected, metric);
 });
@@ -186,7 +202,10 @@ test("ordinary service responses remain compatible without comparison fields or 
   assert.equal(response.statusCode, 200, response.body);
   const parsed = board(response.json(), plain);
   assert.equal(Object.hasOwn(parsed, "comparison"), false);
-  assert.equal(parsed.rows.some((row) => Object.hasOwn(row, "movement")), false);
+  assert.equal(
+    parsed.rows.some((row) => Object.hasOwn(row, "movement")),
+    false,
+  );
   const csv = await h.app.inject(`/api/v1/exports?${params}&format=csv`);
   assert.equal(csv.statusCode, 200, csv.body);
   rewriteCSV(csv.body, (rows) => assert.equal(rows[0].length, 41));
@@ -202,13 +221,19 @@ test("cursor pages retain the service's tied rank and reject a substituted compa
   const first = await h.app.inject(`/api/v1/boards?${params}`);
   assert.equal(first.statusCode, 200, first.body);
   const page = board(first.json(), selected(params.toString()));
-  assert.deepEqual(page.rows.map((row) => row.rank), [1, 2, 3, 3]);
+  assert.deepEqual(
+    page.rows.map((row) => row.rank),
+    [1, 2, 3, 3],
+  );
   assert.equal(typeof page.nextCursor, "string");
   params.set("cursor", page.nextCursor);
   const next = await h.app.inject(`/api/v1/boards?${params}`);
   assert.equal(next.statusCode, 200, next.body);
   const last = board(next.json(), selected(params.toString()));
-  assert.deepEqual(last.rows.map((row) => row.rank), [3]);
+  assert.deepEqual(
+    last.rows.map((row) => row.rank),
+    [3],
+  );
   assert.equal(last.rows[0].movement.delta, 0);
   params.set("compare", "synthetic-substitution");
   const substituted = await h.app.inject(`/api/v1/boards?${params}`);
@@ -216,31 +241,159 @@ test("cursor pages retain the service's tied rank and reject a substituted compa
 });
 
 const malformed = [
-  ["missing comparison", (value) => { delete value.comparison; }],
-  ["mixed unavailable identity", (value) => { value.comparison.scope = null; }],
-  ["substituted baseline", (value) => { value.comparison.snapshotId = "synthetic-other"; }],
-  ["substituted baseline scope", (value) => { value.comparison.scope.repository = "synthetic-other"; }],
-  ["substituted baseline window", (value) => { value.comparison.scope.start = beforeEnd; }],
-  ["private comparison field", (value) => { value.comparison.privateHistory = "secret"; }],
-  ["private scope field", (value) => { value.comparison.scope.actorIds = ["hidden"]; }],
-  ["invalid baseline clock", (value) => { value.comparison.generatedAt = "yesterday"; }],
-  ["invalid current clock", (value) => { value.generatedAt = "yesterday"; }],
-  ["missing movement", (value) => { delete value.rows[0].movement; }],
-  ["substituted actor", (value) => { value.rows[0].movement.actorId = "hidden"; }],
-  ["private movement field", (value) => { value.rows[0].movement.priorActor = "hidden"; }],
-  ["fractional delta", (value) => { value.rows[0].movement.delta = 0.5; }],
-  ["unsafe delta", (value) => { value.rows[0].movement.delta = Number.MAX_SAFE_INTEGER; }],
-  ["impossible previous rank", (value) => { value.rows[0].movement.delta = -1; }],
-  ["non-null comparable reason", (value) => { value.rows[0].movement.reason = "insufficient_history"; }],
-  ["unknown movement state", (value) => { value.rows[0].movement.state = "improved"; }],
-  ["numeric entrant", (value) => { value.rows[0].movement.state = "new_entrant"; }],
-  ["unavailable with delta", (value) => { value.rows[0].movement.state = "unavailable"; value.rows[0].movement.reason = "insufficient_history"; }],
-  ["unavailable without reason", (value) => { value.rows[0].movement.state = "unavailable"; value.rows[0].movement.delta = null; }],
-  ["unranked comparable", (value) => { value.rows[0].rank = null; }],
-  ["missing ranking policy", (value) => { value.ranking = null; }],
-  ["unknown value", (value) => { value.rows[0].result.state = "unknown"; delete value.rows[0].result.value; }],
-  ["unavailable identity with numeric movement", (value) => { value.comparison = { snapshotId: null, scope: null, generatedAt: null }; }],
-  ["duplicate actor rows", (value) => { value.rows[1] = structuredClone(value.rows[0]); }],
+  [
+    "missing comparison",
+    (value) => {
+      delete value.comparison;
+    },
+  ],
+  [
+    "mixed unavailable identity",
+    (value) => {
+      value.comparison.scope = null;
+    },
+  ],
+  [
+    "substituted baseline",
+    (value) => {
+      value.comparison.snapshotId = "synthetic-other";
+    },
+  ],
+  [
+    "substituted baseline scope",
+    (value) => {
+      value.comparison.scope.repository = "synthetic-other";
+    },
+  ],
+  [
+    "substituted baseline window",
+    (value) => {
+      value.comparison.scope.start = beforeEnd;
+    },
+  ],
+  [
+    "private comparison field",
+    (value) => {
+      value.comparison.privateHistory = "secret";
+    },
+  ],
+  [
+    "private scope field",
+    (value) => {
+      value.comparison.scope.actorIds = ["hidden"];
+    },
+  ],
+  [
+    "invalid baseline clock",
+    (value) => {
+      value.comparison.generatedAt = "yesterday";
+    },
+  ],
+  [
+    "invalid current clock",
+    (value) => {
+      value.generatedAt = "yesterday";
+    },
+  ],
+  [
+    "missing movement",
+    (value) => {
+      delete value.rows[0].movement;
+    },
+  ],
+  [
+    "substituted actor",
+    (value) => {
+      value.rows[0].movement.actorId = "hidden";
+    },
+  ],
+  [
+    "private movement field",
+    (value) => {
+      value.rows[0].movement.priorActor = "hidden";
+    },
+  ],
+  [
+    "fractional delta",
+    (value) => {
+      value.rows[0].movement.delta = 0.5;
+    },
+  ],
+  [
+    "unsafe delta",
+    (value) => {
+      value.rows[0].movement.delta = Number.MAX_SAFE_INTEGER;
+    },
+  ],
+  [
+    "impossible previous rank",
+    (value) => {
+      value.rows[0].movement.delta = -1;
+    },
+  ],
+  [
+    "non-null comparable reason",
+    (value) => {
+      value.rows[0].movement.reason = "insufficient_history";
+    },
+  ],
+  [
+    "unknown movement state",
+    (value) => {
+      value.rows[0].movement.state = "improved";
+    },
+  ],
+  [
+    "numeric entrant",
+    (value) => {
+      value.rows[0].movement.state = "new_entrant";
+    },
+  ],
+  [
+    "unavailable with delta",
+    (value) => {
+      value.rows[0].movement.state = "unavailable";
+      value.rows[0].movement.reason = "insufficient_history";
+    },
+  ],
+  [
+    "unavailable without reason",
+    (value) => {
+      value.rows[0].movement.state = "unavailable";
+      value.rows[0].movement.delta = null;
+    },
+  ],
+  [
+    "unranked comparable",
+    (value) => {
+      value.rows[0].rank = null;
+    },
+  ],
+  [
+    "missing ranking policy",
+    (value) => {
+      value.ranking = null;
+    },
+  ],
+  [
+    "unknown value",
+    (value) => {
+      value.rows[0].result.state = "unknown";
+      delete value.rows[0].result.value;
+    },
+  ],
+  [
+    "unavailable identity with numeric movement",
+    (value) => {
+      value.comparison = { snapshotId: null, scope: null, generatedAt: null };
+    },
+  ],
+  [
+    "duplicate actor rows",
+    (value) => {
+      value.rows[1] = structuredClone(value.rows[0]);
+    },
+  ],
 ];
 
 for (const [name, mutate] of malformed) {
@@ -283,7 +436,10 @@ test("explicit unavailable states remain null and never accept filtered-cohort n
       movement: { actorId: row.actorId, state: "unavailable", delta: null, reason },
     }));
     const parsed = board(value, h.selected);
-    assert.equal(parsed.rows.every((row) => row.movement.delta === null && row.movement.reason === reason), true);
+    assert.equal(
+      parsed.rows.every((row) => row.movement.delta === null && row.movement.reason === reason),
+      true,
+    );
     value.comparison = { snapshotId: null, scope: null, generatedAt: null };
     assert.equal(board(value, h.selected).comparison.snapshotId, null);
   }
@@ -303,14 +459,30 @@ test("CSV comparison cells remain repeated exact metadata with no hidden fields,
   const h = await documents(t);
   const column = 41;
   for (const mutate of [
-    (rows) => { rows[0][column + 1] = "private_history"; },
-    (rows) => { rows[1][column + 1] = "{}"; },
-    (rows) => { rows[2][column] = "{}"; },
-    (rows) => { rows[2][column + 1] = ""; },
-    (rows) => { rows[2][column + 1] = '{"actorId":"b","actorId":"hidden"}'; },
-    (rows) => { rows[2][column + 1] = "=HYPERLINK(\"https://example.invalid\")"; },
-    (rows) => { rows[2].pop(); },
-    (rows) => { rows[2].push("hidden"); },
+    (rows) => {
+      rows[0][column + 1] = "private_history";
+    },
+    (rows) => {
+      rows[1][column + 1] = "{}";
+    },
+    (rows) => {
+      rows[2][column] = "{}";
+    },
+    (rows) => {
+      rows[2][column + 1] = "";
+    },
+    (rows) => {
+      rows[2][column + 1] = '{"actorId":"b","actorId":"hidden"}';
+    },
+    (rows) => {
+      rows[2][column + 1] = '=HYPERLINK("https://example.invalid")';
+    },
+    (rows) => {
+      rows[2].pop();
+    },
+    (rows) => {
+      rows[2].push("hidden");
+    },
     (rows) => {
       const value = JSON.parse(rows[2][column + 1]);
       value.privateHistory = "hidden";
@@ -350,12 +522,20 @@ for (const format of ["json", "csv"]) {
     const bad = structuredClone(h.json);
     delete bad.comparison;
     for (const row of bad.rows) delete row.movement;
-    const raw = format === "json"
-      ? JSON.stringify(bad)
-      : rewriteCSV(h.csv, (rows) => { for (const row of rows) row.splice(41, 2); });
-    t.mock.method(globalThis, "fetch", async () => new Response(raw, {
-      headers: { "content-type": format === "json" ? "application/json" : "text/csv" },
-    }));
+    const raw =
+      format === "json"
+        ? JSON.stringify(bad)
+        : rewriteCSV(h.csv, (rows) => {
+            for (const row of rows) row.splice(41, 2);
+          });
+    t.mock.method(
+      globalThis,
+      "fetch",
+      async () =>
+        new Response(raw, {
+          headers: { "content-type": format === "json" ? "application/json" : "text/csv" },
+        }),
+    );
     await assert.rejects(
       () => exportPage("/api/v1", h.selected, format, new AbortController().signal, metric),
       /invalid_export_response/,
@@ -369,7 +549,11 @@ test("a late comparison export response is discarded after its selection is abor
   let cancelled = false;
   t.mock.method(globalThis, "fetch", async () => {
     controller.abort();
-    const body = new ReadableStream({ cancel() { cancelled = true; } });
+    const body = new ReadableStream({
+      cancel() {
+        cancelled = true;
+      },
+    });
     return new Response(body, { headers: { "content-type": "application/json" } });
   });
   await assert.rejects(

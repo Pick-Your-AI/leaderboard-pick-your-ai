@@ -305,7 +305,8 @@ function Filters({
             {path === "/contributors" && <input type="hidden" name="search" value={selected.search ?? ""} />}
           </>
         )}
-        {rankComparisonPath(path) && selected.compare &&
+        {rankComparisonPath(path) &&
+          selected.compare &&
           (["compare", "compareStart", "compareEnd"] as const).map((key) => (
             <input key={key} type="hidden" name={key} value={selected[key] ?? ""} />
           ))}
