@@ -1,7 +1,5 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { RemoteApp } from "./remote/App.tsx";
-import { RemoteWall } from "./remote/Wall.tsx";
 import { applyThemePreference, readThemePreference } from "./lib/theme.ts";
 import "./styles/tokens.css";
 import "./styles/app.css";
@@ -29,6 +27,21 @@ if (["/account", "/admin"].includes(location.pathname.replace(/\/+$/, ""))) {
       </React.StrictMode>,
     ),
   );
+} else if (location.pathname === "/live") {
+  void import("./remote/Wall.tsx").then(({ RemoteWall }) =>
+    root.render(
+      <React.StrictMode>
+        <RemoteWall />
+      </React.StrictMode>,
+    ),
+  );
 } else {
-  root.render(<React.StrictMode>{location.pathname === "/live" ? <RemoteWall /> : <RemoteApp />}</React.StrictMode>);
+  // Keep the static fallback until the selected application's module is ready.
+  void import("./remote/App.tsx").then(({ RemoteApp }) =>
+    root.render(
+      <React.StrictMode>
+        <RemoteApp />
+      </React.StrictMode>,
+    ),
+  );
 }
