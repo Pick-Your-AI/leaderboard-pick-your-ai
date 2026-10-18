@@ -216,6 +216,8 @@ for (const [loss, subjectType] of [
   ["subject_identity", "pull_request"],
   ["inventory_missing_id", "pull_request"],
   ["inventory_reused_id", "pull_request"],
+  ["inventory_malformed_id", "pull_request"],
+  ["inventory_oversized_id", "pull_request"],
   ["normalization_identity", "pull_request"],
   ["legacy_normalization_identity", "pull_request"],
 ])
@@ -238,6 +240,7 @@ for (const [loss, subjectType] of [
     let privateSubject = false;
     let changedSubject = false;
     let inventoryLoss = null;
+    let invalidInventoryHistoryReads = 0;
     let normalizationIdentityLoss = false;
     let normalizing = false;
     let normalizationIdentityReads = 0;
@@ -257,12 +260,17 @@ for (const [loss, subjectType] of [
       id: normalizationIdentityLoss && loss === "normalization_identity" ? "E_synthetic_new" : stableEvent.id,
       project: { ...stableEvent.project, public: publicProject },
     });
+    const subjectId = () => {
+      if (inventoryLoss === "inventory_malformed_id") return "PR invalid";
+      if (inventoryLoss === "inventory_oversized_id") return "P".repeat(129);
+      return subjectType === "pull_request" ? "PR_synthetic" : "I_synthetic";
+    };
     const client = {
       rest: async () => ({ id: 2, private: false }),
       scanRest: async (o) => {
         const subject = {
           id: 1,
-          node_id: subjectType === "pull_request" ? "PR_synthetic" : "I_synthetic",
+          node_id: subjectId(),
           number: 1,
           ...(subjectType === "pull_request" ? { pull_request: {} } : {}),
         };
@@ -272,6 +280,8 @@ for (const [loss, subjectType] of [
         );
       },
       scanGraphql: async (o) => {
+        if (["inventory_malformed_id", "inventory_oversized_id"].includes(inventoryLoss))
+          invalidInventoryHistoryReads += 1;
         const changedDuringHydration = normalizationIdentityLoss && normalizing;
         if (changedDuringHydration) normalizationIdentityReads += 1;
         return o.select({
@@ -279,12 +289,7 @@ for (const [loss, subjectType] of [
             databaseId: 2,
             isPrivate: privateSubject,
             [subjectType === "pull_request" ? "pullRequest" : "issue"]: {
-              id:
-                changedSubject || changedDuringHydration
-                  ? "PR_synthetic_changed"
-                  : subjectType === "pull_request"
-                    ? "PR_synthetic"
-                    : "I_synthetic",
+              id: changedSubject || changedDuringHydration ? "PR_synthetic_changed" : subjectId(),
               url: `https://github.com/synthetic-org/synthetic-repo/${subjectType === "pull_request" ? "pull" : "issues"}/1`,
               timelineItems: { nodes: [current()], pageInfo: { hasNextPage: false, endCursor: null } },
             },
@@ -354,19 +359,22 @@ for (const [loss, subjectType] of [
     else if (loss.startsWith("inventory_")) inventoryLoss = loss;
     else if (loss.endsWith("normalization_identity")) normalizationIdentityLoss = true;
     else publicProject = loss === "hidden" ? null : false;
-    await runtime
-      .runOnce()
-      .catch((error) =>
-        assert.match(
-          error.message,
-          /project_source_scope_requires_reapproval|synthetic_controls_write_failure|project_subject_identity_unverified/,
-        ),
-      );
+    let runError;
+    await runtime.runOnce().catch((error) => {
+      runError = error;
+    });
     if (normalizationIdentityLoss) assert.ok(normalizationIdentityReads > 0);
     h.controlsStore.transaction = originalTransaction;
     const read = await runtime.app.inject(url + "&snapshot=" + first.publications[0].snapshotId);
     assert.notEqual(read.statusCode, 200);
     assert.notEqual((await runtime.app.inject(url)).statusCode, 200);
+    if (runError)
+      assert.match(
+        runError.message,
+        /project_source_scope_requires_reapproval|synthetic_controls_write_failure|project_subject_identity_unverified/,
+      );
+    if (["inventory_malformed_id", "inventory_oversized_id"].includes(loss))
+      assert.equal(invalidInventoryHistoryReads, 0);
     if (loss === "controls_failure") assert.equal(h.controlsStore.read().pipelineSourceDenials, undefined);
     else assert.equal(h.controlsStore.read().pipelineSourceDenials[2].configurationVersion, config.version);
     assert.equal(

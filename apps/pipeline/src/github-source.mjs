@@ -152,7 +152,9 @@ export function createGithubCollectionSource({
             subject.number < 1 ||
             seen.has(subject.number) ||
             typeof subject.node_id !== "string" ||
-            !subject.node_id.trim() ||
+            // Match collection identity validation before admitting history:
+            // Project identity loss must reach the durable publication gate.
+            !/^[A-Za-z0-9_=.:\-]{1,128}$/.test(subject.node_id) ||
             seenIds.has(subject.node_id)
           )
             throw new Error(
