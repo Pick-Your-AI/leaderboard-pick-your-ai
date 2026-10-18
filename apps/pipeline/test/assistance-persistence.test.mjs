@@ -10,6 +10,22 @@ const boardUrl = "/api/v1/boards?metric=pr_merged";
 // Match the whole private version without treating ISO timestamp seconds as attribution.
 const privateFields = /assistance|participation|Claude|(?<![\d.])5\.5(?![\d.])|synthetic-model|example\.invalid|manual/;
 
+test("private model version detector rejects JSON/CSV values without matching source timestamp fractions", () => {
+  assert.doesNotMatch(JSON.stringify({ occurredAt: "2026-10-17T05:26:35.586Z" }), privateFields);
+  for (const value of [
+    JSON.stringify({ version: "5.5" }),
+    '"5.5"',
+    "5.5",
+    JSON.stringify({ assistance: [] }),
+    JSON.stringify({ participation: [] }),
+    "Claude Opus",
+    "synthetic-model@example.invalid",
+    "manual",
+  ]) {
+    assert.match(value, privateFields);
+  }
+});
+
 async function assistedHarness(t) {
   let enrichCalls = 0;
   const payload = {
