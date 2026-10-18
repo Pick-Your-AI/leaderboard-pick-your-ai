@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { actorKindSchema, contributionRoleSchema } from "@pick-your-ai/contracts";
 import {
-  aggregateMetric, comparePolicies, compareRankMovement, getMetricDefinition,
+  aggregateMetric, selectPortfolioFacts, comparePolicies, compareRankMovement, getMetricDefinition,
   participationView, planPolicyRelease, resolveMetricWindow, stableJSON, validateMetricPolicy,
 } from "../dist/index.js";
 
@@ -371,4 +371,22 @@ test("equivalent timestamp encodings do not create conflicting duration evidence
   assert.equal(result.coverage, "complete");
   assert.equal(result.rows[0].sampleCount, 1);
   assert.ok(!result.audit.some(entry => entry.reason === "conflicting_policy_unit"));
+});
+
+
+test("portfolio selection preserves observed and pending states independently of accepted ranking eligibility", () => {
+  const facts = [fact("observed", {state: "observed", acceptedAt: null, acceptanceReceipt: null, acceptedBy: null}),
+    fact("pending", {state: "pending", acceptedAt: null, acceptanceReceipt: null, acceptedBy: null}), fact("accepted"),
+    fact("self-approved", {acceptedBy: "a"}), fact("unknown", {state: "unknown"}), fact("unlinked", {actorId: null})];
+  const selected = selectPortfolioFacts(input(facts), policy(), scope());
+  assert.deepEqual(selected.map((item) => [item.id, item.state]), [["accepted", "qualified"], ["observed", "observed"], ["pending", "pending"]]);
+  assert.deepEqual(board(facts).rows[0].evidenceIds, ["accepted"]);
+});
+
+test("portfolio selection applies canonical correction, frozen observation, half-open date and workstream boundaries", () => {
+  const original = fact("removed", {state: "observed", acceptedAt: null});
+  const facts = [original, {...original, revision: 1, state: "excluded", correctionReceipt: "synthetic-correction"},
+    fact("start", {occurredAt: from}), fact("end", {occurredAt: to}), fact("late", {observedAt: "2026-11-02T00:00:00Z"}),
+    fact("other-workstream", {eventContext: {projects: [], workstreams: ["elsewhere"]}})];
+  assert.deepEqual(selectPortfolioFacts(input(facts), policy(), scope({workstreams: ["w1"]})).map((item) => item.id), ["start"]);
 });

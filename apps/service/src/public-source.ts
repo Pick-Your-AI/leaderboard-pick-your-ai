@@ -27,6 +27,10 @@ export interface PublicEvidence {
   sourceRevision: string | null;
   sourceRevisionUrl: string | null;
 }
+export interface PortfolioEvidence extends PublicEvidence {
+  activityState: "observed" | "pending" | "accepted" | "unknown";
+  observedAt: string | null;
+}
 export interface PublicActor {
   actorId: string;
   actor: Actor;
@@ -54,6 +58,7 @@ export interface PublishedSnapshot {
   actors: PublicActor[];
   rows: PublicRow[];
   evidence: PublicEvidence[];
+  portfolioEvidence?: PortfolioEvidence[];
   /** Approved per-metric direction; the API does not infer comparability or scoring. */
   ranking: { metricId: string; direction: "ascending" | "descending"; rank?: boolean }[];
   disabledMetrics?: { id: string; reason: string; policyVersion: string; policyLink: string | null }[];
@@ -128,6 +133,9 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
     selected.actors.length > 10000 ||
     !Array.isArray(selected.evidence) ||
     selected.evidence.length > 20000 ||
+    (selected.portfolioEvidence !== undefined &&
+      (!Array.isArray(selected.portfolioEvidence) ||
+        selected.portfolioEvidence.length + selected.evidence.length > 20000)) ||
     !Array.isArray(selected.ranking) ||
     selected.ranking.length > 98
   )
@@ -218,34 +226,67 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
     );
   if (new Set(actors.map((actor) => actor.actorId)).size !== actors.length) return reject();
   const actorIds = new Set(actors.map((actor) => actor.actorId));
-  const evidence = selected.evidence
-    .map((entry) => {
-      const artifact = artifactSchema.parse(entry.artifact);
-      const parsed = contributionSchema.parse(entry.contribution);
-      const contribution = { ...parsed, metricIds: parsed.metricIds.filter((metricId) => !disabled.has(metricId)) };
-      if (!date(entry.occurredAt) || (entry.sourceRevision !== null && !id(entry.sourceRevision))) return reject();
-      return {
-        artifact,
-        contribution,
-        occurredAt: entry.occurredAt,
-        sourceRevision: entry.sourceRevision,
-        sourceRevisionUrl: safePublicUrl(entry.sourceRevisionUrl),
-      };
-    })
-    .filter(
-      (entry) =>
-        entry.artifact.visibility === "public" &&
-        safePublicUrl(entry.artifact.publicUrl) !== null &&
-        !suppressedArtifacts.has(entry.artifact.stableId!) &&
-        entry.contribution.metricIds.length > 0 &&
-        entry.contribution.qualification === "eligible" &&
-        entry.contribution.artifactId === entry.artifact.stableId &&
-        actorIds.has(entry.contribution.actorId ?? "") &&
-        (scope.repository === null || entry.artifact.repositoryId === scope.repository) &&
-        (scope.start === null ||
-          (entry.occurredAt !== null && Date.parse(entry.occurredAt) >= Date.parse(scope.start))) &&
-        (scope.end === null || (entry.occurredAt !== null && Date.parse(entry.occurredAt) < Date.parse(scope.end))),
-    );
+  const projectEvidence = (entries: PublicEvidence[]) =>
+    entries
+      .map((entry) => {
+        const artifact = artifactSchema.parse(entry.artifact);
+        const parsed = contributionSchema.parse(entry.contribution);
+        const contribution = {
+          ...parsed,
+          metricIds: parsed.metricIds.filter(
+            (metricId) => !disabled.has(metricId) && ranking.some((policy) => policy.metricId === metricId),
+          ),
+        };
+        if (!date(entry.occurredAt) || (entry.sourceRevision !== null && !id(entry.sourceRevision))) return reject();
+        return {
+          artifact,
+          contribution,
+          occurredAt: entry.occurredAt,
+          sourceRevision: entry.sourceRevision,
+          sourceRevisionUrl: safePublicUrl(entry.sourceRevisionUrl),
+        };
+      })
+      .filter(
+        (entry) =>
+          entry.artifact.visibility === "public" &&
+          safePublicUrl(entry.artifact.publicUrl) !== null &&
+          !suppressedArtifacts.has(entry.artifact.stableId!) &&
+          entry.contribution.metricIds.length > 0 &&
+          entry.contribution.qualification === "eligible" &&
+          entry.contribution.artifactId === entry.artifact.stableId &&
+          actorIds.has(entry.contribution.actorId ?? "") &&
+          (scope.repository === null || entry.artifact.repositoryId === scope.repository) &&
+          (scope.start === null ||
+            (entry.occurredAt !== null && Date.parse(entry.occurredAt) >= Date.parse(scope.start))) &&
+          (scope.end === null || (entry.occurredAt !== null && Date.parse(entry.occurredAt) < Date.parse(scope.end))),
+      );
+  const evidence = projectEvidence(selected.evidence);
+  const portfolioInput = selected.portfolioEvidence ?? [];
+  const portfolioMetadata = new Map(
+    portfolioInput.map((entry) => {
+      if (
+        !["observed", "pending", "accepted", "unknown"].includes(entry.activityState) ||
+        !date(entry.observedAt) ||
+        entry.observedAt === null ||
+        entry.occurredAt === null ||
+        !id(entry.contribution.contributionId) ||
+        entry.contribution.roles.includes("unknown")
+      )
+        return reject();
+      return [entry.contribution.contributionId, { activityState: entry.activityState, observedAt: entry.observedAt }];
+    }),
+  );
+  if (portfolioMetadata.size !== portfolioInput.length) return reject();
+  const portfolioEvidence = projectEvidence(portfolioInput)
+    .map((entry) => ({
+      ...entry,
+      ...portfolioMetadata.get(entry.contribution.contributionId)!,
+      contribution: {
+        ...entry.contribution,
+        reasonCodes: [`public_${portfolioMetadata.get(entry.contribution.contributionId)!.activityState}_work`],
+      },
+    }))
+    .filter((entry) => entry.contribution.metricIds.length > 0);
   const evidenceMap = new Map(evidence.map((entry) => [entry.contribution.contributionId, entry]));
   if (evidenceMap.size !== evidence.length) return reject();
   let evidenceReferenceCount = 0;
@@ -330,6 +371,7 @@ export function projectRead(input: PublicRead, scope: PublicScope, pin: string |
       actors,
       rows: rows.map((row) => ({ ...row, result: { ...row.result, coverage: coverage(row.result.coverage) } })),
       evidence,
+      ...(selected.portfolioEvidence === undefined ? {} : { portfolioEvidence }),
       ranking: ranking.filter((entry) => !disabled.has(entry.metricId)),
       disabledMetrics,
       methodology,

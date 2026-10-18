@@ -600,6 +600,34 @@ export async function createPipeline(options) {
         evidenceIds: row.evidenceIds,
       })),
     );
+    // Descriptive public work is not conditional on earning a ranked outcome.
+    // Selection reuses existing corrections, source/role/context checks and receipt validation.
+    const portfolioFacts = config.policies.flatMap((item) =>
+      c.metrics.selectPortfolioFacts(frozen, item.policy, engineScope),
+    );
+    const portfolioEvidence = portfolioFacts.flatMap((fact) => {
+      const original = evidence.get(fact.id);
+      if (!original || !["observed", "pending", "qualified", "reviewed"].includes(fact.state)) return [];
+      const activityState = ["qualified", "reviewed"].includes(fact.state) ? "accepted" : fact.state;
+      return [
+        {
+          artifact: copy(original.artifact),
+          contribution: {
+            ...copy(original.contribution),
+            actorId: fact.actorId,
+            roles: [fact.role],
+            qualification: "eligible",
+            metricIds: [fact.metricId],
+            reasonCodes: [`public_${activityState}_work`],
+          },
+          occurredAt: fact.occurredAt,
+          observedAt: fact.observedAt,
+          activityState,
+          sourceRevision: original.sourceRevision,
+          sourceRevisionUrl: original.sourceRevisionUrl,
+        },
+      ];
+    });
     const usedIds = new Set(rows.flatMap((row) => row.evidenceIds));
     const publicEvidence = [...evidence.values()].filter((entry) => usedIds.has(entry.contribution.contributionId));
     // Evidence period filtering follows the metric's declared clock, with raw time preserved upstream.
@@ -615,6 +643,7 @@ export async function createPipeline(options) {
       actors: actorContracts([...actors.values()]),
       rows,
       evidence: publicEvidence,
+      portfolioEvidence,
       ranking: config.policies.map((item) => ({
         metricId: item.policy.metricId,
         direction: "descending",
@@ -673,6 +702,7 @@ export async function createPipeline(options) {
           actors: content.actors,
           rows,
           evidence: publicEvidence,
+          portfolioEvidence,
           ranking: content.ranking,
           dataMode,
           diagnostics,

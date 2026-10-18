@@ -82,6 +82,7 @@ function snapshot(id = "api-1", revision = 1) {
       },
       actors,
       evidence,
+      portfolioEvidence: evidence.map((entry) => ({ ...entry, activityState: "observed", observedAt: at })),
       rows: ["pr_opened", "documentation"].flatMap((metricId) =>
         actors.map(({ actorId }, index) => ({
           actorId,
@@ -150,6 +151,27 @@ async function service(page: Page) {
   });
   return {
     calls,
+    observedOnly() {
+      current.selected.rows = [];
+      current.selected.evidence = [];
+    },
+    manyPortfolio() {
+      const first = current.selected.portfolioEvidence[0]!;
+      current.selected.portfolioEvidence = Array.from({ length: 205 }, (_, index) => ({
+        ...structuredClone(first),
+        artifact: {
+          ...first.artifact,
+          stableId: `many-${index}`,
+          publicUrl: `https://github.com/synthetic-api/example/pull/${index + 1}`,
+        },
+        contribution: {
+          ...first.contribution,
+          contributionId: `many-${String(index).padStart(3, "0")}`,
+          artifactId: `many-${index}`,
+        },
+        activityState: index % 2 ? "pending" : "observed",
+      }));
+    },
     close: () => app.close(),
     next() {
       current = snapshot("api-2", 2);
@@ -374,6 +396,69 @@ test("page exports enforce current suppression and revoked export errors clear p
     await page.getByRole("button", { name: "Download current JSON page" }).click();
     await expect(page.getByRole("alert")).toContainText("Selection expired or revoked");
     await expect(page.getByRole("link", { name: "Synthetic API B", exact: true })).toHaveCount(0);
+  } finally {
+    await api.close();
+  }
+});
+
+test("observed-only directory has accessible search/category pages with stable snapshot and no rank requirement", async ({
+  page,
+}) => {
+  const api = await service(page);
+  api.observedOnly();
+  try {
+    await page.goto("/contributors?ui=api&limit=1");
+    await expect(page.getByRole("heading", { name: "Contributor directory", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toBeVisible();
+    await expect(page.getByText(/1 observed; 0 in progress; 0 independently accepted/).first()).toBeVisible();
+    api.next();
+    await page.getByRole("link", { name: "Next contributors page" }).click();
+    await expect(page.getByRole("link", { name: "Synthetic API B", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+    expect(new URL(page.url()).searchParams.get("snapshot")).toBe("api-1");
+    await page.goBack();
+    await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toBeVisible();
+    expect(new URL(page.url()).searchParams.get("snapshot")).toBe("api-1");
+    await page.getByRole("searchbox", { name: "Public username" }).fill("synthetic-api-c");
+    await page.getByRole("combobox", { name: "Contribution category" }).selectOption("documentation");
+    await page.getByRole("button", { name: "Filter contributions" }).click();
+    await expect(page.getByRole("link", { name: "Synthetic API C", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Next contributors page" })).toHaveCount(0);
+    expect(
+      api.calls
+        .filter((url) => url.pathname.endsWith("/contributors"))
+        .at(-1)!
+        .searchParams.get("category"),
+    ).toBe("documentation");
+    expect(
+      (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
+    ).toEqual([]);
+  } finally {
+    await api.close();
+  }
+});
+
+test("profile pages navigate beyond 100 equal-time records and fail closed when controls change", async ({ page }) => {
+  const api = await service(page);
+  api.manyPortfolio();
+  try {
+    await page.goto("/contributors/api-a?ui=api&category=documentation&limit=100");
+    await expect(page.getByRole("link", { name: "many-000", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "many-099", exact: true })).toBeVisible();
+    await expect(page.getByText(/205 public evidence records/)).toBeVisible();
+    await page.getByRole("link", { name: "Next timeline page" }).click();
+    await expect(page.getByRole("link", { name: "many-100", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "many-000", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+    await page.getByRole("link", { name: "Next timeline page" }).click();
+    await expect(page.getByRole("link", { name: "many-204", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Next timeline page" })).toHaveCount(0);
+    await page.goBack();
+    await expect(page.getByRole("link", { name: "many-100", exact: true })).toBeVisible();
+    api.suppress();
+    await page.getByRole("button", { name: "Recheck current publication controls" }).click();
+    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(page.getByRole("link", { name: "many-100", exact: true })).toHaveCount(0);
   } finally {
     await api.close();
   }

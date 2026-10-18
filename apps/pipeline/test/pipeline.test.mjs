@@ -831,3 +831,55 @@ test("a confirmed historical pin cannot advertise an unconfirmed newer publicati
   assert.equal(pinned.head.snapshotId, retry.publications[0].snapshotId);
   assert.equal(pinned.head.revision, 2);
 });
+
+test("public observed work survives accepted-only rankings without granting assignee, mention or membership credit", async (t) => {
+  const h = await harness(t);
+  const config = structuredClone(h.config);
+  config.policies[0].policy.rankedStates = ["qualified"];
+  config.policies[0].policy.dateBasis = "acceptedAt";
+  config.policies[0].signature = components.metrics.stableJSON(config.policies[0].policy);
+  const runtime = await createPipeline({ ...h.options, config });
+  t.after(() => runtime.stop());
+  h.add({
+    id: 1003,
+    node_id: "SYNTHETIC_ISSUE_3",
+    number: 3,
+    html_url: "https://github.com/synthetic-org/synthetic-repo/issues/3",
+    created_at: ago(1),
+    updated_at: ago(1),
+    user: { id: 103, node_id: "U_SYNTHETIC_EXTERNAL", login: "synthetic-external", type: "User" },
+    assignees: [{ id: 909, login: "synthetic-assigned-only", type: "User" }],
+    body: "@synthetic-mentioned-only internal SECRET private@example.invalid",
+    author_association: "NONE",
+  });
+  assert.equal((await runtime.runOnce()).state, "published");
+  const board = await getBoard(runtime);
+  assert.deepEqual(board.rows, []);
+  const response = await runtime.app.inject("/api/v1/contributors");
+  assert.equal(response.statusCode, 200, response.body);
+  const directory = response.json();
+  assert.deepEqual(
+    directory.contributors.map((item) => item.actor.login),
+    ["synthetic-alice", "synthetic-bob", "synthetic-external"],
+  );
+  assert.ok(
+    directory.contributors.every((item) => item.categories[0].observed === 1 && item.categories[0].accepted === 0),
+  );
+  const profile = await runtime.app.inject(`/api/v1/contributors/103?snapshot=${directory.snapshotId}`);
+  assert.deepEqual(profile.json().results, []);
+  assert.equal(profile.json().timeline[0].activityState, "observed");
+  assert.equal(profile.json().timeline[0].contribution.roles[0], "reporter");
+  assert.doesNotMatch(
+    response.body + profile.body,
+    /assigned-only|mentioned-only|SECRET|private@example|author_association|acceptanceReceipt/,
+  );
+  h.controlsStore.transaction((state) => {
+    state.profiles["103"] = { suppressed: true };
+  });
+  assert.deepEqual(
+    (await runtime.app.inject(`/api/v1/contributors?search=external&snapshot=${directory.snapshotId}`)).json()
+      .contributors,
+    [],
+  );
+  assert.equal((await runtime.app.inject(`/api/v1/contributors/103?snapshot=${directory.snapshotId}`)).statusCode, 404);
+});

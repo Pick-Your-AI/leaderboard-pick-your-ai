@@ -507,6 +507,31 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
   };
 }
 
+/** Public portfolio selection is descriptive, never a new ranking or score.
+ * Reuse correction, identity, authorization, context and independent acceptance checks.
+ * Use actual occurrence time and retain canonical actions, including unaccepted work.
+ */
+export function selectPortfolioFacts(
+  input: FrozenInput,
+  policy: MetricPolicy,
+  requestedScope: MetricScope,
+): MetricFact[] {
+  validateMetricPolicy(policy);
+  const scope = canonicalScope(requestedScope);
+  return prepare(
+    input,
+    {
+      ...policy,
+      aggregation: "count",
+      dateBasis: "occurredAt",
+      groupBy: "canonical",
+      rankedStates: ["qualified", "reviewed", "observed"],
+      rank: false,
+    },
+    scope,
+  ).facts.filter((fact) => fact.role !== "unknown" && fact.occurredAt !== null);
+}
+
 export function aggregateMetric(
   input: FrozenInput,
   policy: MetricPolicy,
