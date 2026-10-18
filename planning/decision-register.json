@@ -42,7 +42,10 @@
     "before": [
       "LB-11.01"
     ],
-    "status": "Proposed"
+    "status": "Decision specified; review and merge of LB-01.02 record acceptance",
+    "decision": "Use recognition-governance/v1: independent observed, qualified and reviewed views, dense ties, an inclusive unranked directory and no universal weighted contributor score. Descriptive ratios, wait times, context and editorial recognition remain unranked. The per-definition review preserves all 98 meanings and source limits; runtime policy configuration and public enablement remain separate.",
+    "decision_record": "docs/metric-recognition-policy.md",
+    "definition_review": "docs/metric-definition-review.md"
   },
   {
     "id": "DEC-04",
@@ -57,7 +60,9 @@
       "LB-10.03",
       "LB-17.03"
     ],
-    "status": "Needs role acceptance; no named assignment invented"
+    "status": "Authority rules specified; actual runtime roster and operating acceptance remain required",
+    "decision": "recognition-governance/v1 defines independent evidence review, source and receiving authority, conflict handling, appeal separation and versioned correction receipts. Repository engineering authorization accepts this project's policy decision; it does not create a runtime identity/role, a source observation, contributor consent or external receiving acceptance. No named assignment or response commitment is invented.",
+    "decision_record": "docs/metric-recognition-policy.md"
   },
   {
     "id": "DEC-05",
@@ -103,7 +108,9 @@
       "LB-19.06",
       "LB-20.04"
     ],
-    "status": "Proposed; explicit release manifest required"
+    "status": "Initial presentation defaults specified; explicit enabled-capability release manifest still required",
+    "decision": "Use the implemented, source-proven per-definition lens without substituting an unsupported state or source clock. Raw activity remains labeled; qualified/reviewed outcomes need their exact acceptance. Retained-line analysis stays deferred. Candidate UI metadata and the complete 98-definition catalog are discovery aids, not permission, live measurement or public activation. The release manifest must independently select enabled capabilities and record disabled reasons.",
+    "decision_record": "docs/metric-recognition-policy.md"
   },
   {
     "id": "DEC-08",
