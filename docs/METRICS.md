@@ -2289,7 +2289,7 @@ Every definition below retains its numerator, denominator, event clock, source c
 
 **Source:** label/assignment/relation/project/edit events
 
-**Counting rule:** distinct actor/item/day qualifying change; group related actions; explicit policy version
+**Counting rule:** one observed group per stable actor/item/exact raw state in each fixed 3,600-second UTC bucket anchored at the Unix epoch; repeated identical states within a bucket count once (triage-raw-state/v1)
 
 **Event clock:** event_at
 
@@ -2309,11 +2309,11 @@ Every definition below retains its numerator, denominator, event clock, source c
 
 #### Definition
 
-**Unit:** distinct actor-item-day triage groups
+**Unit:** distinct actor-item-raw-state UTC-hour triage groups
 
 **Aggregation:** count_distinct_eligible_units
 
-**Numerator:** distinct actor/item/day qualifying change; group related actions; explicit policy version
+**Numerator:** one observed group per stable actor/item/exact raw state in each fixed 3,600-second UTC bucket anchored at the Unix epoch; repeated identical states within a bucket count once (triage-raw-state/v1)
 
 ##### Denominator
 
