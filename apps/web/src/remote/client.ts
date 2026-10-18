@@ -830,6 +830,7 @@ export function board(value: unknown, selected: Selection): Board {
   const meta = metadata(value, selected);
   const comparison = rankComparison(data.comparison, selected, meta.generatedAt);
   if (comparison && method && method.metricId !== metric.id) invalidComparison();
+  if (comparison && meta.disabledMetrics.some((entry) => entry.id === metric.id)) invalidComparison();
   const seen = new Set<string>();
   return {
     ...meta,

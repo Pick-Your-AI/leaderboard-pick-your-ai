@@ -193,6 +193,65 @@ test("publication generation time does not invent a different comparison-cutoff 
   validateExport(parseCSVExport(h.csv, metric, 50), h.selected, metric);
 });
 
+test("comparison rejects an explicitly disabled selected metric before presenting movement", async (t) => {
+  const h = await documents(t);
+  assert.doesNotThrow(() => board(h.board, h.selected));
+  const contradictory = structuredClone(h.board);
+  contradictory.disabledMetrics = [
+    { id: metric.id, reason: "explicitly_disabled", policyVersion: "synthetic-policy-v1", policyLink: null },
+  ];
+  assert.throws(() => board(contradictory, h.selected), /invalid_rank_comparison/);
+});
+
+test("unrelated disabled metrics preserve actual-service comparisons and explicit unavailable movement", async (t) => {
+  const unrelated = metricRegistryV1.metrics.find((entry) => entry.id !== metric.id).id;
+  const h = await documents(t, (pair) => {
+    pair.current.selected.disabledMetrics = [
+      { id: unrelated, reason: "explicitly_disabled", policyVersion: "synthetic-policy-v1", policyLink: null },
+    ];
+  });
+  const parsed = board(h.board, h.selected);
+  assert.deepEqual(parsed.disabledMetrics, [{ id: unrelated, reason: "explicitly_disabled" }]);
+  assert.equal(
+    parsed.rows.some((row) => row.movement.state === "comparable"),
+    true,
+  );
+  validateExport(h.json, h.selected, metric);
+  validateExport(parseCSVExport(h.csv, metric, 50), h.selected, metric);
+  const unavailable = structuredClone(h.board);
+  unavailable.comparison = { snapshotId: null, scope: null, generatedAt: null };
+  for (const row of unavailable.rows)
+    row.movement = { actorId: row.actorId, state: "unavailable", delta: null, reason: "comparison_unavailable" };
+  assert.equal(
+    board(unavailable, h.selected).rows.every((row) => row.movement.state === "unavailable"),
+    true,
+  );
+  unavailable.ranking = null;
+  for (const row of unavailable.rows) row.rank = null;
+  assert.equal(
+    board(unavailable, h.selected).rows.every((row) => row.rank === null && row.movement.state === "unavailable"),
+    true,
+  );
+});
+
+test("actual service rejects selected-disabled comparisons for boards and both export formats", async (t) => {
+  const h = await documents(t);
+  h.pair.current.selected.disabledMetrics = [
+    { id: metric.id, reason: "explicitly_disabled", policyVersion: "synthetic-policy-v1", policyLink: null },
+  ];
+  for (const path of [
+    `/api/v1/boards?${h.params}`,
+    `/api/v1/exports?${h.params}&format=json`,
+    `/api/v1/exports?${h.params}&format=csv`,
+  ]) {
+    const response = await h.app.inject(path);
+    assert.equal(response.statusCode, 503, response.body);
+    assert.equal(response.json().error, "metric_disabled");
+    assert.equal(response.json().metric.id, metric.id);
+    assert.equal(Object.hasOwn(response.json(), "rows"), false);
+  }
+});
+
 test("ordinary service responses remain compatible without comparison fields or CSV columns", async (t) => {
   const h = await documents(t);
   const params = new URLSearchParams(h.params);
