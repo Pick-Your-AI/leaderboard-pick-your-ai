@@ -44,6 +44,10 @@ not establish issue acceptance or launch readiness.
 - **Domain recognition (#80/#88/#89/#81/#82/#90):** generic accepted-receipt wiring
   does not implement every research, catalog/pricing, market-source, documentation,
   localization, test/performance, design or security-specific evidence adapter.
+  The [research record adapter](research-record-adapter.md) now supplies pinned
+  pending decision-record versions and exact-locator independent acceptance,
+  with replay, withdrawal and classification-cache verification. This does not
+  complete research findings, issue relationships or domain-owner acceptance.
   Required source/revision/comparable-measurement semantics still need their own
   implementation and meaningful inclusion/exclusion tests.
 - **Recognition and operator breadth (#69/#70/#93/#94/#115/#122/#124):** richer
