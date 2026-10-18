@@ -118,6 +118,8 @@ export async function createPipeline(options) {
     c.controls.configurationOverlay?.(state) ?? {
       revision: 0,
       allowedRepositoryIds: null,
+      allowedRepositories: null,
+      allowedProjectIds: null,
       disabledMetricIds: [],
       disabledMetrics: [],
     };
@@ -128,6 +130,28 @@ export async function createPipeline(options) {
       config.repositories.some((repo) => !overlay.allowedRepositoryIds.includes(String(repo.id)))
     )
       fail("active_configuration_revoked_source");
+    // Activated controls may narrow any part of the independently verified baseline.
+    // A stale runtime must be rebuilt against that scope, not silently keep old grants.
+    if (state.configuration?.active || overlay.allowedRepositories != null || overlay.allowedProjectIds != null) {
+      if (!Array.isArray(overlay.allowedRepositories) || !Array.isArray(overlay.allowedProjectIds))
+        fail("active_configuration_source_scope_unavailable");
+      for (const repo of config.repositories) {
+        const active = overlay.allowedRepositories.find((entry) => entry.id === String(repo.id));
+        if (!active || active.installationId !== String(repo.installationId) || active.slug !== repo.slug)
+          fail("active_configuration_repository_binding_changed");
+        if (
+          !Array.isArray(active.capabilities) ||
+          repo.families.some((family) => !active.capabilities.includes(family))
+        )
+          fail("active_configuration_revoked_capability");
+        if (
+          repo.allowedProjectIds !== undefined &&
+          (!Array.isArray(repo.allowedProjectIds) ||
+            repo.allowedProjectIds.some((id) => !overlay.allowedProjectIds.includes(id)))
+        )
+          fail("active_configuration_revoked_project");
+      }
+    }
     return overlay;
   };
   // Runs are serialized. A reactivation must start a fresh run rather than

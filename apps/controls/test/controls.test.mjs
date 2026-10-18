@@ -1030,6 +1030,8 @@ test("configuration preview, independent approval and fresh activation are durab
     digest: proposal.digest,
     approvalReceipt: approved.approval.id,
     allowedRepositoryIds: ["101"],
+    allowedRepositories: h.store.read().configuration.active.document.repositories,
+    allowedProjectIds: h.store.read().configuration.active.document.projects.map((project) => project.id),
     disabledMetricIds: [],
     disabledMetrics: [],
   });

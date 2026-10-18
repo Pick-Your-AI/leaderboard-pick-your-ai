@@ -1205,3 +1205,60 @@ test("policy approval rolls back its durable receipt when privacy changes during
     false,
   );
 });
+
+for (const narrowing of ["capability", "project", "installation", "slug"]) {
+  test(`activated ${narrowing} narrowing fences historical reads and new collection`, async (t) => {
+    const h = await harness(t);
+    const config = structuredClone(h.options.config);
+    config.repositories[0].allowedProjectIds = ["PVT_syntheticAllowed"];
+    let sourceReads = 0;
+    const runtime = await createPipeline({
+      ...h.options,
+      config,
+      source: {
+        readPage: async (request) => {
+          sourceReads++;
+          return h.options.source.readPage(request);
+        },
+      },
+    });
+    t.after(() => runtime.stop());
+    const publication = (await runtime.runOnce()).publications[0];
+    const active = {
+      repositories: [{ id: "2", installationId: "1", slug: config.repositories[0].slug, capabilities: ["issues"] }],
+      projects: [{ id: "PVT_syntheticAllowed", fields: [] }],
+      metrics: [],
+    };
+    h.controlsStore.transaction(
+      (state) => {
+        state.configuration = {
+          revision: 1,
+          active: {
+            version: "synthetic-control",
+            digest: "a".repeat(64),
+            approval: { id: "synthetic-approval" },
+            document: active,
+          },
+        };
+      },
+      { publish: true },
+    );
+    assert.equal((await runtime.app.inject(`${boardUrl}&snapshot=${publication.snapshotId}`)).statusCode, 200);
+    h.controlsStore.transaction(
+      (state) => {
+        state.configuration.revision++;
+        const document = state.configuration.active.document;
+        if (narrowing === "capability") document.repositories[0].capabilities = ["reviews"];
+        if (narrowing === "project") document.projects = [];
+        if (narrowing === "installation") document.repositories[0].installationId = "9";
+        if (narrowing === "slug") document.repositories[0].slug = "synthetic-org/other";
+      },
+      { publish: true },
+    );
+    const priorReads = sourceReads;
+    assert.equal((await runtime.app.inject(`${boardUrl}&snapshot=${publication.snapshotId}`)).statusCode, 503);
+    assert.equal((await runtime.app.inject(boardUrl)).statusCode, 503);
+    await assert.rejects(runtime.runOnce(), /active_configuration_/);
+    assert.equal(sourceReads, priorReads);
+  });
+}
