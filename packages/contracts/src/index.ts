@@ -1,5 +1,10 @@
 export { actorFilterSchema, actorFilterLabels, matchesActorFilter, type ActorFilter } from "./actor-filter.js";
 export { compareSourceInstants } from "./v1/source-time.js";
+export {
+  publicParticipationSchema,
+  participationWeekDenominator,
+  type PublicParticipation,
+} from "./v1/participation.js";
 
 export {
   actorIdentityStateSchema,
