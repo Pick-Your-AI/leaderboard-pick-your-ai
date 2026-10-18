@@ -1124,10 +1124,7 @@ async function persistLegacyInputManifest(h, input, batchId) {
     return result;
   };
   try {
-    await assert.rejects(
-      h.eraser.eraseBatch(input, batchId, 1, approved),
-      /synthetic_legacy_input_manifest_committed/,
-    );
+    await assert.rejects(h.eraser.eraseBatch(input, batchId, 1, approved), /synthetic_legacy_input_manifest_committed/);
   } finally {
     db.prepare = prepare;
     h.db.transaction = transaction;
@@ -1142,10 +1139,7 @@ async function persistLegacyInputManifest(h, input, batchId) {
     db.prepare("SELECT 1 FROM pipeline_derived_retirement_batches WHERE batch_id=?").get(batchId),
     undefined,
   );
-  assert.equal(
-    (await pgRows(h, "derived_retirement_receipts")).some((row) => row.batch_id === batchId),
-    false,
-  );
+  assert.equal((await pgRows(h, "derived_retirement_receipts")).some((row) => row.batch_id === batchId), false);
   return manifest;
 }
 
@@ -1179,10 +1173,7 @@ for (const inputState of ["present", "already absent"]) {
     );
     const resumed = new PipelineDerivedRetirementStore(h.db, h.controlsStore);
     for (let attempt = 0; attempt < 2; attempt++)
-      await assert.rejects(
-        resumed.eraseBatch(input, batchId, 1, approved),
-        /derived_preview_reference_remaining/,
-      );
+      await assert.rejects(resumed.eraseBatch(input, batchId, 1, approved), /derived_preview_reference_remaining/);
     await assert.rejects(
       resumed.eraseBatch(input, "synthetic-competing-input-batch", 1, approved),
       /derived_batch_pending/,
@@ -1195,15 +1186,10 @@ for (const inputState of ["present", "already absent"]) {
       manifest,
     );
     assert.equal(
-      h.controlsStore.db
-        .prepare("SELECT 1 FROM pipeline_derived_retirement_batches WHERE batch_id=?")
-        .get(batchId),
+      h.controlsStore.db.prepare("SELECT 1 FROM pipeline_derived_retirement_batches WHERE batch_id=?").get(batchId),
       undefined,
     );
-    assert.equal(
-      (await pgRows(h, "derived_retirement_receipts")).some((row) => row.batch_id === batchId),
-      false,
-    );
+    assert.equal((await pgRows(h, "derived_retirement_receipts")).some((row) => row.batch_id === batchId), false);
   });
 }
 
@@ -1284,10 +1270,7 @@ test("a committed input acknowledgement survives pending-manifest recovery witho
     .get(batchId);
   assert.equal(local.manifest_hash, manifest.document_hash);
   assert.equal(JSON.parse(local.document).removed, 1);
-  assert.equal(
-    (await pgRows(h, "derived_retirement_receipts")).some((row) => row.batch_id === batchId),
-    false,
-  );
+  assert.equal((await pgRows(h, "derived_retirement_receipts")).some((row) => row.batch_id === batchId), false);
   assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM policy_preview_inputs").get().n, 0);
   const db = h.controlsStore.db;
   const prepare = db.prepare;
@@ -1314,9 +1297,6 @@ test("a committed input acknowledgement survives pending-manifest recovery witho
     db.prepare("SELECT * FROM pipeline_derived_retirement_batches WHERE batch_id=?").get(batchId),
     local,
   );
-  assert.deepEqual(
-    (await pgRows(h, "derived_retirement_manifests")).find((row) => row.batch_id === batchId),
-    manifest,
-  );
+  assert.deepEqual((await pgRows(h, "derived_retirement_manifests")).find((row) => row.batch_id === batchId), manifest);
   assert.deepEqual(await h.eraser.eraseBatch(input, batchId, 1, approved), result);
 });
