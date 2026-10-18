@@ -547,6 +547,7 @@ fieldset {
 }
 .remote-filters {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   max-width: 48rem;
   padding: var(--space-3) 0;
@@ -566,7 +567,14 @@ fieldset {
 }
 .remote-filters label {
   display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-1);
+}
+.remote-filters select {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
 }
 .remote-filters input {
   width: 100%;
