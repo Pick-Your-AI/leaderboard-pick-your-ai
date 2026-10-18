@@ -1021,6 +1021,13 @@ tbody th {
 .controls-page h3 {
   overflow-wrap: anywhere;
 }
+.operator-observation {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.operator-observation dd {
+  min-width: 0;
+}
 
 .policy-comparison {
   min-width: 0;
