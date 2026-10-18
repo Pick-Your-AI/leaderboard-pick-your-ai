@@ -1,0 +1,965 @@
+{
+  "format": "leaderboard-engineering-source-audit-1",
+  "purpose": "Minimized public-source observations and local physical-diff reconciliation; not a collector input, runtime authority, contribution ranking or release receipt.",
+  "evaluator": {
+    "repository": "Pick-Your-AI/leaderboard-pick-your-ai",
+    "acceptedCommit": "bf1a3d2df954873f4469041f082be09f9dffdc9c",
+    "sourcePath": "packages/github/src/physical-diff.ts",
+    "sourceBlobSha": "4566dd47ab521a43be6bb619b431439c4d36db2f",
+    "functions": [
+      "readPinnedGitDiff",
+      "classifyPhysicalDiff"
+    ]
+  },
+  "observationLimits": [
+    "Requests were separate observations inside the stated windows, not an atomic snapshot or a claim of history completeness.",
+    "Review records include COMMENTED source events; no human identity, independence, quality or acceptance is inferred from account names, counts or merge state.",
+    "No protected collector proof, installed-App capability, source watermark, current authorized metric policy or publication control was created.",
+    "Generated/imported provenance remains unknown. Path classes and whole-file whitespace comparison only describe physical text changes.",
+    "Open PR source and its later default-branch integration remain separate observations; prior observations are not rewritten after a merge."
+  ],
+  "samples": [
+    {
+      "id": "research_352",
+      "repository": {
+        "id": 1421934086,
+        "fullName": "Pick-Your-AI/pick-your-ai-research",
+        "public": true
+      },
+      "pullRequest": 352,
+      "sourceUrls": {
+        "pullRequest": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/352",
+        "metadata": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/pulls/352",
+        "reviews": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/pulls/352/reviews?per_page=100",
+        "files": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/pulls/352/files?per_page=100",
+        "comparison": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/compare/be60732a1353f9d4efab9d1a4c5fbf7627d49abf...fe4c0ca7e30fd126ca58889facd2e9d878a3b43e"
+      },
+      "firstObservationWindow": {
+        "startedAt": "2026-10-18T15:21:58Z",
+        "finishedAt": "2026-10-18T15:25:58Z"
+      },
+      "firstMetadata": {
+        "state": "closed",
+        "draft": false,
+        "merged": true,
+        "createdAt": "2026-10-18T15:10:51Z",
+        "updatedAt": "2026-10-18T15:19:12Z",
+        "mergedAt": "2026-10-18T15:19:11Z",
+        "headSha": "fe4c0ca7e30fd126ca58889facd2e9d878a3b43e",
+        "baseRef": "main",
+        "baseTipSha": "be60732a1353f9d4efab9d1a4c5fbf7627d49abf",
+        "mergeCommitSha": "4f1c22bac91783a00384b3037bb64b040250c072",
+        "author": {
+          "databaseId": 5861166,
+          "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+          "providerType": "User"
+        },
+        "merger": {
+          "databaseId": 5861166,
+          "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+          "providerType": "User"
+        },
+        "commits": 2,
+        "changedFiles": 1,
+        "additions": 74,
+        "deletions": 37
+      },
+      "reviewRecords": [
+        {
+          "id": 5563640426,
+          "actor": {
+            "databaseId": 5861166,
+            "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+            "providerType": "User"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-10-18T15:16:39Z",
+          "commitSha": "fe4c0ca7e30fd126ca58889facd2e9d878a3b43e",
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/352#pullrequestreview-5563640426"
+        }
+      ],
+      "fileManifest": [
+        {
+          "path": "research/T4-agents-integrations/mcp-servers.md",
+          "status": "modified",
+          "blobSha": "8251d39e27e485b4e9eceea1c722e0152d618e1b",
+          "additions": 74,
+          "deletions": 37
+        }
+      ],
+      "mergeBaseSha": "be60732a1353f9d4efab9d1a4c5fbf7627d49abf",
+      "prDiffComparison": "research_352_pr",
+      "integrationDiffComparison": "research_352_integration"
+    },
+    {
+      "id": "research_348",
+      "repository": {
+        "id": 1421934086,
+        "fullName": "Pick-Your-AI/pick-your-ai-research",
+        "public": true
+      },
+      "pullRequest": 348,
+      "sourceUrls": {
+        "pullRequest": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/348",
+        "metadata": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/pulls/348",
+        "reviews": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/pulls/348/reviews?per_page=100",
+        "files": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/pulls/348/files?per_page=100",
+        "comparison": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-research/compare/4f1c22bac91783a00384b3037bb64b040250c072...197af1a64ca34b4553d571bc60daec9b0f939105"
+      },
+      "firstObservationWindow": {
+        "startedAt": "2026-10-18T15:21:58Z",
+        "finishedAt": "2026-10-18T15:25:58Z"
+      },
+      "firstMetadata": {
+        "state": "open",
+        "draft": false,
+        "merged": false,
+        "createdAt": "2026-10-18T14:35:10Z",
+        "updatedAt": "2026-10-18T15:21:00Z",
+        "mergedAt": null,
+        "headSha": "197af1a64ca34b4553d571bc60daec9b0f939105",
+        "baseRef": "main",
+        "baseTipSha": "4f1c22bac91783a00384b3037bb64b040250c072",
+        "mergeCommitSha": "8db769dda1183c0b2e9045a30ee1ce0bca15de0a",
+        "author": {
+          "databaseId": 5861166,
+          "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+          "providerType": "User"
+        },
+        "merger": null,
+        "commits": 5,
+        "changedFiles": 2,
+        "additions": 114,
+        "deletions": 0
+      },
+      "reviewRecords": [
+        {
+          "id": 5563451005,
+          "actor": {
+            "databaseId": 5861166,
+            "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+            "providerType": "User"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-10-18T14:42:26Z",
+          "commitSha": "9dc003a03ef426afaf45feefbe591c04be15fdf6",
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/348#pullrequestreview-5563451005"
+        },
+        {
+          "id": 5563489219,
+          "actor": {
+            "databaseId": 5861166,
+            "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+            "providerType": "User"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-10-18T14:47:37Z",
+          "commitSha": "9dc003a03ef426afaf45feefbe591c04be15fdf6",
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/348#pullrequestreview-5563489219"
+        },
+        {
+          "id": 5563518287,
+          "actor": {
+            "databaseId": 5861166,
+            "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+            "providerType": "User"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-10-18T14:52:04Z",
+          "commitSha": "d81f4cb34099e757096a59b7ad1fe3fda5d8509c",
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/348#pullrequestreview-5563518287"
+        },
+        {
+          "id": 5563601272,
+          "actor": {
+            "databaseId": 24713584,
+            "nodeId": "MDQ6VXNlcjI0NzEzNTg0",
+            "providerType": "User"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-10-18T15:08:25Z",
+          "commitSha": "d81f4cb34099e757096a59b7ad1fe3fda5d8509c",
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/348#pullrequestreview-5563601272"
+        },
+        {
+          "id": 5563650803,
+          "actor": {
+            "databaseId": 5861166,
+            "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+            "providerType": "User"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-10-18T15:19:56Z",
+          "commitSha": "b6d72c907680cdc875dadeb2eb9235b70a48369c",
+          "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/348#pullrequestreview-5563650803"
+        }
+      ],
+      "fileManifest": [
+        {
+          "path": "research/T1-model-selection/handoffs.md",
+          "status": "modified",
+          "blobSha": "c0824f401f661df1b33e369a3afb960d528659b9",
+          "additions": 18,
+          "deletions": 0
+        },
+        {
+          "path": "research/T1-model-selection/model-provider.md",
+          "status": "modified",
+          "blobSha": "719b072daf2d213024bde7fd6816e5387389c131",
+          "additions": 96,
+          "deletions": 0
+        }
+      ],
+      "mergeBaseSha": "4f1c22bac91783a00384b3037bb64b040250c072",
+      "prDiffComparison": "research_348_open",
+      "integrationDiffComparison": null,
+      "followup": {
+        "observationWindow": {
+          "startedAt": "2026-10-18T15:25:58Z",
+          "finishedAt": "2026-10-18T15:31:46Z"
+        },
+        "metadata": {
+          "state": "closed",
+          "draft": false,
+          "merged": true,
+          "createdAt": "2026-10-18T14:35:10Z",
+          "updatedAt": "2026-10-18T15:27:33Z",
+          "mergedAt": "2026-10-18T15:27:32Z",
+          "headSha": "197af1a64ca34b4553d571bc60daec9b0f939105",
+          "baseRef": "main",
+          "baseTipSha": "4f1c22bac91783a00384b3037bb64b040250c072",
+          "mergeCommitSha": "8cf075b1a887459337bfe886958b4c7d7f3c362f",
+          "author": {
+            "databaseId": 5861166,
+            "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+            "providerType": "User"
+          },
+          "merger": {
+            "databaseId": 5861166,
+            "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+            "providerType": "User"
+          },
+          "commits": 5,
+          "changedFiles": 2,
+          "additions": 114,
+          "deletions": 0
+        },
+        "reviewRecords": [
+          {
+            "id": 5563451005,
+            "actor": {
+              "databaseId": 5861166,
+              "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+              "providerType": "User"
+            },
+            "state": "COMMENTED",
+            "submittedAt": "2026-10-18T14:42:26Z",
+            "commitSha": "9dc003a03ef426afaf45feefbe591c04be15fdf6",
+            "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/348#pullrequestreview-5563451005"
+          },
+          {
+            "id": 5563489219,
+            "actor": {
+              "databaseId": 5861166,
+              "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+              "providerType": "User"
+            },
+            "state": "COMMENTED",
+            "submittedAt": "2026-10-18T14:47:37Z",
+            "commitSha": "9dc003a03ef426afaf45feefbe591c04be15fdf6",
+            "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/348#pullrequestreview-5563489219"
+          },
+          {
+            "id": 5563518287,
+            "actor": {
+              "databaseId": 5861166,
+              "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+              "providerType": "User"
+            },
+            "state": "COMMENTED",
+            "submittedAt": "2026-10-18T14:52:04Z",
+            "commitSha": "d81f4cb34099e757096a59b7ad1fe3fda5d8509c",
+            "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/348#pullrequestreview-5563518287"
+          },
+          {
+            "id": 5563601272,
+            "actor": {
+              "databaseId": 24713584,
+              "nodeId": "MDQ6VXNlcjI0NzEzNTg0",
+              "providerType": "User"
+            },
+            "state": "COMMENTED",
+            "submittedAt": "2026-10-18T15:08:25Z",
+            "commitSha": "d81f4cb34099e757096a59b7ad1fe3fda5d8509c",
+            "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/348#pullrequestreview-5563601272"
+          },
+          {
+            "id": 5563650803,
+            "actor": {
+              "databaseId": 5861166,
+              "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+              "providerType": "User"
+            },
+            "state": "COMMENTED",
+            "submittedAt": "2026-10-18T15:19:56Z",
+            "commitSha": "b6d72c907680cdc875dadeb2eb9235b70a48369c",
+            "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/348#pullrequestreview-5563650803"
+          },
+          {
+            "id": 5563672669,
+            "actor": {
+              "databaseId": 5861166,
+              "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+              "providerType": "User"
+            },
+            "state": "COMMENTED",
+            "submittedAt": "2026-10-18T15:26:46Z",
+            "commitSha": "197af1a64ca34b4553d571bc60daec9b0f939105",
+            "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/348#pullrequestreview-5563672669"
+          }
+        ],
+        "integrationDiffComparison": "research_348_integration",
+        "integrationParentSha": "4f1c22bac91783a00384b3037bb64b040250c072"
+      }
+    },
+    {
+      "id": "website_14",
+      "repository": {
+        "id": 1422238606,
+        "fullName": "Pick-Your-AI/pickyour.ai",
+        "public": true
+      },
+      "pullRequest": 14,
+      "sourceUrls": {
+        "pullRequest": "https://github.com/Pick-Your-AI/pickyour.ai/pull/14",
+        "metadata": "https://api.github.com/repos/Pick-Your-AI/pickyour.ai/pulls/14",
+        "reviews": "https://api.github.com/repos/Pick-Your-AI/pickyour.ai/pulls/14/reviews?per_page=100",
+        "files": "https://api.github.com/repos/Pick-Your-AI/pickyour.ai/pulls/14/files?per_page=100",
+        "comparison": "https://api.github.com/repos/Pick-Your-AI/pickyour.ai/compare/1322c29c9ad25cb5206e2ff2cfd9fcd3e288ace0...850e15cbd73ff407f82566e94306654f63b01821"
+      },
+      "firstObservationWindow": {
+        "startedAt": "2026-10-18T15:21:58Z",
+        "finishedAt": "2026-10-18T15:25:58Z"
+      },
+      "firstMetadata": {
+        "state": "closed",
+        "draft": false,
+        "merged": true,
+        "createdAt": "2026-10-16T15:44:18Z",
+        "updatedAt": "2026-10-17T12:44:11Z",
+        "mergedAt": "2026-10-16T15:47:49Z",
+        "headSha": "850e15cbd73ff407f82566e94306654f63b01821",
+        "baseRef": "main",
+        "baseTipSha": "1322c29c9ad25cb5206e2ff2cfd9fcd3e288ace0",
+        "mergeCommitSha": "f560f2c96e5002ce91076827da3d2d3044b7347a",
+        "author": {
+          "databaseId": 5861166,
+          "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+          "providerType": "User"
+        },
+        "merger": {
+          "databaseId": 5861166,
+          "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+          "providerType": "User"
+        },
+        "commits": 1,
+        "changedFiles": 6,
+        "additions": 379,
+        "deletions": 0
+      },
+      "reviewRecords": [],
+      "fileManifest": [
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "status": "added",
+          "blobSha": "1ae549846ef2bc62054e233ea58c01d27259b32d",
+          "additions": 85,
+          "deletions": 0
+        },
+        {
+          "path": "docs/DATA_INTEGRATION.md",
+          "status": "added",
+          "blobSha": "d3ccc7e4a8791f5025b1900bec242fd71c03462a",
+          "additions": 101,
+          "deletions": 0
+        },
+        {
+          "path": "docs/DESIGN_SYSTEM.md",
+          "status": "added",
+          "blobSha": "df399d81e1346f49b70b05172bafe22ab1d2cdd3",
+          "additions": 45,
+          "deletions": 0
+        },
+        {
+          "path": "docs/PRODUCT.md",
+          "status": "added",
+          "blobSha": "6933aef49818dda6ad65e495d230b695c6eb2f6b",
+          "additions": 46,
+          "deletions": 0
+        },
+        {
+          "path": "docs/RESEARCH_MAPPING.md",
+          "status": "added",
+          "blobSha": "6d35d87b2e143adab90fdb6e13a9e0275472df92",
+          "additions": 66,
+          "deletions": 0
+        },
+        {
+          "path": "docs/TESTING.md",
+          "status": "added",
+          "blobSha": "b88447bba10ac8e27445bbbc835a0b7cc8f25dbe",
+          "additions": 36,
+          "deletions": 0
+        }
+      ],
+      "mergeBaseSha": "5d6994c5c335965fdfc257148a2908b3ebcbea71",
+      "prDiffComparison": "website_14_pr",
+      "integrationDiffComparison": "website_14_integration"
+    },
+    {
+      "id": "website_294",
+      "repository": {
+        "id": 1422238606,
+        "fullName": "Pick-Your-AI/pickyour.ai",
+        "public": true
+      },
+      "pullRequest": 294,
+      "sourceUrls": {
+        "pullRequest": "https://github.com/Pick-Your-AI/pickyour.ai/pull/294",
+        "metadata": "https://api.github.com/repos/Pick-Your-AI/pickyour.ai/pulls/294",
+        "reviews": "https://api.github.com/repos/Pick-Your-AI/pickyour.ai/pulls/294/reviews?per_page=100",
+        "files": "https://api.github.com/repos/Pick-Your-AI/pickyour.ai/pulls/294/files?per_page=100",
+        "comparison": "https://api.github.com/repos/Pick-Your-AI/pickyour.ai/compare/dc66a9e269917ab7241c7d08fd0e7f2a2f039872...73d3ca4d91f29020837828c5e965f38934f39229"
+      },
+      "firstObservationWindow": {
+        "startedAt": "2026-10-18T15:21:58Z",
+        "finishedAt": "2026-10-18T15:25:58Z"
+      },
+      "firstMetadata": {
+        "state": "open",
+        "draft": false,
+        "merged": false,
+        "createdAt": "2026-10-18T00:25:43Z",
+        "updatedAt": "2026-10-18T04:52:27Z",
+        "mergedAt": null,
+        "headSha": "73d3ca4d91f29020837828c5e965f38934f39229",
+        "baseRef": "main",
+        "baseTipSha": "dc66a9e269917ab7241c7d08fd0e7f2a2f039872",
+        "mergeCommitSha": "a966e6610da813288acea15ff2b78f0733a57da5",
+        "author": {
+          "databaseId": 5861166,
+          "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+          "providerType": "User"
+        },
+        "merger": null,
+        "commits": 1,
+        "changedFiles": 10,
+        "additions": 309,
+        "deletions": 16
+      },
+      "reviewRecords": [
+        {
+          "id": 5561487670,
+          "actor": {
+            "databaseId": 24713584,
+            "nodeId": "MDQ6VXNlcjI0NzEzNTg0",
+            "providerType": "User"
+          },
+          "state": "COMMENTED",
+          "submittedAt": "2026-10-18T04:52:27Z",
+          "commitSha": "73d3ca4d91f29020837828c5e965f38934f39229",
+          "url": "https://github.com/Pick-Your-AI/pickyour.ai/pull/294#pullrequestreview-5561487670"
+        }
+      ],
+      "fileManifest": [
+        {
+          "path": "src/features/builder/BuilderPage.tsx",
+          "status": "modified",
+          "blobSha": "245ce116cccd34bdf8853a0da223cbde092948a6",
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "path": "src/features/builder/BuilderTable.tsx",
+          "status": "modified",
+          "blobSha": "a48b86c4600463084c1d59cfe50924470b70c1e5",
+          "additions": 11,
+          "deletions": 1
+        },
+        {
+          "path": "src/features/builder/SummaryPanel.tsx",
+          "status": "modified",
+          "blobSha": "6f1faee829fe41db19c3dbf703aee0e950254c68",
+          "additions": 26,
+          "deletions": 10
+        },
+        {
+          "path": "src/features/builder/analysis.ts",
+          "status": "modified",
+          "blobSha": "69d41a724e05e817ce3c56400d13b7c27aa66399",
+          "additions": 4,
+          "deletions": 2
+        },
+        {
+          "path": "src/features/builder/incomplete.ts",
+          "status": "added",
+          "blobSha": "363b8c9c1a4b4e68cdaed68d694b901e93df269c",
+          "additions": 83,
+          "deletions": 0
+        },
+        {
+          "path": "src/pages/BuildSummaryPage.tsx",
+          "status": "modified",
+          "blobSha": "f2af64f883c5274b4fcea669739615790cc73ae4",
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "path": "src/pages/SharedBuildPage.tsx",
+          "status": "modified",
+          "blobSha": "9c2055458119f6f3dcae288a8d31ecbec97b6a27",
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "path": "tests/e2e/smoke.spec.ts",
+          "status": "modified",
+          "blobSha": "736315bf256081e2df967068394106c143b0587a",
+          "additions": 35,
+          "deletions": 0
+        },
+        {
+          "path": "tests/unit/incomplete-ui.test.tsx",
+          "status": "added",
+          "blobSha": "98abed45a8879afa9fe1cb89bcc163f53a817054",
+          "additions": 45,
+          "deletions": 0
+        },
+        {
+          "path": "tests/unit/incomplete.test.ts",
+          "status": "added",
+          "blobSha": "821361d6a2469b4064ef142d6d09bf424daea404",
+          "additions": 102,
+          "deletions": 0
+        }
+      ],
+      "mergeBaseSha": "dc66a9e269917ab7241c7d08fd0e7f2a2f039872",
+      "prDiffComparison": "website_294_open",
+      "integrationDiffComparison": null
+    }
+  ],
+  "diffComparisons": [
+    {
+      "id": "research_352_pr",
+      "beforeSha": "be60732a1353f9d4efab9d1a4c5fbf7627d49abf",
+      "afterSha": "fe4c0ca7e30fd126ca58889facd2e9d878a3b43e",
+      "purpose": "pr_merge_base_comparison",
+      "boundedManifestComplete": true,
+      "rawAdditions": 74,
+      "rawDeletions": 37,
+      "files": [
+        {
+          "path": "research/T4-agents-integrations/mcp-servers.md",
+          "additions": 74,
+          "deletions": 37,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        }
+      ],
+      "contributionQualification": "not_evaluated",
+      "generatedOrImportedProvenance": "not_established"
+    },
+    {
+      "id": "research_352_integration",
+      "beforeSha": "0510f87c45a4e7a5f88d6e6750e45b84f447bb3d",
+      "afterSha": "4f1c22bac91783a00384b3037bb64b040250c072",
+      "purpose": "actual_default_branch_integration",
+      "boundedManifestComplete": true,
+      "rawAdditions": 74,
+      "rawDeletions": 37,
+      "files": [
+        {
+          "path": "research/T4-agents-integrations/mcp-servers.md",
+          "additions": 74,
+          "deletions": 37,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        }
+      ],
+      "contributionQualification": "not_evaluated",
+      "generatedOrImportedProvenance": "not_established"
+    },
+    {
+      "id": "research_348_open",
+      "beforeSha": "4f1c22bac91783a00384b3037bb64b040250c072",
+      "afterSha": "197af1a64ca34b4553d571bc60daec9b0f939105",
+      "purpose": "pr_merge_base_comparison",
+      "boundedManifestComplete": true,
+      "rawAdditions": 114,
+      "rawDeletions": 0,
+      "files": [
+        {
+          "path": "research/T1-model-selection/handoffs.md",
+          "additions": 18,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "research/T1-model-selection/model-provider.md",
+          "additions": 96,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        }
+      ],
+      "contributionQualification": "not_evaluated",
+      "generatedOrImportedProvenance": "not_established"
+    },
+    {
+      "id": "website_14_incorrect_base_tip_probe",
+      "beforeSha": "1322c29c9ad25cb5206e2ff2cfd9fcd3e288ace0",
+      "afterSha": "850e15cbd73ff407f82566e94306654f63b01821",
+      "purpose": "intentionally_wrong_base_tip_probe",
+      "boundedManifestComplete": true,
+      "rawAdditions": 379,
+      "rawDeletions": 591,
+      "files": [
+        {
+          "path": ".github/workflows/e2e-live.yml",
+          "additions": 0,
+          "deletions": 49,
+          "pathClass": "source",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "additions": 85,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/DATA_INTEGRATION.md",
+          "additions": 101,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/DESIGN_SYSTEM.md",
+          "additions": 45,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/PRODUCT.md",
+          "additions": 46,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/RESEARCH_MAPPING.md",
+          "additions": 66,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/TESTING.md",
+          "additions": 36,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/operations/README.md",
+          "additions": 0,
+          "deletions": 38,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/operations/backup-and-rollback.md",
+          "additions": 0,
+          "deletions": 53,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/operations/deployment-runbook.md",
+          "additions": 0,
+          "deletions": 85,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/operations/dns-and-ssl.md",
+          "additions": 0,
+          "deletions": 75,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/operations/environment-variables.md",
+          "additions": 0,
+          "deletions": 37,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/operations/release-procedure.md",
+          "additions": 0,
+          "deletions": 43,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/operations/troubleshooting.md",
+          "additions": 0,
+          "deletions": 42,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "tests/e2e-live/playwright.live.config.ts",
+          "additions": 0,
+          "deletions": 38,
+          "pathClass": "tests",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "tests/e2e-live/production.live.spec.ts",
+          "additions": 0,
+          "deletions": 131,
+          "pathClass": "tests",
+          "entirelyWhitespaceOnly": false
+        }
+      ],
+      "contributionQualification": "not_evaluated",
+      "generatedOrImportedProvenance": "not_established"
+    },
+    {
+      "id": "website_14_pr",
+      "beforeSha": "5d6994c5c335965fdfc257148a2908b3ebcbea71",
+      "afterSha": "850e15cbd73ff407f82566e94306654f63b01821",
+      "purpose": "pr_merge_base_comparison",
+      "boundedManifestComplete": true,
+      "rawAdditions": 379,
+      "rawDeletions": 0,
+      "files": [
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "additions": 85,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/DATA_INTEGRATION.md",
+          "additions": 101,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/DESIGN_SYSTEM.md",
+          "additions": 45,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/PRODUCT.md",
+          "additions": 46,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/RESEARCH_MAPPING.md",
+          "additions": 66,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/TESTING.md",
+          "additions": 36,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        }
+      ],
+      "contributionQualification": "not_evaluated",
+      "generatedOrImportedProvenance": "not_established"
+    },
+    {
+      "id": "website_14_integration",
+      "beforeSha": "65bce2b71e9821deecafd7ced2cdd6a32e1b7d64",
+      "afterSha": "f560f2c96e5002ce91076827da3d2d3044b7347a",
+      "purpose": "actual_default_branch_integration",
+      "boundedManifestComplete": true,
+      "rawAdditions": 379,
+      "rawDeletions": 0,
+      "files": [
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "additions": 85,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/DATA_INTEGRATION.md",
+          "additions": 101,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/DESIGN_SYSTEM.md",
+          "additions": 45,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/PRODUCT.md",
+          "additions": 46,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/RESEARCH_MAPPING.md",
+          "additions": 66,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "docs/TESTING.md",
+          "additions": 36,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        }
+      ],
+      "contributionQualification": "not_evaluated",
+      "generatedOrImportedProvenance": "not_established"
+    },
+    {
+      "id": "website_294_open",
+      "beforeSha": "dc66a9e269917ab7241c7d08fd0e7f2a2f039872",
+      "afterSha": "73d3ca4d91f29020837828c5e965f38934f39229",
+      "purpose": "pr_merge_base_comparison",
+      "boundedManifestComplete": true,
+      "rawAdditions": 309,
+      "rawDeletions": 16,
+      "files": [
+        {
+          "path": "src/features/builder/BuilderPage.tsx",
+          "additions": 1,
+          "deletions": 1,
+          "pathClass": "source",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "src/features/builder/BuilderTable.tsx",
+          "additions": 11,
+          "deletions": 1,
+          "pathClass": "source",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "src/features/builder/SummaryPanel.tsx",
+          "additions": 26,
+          "deletions": 10,
+          "pathClass": "source",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "src/features/builder/analysis.ts",
+          "additions": 4,
+          "deletions": 2,
+          "pathClass": "source",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "src/features/builder/incomplete.ts",
+          "additions": 83,
+          "deletions": 0,
+          "pathClass": "source",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "src/pages/BuildSummaryPage.tsx",
+          "additions": 1,
+          "deletions": 1,
+          "pathClass": "source",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "src/pages/SharedBuildPage.tsx",
+          "additions": 1,
+          "deletions": 1,
+          "pathClass": "source",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "tests/e2e/smoke.spec.ts",
+          "additions": 35,
+          "deletions": 0,
+          "pathClass": "tests",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "tests/unit/incomplete-ui.test.tsx",
+          "additions": 45,
+          "deletions": 0,
+          "pathClass": "tests",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "tests/unit/incomplete.test.ts",
+          "additions": 102,
+          "deletions": 0,
+          "pathClass": "tests",
+          "entirelyWhitespaceOnly": false
+        }
+      ],
+      "contributionQualification": "not_evaluated",
+      "generatedOrImportedProvenance": "not_established"
+    },
+    {
+      "id": "research_348_integration",
+      "beforeSha": "4f1c22bac91783a00384b3037bb64b040250c072",
+      "afterSha": "8cf075b1a887459337bfe886958b4c7d7f3c362f",
+      "purpose": "actual_default_branch_integration",
+      "boundedManifestComplete": true,
+      "rawAdditions": 114,
+      "rawDeletions": 0,
+      "files": [
+        {
+          "path": "research/T1-model-selection/handoffs.md",
+          "additions": 18,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        },
+        {
+          "path": "research/T1-model-selection/model-provider.md",
+          "additions": 96,
+          "deletions": 0,
+          "pathClass": "docs",
+          "entirelyWhitespaceOnly": false
+        }
+      ],
+      "contributionQualification": "not_evaluated",
+      "generatedOrImportedProvenance": "not_established"
+    }
+  ]
+}
