@@ -283,7 +283,9 @@ export function createControlsServer({
             authorizeRepository,
             refreshSession: () => authenticate(req, parsed),
           })({ path, method: req.method, input });
-          send(result.status, result.data);
+          send(result.status, result.data, () => {
+            requireThat(store.read().sessions[session.sid]?.expires > now(), 401, "Session revoked");
+          });
         } catch (error) {
           if (error instanceof ControlError) throw error;
           throw new ControlError(409, "Operation unavailable or changed; reload before retry");

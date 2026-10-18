@@ -20,15 +20,26 @@ export function createOperationsManager({ operations, authorizeRepository, refre
       );
       return { policyVersion: grant.policyVersion, revision: grant.revision };
     };
-    await authorize();
-    if (method === "GET" && !match[2]) return { status: 200, data: await operations.read(repositoryId, authorize) };
+    const initialAuthority = await authorize();
+    const finish = async (status, data) => {
+      // The adapter and its database commit are asynchronous. Do not return
+      // diagnostics or a receipt under an expired or changed authority.
+      const currentAuthority = await authorize();
+      requireThat(
+        JSON.stringify(currentAuthority) === JSON.stringify(initialAuthority),
+        409,
+        "Operation authority changed; reload before retry",
+      );
+      return { status, data };
+    };
+    if (method === "GET" && !match[2]) return finish(200, await operations.read(repositoryId, authorize));
     requireThat(method === "POST" && match[2] === "replay", 405, "Method not allowed");
     exactKeys(input, ["deliveryId", "expectedRevision", "reason", "confirmed"]);
     requireThat(input.confirmed === true, 400, "Scoped confirmation required");
     const session = await refreshSession();
-    return {
-      status: 201,
-      data: await operations.replay(
+    return finish(
+      201,
+      await operations.replay(
         {
           repositoryId,
           deliveryId: input.deliveryId,
@@ -38,6 +49,6 @@ export function createOperationsManager({ operations, authorizeRepository, refre
         },
         authorize,
       ),
-    };
+    );
   };
 }

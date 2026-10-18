@@ -1592,3 +1592,61 @@ test("authenticated operations HTTP bridge commits real scoped replay and expose
   assert.equal(after.data.receipts[0].id, result.data.id);
   assert.equal(after.data.receipts[0].operatorId, "7");
 });
+
+test("operations withhold read and replay responses when authority changes during adapter work", async (t) => {
+  for (const method of ["GET", "POST"]) {
+    for (const change of ["session", "grant", "revision"]) {
+      await t.test(`${method} ${change}`, async (t) => {
+        let h;
+        let allowed = true;
+        let revision = "grant-1";
+        const finish = async (_input, authorize) => {
+          await authorize(9);
+          if (change === "session") h.advance(900_001);
+          if (change === "grant") allowed = false;
+          if (change === "revision") revision = "grant-2";
+          return { diagnostic: "restricted-diagnostic" };
+        };
+        h = await harness(t, {
+          authorizeRepository: async () => ({ allowed, policyVersion: "test-1", revision }),
+          operations: { read: finish, replay: finish },
+        });
+        const user = await h.login("7");
+        const response = await h.call(`/controls/operations/9${method === "POST" ? "/replay" : ""}`, {
+          user,
+          method,
+          ...(method === "POST"
+            ? {
+                input: {
+                  deliveryId: "11111111-1111-1111-1111-111111111111",
+                  expectedRevision: "a".repeat(64),
+                  reason: "operator_reviewed",
+                  confirmed: true,
+                },
+              }
+            : {}),
+        });
+        assert.equal(response.status, { session: 401, grant: 403, revision: 409 }[change]);
+        assert.equal(JSON.stringify(response.data).includes("restricted-diagnostic"), false);
+      });
+    }
+  }
+});
+
+test("operations check session expiry after response serialization", async (t) => {
+  let h;
+  h = await harness(t, {
+    authorizeRepository: async () => ({ allowed: true, policyVersion: "test-1", revision: "grant-1" }),
+    operations: {
+      read: async () => ({
+        toJSON() {
+          h.advance(900_001);
+          return { diagnostic: "restricted-diagnostic" };
+        },
+      }),
+    },
+  });
+  const response = await h.call("/controls/operations/9", { user: await h.login("7") });
+  assert.equal(response.status, 401);
+  assert.equal(JSON.stringify(response.data).includes("restricted-diagnostic"), false);
+});
