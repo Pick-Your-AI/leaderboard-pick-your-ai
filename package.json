@@ -29,7 +29,9 @@
     "db:rollback": "node --env-file-if-exists=.env infra/db/rollback.mjs",
     "db:seed:synthetic": "node --env-file-if-exists=.env infra/db/seed-synthetic.mjs",
     "db:validate": "node --env-file-if-exists=.env infra/db/validate.mjs",
-    "test:browser": "tsc --noEmit -p apps/web/tsconfig.browser.json && playwright test --config apps/web/playwright.config.ts"
+    "test:browser": "tsc --noEmit -p apps/web/tsconfig.browser.json && playwright test --config apps/web/playwright.config.ts",
+    "test:wall-soak": "tsc --noEmit -p apps/web/tsconfig.soak.json && playwright test --config apps/web/playwright.soak.config.ts",
+    "pretest:wall-soak": "npm run build"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
