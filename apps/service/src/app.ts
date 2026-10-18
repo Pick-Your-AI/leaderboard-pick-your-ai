@@ -5,7 +5,7 @@ import {
   canonicalPublicScope,
   publicScopeKey,
   publicScopeParameters,
-  publicScopeSchemaVersion,
+  publicRoleScopeSchemaVersion,
   metricRegistrySchema,
   type ActorFilter,
   type MetricRegistry,
@@ -53,6 +53,7 @@ const allowed = new Set([
   "workstream",
   "context",
   "project",
+  "role",
   "start",
   "end",
   "snapshot",
@@ -161,6 +162,7 @@ export function createService(options: ServiceOptions = {}) {
         ...scope,
         ...(params.has("context") ? { context: params.get("context") } : {}),
         ...(params.has("project") ? { projects: params.get("project")!.split(",") } : {}),
+        ...(params.has("role") ? { roles: params.get("role")!.split(",") } : {}),
       });
     } catch {
       fail(400, "invalid_public_scope");
@@ -325,9 +327,14 @@ export function createService(options: ServiceOptions = {}) {
   }
   function meta(read: PublicRead) {
     const snapshot = read.selected.snapshot;
-    const extendedScope = read.selected.scope.schemaVersion === publicScopeSchemaVersion;
+    const extendedScope = read.selected.scope.schemaVersion !== undefined;
     return {
-      schemaVersion: extendedScope ? "public-read/v2" : snapshot.schemaVersion,
+      schemaVersion:
+        read.selected.scope.schemaVersion === publicRoleScopeSchemaVersion
+          ? "public-read/v3"
+          : extendedScope
+            ? "public-read/v2"
+            : snapshot.schemaVersion,
       ...(extendedScope ? { snapshotSchemaVersion: snapshot.schemaVersion } : {}),
       snapshotId: snapshot.snapshotId,
       revision: snapshot.revision,
@@ -347,10 +354,10 @@ export function createService(options: ServiceOptions = {}) {
     return createHmac("sha256", secret).update(value).digest("base64url");
   }
   // New Project sets can be longer than a cursor. Keep legacy cursor bytes while
-  // binding the complete canonical v2 scope to a fixed-size collision-resistant key.
+  // binding each complete versioned scope to a fixed-size collision-resistant key.
   function cursorScope(scope: PublicScope) {
-    return scope.schemaVersion === publicScopeSchemaVersion
-      ? [publicScopeSchemaVersion, createHash("sha256").update(publicScopeKey(scope)).digest("hex")]
+    return scope.schemaVersion !== undefined
+      ? [scope.schemaVersion, createHash("sha256").update(publicScopeKey(scope)).digest("hex")]
       : scope;
   }
   function decodeCursor(cursor: string): {
