@@ -692,7 +692,14 @@ for (const boundary of [
       h.controlsStore.transaction(
         (state) => {
           state.configuration.revision++;
-          state.configuration.active.document.repositories = [{ id: "2" }];
+          // Restore every original source grant so the revision fence, rather than
+          // an invalid authority fixture, rejects the interrupted run.
+          state.configuration.active.document.repositories = h.options.config.repositories.map((repo) => ({
+            id: String(repo.id),
+            installationId: String(repo.installationId),
+            slug: repo.slug,
+            capabilities: [...repo.families],
+          }));
         },
         { publish: true },
       );
