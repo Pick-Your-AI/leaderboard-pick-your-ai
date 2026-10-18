@@ -1,3 +1,5 @@
+import { githubReviewRevision, githubDiscussionRevision } from "../../../packages/github/dist/normalizers.js";
+
 const routes = {
   issues: "issues?state=all&sort=created&direction=asc&per_page=100",
   pull_requests: "pulls?state=all&sort=created&direction=asc&per_page=100",
@@ -49,7 +51,11 @@ export function createGithubCollectionSource({
     async readPage(request) {
       const repository = approved.get(request.repositoryId),
         route = routes[request.family];
-      if (!repository || !repository.families.includes(request.family) || (!route && request.family !== "reviews"))
+      if (
+        !repository ||
+        !repository.families.includes(request.family) ||
+        (!route && !["reviews", "discussions"].includes(request.family))
+      )
         throw new Error("source_family_adapter_unavailable");
       assertAuthorized();
       let verification;
@@ -80,7 +86,45 @@ export function createGithubCollectionSource({
           },
         });
       let values;
-      if (request.family === "reviews") {
+      if (request.family === "discussions") {
+        if (!client.scanGraphql) throw new Error("discussions_source_unavailable");
+        const [owner, name] = repository.slug.split("/");
+        values = await client.scanGraphql({
+          source: sourceId,
+          key: `pipeline:${repository.id}:${request.runId}:discussions`,
+          query: `query($owner:String!, $name:String!, $first:Int!, $after:String) {
+            repository(owner:$owner, name:$name) {
+              databaseId isPrivate hasDiscussionsEnabled
+              discussions(first:$first, after:$after, orderBy:{field:CREATED_AT,direction:ASC}) {
+                nodes { id url updatedAt createdAt answerChosenAt
+                  answerChosenBy { ... on User { databaseId } ... on Bot { databaseId } }
+                  answer { id isAnswer author { ... on User { databaseId } ... on Bot { databaseId } } }
+                }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }`,
+          variables: { owner, name },
+          maxPages,
+          assertAuthorized,
+          select(data) {
+            assertAuthorized();
+            const repo = data?.repository;
+            if (repo?.databaseId !== repository.id || repo.isPrivate !== false)
+              throw new Error("repository_identity_unverified");
+            if (repo.hasDiscussionsEnabled !== true) throw new Error("discussions_source_unavailable");
+            if (!Array.isArray(repo.discussions?.nodes)) throw new Error("source_array_required");
+            return { nodes: repo.discussions.nodes, pageInfo: repo.discussions.pageInfo };
+          },
+        });
+        values = values.map((value) => ({
+          source_revision: githubDiscussionRevision(value),
+          node_id: value.id,
+          html_url: value.url,
+          updated_at: value.updatedAt,
+          created_at: value.createdAt,
+        }));
+      } else if (request.family === "reviews") {
         const pulls = await scan("review-pulls", routes.pull_requests);
         if (pulls.length > 10000) throw new Error("source_dataset_budget_exceeded");
         values = [];
@@ -106,7 +150,15 @@ export function createGithubCollectionSource({
       const facts = values.slice(offset, offset + request.limit).map((value) => {
         const subjectId = value.node_id ?? value.sha ?? (Number.isSafeInteger(value.id) ? String(value.id) : null);
         const revision =
-          value.sha ?? at(value.updated_at) ?? at(value.submitted_at) ?? at(value.published_at) ?? at(value.created_at);
+          request.family === "reviews"
+            ? githubReviewRevision(value)
+            : request.family === "discussions"
+              ? value.source_revision
+              : (value.sha ??
+                at(value.updated_at) ??
+                at(value.submitted_at) ??
+                at(value.published_at) ??
+                at(value.created_at));
         if (
           typeof subjectId !== "string" ||
           !revision ||

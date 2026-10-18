@@ -6,6 +6,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import test from "node:test";
 import {
   normalizeGithubObservation,
+  githubReviewRevision,
+  githubDiscussionRevision,
   applyRecognitionReceipt,
   groupTriageTransitions,
   parseDeclaredCoauthorTrailers,
@@ -958,7 +960,7 @@ test("review hydration proves first participation only from a complete consisten
     policyVersion: "synthetic/v1",
     fact: {
       subjectId: "51",
-      sourceRevision: at,
+      sourceRevision: githubReviewRevision(review),
       sourceUrl: review.html_url,
       evidence: "current_state",
       actorId: null,
@@ -986,6 +988,8 @@ test("review hydration proves first participation only from a complete consisten
   for (const invalid of [
     [review, earlier, earlier],
     [review, { ...earlier, submitted_at: null }],
+    [review, { ...earlier, user: null }],
+    [review, { ...earlier, commit_id: null }],
     [{ ...review, commit_id: "b".repeat(40) }],
   ]) {
     cohort = invalid;
@@ -997,4 +1001,98 @@ test("review hydration proves first participation only from a complete consisten
     throw Error("page budget exceeded");
   };
   await assert.rejects(normalize(input), /page budget exceeded/);
+});
+
+test("Discussion authors and answer selectors remain distinct with explicit selected-revision proof", () => {
+  const discussion = {
+    id: "D_synthetic",
+    url: "https://github.com/synthetic-owner/repository/discussions/4",
+    createdAt: at,
+    updatedAt: at,
+    author: fixture.author,
+    answerChosenAt: at,
+    answerChosenBy: fixture.merger,
+    answer: { id: "DC_synthetic", isAnswer: true, author: fixture.reviewer },
+  };
+  const base = envelope({ family: "discussion", action: "snapshot", payload: discussion });
+  const unselected = normalizeGithubObservation(base);
+  assert.equal(metrics(unselected, "discussions_started")[0].actorId, "101");
+  assert.equal(metrics(unselected, "discussion_answers").length, 0);
+  const selected = normalizeGithubObservation({ ...base, discussionAnswerSelection: { verified: true } });
+  const answer = metrics(selected, "discussion_answers")[0];
+  assert.equal(answer.actorId, "303");
+  assert.equal(answer.acceptedBy, "202");
+  assert.equal(answer.state, "observed");
+  assert.equal(metrics(selected, "helpful_feedback").length, 0);
+  const removed = normalizeGithubObservation({
+    ...base,
+    payload: { ...discussion, answer: null },
+    discussionAnswerSelection: { verified: true },
+  });
+  assert.equal(metrics(removed, "discussion_answers").length, 0);
+});
+
+test("Discussion hydration validates capability, public identity and exact revision", async () => {
+  let repo = {
+    databaseId: 2,
+    isPrivate: false,
+    hasDiscussionsEnabled: true,
+    discussion: {
+      id: "D_synthetic",
+      url: "https://github.com/synthetic-owner/repository/discussions/4",
+      createdAt: at,
+      updatedAt: at,
+      author: fixture.author,
+      answer: null,
+    },
+  };
+  const normalize = createGithubEvidenceNormalizer({
+    client: { rest: async () => fixture.repository, graphql: async () => ({ repository: repo }) },
+    source: "synthetic",
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+  });
+  const input = {
+    repository: { id: 2, slug: "synthetic-owner/repository" },
+    family: "discussions",
+    factKey: "synthetic-discussion",
+    observedAt,
+    policyVersion: "synthetic/v1",
+    fact: {
+      subjectId: "D_synthetic",
+      sourceRevision: githubDiscussionRevision(repo.discussion),
+      sourceUrl: repo.discussion.url,
+      evidence: "current_state",
+      actorId: null,
+      occurredAt: null,
+      state: "present",
+    },
+  };
+  assert.equal(metrics(await normalize(input), "discussions_started").length, 1);
+  repo = { ...repo, hasDiscussionsEnabled: false };
+  assert.match((await normalize(input)).reasons[0], /unavailable/);
+  repo = {
+    ...repo,
+    hasDiscussionsEnabled: true,
+    discussion: { ...repo.discussion, updatedAt: "2026-10-09T00:00:00Z" },
+  };
+  assert.match((await normalize(input)).reasons[0], /revision_unverified/);
+});
+
+test("mutable review and Discussion revisions include retractions and selection changes", () => {
+  const review = { id: 1, state: "APPROVED", submitted_at: at, body: "synthetic", user: fixture.reviewer };
+  assert.notEqual(githubReviewRevision(review), githubReviewRevision({ ...review, state: "DISMISSED" }));
+  assert.notEqual(githubReviewRevision(review), githubReviewRevision({ ...review, body: "edited synthetic" }));
+  const discussion = {
+    id: "D_synthetic",
+    updatedAt: at,
+    answerChosenAt: at,
+    answer: { id: "A1", isAnswer: true, author: fixture.author },
+    answerChosenBy: fixture.merger,
+  };
+  assert.notEqual(githubDiscussionRevision(discussion), githubDiscussionRevision({ ...discussion, answer: null }));
+  assert.notEqual(
+    githubDiscussionRevision(discussion),
+    githubDiscussionRevision({ ...discussion, answer: { ...discussion.answer, id: "A2" } }),
+  );
 });

@@ -55,3 +55,43 @@ test("duplicate or malformed pull identities cannot establish complete review in
     await assert.rejects(source.readPage(request), /source_pull_identity_unverified/);
   }
 });
+
+test("Discussion source distinguishes disabled capability from an empty complete connection", async () => {
+  let enabled = false;
+  const source = createGithubCollectionSource({
+    sourceId: "synthetic",
+    repositories: [{ ...repository, families: ["discussions"] }],
+    isSynthetic: true,
+    client: {
+      rest: async () => ({ id: 2, private: false }),
+      scanRest: async () => [],
+      scanGraphql: async (options) =>
+        options.select({
+          repository: {
+            databaseId: 2,
+            isPrivate: false,
+            hasDiscussionsEnabled: enabled,
+            discussions: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
+          },
+        }).nodes,
+    },
+  });
+  await assert.rejects(source.readPage({ ...request, family: "discussions" }), /discussions_source_unavailable/);
+  enabled = true;
+  const page = await source.readPage({ ...request, family: "discussions" });
+  assert.equal(page.expectedCount, 0);
+  assert.equal(page.nextCursor, null);
+});
+
+test("review dismissal and body edits change the frozen source revision", async () => {
+  let value = review(11, 1);
+  const source = harness(async (options) => (options.url.includes("/pulls?") ? [{ number: 1 }] : [value]));
+  const approved = (await source.readPage(request)).facts[0];
+  value = { ...value, state: "DISMISSED" };
+  const dismissed = (await source.readPage(request)).facts[0];
+  assert.notEqual(approved.sourceRevision, dismissed.sourceRevision);
+  value = { ...value, body: "synthetic edited feedback" };
+  const edited = (await source.readPage(request)).facts[0];
+  assert.notEqual(dismissed.sourceRevision, edited.sourceRevision);
+  assert.equal(JSON.stringify(edited).includes("synthetic edited feedback"), false);
+});
