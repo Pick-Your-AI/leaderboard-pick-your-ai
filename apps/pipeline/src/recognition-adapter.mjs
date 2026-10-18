@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
+import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
 
 // Private controls only. Never accept a public claim projection as authentication.
-export function recognitionFingerprint(state) {
+export function recognitionFingerprint(state, bindings = []) {
   const requests = Object.values(state.requests ?? {})
     .filter((r) => r.kind === "evidence")
     .sort((a, b) => a.id.localeCompare(b.id));
@@ -9,12 +10,29 @@ export function recognitionFingerprint(state) {
     .filter(([, p]) => p.suppressed)
     .map(([id]) => id)
     .sort();
+  const decisionIds = new Set(
+    requests.flatMap((r) => (r.history ?? []).filter((event) => event.action === "accepted").map((event) => event.id)),
+  );
+  const audit = (state.audit ?? [])
+    .filter((event) => decisionIds.has(event.id))
+    .map((event) => JSON.stringify(event))
+    .sort();
+  // Version the target/clock authority and include exact current bindings. An old
+  // unbound locale publication cannot remain authorized after this correction.
   return createHash("sha256")
-    .update(JSON.stringify([requests, suppressed]))
+    .update(JSON.stringify(["localization-review-target/v1", requests, suppressed, audit, bindings]))
     .digest("hex");
 }
 
-export function materializeRecognition(input, state, bindings, policies, applyReceipt, cutoff) {
+export function materializeRecognition(
+  input,
+  state,
+  bindings,
+  policies,
+  applyReceipt,
+  cutoff,
+  publicReasons = () => [],
+) {
   let output = structuredClone(input);
   for (const request of Object.values(state.requests ?? {})) {
     if (request.kind !== "evidence" || request.status !== "accepted" || state.profiles?.[request.owner]?.suppressed)
@@ -25,27 +43,58 @@ export function materializeRecognition(input, state, bindings, policies, applyRe
     if (!matches.length) continue;
     if (matches.length !== 1) throw new Error("ambiguous_recognition_binding");
     const binding = matches[0];
+    let localeReasons = null;
+    if (
+      binding.metricId === "localization" ||
+      binding.sourceMetricId === "localization" ||
+      binding.localization !== undefined
+    ) {
+      const locale = binding.localization;
+      if (
+        binding.metricId !== "localization" ||
+        binding.sourceMetricId !== "localization" ||
+        !locale ||
+        typeof locale !== "object" ||
+        Array.isArray(locale) ||
+        Object.keys(locale).sort().join(",") !== "category,locale,policyVersion" ||
+        ![locale.policyVersion, locale.locale, locale.category].every((value) => typeof value === "string")
+      )
+        throw new Error("invalid_localization_binding");
+      localeReasons = publicReasons({
+        metricIds: ["localization"],
+        reasonCodes: [
+          `documentation_path_policy:${locale.policyVersion}`,
+          `locale:${locale.locale}`,
+          `localization_category:${locale.category}`,
+        ],
+      });
+      if (localeReasons.length !== 3) throw new Error("invalid_localization_binding");
+    }
     if (
       !policies.some(
         (p) =>
           p.policy.metricId === binding.metricId &&
           p.policy.version === binding.policyVersion &&
-          (p.policy.dateBasis === "acceptedAt" ||
-            (binding.metricId === "decision_records" &&
-              binding.sourceMetricId === "decision_records" &&
-              p.policy.dateBasis === "occurredAt" &&
-              p.policy.groupBy === "actor_artifact")),
+          (binding.metricId === "localization"
+            ? p.policy.dateBasis === "occurredAt"
+            : p.policy.dateBasis === "acceptedAt" ||
+              (binding.metricId === "decision_records" &&
+                binding.sourceMetricId === "decision_records" &&
+                p.policy.dateBasis === "occurredAt" &&
+                p.policy.groupBy === "actor_artifact")),
       )
     )
       throw new Error("recognition_policy_not_configured");
     const decision = request.history?.findLast((h) => h.action === "accepted");
+    const audited = (state.audit ?? []).filter((h) => h.id === decision?.id);
     if (
       !decision ||
       decision.actor === request.owner ||
       Object.hasOwn(request.collaborators ?? {}, decision.actor) ||
       !binding.reviewerIds?.includes(decision.actor) ||
       decision.policyVersion !== binding.policyVersion ||
-      !state.audit?.some((h) => h.id === decision.id && JSON.stringify(h) === JSON.stringify(decision))
+      audited.length !== 1 ||
+      JSON.stringify(audited[0]) !== JSON.stringify(decision)
     )
       throw new Error("recognition_decision_unverified");
     // Controls records epoch milliseconds; normalizers require canonical UTC strings.
@@ -60,16 +109,50 @@ export function materializeRecognition(input, state, bindings, policies, applyRe
     )
       throw new Error("recognition_decision_time_invalid");
     if (acceptedAt > cutoff) continue;
+    let localeTarget = null;
+    if (localeReasons !== null) {
+      // Earlier generic receipts did not record the reviewed locale/revision.
+      // Keep their source observation, but never reinterpret them as locale acceptance.
+      if (decision.localization === undefined) continue;
+      if (
+        decision.receipt !== request.id ||
+        !Number.isSafeInteger(request.version) ||
+        request.version < 1 ||
+        decision.version !== request.version ||
+        JSON.stringify(decision.evidenceRequest) !== JSON.stringify(localizationReviewRequest(request))
+      )
+        throw new Error("recognition_decision_unverified");
+      try {
+        localeTarget = parseLocalizationReviewTarget(decision.localization);
+      } catch {
+        throw new Error("recognition_decision_unverified");
+      }
+      if (
+        localeTarget.locale !== binding.localization.locale ||
+        localeTarget.category !== binding.localization.category ||
+        localeTarget.policyVersion !== binding.localization.policyVersion
+      )
+        continue;
+    }
     const candidates = input.facts.filter(
       (f) =>
         f.actorId === request.owner &&
         f.repoId === binding.repositoryId &&
         f.metricId === binding.sourceMetricId &&
+        (localeTarget === null ||
+          (f.id === localeTarget.targetFactId &&
+            f.state === "observed" &&
+            typeof f.occurredAt === "string" &&
+            Number.isFinite(Date.parse(f.occurredAt)) &&
+            Date.parse(f.occurredAt) <= Date.parse(acceptedAt))) &&
         input.evidence.some(
           (e) =>
             e.contribution.contributionId === f.id &&
             e.artifact.publicUrl === request.locator &&
-            e.artifact.visibility === "public",
+            e.artifact.visibility === "public" &&
+            (localeTarget === null ||
+              (e.sourceRevision === localeTarget.sourceRevision && e.occurredAt === f.occurredAt)) &&
+            (localeReasons === null || JSON.stringify(publicReasons(e.contribution)) === JSON.stringify(localeReasons)),
         ),
     );
     if (!candidates.length) continue;
@@ -86,12 +169,13 @@ export function materializeRecognition(input, state, bindings, policies, applyRe
         acceptedAt,
         decision: "accepted",
         evidenceIds: [candidates[0].id],
+        ...(localeTarget ? { sourceRevision: localeTarget.sourceRevision } : {}),
       },
       binding.reviewerIds,
     );
   }
   // Audit receipt identifiers remain private even when the normalizer annotates evidence.
   for (const entry of output.evidence.slice(input.evidence.length))
-    entry.contribution.reasonCodes = ["independent_recognition_receipt"];
+    entry.contribution.reasonCodes = ["independent_recognition_receipt", ...publicReasons(entry.contribution)];
   return output;
 }

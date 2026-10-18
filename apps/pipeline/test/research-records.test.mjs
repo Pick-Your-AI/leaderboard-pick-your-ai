@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createPipeline } from "../src/index.mjs";
 import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
+import { record as recordControlsDecision } from "../../controls/src/store.mjs";
 import { harness, components, ago, publicScope } from "./harness.mjs";
 
 const before = "a".repeat(40),
@@ -60,8 +61,8 @@ async function researchHarness(t) {
       ];
       config.recognitionBindings = [
         {
-          category: "research",
-          scope: "repository:2",
+          category: "other",
+          scope: "repository:2:decision_records",
           policyVersion,
           metricId: "decision_records",
           sourceMetricId: "decision_records",
@@ -112,29 +113,30 @@ async function researchHarness(t) {
 }
 
 function accept(h, locator = sourceUrl) {
-  const decision = {
-    id: "synthetic-review-receipt",
-    action: "accepted",
-    actor: "202",
-    at: Date.parse(ago(1)),
-    policyVersion,
-    reason: "Private reviewer deliberation must remain private",
-  };
+  let decision;
   h.controlsStore.transaction((state) => {
-    state.requests["synthetic-record-request"] = {
+    const previous = state.requests["synthetic-record-request"];
+    const request = {
       id: "synthetic-record-request",
+      version: previous?.version ?? 0,
       kind: "evidence",
       status: "accepted",
       owner: "101",
-      category: "research",
-      scope: "repository:2",
+      category: "other",
+      scope: "repository:2:decision_records",
       policyVersion,
       locator,
       collaborators: {},
-      history: [decision],
+      history: [...(previous?.history ?? [])],
     };
-    state.audit.push(decision);
+    recordControlsDecision(state, request, "202", "accepted", Date.parse(ago(1)), {
+      policyVersion,
+      reason: "Private reviewer deliberation must remain private",
+    });
+    state.requests[request.id] = request;
+    decision = request.history.at(-1);
   });
+  return decision;
 }
 
 test("research records publish pending proof, require exact revision review, conserve accepted credit through replay and withdrawal", async (t) => {
@@ -160,7 +162,7 @@ test("research records publish pending proof, require exact revision review, con
   await h.runtime.runOnce();
   response = await h.runtime.app.inject(boardUrl);
   assert.equal(response.json().rows[0].result.state, "unknown");
-  accept(h);
+  const review = accept(h);
   const accepted = await h.runtime.runOnce();
   response = await h.runtime.app.inject(boardUrl);
   assert.equal(response.statusCode, 200, response.body);
@@ -176,7 +178,7 @@ test("research records publish pending proof, require exact revision review, con
   assert.equal(proof.json().occurredAt, mergedAt); // The registry's merge clock is preserved.
   assert.equal(proof.json().activityState, "accepted");
   assert.equal(proof.body.includes("Private reviewer deliberation"), false);
-  assert.equal(proof.body.includes("synthetic-review-receipt"), false);
+  assert.equal(proof.body.includes(review.id), false);
   assert.equal(first.publications[0].snapshotId === accepted.publications[0].snapshotId, false);
 
   const cutoff = ago(0);
