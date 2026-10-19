@@ -55,6 +55,8 @@ Other event families require an authorized `enrich(input)` callback returning th
 - Commit authors and committers remain separate participation roles. Integrated commit counts require explicit pinned default-branch integration and commit membership; branch presence alone does not establish delivery. Supplied evidence-bearing squash, cherry-pick, mirror and import lineage is retained. Explicit revert lineage annotates original contributors without erasing historical merges, awarding the reverter an outcome, or imposing a penalty.
 - Release publication uses the evidenced sender and event time, including bot/app publication. The release creator does not become every publisher or notes author. Green CI never creates maintenance, deployment or incident merit. These categories require accepted receipts.
 
+See [persisted default-delivery migration](default-delivery-cache-migration.md) for the observed repository-default requirement, built-in/custom provider version contract, retained-cache replacement, and historical publication recovery.
+
 ## Physical changes and local fallback
 
 `classifyPhysicalDiff` accepts distinct pinned before/after SHAs and an explicitly complete/truncated file manifest. It reports additions, deletions, changed lines, signed net and changed files separately. Source, tests and docs are separate classes. Deterministic path rules and supplied provenance flags exclude generated output, vendor dependencies, lockfiles, binary files, imports and formatting-only changes from eligible totals. Renames retain old/new paths; unchanged renamed files add no lines. These are physical text changes, not human effort, quality or sole authorship.

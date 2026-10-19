@@ -657,6 +657,8 @@ test("a fully classified cache from before locale emission is retained for froze
   // normalizer with locale interpretation disabled, retaining the full host config.
   const oldProjection = await createPipeline({
     ...h.options,
+    // Only locale classification is old; the replacement retains the current delivery guard.
+    defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
     normalizer: components.github.createGithubEvidenceNormalizer({
       client: h.options.githubClient,
       source: h.options.sourceId,
@@ -753,6 +755,8 @@ for (const withMergePins of [false, true])
     // Retain its exact destination-only projection as an actual stored snapshot.
     const oldProjection = await createPipeline({
       ...h.options,
+      // Only locale classification is old; the replacement retains the current delivery guard.
+      defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
       normalizer: async (input) => {
         const output = await normalize(input);
         const omitted = new Set(

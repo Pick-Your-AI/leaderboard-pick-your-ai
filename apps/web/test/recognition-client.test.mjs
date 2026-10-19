@@ -235,6 +235,34 @@ test("equivalent source offsets and fractional encodings preserve fully covered 
   assert.equal(result.achievements[0].occurredAt, at);
 });
 
+test("v1 all-history awards preserve exact equal and earlier snapshot-cutoff instants", () => {
+  for (const occurredAt of [
+    at,
+    "2026-10-17T12:00:00.0000Z",
+    "2026-10-17T08:00:00.00000-04:00",
+    "2026-10-17T11:59:59.9999Z",
+  ]) {
+    const value = fixture();
+    value.achievements[0].occurredAt = occurredAt;
+    assert.equal(achievements(value, selected, "alice").achievements[0].occurredAt, occurredAt);
+  }
+});
+
+test("v1 all-history awards reject source events beyond the snapshot at full fractional precision", () => {
+  for (const occurredAt of [
+    "2026-10-17T12:00:00.0001Z",
+    "2026-10-17T08:00:00.0001-04:00",
+    "2026-10-17T12:00:00.001Z",
+  ]) {
+    const value = fixture();
+    value.achievements[0].occurredAt = occurredAt;
+    assert.throws(() => achievements(value, selected, "alice"), {
+      status: 502,
+      code: "invalid_recognition_response",
+    });
+  }
+});
+
 test("period awards need selected-period coverage without requiring organization history or a later cutoff", () => {
   const { value, period } = periodFixture();
   value.generatedAt = "2026-10-18T12:00:00.000Z";

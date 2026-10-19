@@ -30,11 +30,17 @@ The shared public reader validates both the selected snapshot and the confirmed 
 
 The same source-generation check protects private policy inputs and aggregate explanations, and prevents an interrupted dispatch from acknowledging or restoring an obsolete committed publication. A verified new publication and newly processed dispatch can recover without rewriting the old source, normalization or snapshot.
 
+The [default-delivery migration](default-delivery-cache-migration.md) can also apply to an enriched Discussion observation. Such a row retains both versions, with the delivery generation wrapping the Discussion generation. Frozen-input resolution includes that exact combined signature. A custom Discussion provider still needs the Discussion assertion; delivery enrichment separately verifies the loaded built-in delivery normalizer, while a replacement normalizer must explicitly assert its own delivery contract. Neither assertion supplies the other.
+
+Operator replay and health reconstruct all optional content-version fields from the matching private confirmation, including the Discussion version when no eligible answer remains. The final proof retains each field's exact presence and value across an awaited observer and transaction completion. Adding or removing a marker cannot change an existing publication identity or authorize obsolete retained evidence. These private versions remain absent from the public operator response.
+
 Public applicability is limited to actual retained Discussion observations in the admitted repository/cutoff scope. Hash-only legacy input must resolve its actual bound hashes. An entirely unbound private input cannot disambiguate source families; its privileged authorization interface has no bound cutoff, so any retained Discussion observation in its source repositories makes that old private input unavailable. Existing access locks, source approval, privacy projection and retirement fences remain in force. The migration does not erase retained evidence or extend source authorization.
 
 ## Synthetic regression coverage
 
 The source tests cover ordered and equal clocks, each missing/malformed clock, known inversions and future selection, separate author/selector behavior, revision changes, and both collection and hydration queries. The persisted regression creates actual disposable PGlite and SQLite databases, then closes and reopens them. It exercises exact, hash-only and unbound legacy inputs, unchanged-source rehydration, source-revision mismatch and recovery, current/pinned boards and exports, private previews/explanations, exact frozen bindings, custom-provider assertions and interrupted dispatch. Unrelated issue cache and publication bytes retain their original identity.
+
+The operator composition cases additionally use actual retained Discussion-only, combined Discussion/delivery and review/Discussion/delivery publications, including delivery facts from the same Discussion normalization. They verify replay and health after database reopen, reject a newly added marker on an unversioned publication, and preserve exact version absence at both real final-return boundaries. These cases complement the existing review/default operator regressions.
 
 After building the workspace packages, run the focused regressions with:
 
