@@ -93,6 +93,61 @@ retained according to the approved restricted retention policy. A reversal
 re-evaluates current source validity, suppression, consent and privacy; it
 cannot blindly restore an old public snapshot or a revoked link.
 
+## Canonical proposal encoding and digest
+
+The contracts package exports `encodeVerifiedIdentityCorrectionProposal(input)`
+and `digestVerifiedIdentityCorrectionProposal(input)`. Both accept an unknown
+value and first parse it with the strict proposal schema above. Invalid records,
+unknown fields, unsafe integers and failed cross-field invariants are rejected;
+this encoding does not relax the proposal contract.
+
+The encoding version is
+`leaderboard-verified-identity-correction-proposal/v1`, exported as
+`verifiedIdentityCorrectionProposalEncodingVersion`. The encoded bytes are:
+
+1. That exact ASCII version marker followed by one LF byte (`0a`).
+2. The canonical JSON representation of the complete parsed proposal, encoded
+   as UTF-8, without a BOM or trailing newline.
+
+Canonical JSON uses `{`, `}`, `[`, `]`, `:`, and `,` without insignificant
+whitespace. Every object's keys are sorted in ascending UTF-16 code-unit order
+(the order of JavaScript's default string sort). All arrays retain their original
+order, including actors, assignments, proofs, subjects, contributions and
+referenced evidence. Reordering an object while retaining its fields therefore
+preserves its bytes; reordering an array changes them.
+
+String escaping is ECMAScript's well-formed `JSON.stringify` representation:
+quotes, backslashes and control characters are escaped; unpaired UTF-16
+surrogates use lowercase `\uXXXX` escapes, while valid surrogate pairs encode as
+their Unicode scalar's UTF-8 bytes. No Unicode normalization, case folding,
+identifier conversion or timestamp parsing is applied. An opaque ID containing
+an unpaired surrogate remains distinct from U+FFFD. Equivalent timestamp instants
+with different offset or fractional-second spellings remain different strings
+and produce different bytes. JSON `null` is retained, including an explicit
+`expiresAt: null`; omitting a required nullable field is invalid. The schema's
+positive safe-integer database IDs and proposal revisions use their exact decimal
+JSON representation. This is the proposal-specific format defined here, not a
+claim of conformance to a different canonical JSON standard.
+
+`encodeVerifiedIdentityCorrectionProposal` returns a newly allocated `Uint8Array`.
+`digestVerifiedIdentityCorrectionProposal` hashes those exact bytes with
+Web Crypto SHA-256 and returns 64 lowercase hexadecimal characters. It completes
+schema parsing, serialization and private byte allocation synchronously before
+its first asynchronous wait. Caller changes made after invoking the digest do
+not alter the pending digest, and changing a returned encoding does not change
+the input or later encodings. Web Crypto must be available; there is no alternate
+hash or Node-only implementation in the browser-consumable package.
+
+The digest binds every admitted field, including the proposal version and
+revision, authority basis, requester, policy version, all source/result actors,
+assignment source-event/revision/attribution/role/evidence bindings, and proof
+scope and exact time strings. It covers the proposal only, so decision fields
+such as reviewer, outcome and `proposalSha256` are not recursively included.
+The separate decision schema still checks the supplied digest's shape; a
+protected consumer must calculate and compare the digest for the reviewed
+proposal. Encoding or matching a digest does not authenticate evidence, authorize
+a correction, apply an overlay or satisfy LB-17.03's operational acceptance.
+
 ## Application boundary and remaining implementation
 
 `verifiedGithubIdentitySchema`,
@@ -108,9 +163,9 @@ the exact proposal digest and retained source revision, recheck current
 authority and revocation, and compare the reviewed proposal revision and current
 attribution revision atomically before any write. A prior application receipt
 makes a retry idempotent; a different proposal or intervening decision requires a
-new review. A stale review must fail without modifying attribution. The digest
-encoding must be a specified canonical serialization shared by the protected
-writer and reviewer before an executor is enabled.
+new review. A stale review must fail without modifying attribution. The protected
+writer and reviewer must use the canonical proposal encoding above and verify
+the reviewed digest before an executor is enabled.
 
 Application retains original source attribution and appends a versioned overlay
 and durable operation receipt. It recomputes only affected derived results while

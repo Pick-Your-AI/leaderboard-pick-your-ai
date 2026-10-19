@@ -132,6 +132,7 @@ async function controls(
       "/controls/requests": { requests },
       "/controls/invitations": { invitations },
       "/controls/spotlights/queue": { nominations: [] },
+      "/controls/spotlight-rotation/queue": { schemaVersion: "editorial-dimensions/v1", records: [] },
     };
     return route.fulfill({ json: responses[path] ?? {} });
   });
@@ -266,7 +267,7 @@ test("missing terms block new evidence consent while private requests, decline a
   await page.getByLabel("Request kind").selectOption("privacy");
   await page.getByLabel("Details", { exact: true }).fill("Synthetic privacy request");
   await page.getByRole("button", { name: "Submit request", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("Service confirmed");
+  await expect(page.getByRole("status").filter({ hasText: "Service confirmed" })).toContainText("Service confirmed");
   await page.getByLabel("Request kind").selectOption("evidence");
   await expect(page.getByRole("button", { name: "Submit request", exact: true })).toBeDisabled();
   const newConsents = page.getByLabel(consentLabel);
