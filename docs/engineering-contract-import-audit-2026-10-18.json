@@ -1,0 +1,724 @@
+{
+  "format": "engineering-contract-import-audit/1.0.0",
+  "observed_on": "2026-10-18",
+  "issue": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/86",
+  "purpose": "Real historical frozen-contract import and separately attributed local generation/exclusion replay; no contributor score or source activation.",
+  "source": {
+    "android": {
+      "repository_id": 1422897313,
+      "repository": "Pick-Your-AI/pick-your-ai-android",
+      "pr": 133,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-android/pull/133",
+      "state": "closed",
+      "merged": true,
+      "head": "8b4197a3023fc1d1fd53684b3e29bba28bcf390e",
+      "reported_base": "1a8610607774201b2f6428038a069d2a1e33a820",
+      "merge": "ad0cc3a3eaf7f36bba722bee3254db2b8c1e5bb6",
+      "merged_at": "2026-10-18T00:32:04Z",
+      "files": 73,
+      "additions": 18050,
+      "deletions": 2
+    },
+    "upstream": {
+      "repository": "Pick-Your-AI/pick-your-ai-research",
+      "pr": 44,
+      "url": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/44",
+      "head": "a222013c1f0106159132564d05e5d24666ad6342",
+      "merge": "9769fcd9ea380b1211669b2753181c7782444178",
+      "merged_at": "2026-10-16T11:41:48Z"
+    },
+    "evaluator": {
+      "repository": "Pick-Your-AI/pick-your-ai-leaderboard",
+      "commit": "7f3cc5273e95b185382c39cda0a68808bf267ddf",
+      "path": "packages/github/src/physical-diff.ts",
+      "repository_id": 1422874501
+    }
+  },
+  "accepted_integration_parent": "1a8610607774201b2f6428038a069d2a1e33a820",
+  "source_identity_checks": {
+    "android_head_and_merge_tree": "9790162ff90a1557c11f47b4b719b1e69112e323",
+    "android_head_parent": "5b2b235e555f12a40f4c03008f590ebc0f43ed75",
+    "research_contract_tree": "b1c4eaa4037f2a1e02103849064a947e758a2b40",
+    "research_contract_leaves": 46,
+    "exact_imported_paths": 45,
+    "omitted_research_only_path": "contracts/v1/ADOPTION.md",
+    "all_imported_modes_blobs_sizes_and_sha256_match": true,
+    "all_original_payload_manifest_hashes_match": true,
+    "api_physical_path_and_line_counts_match": true
+  },
+  "reproduction": {
+    "python": "3.12.14",
+    "node": "v24.19.0",
+    "git_before": "1a8610607774201b2f6428038a069d2a1e33a820",
+    "git_after": "ad0cc3a3eaf7f36bba722bee3254db2b8c1e5bb6",
+    "max_files": 3000,
+    "max_bytes": 8388608,
+    "timeout_ms": 30000,
+    "generator_outputs_created_in_empty_directories": true,
+    "every_output_byte_matches_accepted_research": true
+  },
+  "imports": [
+    {
+      "path": "contracts/v1/docs/IMPLEMENTATION_AGENTS.md",
+      "mode": "100644",
+      "blob": "e446ea6b2c28dfce7baf0f767e52d986f6c1d6f9",
+      "bytes": 5681,
+      "sha256": "646ff4792d6386ba92ba6b21167fa216372968900afd95dab5e8dd14df778b3a",
+      "supplied_package_path": "AGENTS.md",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/docs/IMPLEMENTATION_HANDOFF.md",
+      "mode": "100644",
+      "blob": "78daad2762c172bdac711a87dd5b78436a228ebc",
+      "bytes": 1964,
+      "sha256": "3214a7fe3552c32f859a6d9939cedea7b41976f9840b2e03a6ab964374586f5c",
+      "supplied_package_path": "HANDOFF_PROMPT.md",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/README.md",
+      "mode": "100644",
+      "blob": "38713fc7e9d315139a9de6948383518a952172b4",
+      "bytes": 9009,
+      "sha256": "12cb302ea7b87e39489f1f443890dd34435ddab543cce0c3bb23bf9db1cca4fd",
+      "supplied_package_path": "README.md",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/api/openapi.yaml",
+      "mode": "100644",
+      "blob": "117483451e00ac7d87260565b509f81bf383e405",
+      "bytes": 12079,
+      "sha256": "6a08d7230c23576889167da6cff48d95093da9dc04d4bfa6ece443ff35089a79",
+      "supplied_package_path": "api/openapi.yaml",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/baseline/core-dependency-graph.json",
+      "mode": "100644",
+      "blob": "cc4f1e9571e2ff30224b1ebf00989ab0333095ce",
+      "bytes": 17959,
+      "sha256": "e9b3bca19a9cf8241fd74f6618824882a3413649822add88be1ac93cb3f1bacc",
+      "supplied_package_path": "baseline/core-dependency-graph.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/baseline/core-ruleset.json",
+      "mode": "100644",
+      "blob": "d768d7121e1e29519da5ee25823e0e85ad3dcb07",
+      "bytes": 63614,
+      "sha256": "e60e43c0abc3c5d927e10c578a39fdedfa76e00fce6242e2db3a46e4b1da907e",
+      "supplied_package_path": "baseline/core-ruleset.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/docs/AGENT_PROTOCOL.md",
+      "mode": "100644",
+      "blob": "190caab12bf162af4358cad00881bcef0a8ef3f2",
+      "bytes": 6101,
+      "sha256": "f431cd0f8fa679c9aa9babf744791f3c08f66399f9a07320818a4ffa20efd309",
+      "supplied_package_path": "docs/AGENT_PROTOCOL.md",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/docs/COMPONENTS.md",
+      "mode": "100644",
+      "blob": "e7ebf9a61427517041859fb8ff697918b3826fe4",
+      "bytes": 6218,
+      "sha256": "27f2016696ca9466dc09cd4d84641f02e43252151bdc2c038bb673baa9b345fe",
+      "supplied_package_path": "docs/COMPONENTS.md",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/docs/DEPENDENCIES.md",
+      "mode": "100644",
+      "blob": "ff8c81e2f183f767b882cecf9b21e55fd503f64c",
+      "bytes": 9275,
+      "sha256": "542154f672ea1e08449122e04b33ac9f210ce38adf41a70a4c9ab29408b9d903",
+      "supplied_package_path": "docs/DEPENDENCIES.md",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/docs/PRICING_AND_GATES.md",
+      "mode": "100644",
+      "blob": "1e9e64ffe1138ffab456fd8b39c832d9f41e11ea",
+      "bytes": 5890,
+      "sha256": "59db419d25bfbbc6695ad4548b6c406d26343b97cb9ed5544d56b2b1f5425943",
+      "supplied_package_path": "docs/PRICING_AND_GATES.md",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/examples/build.json",
+      "mode": "100644",
+      "blob": "8309dfa05518fe86b86cae790299977473942eb4",
+      "bytes": 14681,
+      "sha256": "26762208769a8cf1012b4f33b1c1608556d275187ce21117d0b9632cdf951864",
+      "supplied_package_path": "examples/build.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/examples/catalog.json",
+      "mode": "100644",
+      "blob": "062af97f42f32dc4358748f6c45ac35b602a3d2b",
+      "bytes": 23827,
+      "sha256": "2e9120db823faef3e1e330a7d2e8067b3ab064328e2faed699d15cf41880fbf8",
+      "supplied_package_path": "examples/catalog.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/examples/cost-estimate.json",
+      "mode": "100644",
+      "blob": "5b391054ab4d29d7ef2c8101a847a33192e3115c",
+      "bytes": 1708,
+      "sha256": "4b7c3889881d3c424ed98cc47b146b25b05df21c5459c9558717f21b6198b7e4",
+      "supplied_package_path": "examples/cost-estimate.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/examples/dependency-graph.json",
+      "mode": "100644",
+      "blob": "cc4f1e9571e2ff30224b1ebf00989ab0333095ce",
+      "bytes": 17959,
+      "sha256": "e9b3bca19a9cf8241fd74f6618824882a3413649822add88be1ac93cb3f1bacc",
+      "supplied_package_path": "examples/dependency-graph.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/examples/deployment-manifest.json",
+      "mode": "100644",
+      "blob": "c9c82451f49da5aaadf1c2b0aed7ced9c34857ae",
+      "bytes": 674,
+      "sha256": "c05603388efc50a15274d1e6fa8e25dac3c205377a1989bfb5b3a3e64face8ab",
+      "supplied_package_path": "examples/deployment-manifest.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/examples/evaluation-report.json",
+      "mode": "100644",
+      "blob": "b6b0122fa6367be91c3b1a5527d9ef03e886352d",
+      "bytes": 16244,
+      "sha256": "039626962ef0f2c4f706614d775ad47eda1d148c58f736c98ad169fc153221f3",
+      "supplied_package_path": "examples/evaluation-report.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/examples/event.json",
+      "mode": "100644",
+      "blob": "bced540886536ef3a7d89eabba358cbfc0d02453",
+      "bytes": 599,
+      "sha256": "ed0a9e96da773bc74bceb774f576971275f6da525fa9b425c3b8d6e5f7406068",
+      "supplied_package_path": "examples/event.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/examples/pricebook.json",
+      "mode": "100644",
+      "blob": "2845350e4e45e4500a897e142ab8b0288c55615f",
+      "bytes": 1255,
+      "sha256": "716a848822fc2b182d226c597f7e50f4b00a0fe01ba5c03879e858ca6f0c9b46",
+      "supplied_package_path": "examples/pricebook.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/examples/quality-evaluation-run.json",
+      "mode": "100644",
+      "blob": "db84d3952f214498da2484a5ea0e37576364bf87",
+      "bytes": 684,
+      "sha256": "bc0abc0b33e2b6bf77fc4609ac88a73981068eac6fabf604c255f58fec954a6d",
+      "supplied_package_path": "examples/quality-evaluation-run.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/examples/resource-estimate.json",
+      "mode": "100644",
+      "blob": "99f8a6b6e41375185178569133c995a8ae049c2b",
+      "bytes": 1207,
+      "sha256": "41469a377c0b428e779c269eb052fa8f455b4768e2add3c137b5e465a79a362f",
+      "supplied_package_path": "examples/resource-estimate.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/examples/ruleset.json",
+      "mode": "100644",
+      "blob": "913f91513e02341b2757db67893387d2bcb61174",
+      "bytes": 63617,
+      "sha256": "05474568204fdbfd407cb4e4cfc9334e22fdf24e75111bed8990868926fab418",
+      "supplied_package_path": "examples/ruleset.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/reference/create_examples.py",
+      "mode": "100644",
+      "blob": "f41d5559aa87e3d444c23e65a86a66ccb24261cb",
+      "bytes": 35965,
+      "sha256": "a59e488eded39c2d38151b55ac2522136a90a35adcd069f517d4fd4761eaf45a",
+      "supplied_package_path": "reference/create_examples.py",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/reference/evaluate.py",
+      "mode": "100644",
+      "blob": "0e01df6ada663b41019ffb7825290b47b142fa38",
+      "bytes": 10946,
+      "sha256": "092c8a99495f9b5ae960df40b27e33f15eefe6d1a7cd80119658fdc79ada1a5a",
+      "supplied_package_path": "reference/evaluate.py",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/reference/generate_component_docs.py",
+      "mode": "100644",
+      "blob": "2a21c68feb6ad9161418711650ddf670807a9b7c",
+      "bytes": 4662,
+      "sha256": "b0b81f9b596acf1f5b8859ab0c65c758b36d43587051d7bb095ad3bf21fbc9e7",
+      "supplied_package_path": "reference/generate_component_docs.py",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/reference/generate_schemas.py",
+      "mode": "100644",
+      "blob": "b23fc9231574dbfcf6ab1742869819912ffaa59a",
+      "bytes": 38285,
+      "sha256": "07186d2cb57b9861670f5265071e3fa2d75bd2dd62b6074a4f8b55c681c1b01a",
+      "supplied_package_path": "reference/generate_schemas.py",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/reference/validate_payload.py",
+      "mode": "100644",
+      "blob": "1893544fef2e46cc7bc0f87ace1900a7646f9194",
+      "bytes": 1363,
+      "sha256": "5ecbb2b9d8ffd72eb38fde0a45064cdde24f82ef251e30df37c638f45aed4cd5",
+      "supplied_package_path": "reference/validate_payload.py",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/schemas/build.schema.json",
+      "mode": "100644",
+      "blob": "2b173755b1665dea3d9cddf0d33062cf1adc94b5",
+      "bytes": 5121,
+      "sha256": "1beacb0b01fcdea0b8b47357cdf2e99d80a10b8a4218aaac9e3b6af55391b42a",
+      "supplied_package_path": "schemas/build.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/catalog-item.schema.json",
+      "mode": "100644",
+      "blob": "d4576e9044b5675a06d1d0d922afd129682fd501",
+      "bytes": 45569,
+      "sha256": "81c960c6e7dfe046634062e3f9ce5a1089b1d88adbd9fd45d9a67dcfc0339a25",
+      "supplied_package_path": "schemas/catalog-item.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/catalog-snapshot.schema.json",
+      "mode": "100644",
+      "blob": "88af389f4f2b72e38f5c25e4cabd73df2d6c6225",
+      "bytes": 760,
+      "sha256": "a5af428386768b698d280a18bf99c0e52364ee397a2075685213b3d0762693a4",
+      "supplied_package_path": "schemas/catalog-snapshot.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/common.schema.json",
+      "mode": "100644",
+      "blob": "fc55e2aa32a9cd63a16ee1ea90709b6ca733f6b5",
+      "bytes": 2490,
+      "sha256": "0342ce2f1114e7276fc7f6a08ff5b86e8727caadd83ae4f443de9a7e1431c43c",
+      "supplied_package_path": "schemas/common.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/component-registry.json",
+      "mode": "100644",
+      "blob": "56dd96f98ff04130d7672e87eeb9deaba2cb934b",
+      "bytes": 5428,
+      "sha256": "cd60070e912a60504f605f2fd9f86c64520160cce7f4184c8ea200209c6b1918",
+      "supplied_package_path": "schemas/component-registry.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/cost-estimate.schema.json",
+      "mode": "100644",
+      "blob": "1031d53c3b9d71fcfa28f9054792f83f0155d9cb",
+      "bytes": 3763,
+      "sha256": "ef7cf8c0492022c1a8a1f971e49eb86dfad5b66ce6a4b2cf72a965fc9ba81259",
+      "supplied_package_path": "schemas/cost-estimate.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/dependency-graph.schema.json",
+      "mode": "100644",
+      "blob": "8bb30e002ccb13339e8e3061c89e8d5cf4df3b5e",
+      "bytes": 3668,
+      "sha256": "fb6a8bb42a9424d4ff2b520301f816c247789a3d70d1124afea1a8dc5ed5bd75",
+      "supplied_package_path": "schemas/dependency-graph.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/deployment-manifest.schema.json",
+      "mode": "100644",
+      "blob": "5290ae6a40e9a957e8055b440a041f9c3becd98e",
+      "bytes": 2798,
+      "sha256": "86bc716c906aca1299d9129eec08abec44378c26b5a97317d6310afe84d6b374",
+      "supplied_package_path": "schemas/deployment-manifest.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/evaluation-report.schema.json",
+      "mode": "100644",
+      "blob": "77875a71a6b7440d5228a1b9880c2651c5bae20f",
+      "bytes": 3972,
+      "sha256": "78935ec78848de7655bd972851aa0357c4426f6870fc028ba81739c85040359b",
+      "supplied_package_path": "schemas/evaluation-report.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/event.schema.json",
+      "mode": "100644",
+      "blob": "b15b739c8a2e4db2d973a3f5f6ef1eab616bb3dc",
+      "bytes": 3506,
+      "sha256": "e169ad8d2f7417580ef63a5098f8ec54dd514af3ce609c59bdb7780b89d6039a",
+      "supplied_package_path": "schemas/event.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/pricebook.schema.json",
+      "mode": "100644",
+      "blob": "fc6e3e74eda33325f68e6e820b3b2700dbda9a73",
+      "bytes": 2586,
+      "sha256": "169e1a48847bee8b6af4b266a55bcebe317b5655dd6abb7718e06331b1df6288",
+      "supplied_package_path": "schemas/pricebook.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/quality-evaluation-run.schema.json",
+      "mode": "100644",
+      "blob": "8dd515b03e07916115a0864a8347968d6dd0dc20",
+      "bytes": 2588,
+      "sha256": "ed6b3f60805428e3788ce27fa224fb3d5008998f0637f24723bf65eea546a959",
+      "supplied_package_path": "schemas/quality-evaluation-run.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/resource-estimate.schema.json",
+      "mode": "100644",
+      "blob": "9dbafa69f59f8667a4e124ec34d8df17606c8f2e",
+      "bytes": 2713,
+      "sha256": "39ab5d061f9021ce14e1f987717441cff04d1a40f76db5582d343d599a5d876c",
+      "supplied_package_path": "schemas/resource-estimate.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/ruleset.schema.json",
+      "mode": "100644",
+      "blob": "dfbbc2284925b101fe56eb03adf1b2c6530505d7",
+      "bytes": 8726,
+      "sha256": "b251e49774d7e6a34522555adefd40f56f5e647a8a2b4a69a0be0a4618b1a8d3",
+      "supplied_package_path": "schemas/ruleset.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/schemas/selection.schema.json",
+      "mode": "100644",
+      "blob": "9a66cceb442c50c93c6e214b760a357146fa3c69",
+      "bytes": 27630,
+      "sha256": "f8f189c6555fec41e616c32f081d06fab9f966b0fa4891ddca55580f577d51a8",
+      "supplied_package_path": "schemas/selection.schema.json",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": true
+    },
+    {
+      "path": "contracts/v1/sql/postgres_reference.sql",
+      "mode": "100644",
+      "blob": "3a0c7a6d5150ea053efead8db0bf5babefb373df",
+      "bytes": 8058,
+      "sha256": "72d9fbde25f47fb9aa6f79ab33dd0be7588b7556b019a9c75c44f28949e8bb53",
+      "supplied_package_path": "sql/postgres_reference.sql",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/tests/test_contract.py",
+      "mode": "100644",
+      "blob": "59b13bf9016f8ca72e00fbba022119ee7bb763e3",
+      "bytes": 16522,
+      "sha256": "237fef187e553cac3e7e42c8dd38f5ac0a76e9166e5851d3c75ff1eb32135f77",
+      "supplied_package_path": "tests/test_contract.py",
+      "kind": "payload",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/IMPORT_MANIFEST.json",
+      "mode": "100644",
+      "blob": "955704740fa9b16eb9b319726bfcb9ed1f8bbf47",
+      "bytes": 8426,
+      "sha256": "ef6d5801eec10f3169e2bf84653e7026b33088e305a987991ec52faadcd7f554",
+      "kind": "manifest",
+      "reproduced_by_pinned_generator": false
+    },
+    {
+      "path": "contracts/v1/UPSTREAM_SHA256SUMS",
+      "mode": "100644",
+      "blob": "26fd660b5161a9b93607bab7d3279991a2e90fa4",
+      "bytes": 4044,
+      "sha256": "0587a133436268bc03684ad61ff29f3bd1a12eb83db8a497eabdbb8fd8803e15",
+      "kind": "manifest",
+      "reproduced_by_pinned_generator": false
+    }
+  ],
+  "generation": [
+    {
+      "source": {
+        "path": "contracts/v1/reference/generate_schemas.py",
+        "mode": "100644",
+        "blob": "b23fc9231574dbfcf6ab1742869819912ffaa59a",
+        "bytes": 38285,
+        "sha256": "07186d2cb57b9861670f5265071e3fa2d75bd2dd62b6074a4f8b55c681c1b01a"
+      },
+      "outputs": [
+        "contracts/v1/schemas/build.schema.json",
+        "contracts/v1/schemas/catalog-item.schema.json",
+        "contracts/v1/schemas/catalog-snapshot.schema.json",
+        "contracts/v1/schemas/common.schema.json",
+        "contracts/v1/schemas/component-registry.json",
+        "contracts/v1/schemas/cost-estimate.schema.json",
+        "contracts/v1/schemas/dependency-graph.schema.json",
+        "contracts/v1/schemas/deployment-manifest.schema.json",
+        "contracts/v1/schemas/evaluation-report.schema.json",
+        "contracts/v1/schemas/event.schema.json",
+        "contracts/v1/schemas/pricebook.schema.json",
+        "contracts/v1/schemas/quality-evaluation-run.schema.json",
+        "contracts/v1/schemas/resource-estimate.schema.json",
+        "contracts/v1/schemas/ruleset.schema.json",
+        "contracts/v1/schemas/selection.schema.json"
+      ],
+      "exit_code": 0,
+      "exact_output_files": 15
+    },
+    {
+      "source": {
+        "path": "contracts/v1/reference/create_examples.py",
+        "mode": "100644",
+        "blob": "f41d5559aa87e3d444c23e65a86a66ccb24261cb",
+        "bytes": 35965,
+        "sha256": "a59e488eded39c2d38151b55ac2522136a90a35adcd069f517d4fd4761eaf45a"
+      },
+      "outputs": [
+        "contracts/v1/baseline/core-dependency-graph.json",
+        "contracts/v1/baseline/core-ruleset.json",
+        "contracts/v1/examples/build.json",
+        "contracts/v1/examples/catalog.json",
+        "contracts/v1/examples/cost-estimate.json",
+        "contracts/v1/examples/dependency-graph.json",
+        "contracts/v1/examples/deployment-manifest.json",
+        "contracts/v1/examples/event.json",
+        "contracts/v1/examples/pricebook.json",
+        "contracts/v1/examples/quality-evaluation-run.json",
+        "contracts/v1/examples/resource-estimate.json",
+        "contracts/v1/examples/ruleset.json"
+      ],
+      "exit_code": 0,
+      "exact_output_files": 12
+    },
+    {
+      "source": {
+        "path": "contracts/v1/reference/generate_component_docs.py",
+        "mode": "100644",
+        "blob": "2a21c68feb6ad9161418711650ddf670807a9b7c",
+        "bytes": 4662,
+        "sha256": "b0b81f9b596acf1f5b8859ab0c65c758b36d43587051d7bb095ad3bf21fbc9e7"
+      },
+      "outputs": [
+        "contracts/v1/docs/COMPONENTS.md"
+      ],
+      "exit_code": 0,
+      "exact_output_files": 1
+    }
+  ],
+  "physical_accounting": {
+    "raw_paths": 73,
+    "raw_additions": 18050,
+    "raw_deletions": 2,
+    "imported_files": 45,
+    "imported_additions": 15986,
+    "imported_deletions": 0,
+    "baseline_evaluator": {
+      "path": "packages/github/src/physical-diff.ts",
+      "mode": "100644",
+      "blob": "31510c0e383983659e5c77ef3d5f400284b82861",
+      "bytes": 7934,
+      "sha256": "139a49ec20e0374b4cd0a72aebc2fb4d00e77f9f8a9541a6eabed2a24ffba81e",
+      "commit": "7f3cc5273e95b185382c39cda0a68808bf267ddf"
+    },
+    "corrected_evaluator": {
+      "path": "packages/github/src/physical-diff.ts",
+      "mode": "100644",
+      "blob": "8b1f060088b236f7d01f8097d9639a5f70867b47",
+      "bytes": 7951,
+      "sha256": "ccbf9c158eef1d701f66c412657a6507a06b073a1d71075fe94c45cc37d439e0"
+    },
+    "baseline": {
+      "unqualifiedPathClassification": {
+        "complete": true,
+        "additions": 18050,
+        "deletions": 2,
+        "changed": 18052,
+        "net": 18048,
+        "filesChanged": 72,
+        "rawAdditions": 18050,
+        "rawDeletions": 2,
+        "reasons": []
+      },
+      "explicitGeneratedClassification": {
+        "complete": true,
+        "additions": 4943,
+        "deletions": 2,
+        "changed": 4945,
+        "net": 4941,
+        "filesChanged": 44,
+        "rawAdditions": 18050,
+        "rawDeletions": 2,
+        "reasons": []
+      },
+      "explicitImportAndGeneratedClassification": {
+        "complete": true,
+        "additions": 2064,
+        "deletions": 2,
+        "changed": 2066,
+        "net": 2062,
+        "filesChanged": 27,
+        "rawAdditions": 18050,
+        "rawDeletions": 2,
+        "reasons": []
+      }
+    },
+    "corrected": {
+      "unqualifiedPathClassification": {
+        "complete": true,
+        "additions": 18010,
+        "deletions": 2,
+        "changed": 18012,
+        "net": 18008,
+        "filesChanged": 71,
+        "rawAdditions": 18050,
+        "rawDeletions": 2,
+        "reasons": []
+      },
+      "explicitGeneratedClassification": {
+        "complete": true,
+        "additions": 4903,
+        "deletions": 2,
+        "changed": 4905,
+        "net": 4901,
+        "filesChanged": 43,
+        "rawAdditions": 18050,
+        "rawDeletions": 2,
+        "reasons": []
+      },
+      "explicitImportAndGeneratedClassification": {
+        "complete": true,
+        "additions": 2024,
+        "deletions": 2,
+        "changed": 2026,
+        "net": 2022,
+        "filesChanged": 26,
+        "rawAdditions": 18050,
+        "rawDeletions": 2,
+        "reasons": []
+      }
+    },
+    "exact_changed_file_classifications": [
+      {
+        "path": "core/gradle.lockfile",
+        "additions": 40,
+        "deletions": 0,
+        "before": {
+          "classification": "source",
+          "eligible": true,
+          "reason": null
+        },
+        "after": {
+          "classification": "lock",
+          "eligible": false,
+          "reason": "lock"
+        }
+      }
+    ]
+  },
+  "synthetic_regression": {
+    "path": "packages/github/test/physical-diff-gradle-locks.test.mjs",
+    "blob": "e508a8ae15a90e4f6a67a390f3b72d25794892da",
+    "before": {
+      "passed": 2,
+      "failed": 1,
+      "skipped": 0,
+      "failure": "Gradle lockfile was classified as source instead of lock"
+    },
+    "corrected_with_existing_utf8_suite": {
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0
+    },
+    "formatting_control": {
+      "synthetic": true,
+      "whitespace_only_files": 40,
+      "substantive_files": 1,
+      "raw_additions": 41,
+      "raw_deletions": 40,
+      "eligible_additions": 1,
+      "eligible_deletions": 0
+    },
+    "unchanged_test_bytes_between_before_and_after": true
+  },
+  "limitations": [
+    "Byte identity establishes this downstream import; it does not identify the original package author or whether a human created the generators.",
+    "Generated means exactly reproduced by these pinned generators; synthetic fixture payloads remain synthetic data, not model, vendor, capacity or deployment evidence.",
+    "The classifier receives explicit independently verified path lists. This audit does not add automatic upstream provenance discovery to production ingestion.",
+    "Other PR paths are not certified original work by merely remaining mechanically eligible. Wrapper/dependency provenance, author/committer/coauthors, metric policy and launch acceptance remain separately required.",
+    "No historical mass-formatting PR or semantic formatting exclusion is established by this import sample.",
+    "The corrected classifier excludes the 40 physical lines in core/gradle.lockfile. The remaining 26 mechanically eligible files and 2,024 added/two deleted lines are not an authorship or effort certification.",
+    "The forty-file whitespace experiment is explicitly synthetic. No actual historical mass-formatting PR or semantic-equivalence detector is certified.",
+    "Metric-specific sign-off, complete author/reviewer/coauthor reconciliation and engineering launch acceptance remain open under issue 86."
+  ]
+}
