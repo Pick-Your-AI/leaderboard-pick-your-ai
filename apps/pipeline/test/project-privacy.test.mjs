@@ -337,6 +337,10 @@ for (const [loss, subjectType] of [
       (await runtime.app.inject(url)).json().rows.map((r) => r.result.value),
       [1],
     );
+    const profileUrl = `/api/v1/contributors/101?category=project_status_updates&snapshot=${first.publications[0].snapshotId}`;
+    const initialProfile = await runtime.app.inject(profileUrl);
+    assert.equal(initialProfile.statusCode, 200, initialProfile.body);
+    assert.deepEqual(initialProfile.json().timeline[0].projectContext.projects, ["PVT_syntheticAllowed"]);
     if (loss === "legacy_normalization_identity") {
       const cached = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
       assert.equal(cached.length, 1);
@@ -371,6 +375,9 @@ for (const [loss, subjectType] of [
     h.controlsStore.transaction = originalTransaction;
     const read = await runtime.app.inject(url + "&snapshot=" + first.publications[0].snapshotId);
     assert.notEqual(read.statusCode, 200);
+    const deniedProfile = await runtime.app.inject(profileUrl);
+    assert.notEqual(deniedProfile.statusCode, 200);
+    assert.equal(deniedProfile.body.includes("PVT_syntheticAllowed"), false);
     assert.notEqual((await runtime.app.inject(url)).statusCode, 200);
     if (runError)
       assert.match(

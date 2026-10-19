@@ -22,6 +22,7 @@ import { activityBurstIndex, activityCompactionVersion, activityGroupPreviewLimi
 import { renderContributorCard, renderContributorCardImage } from "./cards.js";
 import { renderPublicExport } from "./exports.js";
 import { publicParticipation } from "./participation.js";
+import { profilePage } from "./profile-page.js";
 import { publicOrganizationHistory, validateParticipationHistoryRead } from "./participation-history.js";
 import {
   activityGroupingVersion,
@@ -483,18 +484,21 @@ export function createService(options: ServiceOptions = {}) {
     const nextOffset = offset + entries.length;
     let nextCursor: string | null = null;
     if (nextOffset < items.length) {
-      const value = Buffer.from(
-        JSON.stringify({
-          pin: read.selected.snapshot.snapshotId,
-          policy: read.controls.version,
-          offset: nextOffset,
-          binding,
-          expires: Math.floor(now() / 300000) * 300000 + 900000,
-        }),
-      ).toString("base64url");
-      nextCursor = `${value}.${sign(value)}`;
+      nextCursor = continuationCursor(read, binding, nextOffset, Math.floor(now() / 300000) * 300000 + 900000);
     }
     return { entries, nextCursor };
+  }
+  function continuationCursor(read: PublicRead, binding: string, offset: number, expires: number) {
+    const value = Buffer.from(
+      JSON.stringify({
+        pin: read.selected.snapshot.snapshotId,
+        policy: read.controls.version,
+        offset,
+        binding,
+        expires,
+      }),
+    ).toString("base64url");
+    return `${value}.${sign(value)}`;
   }
   function boundCursor(q: ReturnType<typeof query>, binding: string) {
     const cursor = q.cursor ? decodeCursor(q.cursor) : null;
@@ -841,8 +845,9 @@ export function createService(options: ServiceOptions = {}) {
               ? 1
               : 0),
       );
-    const { entries: timeline, nextCursor } = page(evidence, q, read, cursor, binding);
-    return send(request, reply, {
+    if (cursor && cursor.policy !== read.controls.version) fail(410, "cursor_policy_changed_refetch");
+    const expires = Math.floor(now() / 300000) * 300000 + 900000;
+    const envelope = {
       ...meta(read),
       actor: actor.actor,
       actorId: actor.actorId,
@@ -858,12 +863,15 @@ export function createService(options: ServiceOptions = {}) {
         role,
         contributions: evidence.filter((entry) => entry.contribution.roles.includes(role)).length,
       })),
-      timeline,
-      nextCursor,
-      timelineTruncated: nextCursor !== null,
       evidenceCount: evidence.length,
-      evidenceIds: timeline.map((entry) => entry.contribution.contributionId),
-    });
+    };
+    return send(
+      request,
+      reply,
+      profilePage(evidence, cursor?.offset ?? 0, q.limit, envelope, (offset) =>
+        continuationCursor(read, binding, offset, expires),
+      ),
+    );
   });
   async function participationHistory(
     request: FastifyRequest,
