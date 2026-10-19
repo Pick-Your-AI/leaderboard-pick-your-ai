@@ -75,6 +75,37 @@ Native issue fields, Project item custom fields, Project status transitions and 
 
 Relationship types retain parent/child and blocked-by direction. Related/information links do not become blockers. The collector must independently verify both endpoints are public and set `relationship.publicEndpointsVerified`; a public container alone does not establish a linked private item's visibility. Reverse representations of an intentional symmetric link share one canonical unit; automatic cross-references do not create intentional-link merit. Public transfer lineage preserves issue identity and grants no new issue creation/authorship credit. Private, unknown or unapproved destinations produce suppression directives; historical projections must obey those controls. Current ordering cannot identify who reordered items.
 
+An enriched public transfer must identify an issue at each endpoint, with complete
+`owner/repository` coordinates, a canonical positive safe-integer issue number,
+an explicit destination identity and a different positive destination repository
+ID. Pull-request payloads, pull-request URLs, repository roots and extra path
+segments cannot establish issue-transfer lineage. Missing source actor or event
+time remains unknown; another reporter, assignee, update time or later observation
+cannot supply it. Reobserving the same transfer preserves its canonical unit;
+forward and reverse transfers remain descriptive observations, with no qualified
+outcome or new issue-creation credit.
+
+For a known source artifact, a private, unknown, missing or unapproved destination
+still produces a suppression directive when the public source locator is absent
+or unusable. The directive does not require an attributable actor or event time.
+The pipeline must apply it to retained snapshots as well as the current board.
+The [transfer admission cases](../packages/github/test/issue-transfer-admission.test.mjs)
+exercise 28 source-admission, replay and privacy cases. Two additional
+[pipeline cases](../apps/pipeline/test/transfer-visibility.test.mjs) feed the actual
+normalizer into the synthetic PGlite/SQLite runtime and verify durable suppression,
+cached-board filtering, pinned evidence withdrawal and JSON/CSV export filtering.
+They do not represent live GitHub events or installed-service qualification.
+
+GitHub's native GraphQL
+[`TransferredEvent`](https://docs.github.com/en/graphql/reference/issues#transferredevent)
+exposes the source repository and associated issue, but no immutable historical
+destination field. The current issue repository cannot establish every earlier
+transfer destination. These tests exercise an explicitly enriched envelope;
+they add no native transfer collector, installed-App capability, reviewed metric
+enablement or qualified routing receipt. This bounded COV15 contribution does not
+complete [#72](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/72)
+or the separate semantic, inclusion and enablement acceptance for all 98 metrics.
+
 Field-change, triage and relationship subtype lookups accept only entries explicitly declared in their metric maps. Inherited object-property names cannot create a fact or contribution evidence. Relationship kinds must be literal supported strings; arrays and objects are not coerced into a supported kind. Unsupported inputs retain their raw observation and existing reason code. The valid metric identities, actor/time handling, endpoint checks and canonical relationship units are unchanged.
 
 `groupTriageTransitions` requires an explicit reviewed policy version, adjacency interval and cooldown. It groups per actor/artifact/facet/target, deduplicates exact event IDs, rejects conflicting IDs, marks groups returning to their initial state as reversal-suppressed, and marks repeated terminal states within cooldown. Raw counts remain inspectable. It also returns a global distinct-artifact count and sorted per-actor raw-action, session and distinct-artifact summaries; unknown actor/artifact/time events cannot invent those totals. It always reports zero qualified outcomes: persistence, churn suppression and grouping never prove correctness. A scripted batch therefore cannot spill into unrelated accepted-outcome boards. The [definition-day and session policy](triage-definition-grouping.md) specifies the exact boundaries and counting scopes. Runtime policy approval, actual triager review and pathological real-source audits remain acceptance work.

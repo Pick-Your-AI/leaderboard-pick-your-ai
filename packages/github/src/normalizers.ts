@@ -409,6 +409,14 @@ function url(value: unknown, slug: string, allowProject = false): string | null 
     return null;
   }
 }
+/** Transfer endpoints must identify issues in complete repository coordinates. */
+function issueUrl(value: unknown, slug: unknown): string | null {
+  if (typeof slug !== "string" || !/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(slug)) return null;
+  const parsed = url(value, slug);
+  const prefix = "https://github.com/" + slug + "/issues/";
+  const number = parsed?.startsWith(prefix) ? parsed.slice(prefix.length) : "";
+  return /^[1-9][0-9]*$/.test(number) && Number.isSafeInteger(Number(number)) ? parsed : null;
+}
 function sourceActor(payload: Record<string, unknown>): unknown {
   return payload.sender ?? payload.actor;
 }
@@ -576,7 +584,20 @@ export function normalizeGithubObservation(
     url(resource.html_url ?? resource.url, repository.slug, kind === "project") ??
     url(payload.subject_url, repository.slug, kind === "project");
   if (!id || !publicUrl) {
-    out.reasons.push("missing_public_artifact_identity");
+    // Loss of a public locator cannot keep an already-known issue visible after
+    // an authoritative private/unknown/unapproved transfer destination arrives.
+    const destination = object(payload.destination) ? payload.destination : null;
+    if (
+      id &&
+      envelope.family === "relationship" &&
+      sourceAction === "transferred" &&
+      (!destination || destination.visibility !== "public" || destination.allowed !== true)
+    ) {
+      out.suppressArtifactIds.push(id);
+      out.reasons.push("transfer_destination_private_unknown_or_unapproved");
+    } else {
+      out.reasons.push("missing_public_artifact_identity");
+    }
     return out;
   }
   const at = time(envelope.occurredAt);
@@ -1040,9 +1061,14 @@ export function normalizeGithubObservation(
         out.suppressArtifactIds.push(id);
         out.reasons.push("transfer_destination_private_unknown_or_unapproved");
       } else if (
+        object(payload.pull_request) ||
+        resource.pull_request !== undefined ||
+        (resource.__typename !== undefined && resource.__typename !== "Issue") ||
+        !issueUrl(publicUrl, repository.slug) ||
         !positive(destination.repositoryId) ||
+        destination.repositoryId === repository.id ||
         !text(destination.stableId) ||
-        !url(destination.url, String(destination.slug))
+        !issueUrl(destination.url, destination.slug)
       )
         out.reasons.push("transfer_lineage_incomplete");
       else {
