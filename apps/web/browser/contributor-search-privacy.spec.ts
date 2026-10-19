@@ -1,4 +1,16 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
+
+async function expectNeutralCount(entry: Locator) {
+  const count = entry.getByRole("link");
+  await expect(count).toHaveCount(1);
+  await expect(count).toHaveAccessibleName("1 contribution in scope for Deleted account. Open fixture explanation");
+  await expect(count).toHaveAttribute(
+    "href",
+    "/contributors?period=all&snapshot=syn-r42&proof=record%3Asyn-c-032&ui=prototype",
+  );
+  await expect(entry).not.toContainText(/synthetic-iris|Iris \(synthetic\)|syn-actor-9/);
+  expect(await entry.ariaSnapshot()).not.toMatch(/synthetic-iris|Iris \(synthetic\)|syn-actor-9/);
+}
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/contributors?period=all&snapshot=syn-r42");
@@ -33,11 +45,24 @@ for (const [login, displayName] of [
     for (const query of [login.toUpperCase(), displayName.toUpperCase()]) {
       await page.getByRole("searchbox", { name: "Find a contributor" }).fill(query);
       await expect(page.locator(".directory-entry")).toHaveCount(1);
-      await expect(page.locator(".directory-entry").getByRole("link")).toHaveAttribute(
+      const entry = page.locator(".directory-entry");
+      await expect(entry.getByRole("link", { name: `${displayName} @${login}`, exact: true })).toHaveAttribute(
         "href",
         `/contributors/${login}?period=all&snapshot=syn-r42&ui=prototype`,
       );
-      await expect(page.locator(".directory-entry")).toContainText(displayName);
+      const count = entry.getByRole("link", { name: /contributions? in scope for/ });
+      await expect(count).toHaveCount(1);
+      const countUrl = new URL((await count.getAttribute("href"))!, page.url());
+      expect(countUrl.pathname).toBe("/contributors");
+      expect(Object.fromEntries(countUrl.searchParams)).toEqual({
+        period: "all",
+        snapshot: "syn-r42",
+        q: query,
+        proof: login,
+        ui: "prototype",
+      });
+      await expect(entry.getByRole("link")).toHaveCount(2);
+      await expect(entry).toContainText(displayName);
       await expect(page.getByRole("searchbox", { name: "Find a contributor" })).toBeFocused();
     }
   });
@@ -45,8 +70,7 @@ for (const [login, displayName] of [
 
 test("anonymous historical credit remains when the search is empty or cleared", async ({ page }) => {
   const anonymous = page.locator(".directory-entry").filter({ hasText: "Deleted account" });
-  await expect(anonymous.getByRole("link")).toHaveCount(0);
-  await expect(anonymous).not.toContainText(/synthetic-iris|Iris \(synthetic\)/);
+  await expectNeutralCount(anonymous);
 
   await page.getByRole("searchbox", { name: "Find a contributor" }).fill("   ");
   await expect(anonymous).toBeVisible();
@@ -63,6 +87,14 @@ test("anonymous historical credit remains when the search is empty or cleared", 
   });
   await expect(page.getByRole("searchbox", { name: "Find a contributor" })).toHaveValue("");
   await expect(anonymous).toBeVisible();
-  await expect(anonymous.getByRole("link")).toHaveCount(0);
-  await expect(anonymous).not.toContainText(/synthetic-iris|Iris \(synthetic\)/);
+  await expectNeutralCount(anonymous);
+  await anonymous.getByRole("link").click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Contributions: Deleted account", exact: true })).toBeVisible();
+  await expect(dialog.locator(".receipt-row")).toHaveCount(1);
+  await expect(dialog.locator(".receipt-row-main a")).toHaveAttribute("href", /^\/contributions\/syn-c-032\?/);
+  await expect(dialog.getByRole("link", { name: "Open as a full page", exact: true })).toHaveCount(0);
+  expect(await dialog.ariaSnapshot()).not.toMatch(/synthetic-iris|Iris \(synthetic\)|syn-actor-9/);
+  const targets = await page.locator("a[href]").evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+  expect(targets.join("\n")).not.toMatch(/synthetic-iris|Iris|syn-actor-9/);
 });

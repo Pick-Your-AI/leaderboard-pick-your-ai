@@ -61,10 +61,11 @@ nor reconstructs original bytes from older already-decoded records.
 
 | Route | Behavior |
 | --- | --- |
-| `GET /controls/public` | Anonymous persisted public snapshot, containing only opted-in profiles and accepted eligible claims. No private request/audit fields or named suppression notices. |
+| `GET /controls/public` | Anonymous persisted public snapshot, with claims narrowed by current private consent, review and suppression state before serving, including on restart. No private request/audit fields or named suppression notices. |
 | `GET /controls/auth/login` | Starts a browser-bound authorization flow; rejects redirect/query overrides. |
 | `GET /controls/auth/callback` | Consumes state once, verifies provider identity and rotates the session. |
 | `GET /controls/session` | Returns verified stable account ID, current roles, expiry and CSRF token to the authenticated browser. |
+| `GET /controls/evidence-terms` | Returns the current versioned display terms and content digest to the authenticated browser. Does not create a receipt. |
 | `POST /controls/logout` | Deletes current session; body `{}`. |
 | `POST /controls/sessions/revoke` | Deletes all sessions for the verified caller; body `{}`. |
 | `POST /controls/profile` | Saves caller's own `{ bio, highlights, public }`. Plain bio rejects markup/control characters; highlights are bounded GitHub HTTPS locators. No actor override. |
@@ -72,16 +73,22 @@ nor reconstructs original bytes from older already-decoded records.
 | `POST /controls/requests` | Stores an authenticated private request and returns `{ id, status, version }`. Storage occurs before success is returned. |
 | `GET /controls/requests` | Lists caller-owned requests or requests permitted by the caller's server-side reviewer role. |
 | `GET /controls/requests/:id` | Owner or appropriate reviewer only; unauthorized and unknown receipts both return 404. |
-| `GET /controls/invitations` | Lists only the caller's proposed collaborator attributions, with public locator, category, scope, version and consent state. Private submission detail is excluded. |
-| `POST /controls/requests/:id/consent` | Invited account accepts or declines its own attribution using `{ version, consent }`. Pending/declined collaborators never enter the public projection. |
+| `GET /controls/invitations` | Lists the caller's proposed attributions, exact claim/terms identity, all proposed participant IDs, requested dates and only that caller's proposed role. Private detail, source-use rationale, other roles and review records are excluded. |
+| `POST /controls/requests/:id/consent` | Decline uses `{ version, consent: false }`. Acceptance additionally binds the current `claimDigest`, `termsVersion` and `termsDigest`. Pending/declined consent withholds the whole optional claim. Changed consent returns accepted evidence to pending review. |
 | `POST /controls/requests/:id/review` | Eligible independent reviewer accepts/rejects, rolls back or merges a duplicate with optimistic version, explicit conflict declaration and private reason. |
 | `POST /controls/requests/:id/appeal` | Owner appeals an accepted/rejected decision with `{ version, reason }`. Removes the accepted claim until independent appeal resolution. |
-| `POST /controls/requests/:id/amend` | Owner supplies revised evidence, reason and version. Prior values stay in the private audit; recognition returns to pending and collaborator consent is requested again. Declines persist. |
+| `POST /controls/requests/:id/amend` | Owner supplies revised evidence, current intake, fresh consent, reason and receipt version. Prior values stay in the private audit; the claim revision advances, recognition returns to pending and affirmative collaborator consent is requested again. Historical declines persist. |
 | `POST /controls/requests/:id/withdraw` | Owner withdraws; public claim is removed in the same transaction. |
 
-Evidence submission requires `{ kind: 'evidence', locator, category, collaborators: [stableId], consent: true, detail, scope }`. Categories are `governance`, `deployment_work`, `mentorship`, `reliability`, `project_configuration`, `ordering`, `public_moderation` and `other`. A category records the submitted claim, not qualification, metric enablement or an inferred score. Each receipt identifies one reviewed contribution/change set; changing ten Project children does not become ten automatic outcomes. Locators allow only bounded `https://github.com/...` artifact paths with no userinfo or custom port; the server never fetches user locators. A locator alone does not prove public visibility, actor or event time.
+Evidence submission requires `{ kind: 'evidence', locator, category, collaborators: [stableId], consent: true, detail, scope, intake }`. The [versioned intake contract](evidence-intake.md) records the displayed terms, source-use basis, proposed roles and requested dates, preserving explicit unknown values. Categories are `governance`, `deployment_work`, `mentorship`, `reliability`, `project_configuration`, `ordering`, `public_moderation` and `other`. A category records the submitted claim, not qualification, metric enablement or an inferred score. Each receipt identifies one reviewed contribution/change set; changing ten Project children does not become ten automatic outcomes. Locators allow only bounded `https://github.com/...` artifact paths with no userinfo or custom port; the server never fetches user locators. A locator alone does not prove public visibility, actor or event time.
 
-Review requires `{ version, decision, reason, conflict: false }`. Acceptance additionally requires `sourceReviewedPublic: true` and `policyVersion`, expressing an accountable reviewer's actual source/policy review. It cannot be performed by the submitter or a listed collaborator, including someone who declined attribution. An appeal or rollback requires a reviewer who did not make any earlier decision on that receipt. Accepted duplicate evidence with the same owner, locator, category and scope is blocked; use `decision: 'merge'` with `duplicateOf` pointing to an already accepted canonical receipt. Different scopes are not silently merged. No upstream GitHub object is modified.
+Review requires `{ version, decision, reason, conflict: false }`. Acceptance requires a pending or appealed receipt and additionally requires `sourceReviewedPublic: true`, `policyVersion` and a permitted `sourceUseReview` with the reviewer's rationale and bounded versioned references. The stored review binds the current claim and complete protected review inputs to the authenticated reviewer, current role roster and decision time. A public-source checkbox or the submitter's declaration alone is insufficient. Acceptance cannot be performed by the submitter or a listed collaborator, including someone who declined attribution. Resolving an appeal or rolling back an earlier decision requires a reviewer who did not make any earlier decision on that receipt. Accepted duplicate evidence with the same owner, locator, category and scope is blocked; use `decision: 'merge'` with `duplicateOf` pointing to an already accepted canonical receipt. Different scopes are not silently merged. No upstream GitHub object is modified.
+
+Every listed collaborator must have explicitly accepted before independent evidence acceptance. The current representation has no optional-participant flag: hiding a pending or declining person's ID does not make the owner's submitted claim eligible. The owner can amend the public scope and participants, after which the necessary consent and independent review apply to that revised claim. A duplicate can target only a currently consented and reviewed canonical receipt.
+
+Changing consent on accepted evidence returns the receipt to pending and clears its stale policy acceptance. Consent alone cannot restore recognition. Every manual claim, including an owner-only claim, requires current claim-scoped consent and an independent source-use decision bound to its current request version. Older or malformed intake is withheld during initial reads, reopening, editorial selection and recognition. The owner must present current intake through amendment; current participant choices and fresh independent acceptance then supply new authority. A repeated choice on an intact already-reviewed receipt leaves its version and audit unchanged. Previous private receipts, declined choices and raw source observations remain intact.
+
+The protected forms display the actual terms, each invitation's exact scope and the receipt's derived intake eligibility. Missing terms disable new affirmative submission/amendment choices while existing decline, withdrawal and private request paths remain available. Authentication or role failure still clears protected state. This implements the existing GitHub intake path; real identity/participant journeys, approved retention operation and broader external-source activation remain release gates described in [evidence intake](evidence-intake.md).
 
 Locale acceptance also requires an explicit reviewed target in the acceptance input:
 `localization: { targetFactId, sourceRevision, locale, category, policyVersion }`.
@@ -101,20 +108,28 @@ entry. An earlier generic receipt cannot qualify locale work, and changing the
 configuration cannot redirect a recorded language or source revision. The owner
 must amend changed evidence and an independent reviewer must review it again.
 These private audit fields are omitted from `/controls/public` and public evidence.
-When a declared collaborator changes consent after locale acceptance, the receipt
-returns to pending review and its stale metric policy is cleared in the same
-transaction. The earlier target and decision remain in the private audit. The
-reviewer can then accept the current version directly; no unrelated owner appeal
-or amendment is required. Repeating the same consent leaves an accepted locale
-receipt and its version unchanged. Other evidence consent behavior is preserved.
+Locale acceptance follows the same required-participant rule. The earlier target
+and decision remain in the private audit when consent changes. Once every listed
+participant consents, the reviewer can accept the current version and exact target
+directly; no unrelated owner appeal or amendment is required.
 
 Correction, privacy and identity requests use `{ kind, detail, locator? }`. They are durable **pending** private receipts. Privacy/identity requests are accessible only to their owner or the `privacy` role; ordinary evidence reviewers cannot read them. They cannot be marked accepted/applied by the generic review API because the downstream correction/identity capability has not been integrated. This prevents a stored form from falsely claiming a correction was applied. Self-service suppression has a separate actual application path and receipt. Do not send a privacy request to a public GitHub issue. A safe staffed alternative for someone unable to authenticate still requires an accepted owner and verified private destination; none is invented here.
 
 ## Transactional publication
 
-SQLite `BEGIN IMMEDIATE`, full synchronous writes and optimistic receipt versions serialize decisions. A submission is pending; it adds no public claim. Review, amendment, appeal, rollback, withdrawal, collaborator consent and self suppression rebuild `controls_publication` within the same transaction as private state and versioned audit changes. Restart reads the persisted snapshot. Suppression excludes authored claims, optional profile text and collaborator attribution without publishing a named person's privacy choice. Public-source GitHub history and third-party copies cannot be erased by this preference.
+SQLite `BEGIN IMMEDIATE`, full synchronous writes and optimistic receipt versions serialize decisions. A submission is pending; it adds no public claim. Review, amendment, appeal, rollback, withdrawal, collaborator consent and self suppression rebuild `controls_publication` within the same transaction as private state and versioned audit changes. Every public snapshot read joins the persisted projection and current private state in one SQLite statement and removes ineligible claims; opening an older database cannot serve a consent-incomplete claim while waiting for another mutation. The read narrows existing publication and exposes no private records. Suppression excludes authored claims, optional profile text and collaborator attribution without publishing a named person's privacy choice. Public-source GitHub history and third-party copies cannot be erased by this preference.
+
+Editorial nomination, independent selection and every spotlight read require the same currently reviewed participant consent. The recognition adapter checks it before applying any receipt or domain-specific qualification. Its consent-semantics fingerprint retires prior publication authority; an interrupted dispatch retry must compare the original confirmation's recognition fingerprint before reusing it. A prior receipt cannot become current merely by replacing its fingerprint without rebuilding its payload. Existing raw facts, private request/audit history and unrelated contributions remain intact; this is public eligibility enforcement, with payload deletion governed by its separate retention work. The existing default five-attempt dispatch budget quarantines an obsolete operation; a fresh reconciliation through `runOnce()` can publish current eligible work without rewriting that historical operation or its confirmation. An explicitly authorized outbox replay grants only a bounded new retry budget and cannot change the frozen operation identity.
 
 An optional `transactionalPublisher({ database, snapshot })` hook can update dependent tables **through that same SQLite database transaction**. It must be synchronous and must not commit, perform network effects or publish to an external cache. Any error rolls back private state, receipt, local snapshot and dependent-table changes together. The external read API, rankings, exports, profiles, caches and metric recalculation must be connected through an independently reviewed publication boundary before #94 or #122 can claim end-to-end product completion. This package's `/controls/public` is the actual local output tested here; it is not the production leaderboard API.
+
+The proposed private state is written before the synchronous publisher runs, so
+its same-transaction session revocation cannot be overwritten by an older state
+copy. An optional `beforeCommit()` transaction guard runs after private/public
+serialization, database writes and publisher work, immediately before `COMMIT`.
+It must be synchronous; a thrown error or a returned thenable rolls back the
+transaction. Configuration activation uses that boundary for its final authority
+check and rejects publisher changes to its expected configuration/audit state.
 
 ## Validation and remaining acceptance
 
@@ -163,15 +178,56 @@ Remaining release evidence includes approved OAuth registration/credentials and 
 
 The configuration namespace implements the backend flow for [configuration #101](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/101). Only a current server-authorized `operator` can read or mutate it; CSRF, exact origin, session revocation and private storage rules also apply. Pass `knownMetricIds` from the canonical registry and the privileged `sourceVerifier` implementation into `createControlsServer`. Both the metric catalog and approved policy list default to empty. Without a source verifier, new source/permission/policy activation is denied.
 
-| Route | Behavior |
-| --- | --- |
-| `GET /controls/configuration` | Private active version, proposals and versioned audit. |
-| `POST /controls/configuration/proposals` | `{ baseRevision, version, document }` creates an immutable proposal with canonical SHA-256 digest, owner and receipt version. |
-| `GET /controls/configuration/proposals/:id` | Private proposal, actual source-test receipt, changed coverage preview and audit. |
-| `POST /controls/configuration/proposals/:id/preview` | `{ version }` runs server-controlled source verification and records before/after repository, Project-field and enabled-metric coverage, bound to digest and base revision. |
-| `POST /controls/configuration/proposals/:id/approve` | `{ version, previewDigest, conflict: false }` requires a different operator from the proposer. Server creates the approval receipt; browser-supplied approval identity is rejected. |
-| `POST /controls/configuration/proposals/:id/activate` | `{ version, approvalId }` rechecks source permissions/schema tests, preview lifetime, current base revision and approving operator authority, then atomically publishes the version. |
-| `POST /controls/configuration/rollback` | `{ baseRevision, version, targetDigest }` proposes an earlier activated document as a new version. It must complete preview, independent approval and activation; rollback cannot bypass current permissions. |
+| Route                                                 | Behavior                                                                                                                                                                                                      |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /controls/configuration`                         | Private active version, proposals and versioned audit.                                                                                                                                                        |
+| `POST /controls/configuration/proposals`              | `{ baseRevision, version, document }` creates an immutable proposal with canonical SHA-256 digest, owner and receipt version.                                                                                 |
+| `GET /controls/configuration/proposals/:id`           | Private proposal, actual source-test receipt, changed coverage preview and audit.                                                                                                                             |
+| `POST /controls/configuration/proposals/:id/preview`  | `{ version }` runs server-controlled source verification and records before/after repository, Project-field and enabled-metric coverage, bound to digest and base revision.                                   |
+| `POST /controls/configuration/proposals/:id/approve`  | `{ version, previewDigest, conflict: false }` requires a different operator from the proposer. Server creates the approval receipt; browser-supplied approval identity is rejected.                           |
+| `POST /controls/configuration/proposals/:id/activate` | `{ version, approvalId }` rechecks source permissions/schema tests, preview lifetime, current base revision and approving operator authority, then atomically publishes the version.                          |
+| `POST /controls/configuration/rollback`               | `{ baseRevision, version, targetDigest }` proposes an earlier activated document as a new version. It must complete preview, independent approval and activation; rollback cannot bypass current permissions. |
+
+### Current authority at activation and response
+
+Activation additionally requires
+`configurationAuthorityCurrent({ actorId, roleVersion, approverId, approverRoleVersion })`
+in `createControlsServer`. Pipeline hosts pass the same option through
+`controlsAuthentication`. The binding is frozen and names both the activating
+operator and the operator who approved the exact proposal. The callback must
+synchronously return exactly `true` only while both actor/role-version bindings
+still have authoritative operator access. The existing independent-proposer
+approval rule is unchanged; an approver may also perform activation.
+
+This is a read-only check over the actual host-owned authority in the same
+synchronous turn. Authoritative roster changes must be serialized with it and
+the SQLite commit. An eventually consistent mirror or an asynchronous remote
+roster lookup cannot supply this guarantee. The callback must not perform
+publication, mutate the roster, start a nested transaction or acquire unrelated
+locks. It grants no role and does not infer approval from an earlier successful
+request. Missing, false, truthy non-boolean, throwing and thenable results deny
+activation with a fixed error. Unexpected native Promise rejections are observed
+without being awaited or accepted. Other objects and functions are rejected
+without reading or calling their `then` property. Promise cleanup assumes the
+trusted host retains native Promise constructor and species behavior; it does
+not isolate arbitrary host code. Other controls routes remain available under
+their existing permissions. Restrictive disables and rollback activation require
+the same current authority.
+
+After the existing asynchronous source, approver and session refreshes, the
+combined check runs inside the activation transaction before mutation and again
+after synchronous publication work. The final check then reads the actual
+stored session, verifies its actor, role version/set, CSRF binding and expiry,
+and checks both source and preview deadlines. A revocation, changed approval,
+expired receipt or publication failure rolls back the activation, audit, local
+public projection and dependent SQLite writes together.
+
+The activation response repeats the synchronous authority/session/deadline check
+after JSON serialization and before HTTP headers are written. If authority
+changes after a valid commit, the private response is withheld; that does not
+undo the committed activation. An authorized operator can read the original
+proposal receipt to distinguish this outcome from a rejected transaction.
+Repeating the stale activation request cannot create another activation.
 
 Configuration `document` contains three bounded arrays:
 

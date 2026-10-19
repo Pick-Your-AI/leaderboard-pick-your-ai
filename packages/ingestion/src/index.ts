@@ -14,7 +14,7 @@ export type { SnapshotDocument, StoredSnapshot, SnapshotHead, SnapshotNotice } f
 export { CollectionStore, sourceFamilies } from "./collection.js";
 export type { ScanRequest, SourceFact, SourcePage, SourceFamily, ReadOnlySource } from "./collection.js";
 export { EnrichmentStore } from "./enrichment.js";
-export type { SourceMetadata, EnrichmentSource } from "./enrichment.js";
+export type { SourceMetadata, EnrichmentSource, EnrichmentScope } from "./enrichment.js";
 export { OutboxStore, runOutboxWorker, dispatchPublicationScopeKeyLimit } from "./outbox.js";
 export type {
   DispatchBinding,

@@ -8,6 +8,7 @@ import { normalizeGithubObservation, applyRecognitionReceipt } from "@pick-your-
 import { getMetricDefinition, metricRegistryV1 } from "@pick-your-ai/metrics";
 import { sourceEventSchema } from "@pick-your-ai/contracts";
 import { materializeRecognition, recognitionFingerprint } from "../src/recognition-adapter.mjs";
+import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-intake.mjs";
 
 const fixture = JSON.parse(
   readFileSync(new URL("../../../packages/github/test/fixtures/engineering.json", import.meta.url), "utf8"),
@@ -61,7 +62,11 @@ function scenario({ created = createdAt, accepted = acceptedAt, markerFree = fal
     collaborators: {},
     history: [decision],
   };
-  const state = { requests: { [request.id]: request }, profiles: {}, audit: [structuredClone(decision)] };
+  const state = attachSyntheticEvidenceState({
+    requests: { [request.id]: request },
+    profiles: {},
+    audit: [structuredClone(decision)],
+  });
   const binding = {
     category: request.category,
     scope: request.scope,
@@ -245,17 +250,22 @@ function previousAuthority(state, bindings) {
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
-test("issue_answers: prior authority retires answer and later merged-participant bindings", () => {
+test("issue_answers: its configuration fence preserves automatic-source authority while manual intake retires old claims", () => {
   const s = scenario();
+  const empty = { requests: {}, profiles: {}, audit: [] };
   for (const metric of metricRegistryV1.metrics) {
     const bindings = [{ ...s.binding, metricId: metric.id }];
-    const old = previousAuthority(s.state, bindings);
-    const current = recognitionFingerprint(s.state, bindings);
-    // Preserve the literal old fingerprint while accounting for independent later fences.
+    assert.notEqual(
+      recognitionFingerprint(s.state, bindings),
+      previousAuthority(s.state, bindings),
+      `${metric.id}: manual intake retires prior claim authority`,
+    );
+    const old = previousAuthority(empty, bindings);
+    const current = recognitionFingerprint(empty, bindings);
+    // Preserve the literal old fingerprint and the received independent category fences.
     if (["issue_answers", "maintenance", "automation"].includes(metric.id)) assert.notEqual(current, old);
     else assert.equal(current, old, `${metric.id}: exact prior authority remains`);
   }
-  const empty = { requests: {}, profiles: {}, audit: [] };
   const other = { ...s.binding, metricId: "accepted_findings" };
   assert.notEqual(recognitionFingerprint(empty, [other, s.binding]), previousAuthority(empty, [other, s.binding]));
   assert.equal(recognitionFingerprint(empty, [other]), previousAuthority(empty, [other]));

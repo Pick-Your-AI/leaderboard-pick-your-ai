@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, chmodSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 import { configurationOverlay } from "./overlay.mjs";
+import { hasReviewedParticipantConsent } from "./evidence-consent.mjs";
+import { hasReviewedEvidenceIntake } from "./evidence-intake.mjs";
 
 export class ControlError extends Error {
   constructor(status, message) {
@@ -54,7 +56,10 @@ export function projectPublic(state) {
     .filter(([id, profile]) => visible(id) && profile.public)
     .map(([id, profile]) => ({ actorId: id, bio: profile.bio, highlights: profile.highlights }));
   const claims = Object.values(state.requests)
-    .filter((r) => r.kind === "evidence" && r.status === "accepted" && visible(r.owner))
+    .filter(
+      (r) =>
+        r.status === "accepted" && hasReviewedParticipantConsent(r) && hasReviewedEvidenceIntake(r) && visible(r.owner),
+    )
     .map((r) => ({
       id: r.id,
       actorId: r.owner,
@@ -99,24 +104,54 @@ export class ControlStore {
     return JSON.parse(this.db.prepare("SELECT document FROM controls_state WHERE id=1").get().document);
   }
   publicSnapshot() {
-    return JSON.parse(this.db.prepare("SELECT document FROM controls_publication WHERE id=1").get().document);
+    // Read the persisted projection and current authority in one SQLite
+    // snapshot. Older accepted claims may predate required-consent checks;
+    // reopening a database must not serve them before its next mutation.
+    const row = this.db
+      .prepare(
+        "SELECT p.document AS publication, s.document AS state FROM controls_publication p JOIN controls_state s ON s.id=p.id WHERE p.id=1",
+      )
+      .get();
+    const snapshot = JSON.parse(row.publication);
+    const state = JSON.parse(row.state);
+    snapshot.claims = snapshot.claims.filter((claim) => {
+      const request = state.requests[claim.id];
+      return (
+        request?.status === "accepted" &&
+        hasReviewedParticipantConsent(request) &&
+        hasReviewedEvidenceIntake(request) &&
+        !state.profiles[request.owner]?.suppressed
+      );
+    });
+    return snapshot;
   }
-  transaction(change, { publish = false } = {}) {
+  transaction(change, { publish = false, beforeCommit } = {}) {
+    requireThat(beforeCommit === undefined || typeof beforeCommit === "function", 500, "Invalid commit guard");
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const state = this.read();
       const result = change(state);
       requireThat(!result?.then, 500, "Transactions must be synchronous");
+      let snapshot;
       if (publish) {
         state.revision++;
-        const snapshot = projectPublic(state);
+        snapshot = projectPublic(state);
+      }
+      // Make the proposed state visible to same-transaction publication work.
+      // A publisher's session revocation must not be overwritten by an older copy.
+      this.db.prepare("UPDATE controls_state SET document=? WHERE id=1").run(JSON.stringify(state));
+      if (publish) {
         this.db.prepare("UPDATE controls_publication SET document=? WHERE id=1").run(JSON.stringify(snapshot));
         // Hook may write only through this SQLite transaction. Network/cache
         // side effects cannot be made atomic by calling them inside a callback.
         const output = this.publisher?.({ database: this.db, snapshot: structuredClone(snapshot) });
         requireThat(!output?.then, 500, "Publisher must use the same synchronous database transaction");
       }
-      this.db.prepare("UPDATE controls_state SET document=? WHERE id=1").run(JSON.stringify(state));
+      const guarded = beforeCommit?.();
+      if (guarded && typeof guarded.then === "function") {
+        void Promise.resolve(guarded).catch(() => undefined);
+        throw new ControlError(500, "Commit guard must be synchronous");
+      }
       this.db.exec("COMMIT");
       return result;
     } catch (error) {

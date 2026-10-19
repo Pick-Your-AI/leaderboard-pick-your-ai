@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 import {
+  defaultDeliveryNormalizationVersion,
+  discussionSourceNormalizationVersion,
+  reviewSourceNormalizationVersion,
+} from "@pick-your-ai/github";
+import {
   canonicalPublicScope,
   parsePublicWindows,
   publicScopeFilterKey,
@@ -29,6 +34,11 @@ const confirmationKeys = [
   "snapshotId",
   "revision",
 ];
+const confirmationVersions = {
+  reviewSourceNormalizationVersion,
+  discussionSourceNormalizationVersion,
+  defaultDeliveryNormalizationVersion,
+};
 const digest = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const filterScope = (scope) => canonicalPublicScope({ ...scope, start: null, end: null });
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
@@ -69,8 +79,12 @@ export function createPublicationWindowIndex({
   }
   const identity = (scope, period) => hash([publicScopeFilterKey(scope), period]);
   const copyConfirmation = (input, scope) => {
-    exact(input, confirmationKeys);
+    if (!object(input)) fail();
+    const versionKeys = Object.keys(confirmationVersions).filter((key) => Object.hasOwn(input, key));
+    const keys = [...confirmationKeys, ...versionKeys];
+    exact(input, keys);
     if (
+      versionKeys.some((key) => input[key] !== confirmationVersions[key]) ||
       input.configurationVersion !== configurationVersion ||
       input.configurationHash !== configurationHash ||
       input.dataMode !== dataMode ||
@@ -85,7 +99,7 @@ export function createPublicationWindowIndex({
       input.revision < 1
     )
       fail();
-    return Object.fromEntries(confirmationKeys.map((key) => [key, input[key]]));
+    return Object.fromEntries(keys.map((key) => [key, input[key]]));
   };
   const confirmationEquals = (input, expected, scope) => {
     try {
