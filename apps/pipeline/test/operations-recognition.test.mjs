@@ -1085,7 +1085,11 @@ test("operations deployment ID authority: retained SQL publication is withheld a
     defaultDeliveryNormalizationVersion,
     normalizerFactory: () => async () => {
       normalizationCalls++;
-      return structuredClone(retained);
+      const output = structuredClone(retained);
+      // This historical/custom adapter has no physical receipt contract. Its
+      // deliberately stripped merge candidate cannot substantiate a stock one.
+      delete output.physicalContext;
+      return output;
     },
     configure(config) {
       config.repositories[0].families = ["pull_requests"];
@@ -1130,6 +1134,7 @@ test("operations deployment ID authority: retained SQL publication is withheld a
     ).rows;
   const originalSavedRows = await savedRows();
   assert.equal(originalSavedRows.length, 1);
+  assert.equal(Object.hasOwn(originalSavedRows[0].document, "physicalContext"), false);
   assert.equal(
     originalSavedRows[0].document.facts.filter(
       (fact) => fact.metricId === "deployment_work" && fact.state === "qualified",
@@ -1215,6 +1220,7 @@ test("operations deployment ID authority: retained SQL publication is withheld a
   const result = await repaired.runOnce({ cutoff });
   assert.equal(result.state, "published");
   assert.equal(receiptCalls, 1);
+  assert.ok((await savedRows()).every(({ document }) => !Object.hasOwn(document, "physicalContext")));
   assert.ok(normalizationCalls > savedNormalizationCalls);
   const newId = result.publications[0].snapshotId;
   assert.notEqual(newId, snapshotId);
