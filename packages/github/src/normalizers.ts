@@ -22,6 +22,7 @@ import {
 import { GithubReadClient } from "./client.js";
 import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
+import { readIssueFieldEvent, issueFieldHistoryRevision } from "./issue-field-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
   readPublicSubjectProjectSnapshot,
@@ -1483,6 +1484,8 @@ export interface NormalizedProjectContext {
 }
 
 export interface CollectionNormalizerInput {
+  /** Ephemeral host identity shared only within one native-history normalization batch. */
+  issueFieldHistoryBatch?: object;
   /** Trusted host selects the current subject revision at its frozen cutoff. */
   selectedCurrentState?: boolean;
   repository: { id: number; slug: string; allowedProjectIds?: readonly string[] };
@@ -1492,8 +1495,9 @@ export interface CollectionNormalizerInput {
   policyVersion: string;
   fact: {
     subjectId: string;
-    /** Native issue/PR identity retained by the trusted Project-history collector. */
+    /** Native issue/PR identity retained by the trusted typed-history collector. */
     historySubjectId?: string;
+    issueFieldId?: string;
     projectSubjectId?: string;
     sourceRevision: string;
     sourceUrl: string;
@@ -1564,6 +1568,56 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       throw new Error("Pipeline policy and observation time are required");
     let repositoryClient: GithubReadClient | undefined;
     const client = () => (repositoryClient ??= options.client.forRepository(input.repository.id));
+    if (input.family === "issue_field_history") {
+      const match = input.fact.sourceUrl.match(
+        new RegExp("^https://github\\.com/" + input.repository.slug.replaceAll(".", "\\.") + "/issues/([1-9]\\d*)$"),
+      );
+      if (
+        !match ||
+        input.fact.evidence !== "observed_transition" ||
+        typeof input.fact.historySubjectId !== "string" ||
+        !input.fact.historySubjectId ||
+        typeof input.fact.issueFieldId !== "string" ||
+        !input.fact.issueFieldId
+      )
+        return none("issue_field_collected_binding_unverified");
+      const record = await readIssueFieldEvent({
+        client: options.client,
+        source: options.source,
+        repository: input.repository,
+        number: Number(match[1]),
+        subjectId: input.fact.historySubjectId,
+        eventId: input.fact.subjectId,
+        issueFieldId: input.fact.issueFieldId,
+        scanId: input.factKey,
+        ...(input.issueFieldHistoryBatch ? { issueFieldHistoryBatch: input.issueFieldHistoryBatch } : {}),
+        ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
+      });
+      if (issueFieldHistoryRevision(record) !== input.fact.sourceRevision)
+        return none("issue_field_revision_unverified");
+      const nativeActorId = positive(record.event.actor?.databaseId) ? String(record.event.actor.databaseId) : null;
+      if (input.fact.actorId !== nativeActorId || input.fact.occurredAt !== time(record.event.createdAt))
+        return none("issue_field_collected_attribution_unverified");
+      return normalizeGithubObservation({
+        repository: { ...input.repository, visibility: "public" },
+        proof: {
+          verified: true,
+          source: "github_graphql",
+          eventId: record.event.id,
+          revision: input.fact.sourceRevision,
+          isSynthetic: options.isSynthetic === true,
+        },
+        family: "field_change",
+        action: "issue_field_changed",
+        observedAt: input.observedAt,
+        occurredAt: record.event.createdAt,
+        payload: {
+          issue: { id: record.subject.id, url: record.subject.url },
+          sender: record.event.actor,
+          change: record.change,
+        },
+      });
+    }
     if (input.family === "relationships" || input.family === "project_history") {
       const match = input.fact.sourceUrl.match(
         new RegExp(`^https://github\\.com/${input.repository.slug.replaceAll(".", "\\.")}/(issues|pull)/([1-9]\\d*)$`),

@@ -7,6 +7,7 @@ export * from "./normalizers.js";
 export * from "./project-snapshots.js";
 export * from "./project-context.js";
 export * from "./timeline-history.js";
+export * from "./issue-field-history.js";
 export * from "./physical-diff.js";
 export * from "./documentation.js";
 export * from "./research.js";
