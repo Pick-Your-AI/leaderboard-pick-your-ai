@@ -72,7 +72,8 @@ function parseRetryAfter(value: string | null, now: Date): Date | undefined {
     latest.setUTCFullYear(latest.getUTCFullYear() + 50);
     year += Math.floor(latest.getUTCFullYear() / 100) * 100;
     date.setUTCFullYear(year, month, day);
-    if (date.getTime() > latest.getTime()) year -= 100;
+    // Compare the same rounded leap-second instant returned below.
+    if (date.getTime() + (second === 60 ? 1000 : 0) > latest.getTime()) year -= 100;
   }
   // HTTP-date imports RFC 5322's year semantics: 1900 or later, including
   // obsolete two-digit years after applying the HTTP fifty-year rule.
