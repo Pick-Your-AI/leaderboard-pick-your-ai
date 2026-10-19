@@ -42,6 +42,7 @@ async function menu(runtime, scope = filter) {
 }
 async function namedHarness(t, periods = ["7d", "30d"], extra = {}) {
   return harness(t, {
+    discoveryAuthority: true,
     ...extra,
     transformPayloads(payloads) {
       const dated = payloads.map((payload, index) => ({
@@ -58,7 +59,7 @@ async function namedHarness(t, periods = ["7d", "30d"], extra = {}) {
   });
 }
 
-test("all seven confirmed choices share one transaction and coalesced aliases share one materialization", async (t) => {
+test("all seven confirmed choices share one captured transaction and coalesced aliases share one materialization", async (t) => {
   const h = await namedHarness(t, publicWindowPeriods);
   const published = await h.runtime.runOnce({ cutoff });
   assert.equal(published.state, "published");
@@ -89,7 +90,7 @@ test("all seven confirmed choices share one transaction and coalesced aliases sh
     h.db.query = query;
     h.db.transaction = transaction;
   }
-  assert.equal(acquisitions, 1);
+  assert.equal(acquisitions, 2, "one shared capture plus one final SQL admission");
   assert.equal(selectedReads, 6, "coincident labels reuse the same captured authorized read");
   assert.deepEqual(result.scope, filter);
   assert.deepEqual(
@@ -294,11 +295,14 @@ test("current configuration approval, exact configuration namespace and source r
   await h.runtime.runOnce({ cutoff });
   const original = await menu(h.runtime);
   approved = false;
+  h.discoveryAuthority.revoke(h.config);
   unavailable(await h.runtime.app.inject(url()));
   approved = true;
+  h.discoveryAuthority.approve(h.config);
   const changed = structuredClone(h.config);
   changed.policies[0].policy.rank = false;
   changed.policies[0].signature = components.metrics.stableJSON(changed.policies[0].policy);
+  h.discoveryAuthority.approve(changed);
   const other = await createPipeline({ ...h.options, config: changed });
   t.after(() => other.stop());
   assert.deepEqual((await menu(other)).windows, [], "another configuration cannot borrow retained index entries");
@@ -340,8 +344,10 @@ for (const changed of ["actor", "head", "confirmation", "index", "explanation", 
     const target = initial.windows[0];
     const revision = h.controlsStore.read().revision;
     const observed = finalReadFault(h, () => {
-      if (changed === "approval") approved = false;
-      else if (changed === "explanation")
+      if (changed === "approval") {
+        approved = false;
+        h.discoveryAuthority.revoke(h.config);
+      } else if (changed === "explanation")
         h.controlsStore.db
           .prepare("UPDATE pipeline_aggregate_explanations SET document=? WHERE snapshot_id=?")
           .run("{}", target.snapshotId);

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -17,6 +18,39 @@ export const ago = (days) => new Date(Date.now() - days * 86400000).toISOString(
 export const fixtureId = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 export const publicScope = { organization: "Pick-Your-AI", repository: null, workstream: null, start: null, end: null };
 export const boardUrl = "/api/v1/boards?metric=issues_opened";
+
+// Explicit synthetic host administration, separate from the asynchronous verifier.
+// Grants bind exact configured documents; no arbitrary requested hash is approved.
+export function discoveryTestAuthority({ now = Date.now } = {}) {
+  const grants = new Map();
+  let revision = 0;
+  const key = (config) => createHash("sha256").update(components.metrics.stableJSON(config)).digest("hex");
+  return {
+    approve(config, { validUntil = now() + 60_000 } = {}) {
+      const configurationHash = key(config);
+      grants.set(configurationHash, {
+        configurationVersion: config.version,
+        dataMode: "synthetic",
+        epoch: `synthetic-${++revision}`,
+        validUntil,
+      });
+    },
+    revoke(config) {
+      grants.delete(key(config));
+      revision++;
+    },
+    read(binding) {
+      const grant = grants.get(binding.configurationHash);
+      return grant &&
+        grant.configurationVersion === binding.configurationVersion &&
+        grant.dataMode === binding.dataMode &&
+        Number.isFinite(grant.validUntil) &&
+        grant.validUntil > now()
+        ? grant.epoch
+        : null;
+    },
+  };
+}
 
 export async function harness(t, extra = {}) {
   const slug = extra.markerFreeConfig ? "example-org/example-repo" : "synthetic-org/synthetic-repo";
@@ -82,6 +116,8 @@ export async function harness(t, extra = {}) {
     config.policies[0].signature = components.metrics.stableJSON(policy);
   }
   extra.configure?.(config);
+  const discoveryAuthority = extra.discoveryAuthority === true ? discoveryTestAuthority() : null;
+  if (discoveryAuthority) discoveryAuthority.approve(config);
   let privateRepository = false;
   let fixturePage = false;
   let sourceFailure = false;
@@ -171,6 +207,7 @@ export async function harness(t, extra = {}) {
     dataMode: "synthetic",
     cursorSecret: "synthetic-cursor-secret-is-at-least-32-characters",
     verifyConfiguration: async (value) => value.approvalReceipt === config.approvalReceipt,
+    ...(discoveryAuthority ? { configurationAuthorityEpoch: (binding) => discoveryAuthority.read(binding) } : {}),
     authorizeCorrection: async (value) =>
       value.operatorId === "201" && value.approvalReceipt === "synthetic-correction-approval",
     probeRepository: async (repo) => {
@@ -213,6 +250,7 @@ export async function harness(t, extra = {}) {
   return {
     githubReads,
     runtime,
+    discoveryAuthority,
     async reopenDatabase() {
       await engine.close();
       engine = new PGlite(join(directory, "postgres"));
