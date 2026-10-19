@@ -286,11 +286,6 @@
   ],
   "deferred": [
     {
-      "id": "unsupported-aggregation",
-      "metric_ids": ["net_lines"],
-      "reason": "The actor-ranked engine explicitly rejects signed repository net changes. A repository-context implementation is a separate positive-case prerequisite; no positive result is fabricated."
-    },
-    {
       "id": "transfer-owner-382",
       "metric_ids": ["issue_transfers"],
       "reason": "COV15 transfer alias conservation and privacy remain the canonical #382 source lane."
@@ -355,6 +350,13 @@
       "positive_test": "commit author/committer and verified lineage stay separate and integration is mandatory",
       "negative_test": "commit author/committer and verified lineage stay separate and integration is mandatory",
       "limitation": "Integration proof and role attribution are bounded positives/negatives; empty/merge-only/imported cohort completeness is not established here."
+    },
+    {
+      "metric_id": "net_lines",
+      "path": "packages/github/test/repository-net-lines.test.mjs",
+      "positive_test": "net_lines counts signed verified repository integrations without an actor-row sum",
+      "negative_test": "net_lines reuses physical classification rather than counting excluded file categories",
+      "limitation": "The repository-only helper consumes supplied verified integration envelopes and complete eligible diffs. Its 20 synthetic cases cover signed subtotals and bounded exclusions, not acquisition of complete repository history or current source authorization. Coverage remains incomplete and public output/ranking are disabled; the actor-row engine still rejects signed net aggregation. Host collection, permission/privacy controls and public activation remain separate."
     },
     {
       "metric_id": "reverted_delivery",

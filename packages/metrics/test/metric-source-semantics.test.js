@@ -779,8 +779,8 @@ test("the semantic inventory accounts for all 98 definitions and preserves exact
       assert.ok(source.includes(entry.case_parameter), `${entry.metric_id}: missing parameterized source case`);
     }
   }
-  const unsupported = inventory.deferred.find((entry) => entry.id === "unsupported-aggregation");
-  assert.deepEqual(unsupported.metric_ids, ["net_lines"]);
+  const repositoryNet = inventory.existing_evidence.find((entry) => entry.metric_id === "net_lines");
+  assert.equal(repositoryNet.path, "packages/github/test/repository-net-lines.test.mjs");
   assert.throws(
     () =>
       aggregateMetric(
