@@ -12,6 +12,7 @@ import {
   githubSnapshotRevision,
   githubTimelineRevision,
 } from "../../../packages/github/dist/normalizers.js";
+import { parseReconciliationRunId } from "./reconciliation-plan.mjs";
 
 /** Conservative scope-loss codes emitted by the trusted Project adapters. */
 export function isProjectSourceScopeFailure(error, family) {
@@ -131,7 +132,19 @@ export function createGithubCollectionSource({
           !["reviews", "discussions", "project_current", "project_history", "relationships"].includes(request.family))
       )
         throw new Error("source_family_adapter_unavailable");
+      const planned = parseReconciliationRunId(request.runId);
       const window = sourceWindow(request);
+      if (
+        planned &&
+        (at(request.until) === null ||
+          at(request.until) !== request.until ||
+          (request.mode === "audit"
+            ? request.since !== null
+            : request.mode === "reconcile"
+              ? !window || window.since !== request.since
+              : true))
+      )
+        throw new Error("reconciliation_source_plan_invalid");
       const client = readClient.forRepository(repository.id);
       assertAuthorized();
       let verification;
@@ -364,7 +377,7 @@ export function createGithubCollectionSource({
               ? githubSnapshotRevision(githubReviewRevision(value), request.runId)
               : ["discussions", "project_current"].includes(request.family)
                 ? githubSnapshotRevision(value.source_revision, request.runId)
-                : isGithubRestSnapshotFamily(request.family) && nativeRevision
+                : planned && isGithubRestSnapshotFamily(request.family) && nativeRevision
                   ? githubRestSnapshotRevision(request.family, value, request.runId)
                   : nativeRevision;
         if (

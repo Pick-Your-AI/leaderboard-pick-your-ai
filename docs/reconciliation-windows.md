@@ -97,13 +97,20 @@ Primary source contracts:
 - [GraphQL Issue and its timeline items](https://docs.github.com/en/graphql/reference/objects#issue)
 - [GraphQL PullRequest and its timeline items](https://docs.github.com/en/graphql/reference/objects#pullrequest)
 
-REST issue, pull-request, comment and release snapshots retain a versioned content
-fingerprint plus scan identity. Hydration verifies the fields shared by the list
-and object endpoints. A real content change is not lost merely because the
-provider timestamp is unchanged, and a later return to an earlier value remains
-an immutable new observation. Reserved malformed versions fail before a custom
-verifier can authorize them. Unmarked legacy source revisions retain their
-original interpretation.
+Scheduled `rc1` issue, pull-request, comment and release snapshots retain a
+versioned content fingerprint plus scan identity. The default adapter validates
+the complete reserved identity, mode and canonical millisecond window before
+source I/O. Legacy dispatch and explicit scans retain their native source
+revisions, so rereading unchanged content preserves their existing publication
+identity and frozen normalization provenance.
+
+Hydration verifies the fields shared by the list and object endpoints. A real
+scheduled content change is not lost merely because the provider timestamp is
+unchanged, and a later return to an earlier value remains an immutable new
+observation. Custom sources that explicitly emit the versioned marker retain
+this verification and semantic-history behavior in every mode. Reserved malformed
+versions fail before a custom verifier can authorize them. Unmarked legacy source
+revisions retain their original interpretation.
 
 Semantic reconciliation history compares adjacent retained observations within
 the same repository, family, subject and access generation. Unchanged repeat
