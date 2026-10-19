@@ -15,9 +15,9 @@ const slug = "synthetic-org/synthetic-repo";
 const parentUrl = `https://github.com/${slug}/pull/10`;
 const parentApi = `https://api.github.com/repos/${slug}/pulls/10`;
 const actor = (id) => ({ id, node_id: `U_SYNTHETIC_${id}`, login: `synthetic-${id}`, type: "User" });
-const legacySignature = (config) =>
+const projectSignature = (config, version) =>
   comparisonHash([
-    "project-membership-context/v1",
+    version,
     comparisonHash([
       "verified-default-branch-merge-pins/v1",
       comparisonHash([
@@ -27,7 +27,9 @@ const legacySignature = (config) =>
     ]),
     [],
   ]);
-const currentSignature = (config) => comparisonHash(["github-issue-transfer-admission/v1", legacySignature(config)]);
+const legacySignature = (config) => projectSignature(config, "project-membership-context/v1");
+const currentSignature = (config) =>
+  comparisonHash(["github-issue-transfer-admission/v1", projectSignature(config, "project-membership-context/v2")]);
 
 test("pre-transfer versioned review caches keep frozen public and private authority after restart", async (t) => {
   const h = await reviewHarness(t);

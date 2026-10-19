@@ -14,11 +14,10 @@ import {
   paths,
   version,
   legacySignature,
+  currentSignature,
   deliveryMetrics,
   after,
 } from "./default-delivery-fixtures.mjs";
-
-const currentSignature = (config) => comparisonHash(["github-issue-transfer-admission/v1", legacySignature(config)]);
 
 test("pre-transfer versioned default-delivery caches keep frozen public and private authority after restart", async (t) => {
   const h = await deliveryHarness(t, "commit");
@@ -571,6 +570,90 @@ test("delivery and review generations compose on the same enriched review source
     await assertDenied(runtime, h.metric, first.snapshotId, false);
   });
 });
+
+test("an empty v1 Project delivery wrapper remains wrapped after fresh scope normalization", async (t) => {
+  const h = await deliveryHarness(t, "issue");
+  const first = (await h.runtime.runOnce()).publications[0];
+  await retainLegacyDelivery(h, first, "exact");
+  h.state.defaultBranch = undefined;
+  const empty = (await h.runtime.runOnce()).publications[0];
+  await assertMetric(h.runtime, h.metric, 0);
+  const current = comparisonHash([version, currentSignature(h.config)]);
+  const previous = comparisonHash([version, legacySignature(h.config)]);
+  const corrected = (
+    await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations WHERE policy_signature=$1", [current])
+  ).rows[0];
+  assert.equal(corrected.document.defaultDeliveryNormalizationVersion, version);
+  assert.equal(
+    corrected.document.facts.some((fact) => deliveryMetrics.includes(fact.metricId)),
+    false,
+  );
+  // This disposable fixture changes only the generation of an actual corrected
+  // empty document. The earlier positive base row remains separately retained.
+  await h.db.query(
+    "UPDATE leaderboard_pipeline.normalizations SET policy_signature=$2 WHERE fact_key=$1 AND policy_signature=$3",
+    [corrected.fact_key, previous, current],
+  );
+  const retained = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY policy_signature"))
+    .rows;
+  const frozen = (
+    await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [empty.snapshotId])
+  ).rows[0];
+  const privateBefore = await h.runtime.previewPolicy(previewRequest(h, empty.snapshotId));
+  const hydrations = h.state.hydrations;
+  await restart(h, async (runtime) => {
+    await assertMetric(runtime, h.metric, 0, empty.snapshotId);
+    assert.deepEqual(await runtime.previewPolicy(previewRequest(h, empty.snapshotId)), privateBefore);
+    await runtime.runOnce();
+    assert.ok(h.state.hydrations > hydrations, "the old scope generation must be rehydrated");
+    const fresh = (
+      await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations WHERE policy_signature=$1", [current])
+    ).rows[0];
+    assert.equal(fresh.document.defaultDeliveryNormalizationVersion, version);
+    assert.equal(
+      fresh.document.facts.some((fact) => deliveryMetrics.includes(fact.metricId)),
+      false,
+    );
+    assert.deepEqual(
+      (
+        await h.db.query(
+          "SELECT * FROM leaderboard_pipeline.normalizations WHERE policy_signature<>$1 ORDER BY policy_signature",
+          [current],
+        )
+      ).rows,
+      retained,
+    );
+    assert.deepEqual(
+      (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [empty.snapshotId]))
+        .rows[0],
+      frozen,
+    );
+  });
+});
+
+for (const mutation of ["hash", "mode"])
+  test(`a v1 Project delivery migration hint rejects ${mutation} corruption before hydration`, async (t) => {
+    const h = await deliveryHarness(t, "issue");
+    await h.runtime.runOnce();
+    const row = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows[0];
+    const document = { ...row.document, isSynthetic: false };
+    const hash = mutation === "hash" ? row.document_hash : comparisonHash(document);
+    const previous = comparisonHash([version, legacySignature(h.config)]);
+    await h.db.query(
+      "UPDATE leaderboard_pipeline.normalizations SET policy_signature=$2,document=$3::jsonb,document_hash=$4 WHERE fact_key=$1",
+      [row.fact_key, previous, JSON.stringify(document), hash],
+    );
+    const hydrations = h.state.hydrations;
+    await assert.rejects(
+      h.runtime.runOnce(),
+      mutation === "hash" ? /normalization_integrity_error/ : /normalization_data_mode_mismatch/,
+    );
+    assert.equal(h.state.hydrations, hydrations);
+    assert.equal(
+      (await h.db.query("SELECT count(*)::int AS count FROM leaderboard_pipeline.normalizations")).rows[0].count,
+      1,
+    );
+  });
 
 test("acknowledging a corrected empty-delivery cache preserves its confirmed version identity", async (t) => {
   const h = await deliveryHarness(t, "issue", { includeIssuePolicy: true, webhookDispatch: true });

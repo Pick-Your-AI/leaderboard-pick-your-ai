@@ -291,15 +291,26 @@ export async function createPipeline(options) {
   // Retained Project history still participates after active collection stops.
   // Keep its new semantics in a distinct cache generation for every configuration,
   // so reprocessing cannot overwrite an earlier frozen normalization dependency.
-  const projectNormalizationSignature = digest([
+  const previousProjectNormalizationSignature = digest([
     "project-membership-context/v1",
     verifiedMergeNormalizationSignature,
     projectWorkstreamMappings,
   ]);
-  // Transfer admission now retains authoritative withdrawals without a usable
-  // source URL. Recompute unchanged raw revisions in a separate cache generation
-  // while preserving the earlier documents that authorize frozen identity reads.
-  const normalizationSignature = digest(["github-issue-transfer-admission/v1", projectNormalizationSignature]);
+  const projectNormalizationSignature = digest([
+    "project-membership-context/v2",
+    verifiedMergeNormalizationSignature,
+    projectWorkstreamMappings,
+  ]);
+  // Both upgrades need fresh output. Preserve the exact preceding same-policy
+  // generations for frozen authority and delivery classification, never as
+  // current facts or unscoped Project context.
+  const transferAdmissionSignature = (signature) => digest(["github-issue-transfer-admission/v1", signature]);
+  const normalizationSignature = transferAdmissionSignature(projectNormalizationSignature);
+  const previousNormalizationSignatures = [
+    previousProjectNormalizationSignature,
+    transferAdmissionSignature(previousProjectNormalizationSignature),
+    projectNormalizationSignature,
+  ];
   // Family-specific source rules have separate immutable cache generations.
   const reviewNormalizationSignature = digest([reviewSourceNormalizationVersion, normalizationSignature]);
   const discussionNormalizationSignature = digest([discussionSourceNormalizationVersion, normalizationSignature]);
@@ -311,13 +322,13 @@ export async function createPipeline(options) {
     discussionNormalizationSignature,
     reviewNormalizationSignature,
     normalizationSignature,
-    // Frozen inputs produced before transfer admission retain each already
-    // versioned source family, including delivery claims from enriched families.
-    ...[
-      projectNormalizationSignature,
-      digest([reviewSourceNormalizationVersion, projectNormalizationSignature]),
-      digest([discussionSourceNormalizationVersion, projectNormalizationSignature]),
-    ].flatMap((signature) => [signature, defaultDeliverySignature(signature)]),
+    ...previousNormalizationSignatures.flatMap((signature) =>
+      [
+        signature,
+        digest([reviewSourceNormalizationVersion, signature]),
+        digest([discussionSourceNormalizationVersion, signature]),
+      ].flatMap((familySignature) => [familySignature, defaultDeliverySignature(familySignature)]),
+    ),
     verifiedMergeNormalizationSignature,
     documentationNormalizationSignature,
     attributionNormalizationSignature,
@@ -1263,13 +1274,15 @@ export async function createPipeline(options) {
             ? discussionNormalizationSignature
             : normalizationSignature;
       const deliverySignature = defaultDeliverySignature(baseSignature);
-      const priorBaseSignature =
-        row.family === "reviews"
-          ? digest([reviewSourceNormalizationVersion, projectNormalizationSignature])
-          : row.family === "discussions"
-            ? digest([discussionSourceNormalizationVersion, projectNormalizationSignature])
-            : projectNormalizationSignature;
-      const priorDeliverySignature = defaultDeliverySignature(priorBaseSignature);
+      const previousGenerations = previousNormalizationSignatures.map((signature) => {
+        const baseSignature =
+          row.family === "reviews"
+            ? digest([reviewSourceNormalizationVersion, signature])
+            : row.family === "discussions"
+              ? digest([discussionSourceNormalizationVersion, signature])
+              : signature;
+        return { baseSignature, deliverySignature: defaultDeliverySignature(baseSignature) };
+      });
       if (
         row.family === "reviews" &&
         (options.normalizer || options.githubEnrich
@@ -1288,32 +1301,46 @@ export async function createPipeline(options) {
       const candidates = (
         await db.query(
           "SELECT policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=ANY($2::text[])",
-          [row.fact_key, [deliverySignature, baseSignature, priorDeliverySignature, priorBaseSignature]],
+          [
+            row.fact_key,
+            [
+              deliverySignature,
+              baseSignature,
+              ...previousGenerations.flatMap((generation) => [generation.deliverySignature, generation.baseSignature]),
+            ],
+          ],
         )
       ).rows;
       const deliveryCache = candidates.find((entry) => entry.policy_signature === deliverySignature);
       const cached = deliveryCache ?? candidates.find((entry) => entry.policy_signature === baseSignature);
+      const previousCaches = previousGenerations.map((generation) => {
+        const deliveryCache = candidates.find((entry) => entry.policy_signature === generation.deliverySignature);
+        return {
+          deliveryCache,
+          cached: deliveryCache ?? candidates.find((entry) => entry.policy_signature === generation.baseSignature),
+        };
+      });
+      // Validate each selected predecessor even when another generation already
+      // supplies delivery classification or a current cache can otherwise be used.
+      for (const { cached: previousCached } of previousCaches) {
+        if (!previousCached) continue;
+        if (digest(previousCached.document) !== previousCached.document_hash) fail("normalization_integrity_error");
+        if (previousCached.document.isSynthetic !== (dataMode === "synthetic"))
+          fail("normalization_data_mode_mismatch");
+        assertDataMode(previousCached.document);
+      }
       // Once a source enters the new generation, keep that generation even when
       // its corrected output has no delivery facts. Never fall back to an older
       // positive cache or overwrite an immutable frozen dependency.
+      // A preceding Project generation supplies only this migration hint; it is
+      // always rehydrated and cannot supply fresh facts or unscoped context.
       let defaultDelivery =
         ["commits", "pull_requests"].includes(row.family) ||
         !!deliveryCache ||
-        hasDefaultDeliveryClaims(cached?.document);
-      if (!defaultDelivery) {
-        const priorDeliveryCache = candidates.find((entry) => entry.policy_signature === priorDeliverySignature);
-        const priorCache =
-          priorDeliveryCache ?? candidates.find((entry) => entry.policy_signature === priorBaseSignature);
-        if (priorCache) {
-          if (digest(priorCache.document) !== priorCache.document_hash) fail("normalization_integrity_error");
-          if (priorCache.document.isSynthetic !== (dataMode === "synthetic")) fail("normalization_data_mode_mismatch");
-          assertDataMode(priorCache.document);
-          // Carry only the delivery classification across the transfer upgrade.
-          // Old facts are never current cache hits: the current normalizer must
-          // run even when it removes every earlier delivery claim.
-          defaultDelivery = !!priorDeliveryCache || hasDefaultDeliveryClaims(priorCache.document);
-        }
-      }
+        hasDefaultDeliveryClaims(cached?.document) ||
+        previousCaches.some(
+          ({ deliveryCache, cached }) => !!deliveryCache || hasDefaultDeliveryClaims(cached?.document),
+        );
       let signature = defaultDelivery ? deliverySignature : baseSignature;
       if (defaultDelivery) assertDefaultDeliveryNormalizer();
       if (cached) {
@@ -1328,7 +1355,7 @@ export async function createPipeline(options) {
         const currentProjectNormalizer =
           row.family !== "project_current" ||
           row.document.projectSubjectId === undefined ||
-          cached.document.projectContextNormalizationVersion === "subject-membership/v1";
+          cached.document.projectContextNormalizationVersion === "subject-membership/v2";
         if (
           currentHistoryNormalizer &&
           currentProjectNormalizer &&
@@ -1481,7 +1508,7 @@ export async function createPipeline(options) {
         ...(row.family === "discussions" ? { discussionSourceNormalizationVersion } : {}),
         ...(row.family === "project_history" ? { projectHistoryNormalizationVersion: "collected-subject/v2" } : {}),
         ...(row.family === "project_current" && row.document.projectSubjectId !== undefined
-          ? { projectContextNormalizationVersion: "subject-membership/v1" }
+          ? { projectContextNormalizationVersion: "subject-membership/v2" }
           : {}),
         suppressArtifactIds: suppressed,
         isSynthetic: dataMode === "synthetic",

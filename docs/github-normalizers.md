@@ -122,6 +122,16 @@ enriched source families as well as commits and pull requests. The
 verify an actual database reopen, preservation of the old cache and frozen input,
 and rejection of a corrupt historical classification record.
 
+Current normalization applies the transfer-admission wrapper to the
+`project-membership-context/v2` generation. Frozen identity reads retain the
+original Project v1, transfer-wrapped Project v1 and unwrapped Project v2 keys,
+including each review, Discussion and default-delivery wrapper. Every selected
+same-source, same-policy predecessor is checked for document integrity and data
+mode before either its classification or an existing current cache is used.
+The [combined migration cases](../apps/pipeline/test/project-transfer-cache-migration.test.mjs)
+cover empty-result classification across both upgrades and reject a corrupt
+predecessor even when a valid current delivery cache is already present.
+
 GitHub's native GraphQL
 [`TransferredEvent`](https://docs.github.com/en/graphql/reference/issues#transferredevent)
 exposes the source repository and associated issue, but no immutable historical

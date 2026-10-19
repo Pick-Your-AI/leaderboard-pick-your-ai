@@ -6,6 +6,7 @@ import {
   deliveryHarness,
   deliveryMetrics,
   legacySignature,
+  currentSignature,
   restart,
   version,
 } from "./default-delivery-fixtures.mjs";
@@ -17,11 +18,8 @@ test("pre-transfer delivery classification survives an empty current result afte
   await assertMetric(h.runtime, h.metric, h.expected, first.snapshotId);
   const original = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows[0];
   const priorSignature = comparisonHash([version, legacySignature(h.config)]);
-  const currentSignature = comparisonHash([
-    version,
-    comparisonHash(["github-issue-transfer-admission/v1", legacySignature(h.config)]),
-  ]);
-  assert.equal(original.policy_signature, currentSignature);
+  const currentDeliverySignature = comparisonHash([version, currentSignature(h.config)]);
+  assert.equal(original.policy_signature, currentDeliverySignature);
   assert.equal(original.document.defaultDeliveryNormalizationVersion, version);
   // Model a persisted pre-transfer key without claiming to run an old runtime.
   // The complete document, its version marker and its hash remain unchanged.
@@ -48,7 +46,7 @@ test("pre-transfer delivery classification survives an empty current result afte
       generations.find((row) => row.policy_signature === priorSignature),
       retained,
     );
-    const current = generations.find((row) => row.policy_signature === currentSignature);
+    const current = generations.find((row) => row.policy_signature === currentDeliverySignature);
     assert.ok(current, "an empty result must keep the current delivery generation");
     assert.equal(current.document.defaultDeliveryNormalizationVersion, version);
     assert.equal(

@@ -13,9 +13,9 @@ import { assertRetainedSourceGeneration } from "./transfer-cache-generation-fixt
 const version = "discussion-answer-chronology/v1";
 const slug = "synthetic-org/synthetic-repo";
 const actor = (id) => ({ id: `U_SYNTHETIC_${id}`, databaseId: id, login: `synthetic-${id}`, __typename: "User" });
-const legacySignature = (config) =>
+const projectSignature = (config, version) =>
   comparisonHash([
-    "project-membership-context/v1",
+    version,
     comparisonHash([
       "verified-default-branch-merge-pins/v1",
       comparisonHash([
@@ -25,7 +25,9 @@ const legacySignature = (config) =>
     ]),
     [],
   ]);
-const currentSignature = (config) => comparisonHash(["github-issue-transfer-admission/v1", legacySignature(config)]);
+const legacySignature = (config) => projectSignature(config, "project-membership-context/v1");
+const currentSignature = (config) =>
+  comparisonHash(["github-issue-transfer-admission/v1", projectSignature(config, "project-membership-context/v2")]);
 
 test("pre-transfer versioned Discussion caches keep frozen public and private authority after restart", async (t) => {
   const h = await discussionHarness(t);
