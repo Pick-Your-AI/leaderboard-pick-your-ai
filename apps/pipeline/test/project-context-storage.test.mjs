@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
 import { createPipeline } from "../src/index.mjs";
+import { normalizationDocumentVersion } from "../src/private-attribution.mjs";
 import {
   applyCurrentProjectContexts,
   canonicalProjectWorkstreamMappings,
@@ -103,7 +104,7 @@ async function projectHarness(t, { stableProjectRevisions = false, transformProj
         reasons: [],
         isSynthetic: true,
         projectContext: {
-          schemaVersion: "github-current-project-context/v1",
+          schemaVersion: "github-current-project-context/v2",
           repositoryId: "2",
           subjectId: snapshot.subjectId,
           subjectKind: snapshot.subjectKind,
@@ -254,7 +255,13 @@ test("completed Project scans bind private frozen context and partial/failed sca
   assert.equal(current.document.frozen.facts.length, 2);
   assert.deepEqual(
     current.document.frozen.facts.find((fact) => fact.artifactId === "SYNTHETIC_ISSUE_1").currentContext,
-    { projects: [], workstreams: [], workstreamsKnown: true, projectScope: projectIds },
+    {
+      projects: [],
+      workstreams: [],
+      workstreamsKnown: true,
+      projectScope: projectIds,
+      workstreamScope: ["engineering"],
+    },
   );
   assert.equal(
     current.document.frozen.facts.find((fact) => fact.artifactId === "SYNTHETIC_ISSUE_2").currentContext,
@@ -516,7 +523,7 @@ test("private context cannot claim a workstream belonging only to another Projec
     actors: [],
     evidence: [],
     projectContext: {
-      schemaVersion: "github-current-project-context/v1",
+      schemaVersion: "github-current-project-context/v2",
       repositoryId: "2",
       subjectId: "I_native",
       subjectKind: "issue",
@@ -529,6 +536,7 @@ test("private context cannot claim a workstream belonging only to another Projec
         workstreams: ["engineering"],
         workstreamsKnown: true,
         projectScope: projectIds,
+        workstreamScope: ["engineering", "operations"],
       },
     },
   };
@@ -538,6 +546,13 @@ test("private context cannot claim a workstream belonging only to another Projec
   for (const change of [
     { projects: [projectIds[0]], workstreams: ["operations"] },
     { projects: [], workstreams: ["engineering"] },
+    { workstreamScope: undefined },
+    { workstreamScope: null },
+    { workstreamScope: [] },
+    { workstreamScope: ["engineering"] },
+    { workstreamScope: ["engineering", "operations", "outside"] },
+    { workstreamScope: ["operations", "engineering"] },
+    { workstreamScope: ["engineering", "engineering", "operations"] },
   ]) {
     const candidate = structuredClone(base);
     Object.assign(candidate.projectContext.context, change);
@@ -546,6 +561,99 @@ test("private context cannot claim a workstream belonging only to another Projec
       /invalid_normalized_project_context/,
     );
   }
+  const legacy = structuredClone(base);
+  legacy.projectContext.schemaVersion = "github-current-project-context/v1";
+  delete legacy.projectContext.context.workstreamScope;
+  assert.throws(
+    () => normalizedProjectContext(legacy, row, repository, [configured]),
+    /invalid_normalized_project_context/,
+  );
+});
+
+test("fresh Project receipts cannot expand the workstream scope beyond the host mapping", async (t) => {
+  const h = await projectHarness(t, {
+    transformProjectOutput(output) {
+      output.projectContext.context.workstreamScope.push("outside");
+      return output;
+    },
+  });
+  await assert.rejects(h.runtime.runOnce(), /invalid_normalized_project_context/);
+  assert.equal((await h.db.query("SELECT snapshot_id FROM leaderboard_pipeline.snapshots")).rows.length, 0);
+});
+
+test("hash-consistent Project caches cannot expand workstream scope or rewrite prior frozen inputs", async (t) => {
+  const h = await projectHarness(t);
+  const cutoff = clock();
+  const first = await h.runtime.runOnce({ cutoff });
+  const frozen = await h.frozen(first.publications[0]);
+  const row = (
+    await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations WHERE document ? 'projectContext' LIMIT 1")
+  ).rows[0];
+  const changed = structuredClone(row.document);
+  changed.projectContext.context.workstreamScope.push("outside");
+  await h.db.query(
+    "UPDATE leaderboard_pipeline.normalizations SET document=$3::jsonb,document_hash=$4 WHERE fact_key=$1 AND policy_signature=$2",
+    [row.fact_key, row.policy_signature, JSON.stringify(changed), comparisonHash(changed)],
+  );
+  const normalizedBefore = h.normalizedProjects();
+  await assert.rejects(h.runtime.runOnce({ cutoff }), /invalid_normalized_project_context/);
+  assert.equal(h.normalizedProjects(), normalizedBefore);
+  assert.deepEqual(await h.frozen(first.publications[0]), frozen);
+});
+
+test("fresh v2 normalization preserves retained v1 Project receipts under their original cache keys", async (t) => {
+  const h = await projectHarness(t, { stableProjectRevisions: true });
+  const first = await h.runtime.runOnce();
+  const frozen = await h.frozen(first.publications[0]);
+  const originals = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY fact_key")).rows;
+  const policySignature = comparisonHash([
+    "current-state-selection-v1",
+    "synthetic",
+    h.config.policies.map((entry) => entry.signature),
+  ]);
+  const legacySignature = comparisonHash([
+    "project-membership-context/v1",
+    comparisonHash([
+      "verified-default-branch-merge-pins/v1",
+      comparisonHash([normalizationDocumentVersion, policySignature]),
+    ]),
+    canonicalProjectWorkstreamMappings(h.config, components.github.validateProjectWorkstreamMapping),
+  ]);
+  for (const row of originals) {
+    const legacy = structuredClone(row.document);
+    if (legacy.projectContext) {
+      legacy.projectContext.schemaVersion = "github-current-project-context/v1";
+      legacy.projectContextNormalizationVersion = "subject-membership/v1";
+      delete legacy.projectContext.context.workstreamScope;
+    }
+    await h.db.query(
+      "INSERT INTO leaderboard_pipeline.normalizations(fact_key,policy_signature,document,document_hash) VALUES($1,$2,$3::jsonb,$4)",
+      [row.fact_key, legacySignature, JSON.stringify(legacy), comparisonHash(legacy)],
+    );
+  }
+  await h.db.query("DELETE FROM leaderboard_pipeline.normalizations WHERE policy_signature=$1", [
+    originals[0].policy_signature,
+  ]);
+  const before = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY fact_key")).rows;
+  const normalizedBefore = h.normalizedProjects();
+  assert.equal((await h.runtime.runOnce()).state, "published");
+  assert.equal(h.normalizedProjects(), normalizedBefore + 2);
+  const retained = (
+    await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations WHERE policy_signature=$1 ORDER BY fact_key", [
+      legacySignature,
+    ])
+  ).rows;
+  assert.deepEqual(retained, before);
+  const fresh = (
+    await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations WHERE policy_signature<>$1", [legacySignature])
+  ).rows;
+  assert.equal(fresh.length, originals.length);
+  for (const row of fresh.filter((entry) => entry.document.projectContext)) {
+    assert.equal(row.document.projectContextNormalizationVersion, "subject-membership/v2");
+    assert.equal(row.document.projectContext.schemaVersion, "github-current-project-context/v2");
+    assert.deepEqual(row.document.projectContext.context.workstreamScope, ["engineering"]);
+  }
+  assert.deepEqual(await h.frozen(first.publications[0]), frozen);
 });
 
 test("an unchanged source fact retained in a later completed scan keeps its current context", async (t) => {
