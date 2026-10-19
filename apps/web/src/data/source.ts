@@ -35,6 +35,33 @@ export function personFor(actorId: string | null): Person | null {
   return actorId ? (peopleById.get(actorId) ?? null) : null;
 }
 
+/**
+ * Select only evidence already included in the displayed scope and served
+ * snapshot. Deleted accounts use a retained contribution ID, never an identity.
+ * A removed upstream source link does not remove the neutral retained receipt.
+ */
+export function contributorProofSelector(person: Person | null, records: readonly ContributionRecord[]): string | null {
+  if (!person || person.publicState === "suppressed") return null;
+  const record = records.find((candidate) => candidate.actorId === person.actorId && candidate.evidence !== "excluded");
+  if (!record) return null;
+  return person.publicState === "visible" ? person.login : `record:${record.id}`;
+}
+
+/** Resolve against the displayed records only; old deleted-login aliases are not accepted. */
+export function matchesContributorProof(
+  selector: string | null | undefined,
+  person: Person | null,
+  records: readonly ContributionRecord[],
+): boolean {
+  if (!selector || !person || person.publicState === "suppressed") return false;
+  return records.some(
+    (record) =>
+      record.actorId === person.actorId &&
+      record.evidence !== "excluded" &&
+      selector === (person.publicState === "visible" ? person.login : `record:${record.id}`),
+  );
+}
+
 export function isAutomation(person: Person | null): boolean {
   return person !== null && person.actor.kind !== "user";
 }
@@ -77,6 +104,8 @@ function basisTime(record: ContributionRecord, fixture: FixtureMetric | null): s
 }
 
 export interface ScopedRecords {
+  /** Input belonging to these results, including while a replacement read is pending. */
+  scope: Scope;
   snapshot: SnapshotView;
   window: TimeWindow;
   records: ContributionRecord[];
@@ -101,7 +130,7 @@ export function scopedRecords(scope: Scope, latestId: string, fixture: FixtureMe
     if (scope.actor === "automation" && !automation) return false;
     return inWindow(basisTime(record, fixture), window);
   });
-  return { snapshot, window, records };
+  return { scope: structuredClone(scope), snapshot, window, records };
 }
 
 export function eligibleLines(breakdown: LineBreakdown): number {
@@ -159,6 +188,7 @@ export interface BoardRow {
 export interface Board {
   metric: MetricDefinition;
   fixture: FixtureMetric | null;
+  scope: Scope;
   snapshot: SnapshotView;
   window: TimeWindow;
   rows: BoardRow[];
@@ -189,7 +219,7 @@ export function buildBoard(metricId: string, scope: Scope, latestId: string): Bo
   const metric = getMetric(metricId);
   if (!metric) return null;
   const fixture = fixtureMetrics[metric.id] ?? null;
-  const { snapshot, window, records } = scopedRecords(scope, latestId, fixture);
+  const { scope: displayedScope, snapshot, window, records } = scopedRecords(scope, latestId, fixture);
   const scopeRepos = scope.repos.length
     ? scope.repos
     : scope.projects.length
@@ -202,6 +232,7 @@ export function buildBoard(metricId: string, scope: Scope, latestId: string): Bo
     return {
       metric,
       fixture,
+      scope: displayedScope,
       snapshot,
       window,
       rows: [],
@@ -286,6 +317,7 @@ export function buildBoard(metricId: string, scope: Scope, latestId: string): Bo
   return {
     metric,
     fixture,
+    scope: displayedScope,
     snapshot,
     window,
     rows,
@@ -302,26 +334,29 @@ export interface DirectoryEntry {
   families: string[];
   firstObservedAt: string;
   observedCount: number;
+  records: ContributionRecord[];
 }
 
 /** Inclusive alphabetical directory: anyone with attributable public work in scope. */
 export function listContributors(
   scope: Scope,
   latestId: string,
-): { entries: DirectoryEntry[]; snapshot: SnapshotView; window: TimeWindow } {
-  const { records, snapshot, window } = scopedRecords(scope, latestId);
+): { entries: DirectoryEntry[]; scope: Scope; snapshot: SnapshotView; window: TimeWindow } {
+  const { records, scope: displayedScope, snapshot, window } = scopedRecords(scope, latestId);
   const map = new Map<string, DirectoryEntry>();
   for (const record of records) {
     if (record.evidence === "excluded") continue;
     const person = personFor(record.actorId);
     if (!person) continue;
-    const entry = map.get(person.actorId) ?? {
+    const entry: DirectoryEntry = map.get(person.actorId) ?? {
       person,
       families: [],
       firstObservedAt: record.observedAt,
       observedCount: 0,
+      records: [],
     };
     entry.observedCount += 1;
+    entry.records.push(record);
     if (record.observedAt < entry.firstObservedAt) entry.firstObservedAt = record.observedAt;
     for (const metricId of record.metricIds) {
       const family = getMetric(metricId)?.family;
@@ -330,7 +365,7 @@ export function listContributors(
     map.set(person.actorId, entry);
   }
   const entries = [...map.values()].sort((a, b) => a.person.login.localeCompare(b.person.login));
-  return { entries, snapshot, window };
+  return { entries, scope: displayedScope, snapshot, window };
 }
 
 export function findPublicPerson(login: string): Person | null {
@@ -348,6 +383,7 @@ export interface ProfileMeasure {
 
 export interface Profile {
   person: Person;
+  scope: Scope;
   snapshot: SnapshotView;
   window: TimeWindow;
   measures: Map<string, ProfileMeasure[]>;
@@ -358,11 +394,12 @@ export interface Profile {
 export function buildProfile(login: string, scope: Scope, latestId: string): Profile | null {
   const person = findPublicPerson(login);
   if (!person) return null;
-  const { records, snapshot, window } = scopedRecords(scope, latestId);
+  const { records, scope: displayedScope, snapshot, window } = scopedRecords(scope, latestId);
   const own = records
     .filter((record) => record.actorId === person.actorId)
     .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
-  const personScope: Scope = { ...scope, actor: isAutomation(person) ? "automation" : "user" };
+  const personScope: Scope =
+    scope.actor === "all" ? { ...scope, actor: isAutomation(person) ? "automation" : "user" } : scope;
   const measures = new Map<string, ProfileMeasure[]>();
   for (const metricId of Object.keys(fixtureMetrics)) {
     const board = buildBoard(metricId, personScope, latestId);
@@ -387,7 +424,15 @@ export function buildProfile(login: string, scope: Scope, latestId: string): Pro
         Date.parse(record.observedAt) <= Date.parse(snapshot.served.cutoff),
     )
     .sort((a, b) => a.observedAt.localeCompare(b.observedAt));
-  return { person, snapshot, window, measures, records: own, firstObserved: everything[0] ?? null };
+  return {
+    person,
+    scope: displayedScope,
+    snapshot,
+    window,
+    measures,
+    records: own,
+    firstObserved: everything[0] ?? null,
+  };
 }
 
 export interface ContributionView {
