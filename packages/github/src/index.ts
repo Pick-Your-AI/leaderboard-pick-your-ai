@@ -250,3 +250,10 @@ export async function paginateGraphql<T>(
   }
   throw new Error("GraphQL pagination exceeded maxPages");
 }
+
+export {
+  readGithubCommentSource,
+  readGithubCommentIdentity,
+  type GithubCommentKind,
+  type GithubCommentSource,
+} from "./comment-identity.js";

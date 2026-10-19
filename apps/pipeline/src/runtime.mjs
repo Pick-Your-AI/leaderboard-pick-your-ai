@@ -26,6 +26,7 @@ import { requireThat } from "../../controls/src/store.mjs";
 import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-metadata.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
+import { githubCommentsContext, expandedGithubCommentsRun, startGithubCommentsRun } from "./comments-inventory.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
 import {
   canonicalProjectWorkstreamMappings,
@@ -564,6 +565,7 @@ export async function createPipeline(options) {
         isSynthetic: dataMode === "synthetic",
         assertAuthorized: () => assertRunConfiguration(),
         onUnavailable: (repo, reason) => denyRepository(repo, reason, utc(now())),
+        includePullRequestReviewComments: ({ runId }) => expandedGithubCommentsRun(runId),
         async useRestSnapshotRevisions({ repositoryId, family }) {
           if (reconciliationPolicy) return true;
           // Keep immutable observation identities after an approved policy change
@@ -580,6 +582,10 @@ export async function createPipeline(options) {
       })
     : null;
   const collectionSource = options.source ?? defaultSource;
+  const defaultCommentsInventory =
+    defaultSource !== null &&
+    collectionSource === defaultSource &&
+    config.repositories.some((repository) => repository.families.includes("comments"));
   const probeSource = options.probeRepository ?? defaultSource?.probeRepository;
   const collection = new c.ingestion.CollectionStore(db);
   const scanContinuations = new ScanContinuationStore(db);
@@ -662,7 +668,12 @@ export async function createPipeline(options) {
   };
   const scanContext = (mode, sources, revision, fingerprint) => ({
     key: digest(["bounded-scan/v1", config, dataMode, mode]),
-    contextHash: digest([revision, recognitionBindings.length ? fingerprint : null, sources]),
+    contextHash: digest(
+      githubCommentsContext(
+        [revision, recognitionBindings.length ? fingerprint : null, sources],
+        defaultCommentsInventory,
+      ),
+    ),
   });
   async function reconciliationState(tx, repositories, asOf, { untilCutoff = asOf, scan = null } = {}) {
     const state = controlsStore.read();
@@ -2524,10 +2535,15 @@ export async function createPipeline(options) {
             until: cutoff,
           }));
       for (const request of requests) {
-        const { runId, family } = request;
-        // Scheduled plan rows were committed atomically with the continuation.
-        // Legacy/explicit callers retain their existing per-family start path.
-        if (!scan?.plan) await collection.start(request);
+        // Scheduled rows already bind the versioned default inventory context.
+        // For explicit/dispatch runs, retain an existing old operation literally;
+        // otherwise atomically materialize and pin the expanded inventory ID.
+        const selectedRequest =
+          !scan?.plan && defaultCommentsInventory && request.family === "comments"
+            ? await startGithubCommentsRun(db, collection, request, assertRunConfiguration)
+            : request;
+        const { runId, family } = selectedRequest;
+        if (!scan?.plan && selectedRequest === request) await collection.start(request);
         const collectionStarted = performance.now();
         let status = "progress";
         for (let page = 0; page < maxPages && status === "progress"; page++) {

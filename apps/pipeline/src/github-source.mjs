@@ -13,6 +13,7 @@ import {
   githubTimelineRevision,
 } from "../../../packages/github/dist/normalizers.js";
 import { parseReconciliationRunId } from "./reconciliation-plan.mjs";
+import { readGithubCommentIdentity } from "../../../packages/github/dist/comment-identity.js";
 
 /** Conservative scope-loss codes emitted by the trusted Project adapters. */
 export function isProjectSourceScopeFailure(error, family) {
@@ -88,6 +89,7 @@ export function createGithubCollectionSource({
   onUnavailable,
   assertAuthorized = () => {},
   useRestSnapshotRevisions = () => false,
+  includePullRequestReviewComments = () => false,
 }) {
   if (
     !readClient?.scanRest ||
@@ -98,7 +100,8 @@ export function createGithubCollectionSource({
     !Number.isInteger(maxPages) ||
     maxPages < 1 ||
     maxPages > 1000 ||
-    typeof useRestSnapshotRevisions !== "function"
+    typeof useRestSnapshotRevisions !== "function" ||
+    typeof includePullRequestReviewComments !== "function"
   )
     throw new Error("invalid_github_collection_source");
   const approved = new Map(repositories.map((repository) => [repository.id, repository]));
@@ -149,6 +152,9 @@ export function createGithubCollectionSource({
               : true))
       )
         throw new Error("reconciliation_source_plan_invalid");
+      const expandedComments =
+        request.family === "comments" ? includePullRequestReviewComments({ runId: request.runId }) : false;
+      if (typeof expandedComments !== "boolean") throw new Error("invalid_comments_inventory_policy");
       const client = readClient.forRepository(repository.id);
       assertAuthorized();
       let verification;
@@ -166,7 +172,7 @@ export function createGithubCollectionSource({
       if (request.cursor !== null && !/^(0|[1-9]\d{0,4})$/.test(request.cursor))
         throw new Error("invalid_source_cursor");
       const offset = request.cursor === null ? 0 : Number(request.cursor);
-      let restSnapshots = Boolean(planned);
+      let restSnapshots = Boolean(planned) || expandedComments;
       if (!restSnapshots && isGithubRestSnapshotFamily(request.family)) {
         assertAuthorized();
         restSnapshots = await useRestSnapshotRevisions({ repositoryId: repository.id, family: request.family });
@@ -349,6 +355,25 @@ export function createGithubCollectionSource({
           values.push(...reviews);
           if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
         }
+      } else if (expandedComments) {
+        const conversations = await scan("comments", window ? recentRoute(route, window) : route);
+        if (conversations.length > 10000) throw new Error("source_dataset_budget_exceeded");
+        for (const value of conversations)
+          if (
+            typeof value?.html_url === "string" &&
+            value.html_url.includes("/pull/") &&
+            readGithubCommentIdentity(repository.slug, value)?.kind !== "pull_request_conversation_comment"
+          )
+            throw new Error("source_comment_identity_unverified");
+        const inlineRoute = "pulls/comments?per_page=100";
+        const inline = await scan(
+          "comments:pull-request-review/v1",
+          window ? recentRoute(inlineRoute, window) : inlineRoute,
+        );
+        for (const value of inline)
+          if (readGithubCommentIdentity(repository.slug, value)?.kind !== "pull_request_review_comment")
+            throw new Error("source_comment_identity_unverified");
+        values = [...conversations, ...inline];
       } else {
         values = await scan(request.family, window ? recentRoute(route, window) : route, (body) =>
           request.family === "issues" ? body.filter((item) => !item.pull_request) : body,
