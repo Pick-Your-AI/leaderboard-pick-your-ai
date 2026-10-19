@@ -4,6 +4,7 @@ import {
   canonicalPublicScope,
   publicScopeKey,
   type PublicScope,
+  type PublicWindowPeriod,
   publicDocumentationReasons,
   publicDocumentationRecognitionReasons,
   publicReproductionRecognitionReasons,
@@ -122,7 +123,14 @@ export interface PublicComparisonRead {
   currentHistory: RankSnapshotHistory | null;
   previousHistory: RankSnapshotHistory | null;
 }
+/** Provider-private choices from one current authorization/source boundary. */
+export interface PublicWindowsRead {
+  scope: PublicScope;
+  windows: { period: PublicWindowPeriod; read: PublicRead }[];
+}
 export interface PublicSnapshotSource {
+  /** Enumerate only explicitly labeled, currently confirmed publication choices. */
+  readWindows?(scope: PublicScope, signal: AbortSignal): Promise<PublicWindowsRead | null>;
   /** Optional trusted server capability. Read the selected input and full approved
    * organization history under one protected admission/source-lock boundary and
    * a final current privacy fence. Receipt strings are not authorization. Public

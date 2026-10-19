@@ -6,7 +6,8 @@ import { readCorrectionState } from "../src/reversion-store.mjs";
 import { harness, components, publicScope, fixtureId } from "./harness.mjs";
 
 async function scenario(t, extra = {}) {
-  const epoch = Date.now() + 10_000;
+  const observed = Date.now() + 10_000;
+  const epoch = extra.namedPeriods ? Math.floor(observed / 1000) * 1000 : observed;
   const at = (second) => new Date(epoch + second * 1000).toISOString();
   let current = at(4);
   const original = {
@@ -133,6 +134,7 @@ async function scenario(t, extra = {}) {
           approvalReceipt: "synthetic-metric-approval",
         };
       });
+      if (extra.namedPeriods) config.scopes = extra.namedPeriods.map((period) => ({ ...publicScope, period }));
     },
     ...extra,
   });
@@ -605,4 +607,80 @@ test("a restoration cannot override current actor suppression or a changed sourc
   assert.equal((await readCorrectionState(h.db, [2])).decisions.length, 1);
   assert.equal(h.controlsStore.read().requests[active.requestId].status, "pending");
   assert.equal((await h.board(reopened, "pr_lines_changed", h.originalPublication.snapshotId)).rows.length, 0);
+});
+
+test("confirmed named discovery retains exact reviewed-unit authority through withdrawal and restoration", async (t) => {
+  const h = await scenario(t, { namedPeriods: ["7d", "30d"], discoveryAuthority: true });
+  const menuUrl = "/api/v1/windows?" + new URLSearchParams(components.contracts.publicScopeParameters(publicScope));
+  const originalDocuments = (
+    await h.db.query(
+      "SELECT snapshot_id,document,document_hash FROM leaderboard_pipeline.snapshots ORDER BY snapshot_id",
+    )
+  ).rows;
+  const discover = async (expectedSuppression) => {
+    const privateRead = await h.runtime.source.readWindows(publicScope, new AbortController().signal);
+    assert.ok(privateRead);
+    assert.equal(privateRead.windows.length, 2);
+    for (const entry of privateRead.windows)
+      assert.deepEqual(entry.read.controls.suppressedContributionIds ?? [], expectedSuppression);
+    const response = await h.runtime.app.inject(menuUrl);
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.json().windows.length, 2);
+    assert.doesNotMatch(response.body, /suppressedContributionIds|synthetic-review-|reversionRecordsHash/);
+    return response.json().windows;
+  };
+  const board = async (entry, metric) => {
+    const response = await h.runtime.app.inject(
+      "/api/v1/boards?" +
+        new URLSearchParams({
+          ...components.contracts.publicScopeParameters(entry.scope),
+          metric,
+          snapshot: entry.snapshotId,
+        }),
+    );
+    assert.equal(response.statusCode, 200, response.body);
+    return response.json();
+  };
+  const initial = await discover([]);
+  const inactive = h.operation(1);
+  h.request(inactive);
+  h.setTime(6);
+  assert.equal((await h.invoke(h.runtime, inactive)).status, "applied");
+  await discover([h.qualified.id]);
+  for (const entry of initial) {
+    assert.equal((await board(entry, "pr_lines_changed")).rows.length, 0);
+    assert.deepEqual((await board(entry, "pr_merged")).rows.map((row) => [row.actorId, row.result.value]).sort(), [
+      ["101", 1],
+      ["102", 1],
+    ]);
+  }
+  h.setTime(7);
+  assert.equal((await h.publish()).state, "published");
+  await discover([h.qualified.id]);
+  const active = h.operation(2, "active", inactive.requestId);
+  h.request(active);
+  h.setTime(8);
+  assert.equal((await h.invoke(h.runtime, active)).status, "applied");
+  await discover([h.qualified.id]);
+  h.setTime(9);
+  assert.equal((await h.publish()).state, "published");
+  const restored = await discover([]);
+  for (const entry of restored) assert.equal((await board(entry, "pr_lines_changed")).rows[0].result.value, 5);
+  for (const entry of initial) assert.equal((await board(entry, "pr_lines_changed")).rows.length, 0);
+  assert.deepEqual(
+    (
+      await h.db.query(
+        "SELECT snapshot_id,document,document_hash FROM leaderboard_pipeline.snapshots WHERE snapshot_id=ANY($1::text[]) ORDER BY snapshot_id",
+        [originalDocuments.map((row) => row.snapshot_id)],
+      )
+    ).rows,
+    originalDocuments,
+  );
+  await h.db.query("UPDATE leaderboard_pipeline.receipts SET document_hash=$1 WHERE operation_key=$2", [
+    "0".repeat(64),
+    "reversion:" + active.requestId + ":1",
+  ]);
+  const unsealed = await h.runtime.app.inject(menuUrl);
+  assert.equal(unsealed.statusCode, 503, unsealed.body);
+  assert.equal(unsealed.json().windows, undefined);
 });

@@ -1,9 +1,9 @@
+import { validatePublicationPeriods, publicScopeFromTemplate } from "./publication-windows.mjs";
 import {
-  validatePublicationPeriods,
-  resolvePublicationWindows,
-  approvedPublicationScope,
-  publicScopeFromTemplate,
-} from "./publication-windows.mjs";
+  resolveDiscoverablePublicationWindows,
+  approvedDiscoverablePublicationScope,
+} from "./publication-window-aliases.mjs";
+import { createPublicationWindowIndex } from "./publication-window-index.mjs";
 import {
   migratePipeline as migrateScopeStorage,
   assertPipelineStorage,
@@ -306,6 +306,15 @@ export async function createPipeline(options) {
   const verifyConfig = options.verifyConfiguration ?? (async () => false);
   const authorizeCorrection = options.authorizeCorrection ?? (async () => false);
   const now = options.now ?? (() => new Date().toISOString());
+  // Only bounded named templates need whole-second producer event cutoffs.
+  // Fresh scan/dispatch bindings sample this clock; stored retry cutoffs and
+  // the independent source/observation clocks retain their original precision.
+  const implicitPublicationCutoff = () => {
+    const cutoff = utc(now());
+    return config.scopes.some((scope) => ["7d", "30d", "90d", "month", "quarter", "year"].includes(scope.period))
+      ? `${cutoff.slice(0, 19)}.000Z`
+      : cutoff;
+  };
   const policyComparisons = new PolicyComparisonStore(controlsStore, c.metrics, { now: () => Date.parse(utc(now())) });
   const aggregateExplanations = new AggregateExplanationStore(controlsStore);
   const computationVersion = `${dataMode}-pipeline-${digest(Array.isArray(config.policies) ? config.policies.map((item) => item?.signature) : []).slice(0, 16)}`;
@@ -813,7 +822,17 @@ export async function createPipeline(options) {
     }
     return true;
   }
-  const configuredScope = (scope) => approvedPublicationScope(config.scopes, scope, c.metrics.resolveMetricWindow);
+  const configuredScope = (scope) =>
+    approvedDiscoverablePublicationScope(config.scopes, scope, c.metrics.resolveMetricWindow);
+  let publicationWindowIndex;
+  const windowIndex = () =>
+    (publicationWindowIndex ??= createPublicationWindowIndex({
+      configurationVersion: config.version,
+      configurationHash: digest(config),
+      dataMode,
+      templates: config.scopes,
+      resolveMetricWindow: c.metrics.resolveMetricWindow,
+    }));
   const repositoriesFor = (scope) =>
     config.repositories.filter((repo) => scope.repository === null || String(repo.id) === scope.repository);
   async function receipt(tx, operationKey, kind, document) {
@@ -1224,7 +1243,7 @@ export async function createPipeline(options) {
     confirmation.revision === revision &&
     typeof confirmation.aggregateExplanationHash === "string" &&
     /^[a-f0-9]{64}$/.test(confirmation.aggregateExplanationHash);
-  function confirmPublication(scope, publication, comparisonInput) {
+  function confirmPublication(scope, publication, comparisonInput, publicPeriods = []) {
     controlsStore.transaction((state) => {
       assertPipelineSourcesNotRetired(
         controlsStore,
@@ -1268,9 +1287,12 @@ export async function createPipeline(options) {
       // The marker, preview capture and visible head are one durable SQLite
       // commit. A delayed confirmation may acknowledge history, never rewind it.
       if (!head || head.revision <= publication.revision) state.pipelineHeads[scopeKey(scope)] = confirmation;
+      // Explicit labels gain visibility in this same durable confirmation. A
+      // replay may confirm SQL history; it cannot infer labels or rewind them.
+      windowIndex().record(state, scope, publicPeriods, confirmation);
     });
   }
-  async function publish({ scope, window }, cutoff, observationCutoff, dispatch, scan = null) {
+  async function publish({ scope, window, publicPeriods = [] }, cutoff, observationCutoff, dispatch, scan = null) {
     assertRunConfiguration();
     scope = c.contracts.canonicalPublicScope(scope);
     if (!configuredScope(scope)) fail("scope_not_approved");
@@ -1338,7 +1360,7 @@ export async function createPipeline(options) {
             Number(prior.revision),
           )
         ) {
-          confirmPublication(scope, priorPublication);
+          confirmPublication(scope, priorPublication, undefined, publicPeriods);
           return priorPublication;
         }
         // An unconfirmed SQL commit has no private preview capture. Recompute
@@ -1910,7 +1932,7 @@ export async function createPipeline(options) {
       });
       // PostgreSQL can commit while controls change. Confirm publication only in
       // the same synchronous SQLite boundary used by configuration activation.
-      confirmPublication(scope, publication, comparisonInputFor(publication));
+      confirmPublication(scope, publication, comparisonInputFor(publication), publicPeriods);
       monitorSuccess(
         publicationMonitorIdentity(scopeKey(scope)),
         "publication",
@@ -1924,6 +1946,124 @@ export async function createPipeline(options) {
     }
   }
   const source = {
+    async readWindows(scope, signal) {
+      const requested = c.contracts.canonicalPublicScope(scope);
+      if (requested.start !== null || requested.end !== null || signal.aborted) return null;
+      // One bounded index lookup supplies only explicitly confirmed choices.
+      // Reuse one SQL transaction and its source locks for every unique scope.
+      let finalRead = () => null;
+      const result = await db.transaction(async (tx) => {
+        if (!(await approved(tx)) || signal.aborted) return null;
+        const initialControls = controlsStore.read();
+        restrictConfiguration(initialControls);
+        const initial = windowIndex().read(initialControls, requested);
+        if (!initial) return null;
+        const reads = new Map();
+        for (const entry of initial.windows) {
+          const key = scopeKey(entry.scope);
+          if (reads.has(key)) continue;
+          const read = await source.read(entry.scope, null, signal, tx);
+          if (!read || signal.aborted) return null;
+          reads.set(key, read);
+        }
+        // Even a legitimate empty menu still requires current repository and
+        // installation authority; no history scan or GET-side repair occurs.
+        const repositoryIds = repositoriesFor(requested).map((repo) => repo.id);
+        const access = (
+          await tx.query(
+            "SELECT repository_id,installation_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE",
+            [repositoryIds],
+          )
+        ).rows;
+        if (
+          signal.aborted ||
+          access.length !== repositoryIds.length ||
+          access.some(
+            (row) =>
+              row.state !== "public" ||
+              String(row.installation_id) !==
+                String(
+                  config.repositories.find((repo) => String(repo.id) === String(row.repository_id))?.installationId,
+                ),
+          )
+        )
+          return null;
+        const corrections = await readCorrectionState(tx, repositoryIds);
+        const removed = [
+          ...new Set([
+            ...(await sourceSuppressions(tx, repositoryIds)),
+            ...corrections.legacy.map((row) => row.artifact_id),
+          ]),
+        ];
+        if (!(await approved(tx)) || signal.aborted) return null;
+        finalRead = () => {
+          // No awaits below: the complete index, current privacy authority,
+          // confirmations, recognition and explanations fence all captured reads.
+          const controls = controlsStore.read();
+          const overlay = restrictConfiguration(controls);
+          const current = windowIndex().read(controls, requested);
+          if (!current || canonical(current) !== canonical(initial)) return null;
+          const authorityAt = utc(now());
+          const version = currentControlsVersion(controls, overlay, access, removed, corrections, authorityAt);
+          const suppressedActors = Object.entries(controls.profiles)
+            .filter(([, profile]) => profile.suppressed)
+            .map(([id]) => id)
+            .sort();
+          const fingerprint = recognitionBindings.length ? recognitionFingerprint(controls, recognitionBindings) : null;
+          for (const entry of current.windows) {
+            const read = reads.get(scopeKey(entry.scope));
+            const selected = read?.selected.snapshot;
+            const head = controls.pipelineHeads?.[scopeKey(entry.scope)];
+            if (
+              !read ||
+              scopeKey(read.selected.scope) !== scopeKey(entry.scope) ||
+              selected.snapshotId !== entry.confirmation.snapshotId ||
+              selected.revision !== entry.confirmation.revision ||
+              read.head.snapshotId !== entry.confirmation.snapshotId ||
+              read.head.revision !== entry.confirmation.revision ||
+              read.controls.version !== version ||
+              canonical([...read.controls.suppressedActorIds].sort()) !== canonical(suppressedActors) ||
+              canonical([...read.controls.suppressedArtifactIds].sort()) !== canonical([...removed].sort()) ||
+              canonical([...(read.controls.suppressedContributionIds ?? [])].sort()) !==
+                canonical(
+                  reversionProjection(corrections.decisions, read.selected.reversionAuthority, authorityAt)
+                    .suppressedContributionIds,
+                ) ||
+              canonical(read.controls.revokedSnapshotIds) !== canonical([]) ||
+              !confirmationMatches(head, entry.scope, read.head.snapshotId, read.head.revision) ||
+              !confirmationMatches(
+                controls.pipelinePublications?.[selected.snapshotId],
+                entry.scope,
+                selected.snapshotId,
+                selected.revision,
+              ) ||
+              (recognitionBindings.length &&
+                [read.head.snapshotId, selected.snapshotId].some(
+                  (id) => controls.pipelinePublications?.[id]?.recognitionFingerprint !== fingerprint,
+                ))
+            )
+              return null;
+          }
+          for (const read of reads.values()) {
+            // Each chosen publication is its current confirmed head. Aliases use
+            // this same captured read and need only one final explanation check.
+            aggregateExplanations.verify(read.selected.snapshot.snapshotId, {
+              ...explanationBinding(read.selected.scope, read.selected.snapshot),
+              digest: controls.pipelinePublications[read.selected.snapshot.snapshotId].aggregateExplanationHash,
+            });
+          }
+          return {
+            scope: requested,
+            windows: current.windows.map((entry) => ({ period: entry.period, read: reads.get(scopeKey(entry.scope)) })),
+          };
+        };
+        return finalRead();
+      });
+      // COMMIT can await after the transaction callback returns. Recheck host
+      // approval, then the complete synchronous fence, before returning pointers.
+      if (!result || signal.aborted || !(await verifyConfig(copy(config))) || signal.aborted) return null;
+      return finalRead();
+    },
     async readComparison(scope, pin, previous, signal) {
       if (c.contracts.publicScopeFilterKey(scope) !== c.contracts.publicScopeFilterKey(previous.scope)) return null;
       // Both reads reuse this transaction. Source locks remain held through the
@@ -2221,10 +2361,10 @@ export async function createPipeline(options) {
           sources,
         },
         assertRunConfiguration,
-        () => utc(now()),
+        implicitPublicationCutoff,
         (savedCutoff) =>
-          resolvePublicationWindows(config.scopes, savedCutoff, c.metrics.resolveMetricWindow).map(({ scope }) =>
-            scopeKey(scope),
+          resolveDiscoverablePublicationWindows(config.scopes, savedCutoff, c.metrics.resolveMetricWindow).map(
+            ({ scope }) => scopeKey(scope),
           ),
         reconciliationPolicy && mode === "reconcile"
           ? (tx, selected, { fresh }) =>
@@ -2240,7 +2380,11 @@ export async function createPipeline(options) {
       );
       cutoff = scan.cutoff;
     }
-    const publicationWindows = resolvePublicationWindows(config.scopes, cutoff, c.metrics.resolveMetricWindow);
+    const publicationWindows = resolveDiscoverablePublicationWindows(
+      config.scopes,
+      cutoff,
+      c.metrics.resolveMetricWindow,
+    );
     const progress = [];
     for (const repo of config.repositories) {
       await verifyRepository(repo, cutoff);
@@ -2352,11 +2496,17 @@ export async function createPipeline(options) {
     policyVersion: c.metrics.metricRegistryV1.policy_version,
     approved,
     configurationRevision: () => restrictConfiguration(controlsStore.read()).revision,
-    now: () => utc(now()),
+    now: implicitPublicationCutoff,
+    publicationEligible: (cutoff) =>
+      resolveDiscoverablePublicationWindows(config.scopes, cutoff, c.metrics.resolveMetricWindow).length > 0,
     execute: async (lease) => {
       const result = await runOnceInternal({ cutoff: lease.operation.cutoff, dispatch: { lease } });
       if (result.state !== "published") fail("dispatch_collection_incomplete");
-      const windows = resolvePublicationWindows(config.scopes, lease.operation.cutoff, c.metrics.resolveMetricWindow);
+      const windows = resolveDiscoverablePublicationWindows(
+        config.scopes,
+        lease.operation.cutoff,
+        c.metrics.resolveMetricWindow,
+      );
       return result.publications.map((publication, index) => ({
         scopeKey: scopeKey(windows[index].scope),
         snapshotId: publication.snapshotId,
@@ -2388,7 +2538,11 @@ export async function createPipeline(options) {
         )
       )
         fail("dispatch_source_generation_changed");
-      const windows = resolvePublicationWindows(config.scopes, lease.operation.cutoff, c.metrics.resolveMetricWindow);
+      const windows = resolveDiscoverablePublicationWindows(
+        config.scopes,
+        lease.operation.cutoff,
+        c.metrics.resolveMetricWindow,
+      );
       for (const publication of publications) {
         const selectedScope = windows.find(({ scope }) => scopeKey(scope) === publication.scopeKey)?.scope;
         const receipt = (
@@ -2440,7 +2594,9 @@ export async function createPipeline(options) {
     computationVersion,
     scopeKey,
     publicationScopesAt: (cutoff) =>
-      resolvePublicationWindows(config.scopes, cutoff, c.metrics.resolveMetricWindow).map(({ scope }) => scope),
+      resolveDiscoverablePublicationWindows(config.scopes, cutoff, c.metrics.resolveMetricWindow).map(
+        ({ scope }) => scope,
+      ),
     digest,
     approved,
     controlsStore,

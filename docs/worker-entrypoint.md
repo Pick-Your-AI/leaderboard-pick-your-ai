@@ -71,11 +71,25 @@ the original per-family scan selection is unchanged.
 Approved named-period templates resolve inside a new continuation's transaction
 from its selected event cutoff, including the complete role and Project scope keys
 whose heads are retained. A resumed cycle keeps those exact windows when the clock
-crosses into another month. New cycles still require a valid, unambiguous named
-window with a whole-second event cutoff; the host must supply that compatible
-clock or explicit cutoff. An already valid pending cycle can finish at a later
-fractional observation time. These rules do not round the clock or choose the
-host's period scheduling policy.
+crosses into another month. If the approved configuration includes a bounded named
+period, a new implicit event cutoff uses the validated clock's preceding whole
+second. The authoritative cutoff is still chosen under the continuation row lock.
+All scopes in a mixed configuration share that cutoff; configurations containing
+only legacy, custom or all-time scopes retain millisecond event precision. An
+explicit fractional named cutoff remains invalid and is never silently changed.
+Observation, source and probe timestamps retain their full precision. Existing
+pending scans and dispatcher operations always reuse their stored cutoffs.
+
+Distinct approved calendar labels can share one concrete publication, with every
+matching label confirmed together. At an exact UTC calendar opening, empty labels
+produce no publication; other nonempty windows continue. If all approved labels
+are empty, a collection cycle can complete without creating a snapshot. A new
+webhook notice instead remains pending with no operation, attempt or collection
+until a nonempty window exists. That eligibility decision is made under the
+outbox row lock before binding the immutable operation. An already-bound nonempty
+retry can still finish at a later empty calendar opening. Invalid configuration
+is an error, not an empty-window deferral; ordinary completion still requires
+actual confirmed publication references.
 
 The event cutoff bounds the requested collection window. Once every family is
 complete, a separate observation cutoff is frozen for normalization and publication.
@@ -110,6 +124,9 @@ authorization changes, bounds and delayed implicit/explicit publication races.
 It also exercises mixed named, role-filtered, custom and all-time scopes through
 a month-boundary database reopen, new-window validation before collection, and
 selection of concrete scope heads under the continuation row lock.
+`calendar-dispatch.test.mjs` exercises unclaimed calendar-opening deferral through
+a real database restart, first nonempty publication, retained retries at a later
+opening, mixed rolling/calendar choices and rejection of ambiguous configuration.
 The maximum-Project v2/v3 cases additionally interrupt the actual scan binding
 inside publication, then interrupt private confirmation and reopen the database.
 They verify rollback, unchanged-publication binding, literal scope and receipt
