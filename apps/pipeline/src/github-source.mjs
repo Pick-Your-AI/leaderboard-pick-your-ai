@@ -75,6 +75,8 @@ const recentRoute = (route, window) => {
   parameters.set("direction", "asc");
   return path + "?" + parameters.toString();
 };
+const sourceSubjectId = (value) =>
+  value?.node_id ?? value?.sha ?? (Number.isSafeInteger(value?.id) ? String(value.id) : null);
 
 /** Read-only REST source with complete, bounded review fanout. */
 export function createGithubCollectionSource({
@@ -352,6 +354,17 @@ export function createGithubCollectionSource({
           request.family === "issues" ? body.filter((item) => !item.pull_request) : body,
         );
       }
+      if (isGithubRestSnapshotFamily(request.family)) {
+        const seen = new Set();
+        for (const value of values) {
+          const subjectId = sourceSubjectId(value);
+          if (typeof subjectId !== "string") throw new Error("source_identity_or_revision_unverified");
+          // Reordered provider pages can repeat an object at another revision
+          // while omitting a different object. Revisions are not inventory IDs.
+          if (seen.has(subjectId)) throw new Error("source_inventory_identity_ambiguous");
+          seen.add(subjectId);
+        }
+      }
       if (request.family === "timelines")
         values = values.map((value) => ({
           ...value,
@@ -375,7 +388,7 @@ export function createGithubCollectionSource({
       if (offset > expectedCount) throw new Error("invalid_source_cursor");
       const selected = projectSubjectCount === null ? values.slice(offset, offset + request.limit) : values;
       const facts = selected.map((value) => {
-        const subjectId = value.node_id ?? value.sha ?? (Number.isSafeInteger(value.id) ? String(value.id) : null);
+        const subjectId = sourceSubjectId(value);
         const nativeRevision =
           value.sha ?? at(value.updated_at) ?? at(value.submitted_at) ?? at(value.published_at) ?? at(value.created_at);
         const revision = ["project_history", "relationships"].includes(request.family)

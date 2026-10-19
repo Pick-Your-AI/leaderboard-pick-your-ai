@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Request } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 test.use({ storageState: { cookies: [], origins: [] } });
 const at = "2026-10-17T12:00:00.000Z";
@@ -123,6 +123,8 @@ async function service(page: Page, approved = true) {
   let unavailable = false;
   let corruptAchievementCoverage = false;
   let calls = 0;
+  const categories: (string | null)[] = [];
+  const fulfilledAchievements = new WeakMap<Request, { status: number; body: string }>();
   const app = createService({
     approvedAchievementRuleVersion: approved ? "accepted-evidence/v1" : undefined,
     source: {
@@ -135,8 +137,12 @@ async function service(page: Page, approved = true) {
     },
   });
   await page.route("**/api/v1/**", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname.endsWith("/achievements")) calls++;
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname.endsWith("/achievements")) {
+      calls++;
+      categories.push(url.searchParams.get("category"));
+    }
     const response = await app.inject({ method: "GET", url: url.pathname + url.search });
     let body = response.body;
     const headers = { ...response.headers };
@@ -147,6 +153,9 @@ async function service(page: Page, approved = true) {
       headers["content-length"] = String(Buffer.byteLength(body));
     }
     await route.fulfill({ status: response.statusCode, headers, body });
+    if (url.pathname.endsWith("/achievements")) {
+      fulfilledAchievements.set(request, { status: response.statusCode, body });
+    }
   });
   return {
     close: () => app.close(),
@@ -157,6 +166,8 @@ async function service(page: Page, approved = true) {
       current.controls.suppressedActorIds = ["api-a"];
     },
     calls: () => calls,
+    categories: () => [...categories],
+    fulfilledAchievement: (request: Request) => fulfilledAchievements.get(request),
     corruptAwardCoverage: () => {
       corruptAchievementCoverage = true;
     },
@@ -298,7 +309,9 @@ test("real controls current spotlights reject filtered scope and disappear after
   }
 });
 
-test("category-filtered portfolios withhold broader achievements and do not request them", async ({ page }) => {
+test("a legacy service receives only the exact category request and never supplies broader fallback achievements", async ({
+  page,
+}) => {
   const api = await service(page);
   try {
     await page.clock.install();
@@ -309,11 +322,17 @@ test("category-filtered portfolios withhold broader achievements and do not requ
       history.pushState(null, "", "/contributors/api-a?ui=api&snapshot=api-1&category=documentation");
       window.dispatchEvent(new PopStateEvent("popstate"));
     });
-    await expect(page.getByText(/Achievements are unavailable for category-filtered portfolios/)).toBeVisible();
+    await expect(page.getByText(/Achievements are unavailable for this category-filtered portfolio/)).toBeVisible();
     await expect(page.getByRole("link", { name: "Qualifying public artifact" })).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "First accepted contribution in available scope" })).toHaveCount(0);
     await page.clock.fastForward(30_001);
-    expect(api.calls()).toBe(before);
+    expect(api.calls()).toBeGreaterThan(before);
+    expect(
+      api
+        .categories()
+        .slice(before)
+        .every((category) => category === "documentation"),
+    ).toBe(true);
     await expect(page.getByRole("link", { name: "Open archived documentation card" })).toBeVisible();
     await page.evaluate(() => {
       history.pushState(null, "", "/contributors/api-a?ui=api&snapshot=api-1");
@@ -342,7 +361,9 @@ test("contradictory achievement coverage clears visible awards while keeping the
     await page.clock.fastForward(30_001);
     const response = await refreshed;
     expect(response.status()).toBe(200);
-    const supplied = await response.json();
+    const request = response.request();
+    await expect.poll(() => api.fulfilledAchievement(request)?.status).toBe(200);
+    const supplied = JSON.parse(api.fulfilledAchievement(request)!.body);
     expect(supplied.coverage).toEqual([]);
     expect(supplied.achievements).toHaveLength(1);
     await expect.poll(() => api.calls()).toBeGreaterThan(before);

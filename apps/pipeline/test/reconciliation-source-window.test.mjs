@@ -100,6 +100,30 @@ test("recent issue collection filters pulls while preserving the complete select
   assert.equal(second.nextCursor, null);
 });
 
+for (const family of ["issues", "pull_requests", "comments", "releases"]) {
+  test(family + " rejects repeated inventory subjects before returning any output page", async () => {
+    for (const changed of [false, true]) {
+      const original = item(1, since);
+      const repeated = changed
+        ? { ...original, updated_at: until, body: "Synthetic later observation" }
+        : { ...original };
+      const rows = [original, item(2, since), repeated];
+      const source = makeSource({ scanRest: async (options) => options.select(rows) });
+      await assert.rejects(
+        source.readPage({ ...request, family, mode: "audit", since: null, limit: 1 }),
+        /source_inventory_identity_ambiguous/,
+      );
+    }
+  });
+}
+
+test("recent filtering cannot hide a repeated subject outside the exact lower bound", async () => {
+  const source = makeSource({
+    scanRest: async (options) => options.select([item(1, "2026-10-01T12:00:00.249Z"), item(1, since)]),
+  });
+  await assert.rejects(source.readPage({ ...request, family: "issues" }), /source_inventory_identity_ambiguous/);
+});
+
 for (const family of [
   "pull_requests",
   "reviews",

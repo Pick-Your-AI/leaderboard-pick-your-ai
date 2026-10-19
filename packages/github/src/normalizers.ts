@@ -8,6 +8,7 @@ import {
 import { createHash } from "node:crypto";
 import {
   compareSourceInstants,
+  sourceEventSchema,
   publicDocumentationReasons,
   serviceAccountClassificationSchema,
   type ServiceAccountClassification,
@@ -25,6 +26,7 @@ import {
   githubRestSnapshotSemanticRevision,
   verifyGithubRestSnapshotRevision,
 } from "./rest-snapshot.js";
+import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
@@ -91,6 +93,12 @@ function matchesSnapshotRevision(revision: string, fingerprint: string): boolean
   );
 }
 
+function canonicalTriageAction(action: string): string {
+  if (action === "issue_type_added") return "issue_typed";
+  if (action === "issue_type_removed") return "issue_untyped";
+  return action;
+}
+
 export function githubTimelineRevision(value: Record<string, unknown>): string {
   const identity = (item: unknown) =>
     object(item) ? [item.id ?? null, item.node_id ?? null, item.name ?? null] : null;
@@ -104,6 +112,12 @@ export function githubTimelineRevision(value: Record<string, unknown>): string {
         identity(value.label),
         identity(value.milestone),
         identity(value.assignee),
+        // Type targets affect raw-state identity and must survive the same
+        // collection/hydration revision check as other credited metadata.
+        // Keep existing non-type event fingerprints unchanged.
+        ...(["issue_typed", "issue_untyped"].includes(canonicalTriageAction(String(value.event)))
+          ? [identity(value.issue_type), value.target_id ?? null]
+          : []),
       ]),
     )
     .digest("hex");
@@ -416,6 +430,17 @@ function resourceId(payload: Record<string, unknown>, kind: string, repoId: numb
   );
 }
 
+function definitionResourceId(
+  payload: Record<string, unknown>,
+  kind: "label" | "milestone",
+  repoId: number,
+): string | null {
+  const nodeId = text(payload.node_id);
+  if (nodeId) return nodeId;
+  const providerId = positive(payload.id) ? String(payload.id) : text(payload.id);
+  return providerId ? `github:${repoId}:${kind}:${providerId}` : null;
+}
+
 /** Names are bounded current-source labels, never historical titles or rendered Markdown. */
 function collectedTitle(resource: Record<string, unknown>, kind: string, observedAt: string) {
   const raw = resource.title ?? (kind === "release" || kind === "other" ? resource.name : null);
@@ -497,19 +522,37 @@ export function normalizeGithubObservation(
     return out;
   }
   const payload = envelope.payload;
-  const resource = object(payload.pull_request)
-    ? payload.pull_request
-    : object(payload.issue)
-      ? payload.issue
-      : object(payload.review)
-        ? payload.review
-        : object(payload.release)
-          ? payload.release
-          : envelope.action?.startsWith("label_") && object(payload.label)
-            ? payload.label
-            : envelope.action?.startsWith("milestone_") && object(payload.milestone)
-              ? payload.milestone
-              : payload;
+  const observedAction = envelope.action ?? text(payload.action) ?? "snapshot";
+  const sourceAction = envelope.family === "triage" ? canonicalTriageAction(observedAction) : observedAction;
+  const definitionKind =
+    envelope.family === "triage" && sourceAction.startsWith("label_")
+      ? "label"
+      : envelope.family === "triage" && sourceAction.startsWith("milestone_")
+        ? "milestone"
+        : null;
+  const definitionResource = definitionKind ? payload[definitionKind] : null;
+  if (definitionKind && !object(definitionResource)) {
+    out.reasons.push("missing_public_artifact_identity");
+    return out;
+  }
+  // A definition event owns the definition, even when an envelope also carries
+  // issue context. Attached item membership cannot multiply definition credit.
+  const resource =
+    definitionKind && object(definitionResource)
+      ? definitionResource
+      : object(payload.pull_request)
+        ? payload.pull_request
+        : object(payload.issue)
+          ? payload.issue
+          : object(payload.review)
+            ? payload.review
+            : object(payload.release)
+              ? payload.release
+              : envelope.action?.startsWith("label_") && object(payload.label)
+                ? payload.label
+                : envelope.action?.startsWith("milestone_") && object(payload.milestone)
+                  ? payload.milestone
+                  : payload;
   const kind: NormalizedPublicEvidence["artifact"]["kind"] =
     envelope.family === "pull_request" || envelope.family === "review" || envelope.family === "revert"
       ? "pull_request"
@@ -520,12 +563,12 @@ export function normalizeGithubObservation(
           : envelope.family === "project_snapshot" ||
               (envelope.family === "field_change" && envelope.action?.startsWith("project"))
             ? "project"
-            : envelope.family === "discussion" ||
-                envelope.family === "comment" ||
-                (envelope.family === "triage" && /^(?:label|milestone)_/.test(envelope.action ?? ""))
+            : envelope.family === "discussion" || envelope.family === "comment" || definitionKind !== null
               ? "other"
               : "issue";
-  const id = resourceId(resource, kind, repository.id);
+  const id = definitionKind
+    ? definitionResourceId(resource, definitionKind, repository.id)
+    : resourceId(resource, kind, repository.id);
   if (repository.visibility !== "public" || (object(payload.repository) && payload.repository.private !== false)) {
     if (id) out.suppressArtifactIds.push(id);
     out.reasons.push("public_visibility_unverified_or_revoked");
@@ -543,7 +586,6 @@ export function normalizeGithubObservation(
     return out;
   }
   const at = time(envelope.occurredAt);
-  const sourceAction = envelope.action ?? text(payload.action) ?? "snapshot";
   const history =
     envelope.publicHistory?.approvedPublic === true
       ? publicEvidenceHistorySchema.parse(envelope.publicHistory.history)
@@ -619,7 +661,7 @@ export function normalizeGithubObservation(
   out.observations.push({
     id: observationId,
     source: proof.source,
-    action: sourceAction,
+    action: observedAction,
     actorId: sender?.id ?? null,
     artifactId: id,
     occurredAt: at,
@@ -861,6 +903,8 @@ export function normalizeGithubObservation(
       !sha ||
       !pinnedSha(sha) ||
       !integration ||
+      !text(repository.defaultBranch) ||
+      integration.defaultBranch !== repository.defaultBranch ||
       integration.targetBranch !== integration.defaultBranch ||
       !integration.commitShas.includes(sha)
     ) {
@@ -928,7 +972,7 @@ export function normalizeGithubObservation(
       project_status_changed: "project_status_updates",
       project_progress_published: "project_updates",
     };
-    const metric = mapping[sourceAction];
+    const metric = Object.hasOwn(mapping, sourceAction) ? mapping[sourceAction] : undefined;
     if (
       !metric ||
       !proof.eventId ||
@@ -965,7 +1009,7 @@ export function normalizeGithubObservation(
       locked: "public_moderation",
       unlocked: "public_moderation",
     };
-    const metric = mapping[sourceAction];
+    const metric = Object.hasOwn(mapping, sourceAction) ? mapping[sourceAction] : undefined;
     // Resolve the action's own target, never another field or the issue's current
     // metadata snapshot. Removal and type transitions need the same identity
     // proof as additions before they can participate in raw-state grouping.
@@ -1024,12 +1068,17 @@ export function normalizeGithubObservation(
         reference: "reference_links",
         duplicate: "duplicate_resolution",
       };
+      const relationshipKind = relationship?.kind;
+      const metric =
+        typeof relationshipKind === "string" && Object.hasOwn(mapping, relationshipKind)
+          ? mapping[relationshipKind]
+          : undefined;
       if (
         !relationship ||
         relationship.intentional !== true ||
         !text(relationship.from) ||
         !text(relationship.to) ||
-        !mapping[String(relationship.kind)] ||
+        !metric ||
         !proof.eventId
       ) {
         out.reasons.push("automatic_reference_or_relationship_actor_unverified");
@@ -1037,14 +1086,14 @@ export function normalizeGithubObservation(
         out.reasons.push("relationship_endpoint_visibility_unverified");
       } else {
         const endpoints = [String(relationship.from), String(relationship.to)];
-        if (["related", "duplicate"].includes(String(relationship.kind))) endpoints.sort();
+        if (["related", "duplicate"].includes(String(relationshipKind))) endpoints.sort();
         emit(
-          mapping[String(relationship.kind)]!,
+          metric,
           sender,
           "triager",
           at,
-          stable(relationship.kind, endpoints, sourceAction, at, sender?.id, nativeEventId),
-          { rawState: String(relationship.kind) },
+          stable(relationshipKind, endpoints, sourceAction, at, sender?.id, nativeEventId),
+          { rawState: String(relationshipKind) },
         );
       }
     }
@@ -1069,6 +1118,8 @@ export function normalizeGithubObservation(
   const integration = envelope.integration;
   if (integration?.diff) {
     if (
+      !text(repository.defaultBranch) ||
+      integration.defaultBranch !== repository.defaultBranch ||
       integration.targetBranch !== integration.defaultBranch ||
       integration.diff.before !== integration.before ||
       integration.diff.after !== integration.after ||
@@ -1325,6 +1376,17 @@ export function applyRecognitionReceipt(
   ) {
     throw new Error("Independent verified recognition receipt is required");
   }
+  // An accepted answer cannot precede its known source occurrence. Preserve
+  // unknown clocks and the separate accepted-at ranking rule; a collection or
+  // revision time is not a substitute for the original source event.
+  if (
+    receipt.metricId === "issue_answers" &&
+    receipt.decision === "accepted" &&
+    typeof target.occurredAt === "string" &&
+    sourceEventSchema.shape.occurredAt.safeParse(target.occurredAt).success &&
+    compareSourceInstants(target.occurredAt, receipt.acceptedAt) > 0
+  )
+    throw new Error("Answer acceptance cannot predate its known source occurrence");
   // A generic receipt cannot turn a PR, closing action or synthetic fixture into
   // a confirmed report. The issue proof must identify this exact source fact.
   if (
@@ -1344,7 +1406,17 @@ export function applyRecognitionReceipt(
     throw new Error("Confirmed bug recognition requires a nonsynthetic issue source");
   // Localization is one PR/language/category unit. A bulk changeset must never
   // collapse different languages or mint another unit for the same source fact.
-  const unit = receipt.metricId === "localization" ? target.canonicalKey : (receipt.changesetId ?? target.canonicalKey);
+  const mergedChange =
+    receipt.metricId === "maintenance"
+      ? validateMaintenanceSource(input, target.id, receipt.acceptedAt)
+      : receipt.metricId === "automation"
+        ? validateAutomationSource(input, target.id, receipt.acceptedAt)
+        : null;
+  const unit = mergedChange
+    ? mergedChange.unit
+    : receipt.metricId === "localization"
+      ? target.canonicalKey
+      : (receipt.changesetId ?? target.canonicalKey);
   if (receipt.metricId === "localization" && target.state !== "observed")
     throw new Error("Localization acceptance must target its original observed source fact");
   if (
@@ -1376,7 +1448,7 @@ export function applyRecognitionReceipt(
   if (evidence)
     out.evidence.push({
       ...structuredClone(evidence),
-      occurredAt: receipt.metricId === "localization" ? target.occurredAt : fact.acceptedAt,
+      occurredAt: receipt.metricId === "localization" || mergedChange ? target.occurredAt : fact.acceptedAt,
       ...(evidence.evidenceMetadata
         ? {
             evidenceMetadata: {
@@ -1939,7 +2011,7 @@ export function groupTriageTransitions(
     byId.set(event.id, event);
   }
   for (const event of byId.values()) {
-    if (!event.actorId || !time(event.occurredAt)) {
+    if (!text(event.actorId) || !text(event.artifactId) || !time(event.occurredAt)) {
       unknown.push(event.id);
       continue;
     }
@@ -1995,11 +2067,30 @@ export function groupTriageTransitions(
       });
     }
   }
+  const artifacts = new Set<string>();
+  const byActor = new Map<string, { rawActions: number; sessions: number; artifacts: Set<string> }>();
+  for (const session of sessions) {
+    artifacts.add(session.artifactId);
+    const summary = byActor.get(session.actorId) ?? { rawActions: 0, sessions: 0, artifacts: new Set<string>() };
+    summary.rawActions += session.rawActions;
+    summary.sessions += 1;
+    summary.artifacts.add(session.artifactId);
+    byActor.set(session.actorId, summary);
+  }
   return {
     policyVersion: policy.version,
     sessions: sessions.sort((a, b) => a.id.localeCompare(b.id)),
     unknownEventIds: unknown.sort(),
     rawActions: byId.size,
+    distinctArtifacts: artifacts.size,
+    actorSummaries: [...byActor]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([actorId, summary]) => ({
+        actorId,
+        rawActions: summary.rawActions,
+        sessions: summary.sessions,
+        distinctArtifacts: summary.artifacts.size,
+      })),
     qualifiedOutcomes: 0,
     caveat:
       "Grouping and persistence do not prove curation correctness; independent recognition receipts are required.",

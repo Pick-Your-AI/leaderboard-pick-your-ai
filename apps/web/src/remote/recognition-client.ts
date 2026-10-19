@@ -1,5 +1,6 @@
-import { compareSourceInstants, sourceEventSchema } from "@pick-your-ai/contracts";
+import { compareSourceInstants, publicArtifactIdSchema, sourceEventSchema } from "@pick-your-ai/contracts";
 import { metadata, parameters, publicLink, ReadFailure, type Selection } from "./client.ts";
+import { milestonePage } from "./achievement-milestones-client.ts";
 const id = /^[A-Za-z0-9_.:-]{1,200}$/;
 const fail = (): never => {
   throw new ReadFailure(502, "invalid_recognition_response");
@@ -13,6 +14,10 @@ const text = (value: unknown, max = 2000): string =>
 const identity = (value: unknown) => {
   const result = text(value, 200);
   return id.test(result) ? result : fail();
+};
+const artifactIdentity = (value: unknown) => {
+  const result = publicArtifactIdSchema.safeParse(value);
+  return result.success ? result.data : fail();
 };
 const date = (value: unknown) => {
   const result = text(value, 40);
@@ -46,6 +51,18 @@ export function recognitionParameters(selected: Selection, snapshotId: string) {
   if (selected.snapshot && selected.snapshot !== snapshotId) throw new ReadFailure(502, "api_snapshot_mismatch");
   return parameters(selected, { snapshot: snapshotId, cursor: null });
 }
+/** Achievement paging has its own cursor and exact category; card scope stays unchanged. */
+export function milestoneParameters(selected: Selection, snapshotId: string, cursor: string | null = null) {
+  const params = recognitionParameters(selected, snapshotId);
+  params.set("limit", "20");
+  if (selected.category !== null) params.set("category", identity(selected.category));
+  if (cursor !== null) {
+    if (cursor.length > 2048 || /[^A-Za-z0-9_.-]/.test(cursor) || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(cursor))
+      fail();
+    params.set("cursor", cursor);
+  }
+  return params;
+}
 export function cardHref(base: string, selected: Selection, snapshotId: string, actorId: string, metricId: string) {
   const params = recognitionParameters(selected, snapshotId);
   params.set("metric", identity(metricId));
@@ -65,8 +82,13 @@ export function cardImageHref(
 export function achievements(value: unknown, selected: Selection, actorId: string) {
   const data = record(value);
   const meta = metadata(data, selected);
-  if (data.actorId !== actorId || data.ruleVersion !== "accepted-evidence/v1") fail();
-  const suppliedAwards = list(data.achievements, 2);
+  if (
+    data.actorId !== actorId ||
+    (data.ruleVersion !== "accepted-evidence/v1" && data.ruleVersion !== "accepted-evidence/v2") ||
+    (data.ruleVersion === "accepted-evidence/v1" && selected.category !== null)
+  )
+    fail();
+  const suppliedAwards = list(data.achievements, data.ruleVersion === "accepted-evidence/v2" ? 100 : 2);
   const through = selected.end ?? meta.generatedAt;
   if (
     suppliedAwards.length > 0 &&
@@ -88,9 +110,11 @@ export function achievements(value: unknown, selected: Selection, actorId: strin
       ))
   )
     fail();
+  if (data.ruleVersion === "accepted-evidence/v2") return milestonePage(data, meta, selected, actorId);
   const seen = new Set<string>();
   return {
     ...meta,
+    ruleVersion: "accepted-evidence/v1" as const,
     achievements: suppliedAwards.map((value) => {
       const item = record(value);
       const rule = identity(item.id);
@@ -106,11 +130,12 @@ export function achievements(value: unknown, selected: Selection, actorId: strin
       const occurredAt = date(item.occurredAt);
       if (
         (selected.start && Date.parse(occurredAt) < Date.parse(selected.start)) ||
-        (selected.end && Date.parse(occurredAt) >= Date.parse(selected.end))
+        (selected.end && Date.parse(occurredAt) >= Date.parse(selected.end)) ||
+        compareSourceInstants(occurredAt, meta.generatedAt) > 0
       )
         fail();
       const evidenceIds = list(item.evidenceIds, 1).map(identity);
-      const artifactIds = list(item.artifactIds, 1).map(identity);
+      const artifactIds = list(item.artifactIds, 1).map(artifactIdentity);
       const sourceUrls = list(item.sourceUrls, 1).map((value) => publicLink(text(value)) ?? fail());
       if (!evidenceIds.length || !artifactIds.length || !sourceUrls.length) fail();
       return {

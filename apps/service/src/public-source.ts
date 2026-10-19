@@ -1,4 +1,5 @@
 import type { RankSnapshotHistory } from "./rank-comparison.js";
+import type { ParticipationHistoryRead } from "./participation-history.js";
 import {
   canonicalPublicScope,
   publicScopeKey,
@@ -12,6 +13,7 @@ import {
   type PublicEvidenceMetadata,
   actorSchema,
   artifactSchema,
+  publicArtifactIdSchema,
   contributionSchema,
   metricResultSchema,
   pendingCountSchema,
@@ -121,6 +123,17 @@ export interface PublicComparisonRead {
   previousHistory: RankSnapshotHistory | null;
 }
 export interface PublicSnapshotSource {
+  /** Optional trusted server capability. Read the selected input and full approved
+   * organization history under one protected admission/source-lock boundary and
+   * a final current privacy fence. Receipt strings are not authorization. Public
+   * requests cannot activate it; the stock pipeline intentionally omits it.
+   */
+  readParticipationHistory?(
+    scope: PublicScope,
+    snapshotId: string | null,
+    actorId: string,
+    signal: AbortSignal,
+  ): Promise<ParticipationHistoryRead | null>;
   /** Pair under one authorization/source-lock boundary and final current privacy fence. */
   readComparison?(
     scope: PublicScope,
@@ -361,9 +374,12 @@ export function projectRead(
     input.head.revision < snapshot.revision ||
     !date(input.head.publishedAt) ||
     input.head.publishedAt === null ||
-    ![controls.suppressedActorIds, controls.suppressedArtifactIds, controls.revokedSnapshotIds].every(
+    ![controls.suppressedActorIds, controls.revokedSnapshotIds].every(
       (list) => Array.isArray(list) && list.length <= 20000 && list.every(id),
-    )
+    ) ||
+    !Array.isArray(controls.suppressedArtifactIds) ||
+    controls.suppressedArtifactIds.length > 20000 ||
+    !controls.suppressedArtifactIds.every((value) => publicArtifactIdSchema.safeParse(value).success)
   )
     return reject();
   if (pin !== null && snapshot.snapshotId !== pin) return reject();

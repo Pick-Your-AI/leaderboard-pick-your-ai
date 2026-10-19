@@ -10,6 +10,41 @@ export interface TypedHistoryRecord {
 export const typedHistoryRevision = (value: TypedHistoryRecord): string =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
+function assertRelationshipEvent(event: unknown, repository: { id: number; slug: string }): void {
+  if (!object(event) || typeof event.id !== "string" || !event.id.trim() || typeof event.createdAt !== "string")
+    throw new Error("typed_history_event_unverified");
+  let field: "parent" | "blockingIssue";
+  switch (event.__typename) {
+    case "ParentIssueAddedEvent":
+    case "ParentIssueRemovedEvent":
+      field = "parent";
+      break;
+    case "BlockedByAddedEvent":
+    case "BlockedByRemovedEvent":
+      field = "blockingIssue";
+      break;
+    default:
+      throw new Error("typed_history_event_unverified");
+  }
+  const otherField = field === "parent" ? "blockingIssue" : "parent";
+  if (event[otherField] !== undefined && event[otherField] !== null) throw new Error("typed_history_event_unverified");
+  const target = event[field];
+  const prefix = `https://github.com/${repository.slug}/issues/`;
+  if (
+    !object(target) ||
+    !object(target.repository) ||
+    target.repository.isPrivate !== false ||
+    target.repository.databaseId !== repository.id ||
+    typeof target.id !== "string" ||
+    !target.id.trim() ||
+    typeof target.url !== "string" ||
+    !target.url.startsWith(prefix) ||
+    !/^[1-9][0-9]*$/.test(target.url.slice(prefix.length)) ||
+    !Number.isSafeInteger(Number(target.url.slice(prefix.length)))
+  )
+    throw new Error("relationship_endpoint_not_authorized");
+}
+
 /** Selected native issue/PR histories only; no reconstruction from current Project/relationship fields. */
 export async function readTypedIssueHistory(options: {
   client: GithubReadClient;
@@ -151,20 +186,11 @@ export async function readTypedIssueHistory(options: {
     )
       throw new Error(subjectError);
     verifiedSubjectId = record.subject.id;
+    // Cached pages must prove the selected native type and its own endpoint too.
+    if (options.family === "relationships") assertRelationshipEvent(record.event, options.repository);
     if (seen.has(record.event.id)) throw new Error("typed_history_duplicate_event");
     seen.add(record.event.id);
     if (options.family === "relationships") {
-      const target = record.event.parent ?? record.event.blockingIssue;
-      if (
-        !object(target) ||
-        !object(target.repository) ||
-        target.repository.isPrivate !== false ||
-        target.repository.databaseId !== options.repository.id ||
-        typeof target.id !== "string" ||
-        typeof target.url !== "string" ||
-        !target.url.startsWith(`https://github.com/${options.repository.slug}/issues/`)
-      )
-        throw new Error("relationship_endpoint_not_authorized");
       result.push(record);
     } else {
       const project = record.event.project;
