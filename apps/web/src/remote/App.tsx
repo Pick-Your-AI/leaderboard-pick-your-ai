@@ -1,4 +1,5 @@
 import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
+import { FirstContributionsEntry } from "./OverviewDiscovery.tsx";
 import { PublicScopeControls, PublicScopeProvenance } from "./PublicScope.tsx";
 import { selectionScope } from "./public-scope.ts";
 import { ContributorParticipation } from "./Participation.tsx";
@@ -961,6 +962,7 @@ export function RemoteApp() {
           {data?.kind === "health" && url.pathname === "/" && state.status === "ready" && (
             <>
               <OverviewNavigation registry={state.registry} selected={pinned} />
+              <FirstContributionsEntry selected={pinned} />
               <OverviewAcceptedWork state={overviewActivity} selected={pinned} />
             </>
           )}
