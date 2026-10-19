@@ -295,8 +295,13 @@ export async function createPipeline(options) {
   // Retained Project history still participates after active collection stops.
   // Keep its new semantics in a distinct cache generation for every configuration,
   // so reprocessing cannot overwrite an earlier frozen normalization dependency.
-  const normalizationSignature = digest([
+  const previousProjectNormalizationSignature = digest([
     "project-membership-context/v1",
+    verifiedMergeNormalizationSignature,
+    projectWorkstreamMappings,
+  ]);
+  const normalizationSignature = digest([
+    "project-membership-context/v2",
     verifiedMergeNormalizationSignature,
     projectWorkstreamMappings,
   ]);
@@ -304,6 +309,16 @@ export async function createPipeline(options) {
   const reviewNormalizationSignature = digest([reviewSourceNormalizationVersion, normalizationSignature]);
   const discussionNormalizationSignature = digest([discussionSourceNormalizationVersion, normalizationSignature]);
   const defaultDeliverySignature = (signature) => digest([defaultDeliveryNormalizationVersion, signature]);
+  // The Project scope upgrade must also retain every already-versioned family
+  // wrapper. Their documents can resolve frozen identities, never fresh output.
+  const previousReviewNormalizationSignature = digest([
+    reviewSourceNormalizationVersion,
+    previousProjectNormalizationSignature,
+  ]);
+  const previousDiscussionNormalizationSignature = digest([
+    discussionSourceNormalizationVersion,
+    previousProjectNormalizationSignature,
+  ]);
   const frozenNormalizationSignatures = [
     defaultDeliverySignature(normalizationSignature),
     defaultDeliverySignature(reviewNormalizationSignature),
@@ -311,6 +326,12 @@ export async function createPipeline(options) {
     discussionNormalizationSignature,
     reviewNormalizationSignature,
     normalizationSignature,
+    defaultDeliverySignature(previousProjectNormalizationSignature),
+    defaultDeliverySignature(previousReviewNormalizationSignature),
+    defaultDeliverySignature(previousDiscussionNormalizationSignature),
+    previousDiscussionNormalizationSignature,
+    previousReviewNormalizationSignature,
+    previousProjectNormalizationSignature,
     verifiedMergeNormalizationSignature,
     documentationNormalizationSignature,
     attributionNormalizationSignature,
@@ -1288,6 +1309,13 @@ export async function createPipeline(options) {
             ? discussionNormalizationSignature
             : normalizationSignature;
       const deliverySignature = defaultDeliverySignature(baseSignature);
+      const previousBaseSignature =
+        row.family === "reviews"
+          ? previousReviewNormalizationSignature
+          : row.family === "discussions"
+            ? previousDiscussionNormalizationSignature
+            : previousProjectNormalizationSignature;
+      const previousDeliverySignature = defaultDeliverySignature(previousBaseSignature);
       if (
         row.family === "reviews" &&
         (options.normalizer || options.githubEnrich
@@ -1306,18 +1334,31 @@ export async function createPipeline(options) {
       const candidates = (
         await db.query(
           "SELECT policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=ANY($2::text[])",
-          [row.fact_key, [deliverySignature, baseSignature]],
+          [row.fact_key, [deliverySignature, baseSignature, previousDeliverySignature, previousBaseSignature]],
         )
       ).rows;
       const deliveryCache = candidates.find((entry) => entry.policy_signature === deliverySignature);
       const cached = deliveryCache ?? candidates.find((entry) => entry.policy_signature === baseSignature);
+      const previousDeliveryCache = candidates.find((entry) => entry.policy_signature === previousDeliverySignature);
+      const previousCached =
+        previousDeliveryCache ?? candidates.find((entry) => entry.policy_signature === previousBaseSignature);
+      if (previousCached) {
+        if (digest(previousCached.document) !== previousCached.document_hash) fail("normalization_integrity_error");
+        if (previousCached.document.isSynthetic !== (dataMode === "synthetic"))
+          fail("normalization_data_mode_mismatch");
+        assertDataMode(previousCached.document);
+      }
       // Once a source enters the new generation, keep that generation even when
       // its corrected output has no delivery facts. Never fall back to an older
       // positive cache or overwrite an immutable frozen dependency.
+      // A preceding Project generation supplies only this migration hint; it is
+      // always rehydrated and cannot supply fresh facts or unscoped context.
       let defaultDelivery =
         ["commits", "pull_requests"].includes(row.family) ||
         !!deliveryCache ||
-        hasDefaultDeliveryClaims(cached?.document);
+        !!previousDeliveryCache ||
+        hasDefaultDeliveryClaims(cached?.document) ||
+        hasDefaultDeliveryClaims(previousCached?.document);
       let signature = defaultDelivery ? deliverySignature : baseSignature;
       if (defaultDelivery) assertDefaultDeliveryNormalizer();
       if (cached) {
@@ -1332,7 +1373,7 @@ export async function createPipeline(options) {
         const currentProjectNormalizer =
           row.family !== "project_current" ||
           row.document.projectSubjectId === undefined ||
-          cached.document.projectContextNormalizationVersion === "subject-membership/v1";
+          cached.document.projectContextNormalizationVersion === "subject-membership/v2";
         if (
           currentHistoryNormalizer &&
           currentProjectNormalizer &&
@@ -1491,7 +1532,7 @@ export async function createPipeline(options) {
         ...(row.family === "discussions" ? { discussionSourceNormalizationVersion } : {}),
         ...(row.family === "project_history" ? { projectHistoryNormalizationVersion: "collected-subject/v2" } : {}),
         ...(row.family === "project_current" && row.document.projectSubjectId !== undefined
-          ? { projectContextNormalizationVersion: "subject-membership/v1" }
+          ? { projectContextNormalizationVersion: "subject-membership/v2" }
           : {}),
         suppressArtifactIds: suppressed,
         isSynthetic: dataMode === "synthetic",

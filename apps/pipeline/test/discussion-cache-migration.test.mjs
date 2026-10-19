@@ -12,9 +12,9 @@ import { insertOperatorDelivery } from "./operator-harness.mjs";
 const version = "discussion-answer-chronology/v1";
 const slug = "synthetic-org/synthetic-repo";
 const actor = (id) => ({ id: `U_SYNTHETIC_${id}`, databaseId: id, login: `synthetic-${id}`, __typename: "User" });
-const legacySignature = (config) =>
+const projectSignature = (config, version) =>
   comparisonHash([
-    "project-membership-context/v1",
+    version,
     comparisonHash([
       "verified-default-branch-merge-pins/v1",
       comparisonHash([
@@ -24,6 +24,8 @@ const legacySignature = (config) =>
     ]),
     [],
   ]);
+const legacySignature = (config) => projectSignature(config, "project-membership-context/v1");
+const currentSignature = (config) => projectSignature(config, "project-membership-context/v2");
 
 async function discussionHarness(t, extra = {}) {
   const issue = {
@@ -331,7 +333,7 @@ for (const bindingMode of ["exact", "hash-only", "unbound"]) {
       assert.deepEqual(rows.find((row) => row.policy_signature === legacy.signature).document, legacy.document);
       assert.equal(rows.find((row) => row.policy_signature === legacy.signature).document_hash, legacy.documentHash);
       const current = rows.find((row) => row.policy_signature !== legacy.signature);
-      assert.equal(current.policy_signature, comparisonHash([version, legacy.signature]));
+      assert.equal(current.policy_signature, comparisonHash([version, currentSignature(h.config)]));
       assert.equal(current.document.discussionSourceNormalizationVersion, version);
       assert.equal(
         current.document.facts.some((fact) => fact.metricId === "discussion_answers"),
@@ -370,7 +372,7 @@ test("unrelated issue publications retain their original bytes, cache generation
   assert.ok(
     caches.every(
       (row) =>
-        row.policy_signature === legacySignature(h.config) &&
+        row.policy_signature === currentSignature(h.config) &&
         row.document.discussionSourceNormalizationVersion === undefined,
     ),
   );

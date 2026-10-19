@@ -193,3 +193,40 @@ test("scope admission rejects unapproved Projects, duplicate aliases and scope e
     });
   }
 });
+
+test("public workstream scope: empty and nonempty subjects outside the mapping remain unknown", async (t) => {
+  const outside = { ...current, workstream: "outside" };
+  const h = await publicScopeHarness(t, { scopes: [outside] });
+  assert.equal((await h.runtime.runOnce({ cutoff: clock() })).state, "published");
+  const view = await board(h, outside);
+  assert.deepEqual(view.rows, []);
+  assert.ok(view.coverage.every((entry) => entry.state === "partial"));
+  const explanation = await h.runtime.aggregateExplanations.read(view.snapshotId);
+  assert.equal(explanation.document.metrics[0].audit.length, 2);
+  assert.deepEqual(
+    explanation.document.metrics[0].audit.map((entry) => entry.reason),
+    ["unknown_membership_context", "unknown_membership_context"],
+  );
+});
+
+test("public workstream scope: empty subjects preserve proved in-mapping absence", async (t) => {
+  const inside = { ...current, workstream: "engineering" };
+  const h = await publicScopeHarness(t, { scopes: [inside] });
+  h.setMemberships([[], []]);
+  assert.equal((await h.runtime.runOnce({ cutoff: clock() })).state, "published");
+  const view = await board(h, inside);
+  assert.deepEqual(view.rows, []);
+  const explanation = await h.runtime.aggregateExplanations.read(view.snapshotId);
+  assert.equal(explanation.document.metrics[0].audit.length, 2);
+  assert.ok(explanation.document.metrics[0].audit.every((entry) => entry.reason === "workstream_filter"));
+});
+
+test("public workstream scope: overlapping Projects still contribute one mapped action", async (t) => {
+  const inside = { ...current, projects: projectIds, workstream: "engineering" };
+  const h = await publicScopeHarness(t, { scopes: [inside] });
+  assert.equal((await h.runtime.runOnce({ cutoff: clock() })).state, "published");
+  const view = await board(h, inside);
+  assert.equal(view.rows.length, 1);
+  assert.equal(view.rows[0].result.value, 1);
+  assert.equal(view.rows[0].evidenceIds.length, 1);
+});

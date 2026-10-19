@@ -168,6 +168,7 @@ for (const kind of ["issue", "pull_request"]) {
       projects: approved,
       workstreams: ["engineering"],
       workstreamsKnown: true,
+      workstreamScope: ["engineering", "research"],
     });
   });
 }
@@ -176,7 +177,13 @@ test("complete empty membership is explicit, with both public-scope proofs and n
   const fixture = source({ members: [] });
   const snapshot = await fixture.read();
   assert.deepEqual(snapshot.items, []);
-  assert.deepEqual(projectContextFromSnapshot(snapshot), { projects: [], workstreams: [], workstreamsKnown: true });
+  assert.deepEqual(projectContextFromSnapshot(snapshot), {
+    projects: [],
+    workstreams: [],
+    workstreamsKnown: true,
+    workstreamScope: [],
+  });
+  assert.deepEqual(projectContextFromSnapshot(snapshot, mapping()).workstreamScope, ["engineering", "research"]);
   assert.equal(fixture.calls.filter((call) => call.type === "scope").length, 2);
   assert.equal(fixture.calls.filter((call) => call.type === "membership").length, 2);
   assert.equal(fixture.calls.filter((call) => call.type === "fields").length, 0);
@@ -309,6 +316,7 @@ test("Project timestamps preserve valid leap days and millisecond fraction spell
       projects: ["PVT_alpha"],
       workstreams: ["engineering"],
       workstreamsKnown: true,
+      workstreamScope: ["engineering", "research"],
     });
   }
 });
@@ -529,6 +537,7 @@ test("missing, null, unmapped and wrong-field options retain known Project assoc
       projects: ["PVT_alpha"],
       workstreams: [],
       workstreamsKnown: false,
+      workstreamScope: configured ? ["engineering", "research"] : [],
     });
   }
 });
@@ -541,6 +550,7 @@ test("one mapped membership does not turn another unmapped membership into known
     projects: ["PVT_alpha", "PVT_beta"],
     workstreams: ["engineering"],
     workstreamsKnown: false,
+    workstreamScope: ["engineering", "research"],
   });
 });
 
@@ -552,6 +562,22 @@ test("mapping validation returns canonical detached ID bindings and permits many
   assert.deepEqual(normalized, mapping());
   configured.projects[0].fields[0].options[0].workstreamId = "mutated";
   assert.equal(JSON.stringify(normalized).includes("mutated"), false);
+});
+
+test("workstream scope uses every approved mapping entry before selecting current positive memberships", async () => {
+  const snapshot = await source({ members: [member("alpha")] }).read();
+  const configured = mapping();
+  configured.projects[2].fields[0].options.push({ optionId: "option_red", workstreamId: "operations" });
+  configured.projects.reverse();
+  const context = projectContextFromSnapshot(snapshot, configured);
+  assert.deepEqual(context.workstreams, ["engineering"]);
+  assert.deepEqual(context.workstreamScope, ["engineering", "operations", "research"]);
+  context.workstreamScope.push("mutated");
+  assert.deepEqual(projectContextFromSnapshot(snapshot, configured).workstreamScope, [
+    "engineering",
+    "operations",
+    "research",
+  ]);
 });
 
 test("out-of-scope, duplicate, ambiguous or name-based configuration cannot supply workstream identity", () => {
