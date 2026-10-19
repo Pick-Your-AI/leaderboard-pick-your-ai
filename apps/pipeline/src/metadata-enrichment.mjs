@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
+import { types } from "node:util";
 
 const fail = () => {
   throw new Error("enrichment_authorization_changed");
@@ -15,6 +16,21 @@ const canonical = (value) =>
           .join(",")}}`
       : JSON.stringify(value);
 const hash = (value) => createHash("sha256").update(canonical(value)).digest("hex");
+
+function drainUnexpectedPromise(value, seen = new WeakSet()) {
+  // Invalid authority values must not execute foreign then getters or methods.
+  if (!types.isPromise(value) || seen.has(value)) return;
+  seen.add(value);
+  try {
+    // Observe native rejection reasons once, including cycles; discard fulfilled
+    // values. Promise constructor/species behavior remains trusted host code.
+    void Promise.prototype.then.call(
+      value,
+      () => undefined,
+      (reason) => drainUnexpectedPromise(reason, seen),
+    );
+  } catch {}
+}
 
 /** Explicit trusted host composition; never installs an adapter or a public route. */
 export function createMetadataEnrichment({ db, ingestion, setting, config, dataMode, capture }) {
@@ -91,11 +107,12 @@ export function createMetadataEnrichment({ db, ingestion, setting, config, dataM
       let allowed;
       try {
         allowed = configurationCurrent(clone(binding));
-      } catch {
+      } catch (error) {
+        drainUnexpectedPromise(error);
         return false;
       }
       if (allowed !== true) {
-        if (allowed && typeof allowed.then === "function") void Promise.resolve(allowed).catch(() => undefined);
+        drainUnexpectedPromise(allowed);
         return false;
       }
       captured.current();

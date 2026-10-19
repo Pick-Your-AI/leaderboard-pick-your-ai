@@ -14,6 +14,8 @@ export * from "./physical-diff.js";
 export * from "./documentation.js";
 export * from "./research.js";
 export * from "./maintenance.js";
+export * from "./release-inclusion.js";
+export * from "./release-recognition.js";
 export * from "./ordering.js";
 
 export type EndpointOutcome =
@@ -260,3 +262,15 @@ export {
   type GithubCommentKind,
   type GithubCommentSource,
 } from "./comment-identity.js";
+
+export {
+  validateDocumentationPurposeSource,
+  type VerifiedDocumentationPurposeSource,
+} from "./documentation-purpose.js";
+
+export {
+  parseMaintenanceClassification,
+  validateMaintenanceClassification,
+  type MaintenanceClassificationRecord,
+  type MaintenanceClassificationReference,
+} from "./maintenance-classification.js";
