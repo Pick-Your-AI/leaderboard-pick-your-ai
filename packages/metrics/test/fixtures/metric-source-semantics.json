@@ -1,0 +1,331 @@
+{
+  "schema_version": "metric-source-semantics/v1",
+  "synthetic": true,
+  "notice": "Candidate internal policies and synthetic payloads only. A listed case proves its stated boundary, not full metric acceptance, source completeness or a public launch gate.",
+  "cases": [
+    {
+      "id": "PR-CREATION",
+      "name": "PR creation credits its author and original clock, not the delivery sender",
+      "inclusion": "A draft PR still contributes one creation unit to its author.",
+      "exclusion": "Missing creation time and a merger-role selection cannot supply author credit."
+    },
+    {
+      "id": "PR-READINESS",
+      "name": "first readiness survives toggles without inventing current-state history",
+      "inclusion": "Two witnessed readiness observations conserve the first-ready author unit.",
+      "exclusion": "A later toggle outside the first-ready window, an unproven toggle and a current snapshot do not contribute."
+    },
+    {
+      "id": "PR-DELIVERY",
+      "name": "merged participation uses the PR author and merge clock",
+      "inclusion": "One merged object contributes one author unit across repeated observations.",
+      "exclusion": "Closed-unmerged, missing merged_at, merger-role selection and out-of-window merges do not contribute."
+    },
+    {
+      "id": "PR-COAUTHOR",
+      "name": "verified coauthors stay separate from primary authors and pending work",
+      "inclusion": "An independently linked coauthor receives one merged participation unit even with repeated links.",
+      "exclusion": "Primary-author overlap, an empty verification receipt and an unmerged PR do not become coauthor delivery."
+    },
+    {
+      "id": "MERGE-STEWARD",
+      "name": "merged_by remains distinct from the author, sender and automation lens",
+      "inclusion": "The merger receives one operation; a Bot merger is visible only in the automation selection.",
+      "exclusion": "The sender cannot fill missing merged_by, and a Bot merger cannot receive user-lens credit."
+    },
+    {
+      "id": "DECIDED-SHARE",
+      "name": "the decided-PR denominator excludes pending PRs and duplicate observations",
+      "inclusion": "One merged and one closed-unmerged decision produce numerator1, denominator2 and share0.5.",
+      "exclusion": "A pending PR stays separate; replay does not enlarge the denominator, and ranking or creation-time ratios are rejected."
+    },
+    {
+      "id": "DECISION-PROOF",
+      "name": "decisions require exact selected history and an empty denominator is unavailable",
+      "inclusion": "A pending object remains visible as pending1 with numerator0 and denominator0.",
+      "exclusion": "Absent, unverified, different-as-of or contradictory decision histories cannot contribute a decided fact; no decided sample is null, not0%."
+    },
+    {
+      "id": "REVIEW-PARTICIPATION",
+      "name": "submitted reviewer participation is independent of approval preference",
+      "inclusion": "COMMENTED, APPROVED and CHANGES_REQUESTED observations from one reviewer yield one reviewer-PR participation.",
+      "exclusion": "PR self-review, Bot review, pending draft review and author-role selection do not contribute."
+    },
+    {
+      "id": "REVIEW-ROUNDS",
+      "name": "head-specific rounds conserve repeat submissions without favoring approval",
+      "inclusion": "Two reviews on one head and one on a second head yield two rounds but one reviewed PR.",
+      "exclusion": "Missing head proof and dismissed reviews cannot contribute a counted round."
+    },
+    {
+      "id": "REVIEW-COHORT-PROOF",
+      "name": "hydrated review clocks require a complete consistent reviewer cohort",
+      "inclusion": "An earlier submitted review establishes the current reviewer participation clock.",
+      "exclusion": "Duplicate, malformed and missing-current cohort members withhold participation and round facts; a later submission cannot move the first clock into a new window."
+    },
+    {
+      "id": "REVIEW-FEEDBACK",
+      "name": "raw feedback and independently accepted feedback remain separate",
+      "inclusion": "Two distinct submitted review objects yield two raw feedback groups; an independently authorized synthetic receipt qualifies its exact target.",
+      "exclusion": "Replaying one review, pending reviews, raw-only evidence, self-acceptance and rejected receipts do not create extra accepted feedback."
+    },
+    {
+      "id": "THREAD-RESOLUTION-CLOCK",
+      "name": "a resolver transition requires its own actor and time",
+      "inclusion": "A host-proven timestamped resolution attributes its observed unit to the transition actor.",
+      "exclusion": "Current resolvedBy, missing event time and author-role selection cannot supply a period resolution."
+    },
+    {
+      "id": "REVIEW-WAIT-CLOCKS",
+      "name": "duration samples retain readiness cohorts, censoring and unknown clocks",
+      "inclusion": "One proven two-hour pair yields one sample, median2 and p75=2 while a second PR is censored.",
+      "exclusion": "Missing readiness is separately counted, no complete pair remains unavailable, a later response cannot move the readiness cohort, and individual ranking is rejected."
+    },
+    {
+      "id": "ISSUE-REPORTER-CLOSER",
+      "name": "issue reporting, closing and implementation remain different roles",
+      "inclusion": "A closed issue retains one reporter unit and a separate closer stewardship unit.",
+      "exclusion": "An assignee receives neither unit; a closed snapshot does not prove its closer, a missing reporter is not filled from the sender, and closing does not establish resolution or a confirmed bug."
+    }
+  ],
+  "metrics": [
+    {
+      "id": "pr_opened",
+      "role": "author",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["PR-CREATION"],
+      "remaining_scope": "Draft/readiness labels and live source approval remain outside this creation-count boundary."
+    },
+    {
+      "id": "pr_ready",
+      "role": "author",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["PR-READINESS"],
+      "remaining_scope": "The test assumes an explicitly host-verified readiness cohort; it does not prove timeline collection complete."
+    },
+    {
+      "id": "pr_merged",
+      "role": "author",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["PR-DELIVERY"],
+      "remaining_scope": "Physical default-branch delivery, team fractional shares and transfer conservation remain separate source work."
+    },
+    {
+      "id": "pr_coauthored",
+      "role": "coauthor",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["PR-COAUTHOR"],
+      "remaining_scope": "The fixture supplies synthetic verified links; it does not establish actual people, coauthor verification or fractional physical units."
+    },
+    {
+      "id": "maintainer_merges",
+      "role": "merger",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["MERGE-STEWARD"],
+      "remaining_scope": "This establishes actor/lens separation, not the quality of stewardship or a public policy approval."
+    },
+    {
+      "id": "pr_accepted_rate",
+      "role": "author",
+      "aggregation": "ratio",
+      "date_basis": "acceptedAt",
+      "group_by": "actor_artifact",
+      "case_ids": ["DECIDED-SHARE", "DECISION-PROOF"],
+      "remaining_scope": "Reopen-history reconciliation and production cohort completeness remain separate; this suite does not invent either."
+    },
+    {
+      "id": "prs_reviewed",
+      "role": "reviewer",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["REVIEW-PARTICIPATION", "REVIEW-COHORT-PROOF"],
+      "remaining_scope": "The transport is synthetic and does not establish permission or complete real repository history."
+    },
+    {
+      "id": "review_rounds",
+      "role": "reviewer",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["REVIEW-ROUNDS", "REVIEW-COHORT-PROOF"],
+      "remaining_scope": "These cases cover submitted round grouping and proof, not every eligibility or correction rule."
+    },
+    {
+      "id": "review_feedback",
+      "role": "reviewer",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["REVIEW-FEEDBACK"],
+      "remaining_scope": "Standalone inline-comment grouping and substantive review quality are not claimed by these submitted-review cases."
+    },
+    {
+      "id": "review_threads_resolved",
+      "role": "resolver",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "actor_artifact",
+      "case_ids": ["THREAD-RESOLUTION-CLOCK"],
+      "remaining_scope": "Only the host-proven transition boundary is exercised; real thread identity, reopened histories and feedback-author/fixer attribution require separate evidence."
+    },
+    {
+      "id": "review_wait",
+      "role": "author",
+      "aggregation": "duration",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["REVIEW-WAIT-CLOCKS"],
+      "remaining_scope": "The engine retains internal actor rows; the public team/repository-only projection and source cohort construction are not certified here."
+    },
+    {
+      "id": "issues_opened",
+      "role": "reporter",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["ISSUE-REPORTER-CLOSER"],
+      "remaining_scope": "Public reporter identity is synthetic; source hydration and unboarded selection also have separate existing source-boundary tests."
+    },
+    {
+      "id": "issue_closure_stewardship",
+      "role": "triager",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["ISSUE-REPORTER-CLOSER"],
+      "remaining_scope": "A closing transition is operational activity, not implementing contribution or accepted resolution."
+    }
+  ],
+  "deferred": [
+    {
+      "id": "unsupported-aggregation",
+      "metric_ids": ["net_lines"],
+      "reason": "Signed net changes have no implemented aggregation. The inventory checks the explicit rejection; it does not fabricate a positive inclusion case."
+    },
+    {
+      "id": "transfer-owner-382",
+      "metric_ids": ["issue_transfers"],
+      "reason": "COV15 transfer lineage, alias conservation and privacy suppression remain the canonical #382 source lane. This inventory adds no transfer implementation or acceptance."
+    },
+    {
+      "id": "physical-source-owners",
+      "metric_ids": [
+        "pr_lines_added",
+        "pr_lines_removed",
+        "pr_lines_changed",
+        "commit_attributed_lines",
+        "files_changed",
+        "retained_lines"
+      ],
+      "reason": "Physical integration, cohort and revision work remains in #377/#385. Existing tests and their remaining metric-specific mapping are not requalified here."
+    },
+    {
+      "id": "release-operations-owners",
+      "metric_ids": [
+        "release_changes",
+        "release_stewardship",
+        "deployment_work",
+        "incidents",
+        "maintenance",
+        "automation"
+      ],
+      "reason": "Current #375/#367 release/operations policy and recognition work is preserved. The generic engine audit is not substituted for those source cases."
+    },
+    {
+      "id": "project-owner-406",
+      "metric_ids": ["project_configuration"],
+      "reason": "Typed Project-configuration source and semantic correction remain in canonical #406."
+    },
+    {
+      "id": "discussion-owner-395",
+      "metric_ids": ["discussions_started"],
+      "reason": "Discussion capability/source work remains in canonical #395. This inventory does not requalify its collector evidence."
+    },
+    {
+      "id": "source-mapping-not-yet-reviewed",
+      "metric_ids": [
+        "commits_integrated",
+        "direct_changes",
+        "reverted_delivery",
+        "accepted_suggestions",
+        "first_reviews",
+        "cross_workstream_reviews",
+        "evidence_reviews",
+        "accepted_findings",
+        "confirmed_bugs",
+        "reproductions",
+        "issue_resolution",
+        "issue_answers",
+        "issue_clarifications",
+        "duplicate_resolution",
+        "items_triaged",
+        "labels_applied",
+        "labels_corrected",
+        "assignments_coordinated",
+        "milestones_curated",
+        "title_scope_edits",
+        "reference_links",
+        "closing_links",
+        "parent_child_links",
+        "blocker_links",
+        "related_links",
+        "project_items_curated",
+        "project_status_updates",
+        "project_field_updates",
+        "issue_field_updates",
+        "project_updates",
+        "routing_handoffs",
+        "label_taxonomy",
+        "milestone_definitions",
+        "issue_ordering",
+        "public_moderation",
+        "decision_records",
+        "catalog_proposals",
+        "pricebook_proposals",
+        "compatibility_proposals",
+        "primary_sources",
+        "freshness_checks",
+        "reproduced_measurements",
+        "negative_findings",
+        "rights_reviews",
+        "assumptions_resolved",
+        "market_research",
+        "evidence_manifests",
+        "documentation",
+        "tests",
+        "regressions_prevented",
+        "accessibility",
+        "design",
+        "usability",
+        "localization",
+        "performance",
+        "security",
+        "discussion_answers",
+        "helpful_feedback",
+        "mentorship",
+        "onboarding",
+        "governance",
+        "outreach",
+        "appreciation",
+        "data_quality",
+        "first_contribution",
+        "repositories",
+        "workstreams",
+        "collaborations",
+        "active_periods"
+      ],
+      "reason": "Existing domain, normalizer, portfolio and recognition suites may contain useful source cases. Their full metric-to-inclusion/exclusion mapping has not been independently established by this bounded PR; all remain explicit rather than counted as covered by the97 generic engine cases."
+    }
+  ]
+}
