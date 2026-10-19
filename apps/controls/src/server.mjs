@@ -343,24 +343,26 @@ export function createControlsServer({
       }
       if (path.startsWith("/controls/spotlight-rotation")) {
         requireThat([...url.searchParams].length === 0, 400, "Unexpected editorial query");
+        const requireCurrentSession = () =>
+          requireThat(store.read().sessions[session.sid]?.expires > now(), 401, "Session revoked");
         if (req.method === "GET" && path === "/controls/spotlight-rotation/queue") {
-          send(200, rotationQueue(store.read(), session, spotlightEligibility));
+          send(200, rotationQueue(store.read(), session, spotlightEligibility), requireCurrentSession);
           return;
         }
         const action = path.match(/^\/controls\/spotlight-rotation\/([a-f0-9-]{36})$/);
         requireThat(req.method === "POST" && (path === "/controls/spotlight-rotation" || action), 404, "Not found");
         const input = await inputBody();
         const result = store.transaction(
-          (state) =>
-            action
+          (state) => {
+            const record = action
               ? decideRotation(state, session, action[1], input, now(), spotlightEligibility)
-              : proposeRotation(state, session, input, now(), spotlightEligibility),
-          {
-            // No network operation occurs in this synchronous transaction. Recheck
-            // the persisted session after any source-eligibility callback.
-            beforeCommit: () =>
-              requireThat(store.read().sessions[session.sid]?.expires > now(), 401, "Session revoked"),
+              : proposeRotation(state, session, input, now(), spotlightEligibility);
+            // Check persisted authority before ControlStore writes this cloned
+            // state, which could otherwise restore a callback-revoked session.
+            requireCurrentSession();
+            return record;
           },
+          { beforeCommit: requireCurrentSession },
         );
         send(action ? 200 : 201, { record: result });
         return;
