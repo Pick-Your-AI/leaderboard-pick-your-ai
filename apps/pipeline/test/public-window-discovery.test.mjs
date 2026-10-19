@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { join } from "node:path";
 import { createPipeline } from "../src/index.mjs";
+import { correctionStateQuery } from "../src/reversion-store.mjs";
 import { harness, components, publicScope, fixtureId } from "./harness.mjs";
 import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-intake.mjs";
 
@@ -362,16 +363,19 @@ test("current configuration approval, exact configuration namespace and source r
 
 function finalReadFault(h, change) {
   const transaction = h.db.transaction.bind(h.db);
-  const observed = { reads: 0, authorityQueries: 0, changes: 0 };
+  const observed = { reads: 0, authorityQueries: 0, authorityReadTrace: [], changes: 0 };
   h.db.transaction = (work) =>
     transaction((tx) =>
       work({
         query: async (sql, params) => {
           const result = await tx.query(sql, params);
           if (sql.includes("SELECT selected.document")) observed.reads++;
-          if (sql.includes("SELECT subject_id") && sql.includes("UNION SELECT dependency.artifact_id")) {
+          // One standalone query per individual read is followed by the shared final fence.
+          if (sql === correctionStateQuery) {
             observed.authorityQueries++;
+            observed.authorityReadTrace.push(observed.reads);
             if (observed.authorityQueries === 3) {
+              assert.deepEqual(observed.authorityReadTrace, [1, 2, 2], "the edit must occur at the shared final fence");
               assert.equal(observed.reads, 2, "the edit must follow both complete individually authorized reads");
               observed.changes++;
               change();
@@ -409,7 +413,7 @@ for (const changed of ["actor", "head", "confirmation", "index", "explanation", 
         });
     });
     unavailable(await h.runtime.app.inject(url()));
-    assert.deepEqual(observed, { reads: 2, authorityQueries: 3, changes: 1 });
+    assert.deepEqual(observed, { reads: 2, authorityQueries: 3, authorityReadTrace: [1, 2, 2], changes: 1 });
     assert.equal(h.controlsStore.read().revision, revision, "the fence cannot depend only on a public revision bump");
   });
 
@@ -475,6 +479,6 @@ test("the final discovery fence rechecks recognition withdrawal after every capt
     }),
   );
   unavailable(await h.runtime.app.inject(url()));
-  assert.deepEqual(observed, { reads: 2, authorityQueries: 3, changes: 1 });
+  assert.deepEqual(observed, { reads: 2, authorityQueries: 3, authorityReadTrace: [1, 2, 2], changes: 1 });
   assert.equal(h.controlsStore.read().revision, revision);
 });

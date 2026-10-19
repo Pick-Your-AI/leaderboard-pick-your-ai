@@ -110,12 +110,29 @@ The direct trusted receipt API can carry `documentationPurpose: "release_notes"`
 only with the exact original documentation source and reviewed `sourceRevision`;
 that API continues to require independently authenticated host receipts.
 
+For an original source marked as a notes candidate, generic documentation and
+purpose receipts share the existing documentation category unit. Caller changeset
+aliases cannot split that contribution. A generic receipt can retain the existing
+source-bound `example` or `guide` category unit from domain qualification; those
+separately reviewed categories remain distinct on the same PR. This identity rule
+adds no purpose claim to a generic receipt.
+
 ## Currentness, aliases and stored history
 
 Every current request and source passes qualification before canonical duplicate
 selection. Accepted-time ordering retains the earliest valid canonical receipt;
 later aliases do not union purposes or add units. A later malformed alias is
 still rejected. Amend the existing claim and obtain fresh review to replace it.
+The direct receipt API retains the supplied reviews instead of selecting a
+canonical winner. Conflicting reviews of one unit therefore retain the metric
+engine's existing withheld result; mixing generic and purpose reviews cannot
+turn that conflict into two counted contributions.
+The exact retained legacy generic identity is rejected before a new receipt can
+split it into a second documentation unit. Hosts must rebuild that accepted
+overlay from the original source and current receipts before appending reviews
+after an upgrade. This bounded admission check does not rewrite historical
+outputs or reinterpret arbitrary older changeset aliases. The built-in pipeline
+recomputes its controls overlays from provider normalizations on each run.
 Pending, declined, withdrawn, appealed or stale inputs cannot retain an accepted
 overlay. SQLite/database reopen does not restore revoked authority.
 

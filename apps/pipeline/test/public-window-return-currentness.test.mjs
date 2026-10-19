@@ -306,6 +306,9 @@ for (const boundary of ["after BEGIN", "after statement", "after COMMIT"])
       let transactions = 0,
         changes = 0,
         statements = 0;
+      const finalQueries = [];
+      const isFinalAuthority = (sql) =>
+        sql.includes("WITH access AS MATERIALIZED") && sql.includes("correction_rows AS MATERIALIZED");
       const change = () => {
         changes++;
         if (changed === "expiry") now = 2_000;
@@ -325,8 +328,11 @@ for (const boundary of ["after BEGIN", "after statement", "after COMMIT"])
             query: async (sql, params) => {
               const rows = await tx.query(sql, params);
               if (number === 2) {
-                statements++;
-                if (boundary === "after statement") change();
+                finalQueries.push(sql);
+                if (isFinalAuthority(sql)) {
+                  statements++;
+                  if (boundary === "after statement") change();
+                }
               }
               return rows;
             },
@@ -343,7 +349,13 @@ for (const boundary of ["after BEGIN", "after statement", "after COMMIT"])
       }
       assert.equal(transactions, 2);
       assert.equal(changes, 1);
-      if (boundary !== "after BEGIN") assert.equal(statements, 1, "one complete final SQL authority statement");
+      if (boundary !== "after BEGIN") {
+        assert.equal(statements, 1, "one complete final SQL authority statement");
+        assert.match(finalQueries[0], /pg_advisory_xact_lock_shared/, "dependency preparation is graph-first");
+        assert.equal(isFinalAuthority(finalQueries.at(-1)), true, "no SQL follows the complete final authority");
+        assert.match(finalQueries.at(-1), /project_scope_denial/);
+        assert.match(finalQueries.at(-1), /UNION ALL SELECT 'correction'/);
+      }
       assert.deepEqual(h.controlsStore.read(), controls, "the host transition does not require a controls revision");
       assert.deepEqual(
         (await h.db.query("SELECT * FROM leaderboard_ingestion.repository_access ORDER BY repository_id")).rows,
