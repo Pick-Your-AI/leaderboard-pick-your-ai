@@ -4,11 +4,21 @@ import test from "node:test";
 import {
   applyRecognitionReceipt,
   createGithubEvidenceNormalizer,
+  groupTriageTransitions,
   githubReviewRevision,
   normalizeGithubObservation,
 } from "../../github/dist/index.js";
 import { syntheticRepositoryClient } from "../../github/test/synthetic-client.mjs";
-import { aggregateMetric, getMetricDefinition, metricDefinitionsV1, metricRegistryV1 } from "../dist/index.js";
+import { createGithubCollectionSource } from "../../../apps/pipeline/src/github-source.mjs";
+import { metricRegistrySchema } from "../../contracts/dist/index.js";
+import {
+  aggregateMetric,
+  getMetricDefinition,
+  getMetricGroupingPolicy,
+  getMetricUi,
+  metricDefinitionsV1,
+  metricRegistryV1,
+} from "../dist/index.js";
 
 // Deliberately synthetic public transport payloads. They exercise the real
 // normalizer and engine, without claiming collection coverage or release approval.
@@ -65,6 +75,8 @@ function policy(metricId, patch = {}) {
     rankedStates: ["observed"],
     roles: [entry.role],
     groupBy: entry.group_by,
+    ...(entry.grouping_seconds ? { groupingSeconds: entry.grouping_seconds } : {}),
+    ...(entry.grouping_policy_version ? { groupingPolicyVersion: entry.grouping_policy_version } : {}),
     sources: ["github_webhook", "github_rest"],
     minimumSamples: 1,
     rank: false,
@@ -104,7 +116,7 @@ function review(id, patch = {}) {
     ...patch,
   };
 }
-async function hydrateReview(current, cohort = [current], parent = pull()) {
+async function hydrateReview(current, cohort = [current], parent = pull(), options = {}) {
   const client = syntheticRepositoryClient(2, {
     rest: async (_source, path) => {
       if (path === `/repos/synthetic-owner/repository/pulls/10/reviews/${current.id}`) return current;
@@ -117,7 +129,13 @@ async function hydrateReview(current, cohort = [current], parent = pull()) {
       return request.select(cohort);
     },
   });
-  return createGithubEvidenceNormalizer({ client, source: "synthetic", allowedRepositoryIds: [2], isSynthetic: true })({
+  return createGithubEvidenceNormalizer({
+    client,
+    source: "synthetic",
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+    ...options,
+  })({
     repository: { id: 2, slug: "synthetic-owner/repository" },
     family: "reviews",
     factKey: `synthetic-review-${current.id}`,
@@ -399,12 +417,337 @@ semanticCase("ISSUE-REPORTER-CLOSER", () => {
   assert.deepEqual(values(aggregate("issue_closure_stewardship", [unknownReporter])), [["202", 1]]);
 });
 
-test("the semantic inventory accounts for all 98 definitions without treating deferred metrics as tested", () => {
+async function collectedTimeline(event, hydrated = event) {
+  const repository = {
+    id: 2,
+    installationId: 1,
+    slug: "synthetic-owner/repository",
+    families: ["timelines"],
+  };
+  const calls = [];
+  const client = syntheticRepositoryClient(2, {
+    rest: async (_source, path) => {
+      calls.push(path);
+      if (path === "/repos/synthetic-owner/repository") return fixture.repository;
+      assert.equal(path, `/repos/synthetic-owner/repository/issues/events/${event.id}`);
+      return structuredClone(hydrated);
+    },
+    scanRest: async (request) => {
+      assert.equal(request.url, "/repos/synthetic-owner/repository/issues/events?per_page=100");
+      return request.select([structuredClone(event)]);
+    },
+  });
+  const source = createGithubCollectionSource({
+    client,
+    sourceId: "synthetic",
+    repositories: [repository],
+    isSynthetic: true,
+  });
+  const page = await source.readPage({
+    repositoryId: 2,
+    runId: "synthetic",
+    family: "timelines",
+    cursor: null,
+    limit: 10,
+  });
+  assert.equal(page.facts.length, 1);
+  assert.equal(page.nextCursor, null);
+  const output = await createGithubEvidenceNormalizer({
+    client,
+    source: "synthetic",
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+  })({
+    repository,
+    family: "timelines",
+    factKey: `synthetic-timeline-${event.id}`,
+    observedAt,
+    policyVersion: "synthetic/v1",
+    fact: page.facts[0],
+  });
+  assert.ok(calls.includes(`/repos/synthetic-owner/repository/issues/events/${event.id}`));
+  return { page, output };
+}
+
+function timelineEvent(action, field, patch = {}) {
+  return {
+    id: 901,
+    event: action,
+    actor: fixture.merger,
+    created_at: at,
+    issue: {
+      ...structuredClone(fixture.issue),
+      user: fixture.author,
+      labels: [{ id: 81 }],
+      assignees: [fixture.reviewer],
+      milestone: { id: 82 },
+    },
+    ...(field ? { [field]: { id: 90, node_id: "SYNTHETIC_TARGET" } } : {}),
+    ...patch,
+  };
+}
+
+for (const [id, metricId, action, field] of [
+  ["COLLECTED-LABEL", "labels_applied", "labeled", "label"],
+  ["COLLECTED-ASSIGNMENT", "assignments_coordinated", "assigned", "assignee"],
+  ["COLLECTED-MILESTONE", "milestones_curated", "milestoned", "milestone"],
+]) {
+  semanticCase(id, async () => {
+    const event = timelineEvent(action, field);
+    const before = structuredClone(event);
+    const { page, output } = await collectedTimeline(event);
+    assert.equal(page.facts[0].actorId, "202");
+    assert.equal(page.facts[0].occurredAt, "2026-10-07T10:00:00.000Z");
+    const fact = metricFacts(output, metricId)[0];
+    assert.equal(fact.actorId, "202");
+    assert.equal(fact.role, "triager");
+    assert.equal(fact.occurredAt, page.facts[0].occurredAt);
+    assert.equal(fact.rawState, `${action}:SYNTHETIC_TARGET`);
+    assert.deepEqual(values(aggregate(metricId, [output, output])), [["202", 1]]);
+    assert.deepEqual(aggregate(metricId, [output], {}, { roles: ["author"] }).rows, []);
+    assert.deepEqual(aggregate(metricId, [output], {}, { from: "2026-10-07T11:00:00Z" }).rows, []);
+    assert.equal(
+      output.facts.some((entry) => entry.actorId === "303"),
+      false,
+      "The current assignee is not the editor",
+    );
+
+    for (const missing of [undefined, {}, { name: "Synthetic display name without identity" }]) {
+      const unrelated = field === "label" ? "milestone" : "label";
+      const absent = await collectedTimeline(
+        timelineEvent(action, field, { [field]: missing, [unrelated]: { id: 99 } }),
+      );
+      assert.equal(metricFacts(absent.output, metricId)[0].state, "unknown");
+      assert.deepEqual(values(aggregate(metricId, [absent.output])), []);
+    }
+    const changed = await collectedTimeline(event, { ...event, [field]: { id: 91 } });
+    assert.deepEqual(changed.output.facts, []);
+    assert.ok(changed.output.reasons.includes("hydrated_source_revision_unverified"));
+    const wrongSubject = await collectedTimeline(event, {
+      ...event,
+      issue: { ...event.issue, html_url: `${event.issue.html_url}1` },
+    });
+    assert.deepEqual(wrongSubject.output.facts, []);
+    const unknownActor = await collectedTimeline(timelineEvent(action, field, { actor: null }));
+    assert.deepEqual(values(aggregate(metricId, [unknownActor.output])), []);
+    const bot = await collectedTimeline(timelineEvent(action, field, { actor: fixture.bot }));
+    assert.deepEqual(aggregate(metricId, [bot.output]).rows, []);
+    const snapshot = normalize({
+      family: "issue",
+      action: "snapshot",
+      payload: { issue: event.issue, sender: fixture.merger },
+    });
+    assert.deepEqual(metricFacts(snapshot, metricId), []);
+    if (metricId === "milestones_curated") {
+      const removed = await collectedTimeline(timelineEvent("demilestoned", field, { id: 902 }));
+      assert.equal(metricFacts(removed.output, metricId)[0].rawState, "demilestoned:SYNTHETIC_TARGET");
+      assert.deepEqual(
+        values(aggregate(metricId, [output, removed.output])),
+        [["202", 2]],
+        "The raw event lens retains both actions",
+      );
+      const transitions = [output, removed.output].map((result, index) => {
+        const fact = metricFacts(result, metricId)[0];
+        return {
+          id: fact.id,
+          artifactId: fact.artifactId,
+          actorId: fact.actorId,
+          occurredAt: fact.occurredAt,
+          facet: "milestone",
+          targetId: "SYNTHETIC_TARGET",
+          before: index ? "present" : "absent",
+          after: index ? "absent" : "present",
+        };
+      });
+      const grouped = groupTriageTransitions(transitions, {
+        version: "synthetic-milestone/v1",
+        intervalSeconds: 3600,
+        cooldownSeconds: 86400,
+      });
+      assert.equal(grouped.sessions.length, 1);
+      assert.equal(grouped.sessions[0].rawActions, 2);
+      assert.equal(grouped.sessions[0].reversalSuppressed, true);
+      assert.equal(grouped.qualifiedOutcomes, 0, "A reversal group does not manufacture completed curation");
+      const definition = normalize({
+        family: "triage",
+        action: "milestone_edited",
+        payload: {
+          milestone: { ...event.milestone, html_url: "https://github.com/synthetic-owner/repository/milestone/1" },
+          sender: fixture.merger,
+        },
+      });
+      assert.deepEqual(metricFacts(definition, metricId), []);
+      assert.equal(metricFacts(definition, "milestone_definitions").length, 1);
+    }
+    assert.deepEqual(event, before);
+  });
+}
+
+semanticCase("PUBLIC-STEWARDSHIP-DAY", async () => {
+  const grouping = getMetricGroupingPolicy("public_moderation");
+  assert.equal(grouping.version, "public-stewardship-day/v1");
+  assert.equal(grouping.grouping_seconds, 86400);
+  assert.equal(grouping.public_enabled, false);
+  assert.equal(getMetricUi("public_moderation").default_combination, null);
+  const outputs = [];
+  for (const [index, action] of ["pinned", "unpinned", "locked", "unlocked"].entries()) {
+    const { output } = await collectedTimeline(timelineEvent(action, null, { id: 910 + index }));
+    assert.equal(metricFacts(output, "public_moderation")[0].rawState, `${action}:unknown`);
+    outputs.push(output);
+  }
+  assert.deepEqual(values(aggregate("public_moderation", [...outputs, ...outputs])), [["202", 1]]);
+  const previousDay = await collectedTimeline(
+    timelineEvent("locked", null, { id: 919, created_at: "2026-10-06T23:59:59Z" }),
+  );
+  assert.deepEqual(values(aggregate("public_moderation", [...outputs, previousDay.output])), [["202", 2]]);
+  const snapshot = normalize({
+    family: "issue",
+    action: "snapshot",
+    payload: { issue: { ...fixture.issue, locked: true, pinned: true }, sender: fixture.merger },
+  });
+  assert.deepEqual(metricFacts(snapshot, "public_moderation"), []);
+  const privateSource = normalize({
+    family: "triage",
+    action: "locked",
+    repository: { id: 2, slug: "synthetic-owner/repository", visibility: "private" },
+  });
+  assert.deepEqual(metricFacts(privateSource, "public_moderation"), []);
+  const organizationBlock = normalize({ family: "triage", action: "member_blocked" });
+  assert.deepEqual(metricFacts(organizationBlock, "public_moderation"), []);
+  assert.throws(() => aggregate("public_moderation", outputs, { rank: true }), /Descriptive metrics/);
+  for (const patch of [
+    { groupingSeconds: 3600 },
+    { groupingPolicyVersion: undefined },
+    { groupBy: "canonical" },
+    { dateBasis: "acceptedAt" },
+  ]) {
+    assert.throws(() => aggregate("public_moderation", outputs, patch), /exact versioned grouping/);
+  }
+  const altered = structuredClone(metricRegistryV1);
+  altered.grouping_policies.find((entry) => entry.metric_id === "public_moderation").grouping_seconds = 3600;
+  assert.equal(metricRegistrySchema.safeParse(altered).success, false);
+});
+
+semanticCase("FIRST-REVIEW-SEQUENCE", async () => {
+  const first = review(941, { state: "COMMENTED" });
+  const tie = review(942, { user: fixture.merger, state: "CHANGES_REQUESTED" });
+  const later = review(943, { user: fixture.merger, submitted_at: "2026-10-07T11:00:00Z" });
+  const own = review(944, { user: fixture.author, submitted_at: "2026-10-06T10:00:00Z" });
+  const automated = review(945, { user: fixture.bot, submitted_at: "2026-10-06T09:00:00Z" });
+  const pending = review(946, { state: "PENDING", user: null, submitted_at: null });
+  const cohort = [later, own, pending, tie, automated, first];
+  const earlyOutput = await hydrateReview(first, cohort);
+  const tieOutput = await hydrateReview(tie, cohort);
+  assert.deepEqual(values(aggregate("first_reviews", [earlyOutput, tieOutput, earlyOutput])), [
+    ["202", 1],
+    ["303", 1],
+  ]);
+  assert.equal(metricFacts(earlyOutput, "first_reviews")[0].occurredAt, "2026-10-07T10:00:00.000Z");
+  assert.deepEqual(metricFacts(await hydrateReview(later, cohort), "first_reviews"), []);
+  assert.deepEqual(metricFacts(await hydrateReview(own, cohort), "first_reviews"), []);
+  assert.deepEqual(metricFacts(await hydrateReview(automated, cohort), "first_reviews"), []);
+  assert.deepEqual(metricFacts(await hydrateReview(pending, cohort), "first_reviews"), []);
+  assert.deepEqual(metricFacts(await hydrateReview(first, [...cohort, first]), "first_reviews"), []);
+  assert.deepEqual(
+    metricFacts(
+      await hydrateReview(
+        first,
+        cohort.filter((item) => item.id !== first.id),
+      ),
+      "first_reviews",
+    ),
+    [],
+  );
+  assert.deepEqual(metricFacts(await hydrateReview(first, cohort, pull({ user: null })), "first_reviews"), []);
+  const conflictingAuthor = pull({ user: { ...fixture.author, node_id: "U_SYNTHETIC_AUTHOR" } });
+  const aliasedAuthor = review(947, {
+    user: { ...fixture.merger, node_id: "U_SYNTHETIC_AUTHOR" },
+    submitted_at: "2026-10-07T11:00:00Z",
+  });
+  assert.deepEqual(
+    metricFacts(await hydrateReview(first, [first, aliasedAuthor], conflictingAuthor), "first_reviews"),
+    [],
+    "A later cohort entry cannot rebind the pull author's native identity",
+  );
+  for (const earlier of [
+    review(947, { user: null, submitted_at: "2026-10-06T10:00:00Z" }),
+    review(947, { user: { ...fixture.merger, type: "Unknown" }, submitted_at: "2026-10-06T10:00:00Z" }),
+    review(947, { submitted_at: "2026-09-30T10:00:00Z" }),
+    review(947, { submitted_at: "2026-10-09T10:00:00Z" }),
+    review(947, { submitted_at: "2026-10-07T10:00:00.0001Z" }),
+    review(947, { state: "PENDING", submitted_at: at }),
+  ])
+    assert.deepEqual(metricFacts(await hydrateReview(first, [...cohort, earlier]), "first_reviews"), []);
+  const dismissed = review(948, { state: "DISMISSED", user: fixture.merger, submitted_at: "2026-10-06T10:00:00Z" });
+  assert.deepEqual(
+    metricFacts(await hydrateReview(first, [dismissed, first]), "first_reviews"),
+    [],
+    "A dismissed earlier submission does not turn a later review into historical first",
+  );
+  assert.deepEqual(metricFacts(await hydrateReview(dismissed, [dismissed, first]), "first_reviews"), []);
+  const service = review(949, {
+    user: { id: 606, node_id: "U_SYNTHETIC_SERVICE_606", type: "User" },
+    submitted_at: "2026-10-06T10:00:00Z",
+  });
+  const classifications = {
+    reviewedServiceAccounts: [
+      {
+        schemaVersion: "leaderboard-service-account/v1",
+        classificationId: "synthetic-first-review-service",
+        githubDatabaseId: 606,
+        githubNodeId: "U_SYNTHETIC_SERVICE_606",
+        source: "reviewed_configuration",
+        evidenceIds: ["synthetic-classification-606"],
+        reviewerActorId: "202",
+        reviewedAt: "2026-10-01T00:00:00Z",
+      },
+    ],
+    authorizedClassifierIds: ["202"],
+  };
+  const serviceExcluded = await hydrateReview(first, [service, first], pull(), classifications);
+  assert.deepEqual(values(aggregate("first_reviews", [serviceExcluded])), [["303", 1]]);
+  assert.ok(
+    !serviceExcluded.actors.some((actor) => actor.id === "606"),
+    "Sequence inspection does not add unrelated actors to the normalized output",
+  );
+  assert.deepEqual(
+    metricFacts(await hydrateReview(service, [service, first], pull(), classifications), "first_reviews"),
+    [],
+  );
+  assert.deepEqual(
+    metricFacts(await hydrateReview(first, [service, first]), "first_reviews"),
+    [],
+    "A user-looking account is not classified by its appearance",
+  );
+  await assert.rejects(
+    hydrateReview(first, [service, first], pull(), {
+      ...classifications,
+      reviewedServiceAccounts: [{ ...classifications.reviewedServiceAccounts[0], githubNodeId: "U_WRONG" }],
+    }),
+    /classification conflicts/,
+  );
+  assert.deepEqual(aggregate("first_reviews", [earlyOutput], {}, { from: "2026-10-07T10:00:00.001Z" }).rows, []);
+  assert.deepEqual(
+    metricFacts(
+      normalize({
+        family: "review",
+        action: "first_submitted_review_verified",
+        payload: { pull_request: pull(), review: first },
+      }),
+      "first_reviews",
+    ),
+    [],
+    "An action string cannot replace a complete source sequence",
+  );
+});
+
+test("the semantic inventory accounts for all 98 definitions and preserves exact existing semantic test references", async () => {
   assert.equal(inventory.synthetic, true);
   assert.equal(metricDefinitionsV1.length, 98);
   const covered = inventory.metrics.map((entry) => entry.id);
   const deferred = inventory.deferred.flatMap((group) => group.metric_ids);
-  const all = [...covered, ...deferred];
+  const existing = inventory.existing_evidence.map((entry) => entry.metric_id);
+  const all = [...covered, ...existing, ...deferred];
   assert.equal(new Set(all).size, all.length, "Every metric must appear in exactly one disposition");
   assert.deepEqual(all.sort(), metricDefinitionsV1.map((metric) => metric.id).sort());
   assert.equal(new Set(inventory.cases.map((entry) => entry.id)).size, inventory.cases.length);
@@ -418,6 +761,24 @@ test("the semantic inventory accounts for all 98 definitions without treating de
     assert.ok(inventory.metrics.some((metric) => metric.case_ids.includes(entry.id)));
   }
   for (const entry of inventory.deferred) assert.ok(entry.reason.trim() && entry.metric_ids.length);
+  for (const entry of inventory.existing_evidence) {
+    assert.match(entry.path, /^(?:apps|packages)\/[A-Za-z0-9_./-]+\.test\.(?:mjs|js)$/);
+    assert.ok(!entry.path.split("/").includes(".."));
+    const source = await readFile(new URL(`../../../${entry.path}`, import.meta.url), "utf8");
+    assert.ok(
+      entry.positive_test.trim() && source.includes(entry.positive_test),
+      `${entry.metric_id}: missing positive test`,
+    );
+    assert.ok(
+      entry.negative_test.trim() && source.includes(entry.negative_test),
+      `${entry.metric_id}: missing exclusion test`,
+    );
+    assert.ok(entry.limitation.trim());
+    if (entry.case_parameter) {
+      assert.equal(entry.case_parameter, entry.metric_id);
+      assert.ok(source.includes(entry.case_parameter), `${entry.metric_id}: missing parameterized source case`);
+    }
+  }
   const unsupported = inventory.deferred.find((entry) => entry.id === "unsupported-aggregation");
   assert.deepEqual(unsupported.metric_ids, ["net_lines"]);
   assert.throws(

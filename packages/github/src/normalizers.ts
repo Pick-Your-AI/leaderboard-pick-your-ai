@@ -22,6 +22,7 @@ import {
 import { GithubReadClient } from "./client.js";
 import { readGithubCommentSource, readGithubCommentIdentity } from "./comment-identity.js";
 import { consistentReviewCohortIdentities, reviewParentMatches, reviewSourceMatches } from "./review-cohort.js";
+import { firstReviewSubmission } from "./first-review.js";
 import {
   hasGithubRestSnapshotPrefix,
   isGithubRestSnapshotFamily,
@@ -337,6 +338,8 @@ export interface GithubEvidenceEnvelope {
   discussionAnswerSelection?: { verified: true };
   reviewCohort?: { verified: true; firstReadyAt: string | null; firstSubmittedReviewAt: string | null };
   reviewParticipation?: { verified: true; firstSubmittedAt: string | null; roundFirstSubmittedAt: string | null };
+  /** Complete exact-PR REST sequence; ephemeral protected input, not retained source bodies. */
+  reviewSequence?: { verified: true; reviews: readonly unknown[] };
   /** Host-selected current decision at one frozen cutoff, not a latest-field guess. */
   decisionCohort?: {
     verified: true;
@@ -645,19 +648,7 @@ export function normalizeGithubObservation(
   const observedNodes = new Map<number, string>();
   const observedDatabaseIds = new Map<string, number>();
   const registeredActors = new Map<string, NormalizedGithubActor>();
-  const register = (value: unknown, automated = false) => {
-    const parsed = actor(value, automated);
-    if (parsed?.githubNodeId) {
-      const previousNode = observedNodes.get(parsed.githubDatabaseId);
-      const previousDatabaseId = observedDatabaseIds.get(parsed.githubNodeId);
-      if (
-        (previousNode !== undefined && previousNode !== parsed.githubNodeId) ||
-        (previousDatabaseId !== undefined && previousDatabaseId !== parsed.githubDatabaseId)
-      )
-        throw new Error("Conflicting observed actor database/node identity bindings");
-      observedNodes.set(parsed.githubDatabaseId, parsed.githubNodeId);
-      observedDatabaseIds.set(parsed.githubNodeId, parsed.githubDatabaseId);
-    }
+  const classifyActor = (parsed: NormalizedGithubActor | null) => {
     const classification = parsed && classifications.get(parsed.githubDatabaseId);
     if (parsed && classification) {
       if (
@@ -671,6 +662,22 @@ export function normalizeGithubObservation(
     } else if (parsed?.githubNodeId && classifiedNodes.has(parsed.githubNodeId)) {
       throw new Error("Service-account classification conflicts with source actor database ID");
     }
+    return parsed;
+  };
+  const register = (value: unknown, automated = false) => {
+    const parsed = actor(value, automated);
+    if (parsed?.githubNodeId) {
+      const previousNode = observedNodes.get(parsed.githubDatabaseId);
+      const previousDatabaseId = observedDatabaseIds.get(parsed.githubNodeId);
+      if (
+        (previousNode !== undefined && previousNode !== parsed.githubNodeId) ||
+        (previousDatabaseId !== undefined && previousDatabaseId !== parsed.githubDatabaseId)
+      )
+        throw new Error("Conflicting observed actor database/node identity bindings");
+      observedNodes.set(parsed.githubDatabaseId, parsed.githubNodeId);
+      observedDatabaseIds.set(parsed.githubNodeId, parsed.githubDatabaseId);
+    }
+    classifyActor(parsed);
     if (parsed) {
       const previous = registeredActors.get(parsed.id);
       if (previous && previous.kind !== parsed.kind) throw new Error("Conflicting observed actor kinds");
@@ -909,8 +916,22 @@ export function normalizeGithubObservation(
         `${reviewId}:feedback`,
         { rawState: state! },
       );
-      if (envelope.action === "first_submitted_review_verified")
-        emit("first_reviews", reviewer, "reviewer", submitted, `${id}:first-review`);
+      const firstReviewAt = envelope.reviewSequence?.verified
+        ? firstReviewSubmission({
+            current: review,
+            parent: resource,
+            parentUrl: publicUrl,
+            parentApiUrl: `https://api.github.com/repos/${repository.slug}/pulls/${resource.number}`,
+            cohort: envelope.reviewSequence.reviews,
+            observedAt,
+            readActor: (value) => classifyActor(actor(value)),
+            readTime: time,
+          })
+        : null;
+      if (firstReviewAt)
+        emit("first_reviews", reviewer, "reviewer", firstReviewAt, `${id}:first-review`, {
+          rawState: "first_nonself_submitted_review",
+        });
     }
     out.reasons.push("review_quality_requires_independent_receipt");
   } else if (envelope.family === "commit") {
@@ -1875,6 +1896,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       let timeline = false;
       let pullResource: unknown;
       let reviewParticipation: GithubEvidenceEnvelope["reviewParticipation"];
+      let reviewSequence: GithubEvidenceEnvelope["reviewSequence"];
       if (input.family === "timelines" && (issue || pull) && /^[1-9]\d*$/.test(input.fact.subjectId)) {
         family = "triage";
         timeline = true;
@@ -2065,6 +2087,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
             firstSubmittedAt: earliest(submissions),
             roundFirstSubmittedAt: earliest(submissions.filter((review) => review.commit_id === payload.commit_id)),
           };
+          reviewSequence = { verified: true, reviews: cohort };
         }
       }
       if (timeline && (!object(payload.issue) || payload.issue.html_url !== sourceUrl))
@@ -2098,6 +2121,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           ? {}
           : { authorizedClassifierIds: options.authorizedClassifierIds }),
         ...(reviewParticipation ? { reviewParticipation } : {}),
+        ...(reviewSequence ? { reviewSequence } : {}),
         ...(family === "discussion" && input.selectedCurrentState
           ? { discussionAnswerSelection: { verified: true as const } }
           : {}),

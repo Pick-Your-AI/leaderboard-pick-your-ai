@@ -9,7 +9,7 @@ import { syntheticRepositoryClient } from "../../../packages/github/test/synthet
 import { ago, clock, components, harness, publicScope } from "./harness.mjs";
 import { insertOperatorDelivery } from "./operator-harness.mjs";
 
-const version = "review-source-identity/v1";
+const version = "review-source-identity/v2";
 const slug = "synthetic-org/synthetic-repo";
 const parentUrl = `https://github.com/${slug}/pull/10`;
 const parentApi = `https://api.github.com/repos/${slug}/pulls/10`;
@@ -179,7 +179,7 @@ async function assertMetrics(runtime, expected, snapshotId = null) {
 // A deliberately pre-upgrade fixture: actual source/cache, SQL frozen input and
 // SQLite authorities retain valid hashes, but review semantics have no version
 // assertion. Rebuild the private arithmetic receipt from the same frozen input.
-async function retainLegacyReview(h, publication, bindingMode) {
+async function retainLegacyReview(h, publication, bindingMode, legacyVersion = null) {
   const row = (
     await h.db.query(
       `SELECT n.* FROM leaderboard_pipeline.normalizations n
@@ -187,9 +187,12 @@ async function retainLegacyReview(h, publication, bindingMode) {
     )
   ).rows[0];
   const document = structuredClone(row.document);
-  delete document.reviewSourceNormalizationVersion;
+  if (legacyVersion) document.reviewSourceNormalizationVersion = legacyVersion;
+  else delete document.reviewSourceNormalizationVersion;
   const oldHash = comparisonHash(document);
-  const signature = legacySignature(h.config);
+  const signature = legacyVersion
+    ? comparisonHash([legacyVersion, currentSignature(h.config)])
+    : legacySignature(h.config);
   await h.db.query(
     `UPDATE leaderboard_pipeline.normalizations SET policy_signature=$2,document=$3::jsonb,document_hash=$4
      WHERE fact_key=$1 AND policy_signature=$5`,
@@ -267,7 +270,8 @@ async function retainLegacyReview(h, publication, bindingMode) {
       ...Object.values(state.pipelineHeads),
     ]) {
       if (confirmation.snapshotId !== publication.snapshotId) continue;
-      delete confirmation.reviewSourceNormalizationVersion;
+      if (legacyVersion) confirmation.reviewSourceNormalizationVersion = legacyVersion;
+      else delete confirmation.reviewSourceNormalizationVersion;
       confirmation.aggregateExplanationHash = explanationHash;
     }
   });
@@ -392,6 +396,32 @@ test("legacy review authority and cache generations are denied across actual Pos
         await assertDenied(runtime, first.snapshotId, { current: false });
       });
     });
+});
+
+test("version-one review authority is retained unchanged and withheld until a complete sequence is recomputed", async (t) => {
+  const h = await reviewHarness(t);
+  const first = (await h.runtime.runOnce()).publications[0];
+  const legacy = await retainLegacyReview(h, first, "exact", "review-source-identity/v1");
+  const hydrations = h.state.hydrations;
+  await restart(h, async (runtime) => {
+    await assertDenied(runtime, first.snapshotId);
+    const rebuilt = (await runtime.runOnce()).publications[0];
+    assert.notEqual(rebuilt.snapshotId, first.snapshotId);
+    assert.ok(h.state.hydrations > hydrations);
+    await assertDenied(runtime, first.snapshotId, { current: false });
+    await assertMetrics(runtime, { prs_reviewed: 1, review_rounds: 1, review_feedback: 1 });
+    const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY policy_signature")).rows;
+    assert.equal(rows.length, 2);
+    const retained = rows.find((row) => row.policy_signature === legacy.signature);
+    assert.deepEqual(retained.document, legacy.document);
+    assert.equal(retained.document_hash, legacy.documentHash);
+    const current = rows.find((row) => row.policy_signature !== legacy.signature);
+    assert.equal(current.document.reviewSourceNormalizationVersion, version);
+    const firstFacts = current.document.facts.filter((fact) => fact.metricId === "first_reviews");
+    assert.equal(firstFacts.length, 1);
+    assert.equal(firstFacts[0].actorId, "303");
+    assert.equal(firstFacts[0].occurredAt, h.state.review.submitted_at);
+  });
 });
 
 test("retained nonreview publications keep their cache generation, public exports and private comparison across restart", async (t) => {

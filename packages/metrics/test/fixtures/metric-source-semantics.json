@@ -86,6 +86,36 @@
       "name": "issue reporting, closing and implementation remain different roles",
       "inclusion": "A closed issue retains one reporter unit and a separate closer stewardship unit.",
       "exclusion": "An assignee receives neither unit; a closed snapshot does not prove its closer, a missing reporter is not filled from the sender, and closing does not establish resolution or a confirmed bug."
+    },
+    {
+      "id": "COLLECTED-LABEL",
+      "name": "label additions require their own collected actor, label identity and exact hydrated revision",
+      "inclusion": "A collected labeled event carries its own editor, target and timestamp through hydration to one replay-stable candidate unit.",
+      "exclusion": "Unidentified/unrelated label targets, changed revisions, wrong subjects, missing actors, bots and current labels do not create user contribution."
+    },
+    {
+      "id": "COLLECTED-ASSIGNMENT",
+      "name": "assignment history credits its editor rather than the current assignee",
+      "inclusion": "An assigned event credits the distinct observed editor, not the issue reporter or current assignee.",
+      "exclusion": "Missing assignee identity, changed hydrated target, wrong subject, unknown actors, bots and a current assignee list are excluded."
+    },
+    {
+      "id": "COLLECTED-MILESTONE",
+      "name": "collected milestone membership remains distinct from milestone definitions",
+      "inclusion": "Actual collection and exact hydration preserve the membership actor, target and clock. Add/remove actions remain two raw events; the separate explicit grouping helper marks their one-session reversal without qualified curation.",
+      "exclusion": "Missing or unrelated milestone targets, changed revisions, current snapshot milestones and milestone-definition events do not produce membership."
+    },
+    {
+      "id": "PUBLIC-STEWARDSHIP-DAY",
+      "name": "public pin and lock facets share one actor/item/UTC-day group",
+      "inclusion": "Four actor-backed public facets and their replay contribute one day group; a separate UTC day contributes a second.",
+      "exclusion": "Current pin/lock fields, private repositories, organization block actions and personal ranking are excluded."
+    },
+    {
+      "id": "FIRST-REVIEW-SEQUENCE",
+      "name": "the default hydrated sequence credits earliest eligible nonself reviewers and exact-time ties",
+      "inclusion": "COMMENTED and CHANGES_REQUESTED reviews at the same earliest eligible time each give their actual author one PR unit; source order and replay cannot break the tie.",
+      "exclusion": "Earlier self/bot and pending reviews do not win; later, missing or conflicting cohorts and an unproved special action cannot mint first-review participation."
     }
   ],
   "metrics": [
@@ -205,127 +235,469 @@
       "group_by": "canonical",
       "case_ids": ["ISSUE-REPORTER-CLOSER"],
       "remaining_scope": "A closing transition is operational activity, not implementing contribution or accepted resolution."
+    },
+    {
+      "id": "labels_applied",
+      "role": "triager",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["COLLECTED-LABEL"],
+      "remaining_scope": "This tests one observed addition and exact replay. Cross-event reapplication/toggle policy is not certified by a single collected event."
+    },
+    {
+      "id": "assignments_coordinated",
+      "role": "triager",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["COLLECTED-ASSIGNMENT"],
+      "remaining_scope": "The engine case counts raw events and exact replay. The separate explicit synthetic grouping helper does not approve the organization correction interval or award qualified curation."
+    },
+    {
+      "id": "milestones_curated",
+      "role": "triager",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["COLLECTED-MILESTONE"],
+      "remaining_scope": "The engine case counts raw events and exact replay. The separate explicit synthetic grouping helper does not approve the organization correction interval or award qualified curation."
+    },
+    {
+      "id": "public_moderation",
+      "role": "triager",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "actor_artifact_interval",
+      "case_ids": ["PUBLIC-STEWARDSHIP-DAY"],
+      "remaining_scope": "Issue-comment pin history and unsupported discussion stewardship require their own proven source or reviewed receipt; no sanction, offender or justification is inferred.",
+      "grouping_seconds": 86400,
+      "grouping_policy_version": "public-stewardship-day/v1"
+    },
+    {
+      "id": "first_reviews",
+      "role": "reviewer",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["FIRST-REVIEW-SEQUENCE"],
+      "remaining_scope": "The transport is synthetic and complete only within the fixture. It certifies no review substance, reviewer expertise, source authorization or real history completeness."
     }
   ],
   "deferred": [
     {
       "id": "unsupported-aggregation",
       "metric_ids": ["net_lines"],
-      "reason": "Signed net changes have no implemented aggregation. The inventory checks the explicit rejection; it does not fabricate a positive inclusion case."
+      "reason": "The actor-ranked engine explicitly rejects signed repository net changes. A repository-context implementation is a separate positive-case prerequisite; no positive result is fabricated."
     },
     {
       "id": "transfer-owner-382",
       "metric_ids": ["issue_transfers"],
-      "reason": "COV15 transfer lineage, alias conservation and privacy suppression remain the canonical #382 source lane. This inventory adds no transfer implementation or acceptance."
-    },
-    {
-      "id": "physical-source-owners",
-      "metric_ids": [
-        "pr_lines_added",
-        "pr_lines_removed",
-        "pr_lines_changed",
-        "commit_attributed_lines",
-        "files_changed",
-        "retained_lines"
-      ],
-      "reason": "Physical integration, cohort and revision work remains in #377/#385. Existing tests and their remaining metric-specific mapping are not requalified here."
+      "reason": "COV15 transfer alias conservation and privacy remain the canonical #382 source lane."
     },
     {
       "id": "release-operations-owners",
-      "metric_ids": [
-        "release_changes",
-        "release_stewardship",
-        "deployment_work",
-        "incidents",
-        "maintenance",
-        "automation"
-      ],
-      "reason": "Current #375/#367 release/operations policy and recognition work is preserved. The generic engine audit is not substituted for those source cases."
+      "metric_ids": ["release_changes", "release_stewardship", "deployment_work", "incidents"],
+      "reason": "The selected #375/#367 release and operations source remains with its canonical owners; no duplicate source implementation or execution is claimed."
     },
     {
       "id": "project-owner-406",
       "metric_ids": ["project_configuration"],
-      "reason": "Typed Project-configuration source and semantic correction remain in canonical #406."
+      "reason": "Typed Project configuration and its host authority remain the canonical #406 lane."
     },
     {
-      "id": "discussion-owner-395",
-      "metric_ids": ["discussions_started"],
-      "reason": "Discussion capability/source work remains in canonical #395. This inventory does not requalify its collector evidence."
+      "id": "ordering-owner-412",
+      "metric_ids": ["issue_ordering"],
+      "reason": "Canonical #412 supplies typed ordering plans and exact host authority. Its current source and receiving execution remain separate from this continuation."
     },
     {
-      "id": "source-mapping-not-yet-reviewed",
+      "id": "source-implementation-prerequisites",
       "metric_ids": [
-        "commits_integrated",
-        "direct_changes",
-        "reverted_delivery",
-        "accepted_suggestions",
-        "first_reviews",
         "cross_workstream_reviews",
         "evidence_reviews",
-        "accepted_findings",
-        "confirmed_bugs",
-        "reproductions",
-        "issue_resolution",
-        "issue_answers",
-        "issue_clarifications",
-        "duplicate_resolution",
-        "items_triaged",
-        "labels_applied",
-        "labels_corrected",
-        "assignments_coordinated",
-        "milestones_curated",
-        "title_scope_edits",
-        "reference_links",
-        "closing_links",
-        "parent_child_links",
-        "blocker_links",
-        "related_links",
         "project_items_curated",
-        "project_status_updates",
-        "project_field_updates",
-        "issue_field_updates",
-        "project_updates",
-        "routing_handoffs",
-        "label_taxonomy",
-        "milestone_definitions",
-        "issue_ordering",
-        "public_moderation",
-        "decision_records",
-        "catalog_proposals",
-        "pricebook_proposals",
-        "compatibility_proposals",
-        "primary_sources",
-        "freshness_checks",
-        "reproduced_measurements",
-        "negative_findings",
-        "rights_reviews",
-        "assumptions_resolved",
-        "market_research",
-        "evidence_manifests",
-        "documentation",
-        "tests",
-        "regressions_prevented",
-        "accessibility",
-        "design",
-        "usability",
-        "localization",
-        "performance",
-        "security",
-        "discussion_answers",
         "helpful_feedback",
-        "mentorship",
-        "onboarding",
         "governance",
         "outreach",
-        "appreciation",
-        "data_quality",
-        "first_contribution",
         "repositories",
         "workstreams",
         "collaborations",
-        "active_periods"
+        "commit_attributed_lines",
+        "retained_lines"
       ],
-      "reason": "Existing domain, normalizer, portfolio and recognition suites may contain useful source cases. Their full metric-to-inclusion/exclusion mapping has not been independently established by this bounded PR; all remain explicit rather than counted as covered by the97 generic engine cases."
+      "reason": "A dedicated admitted source, exact acceptance/consent proof, or derivation is still missing. Existing physical #377/#385 paths are preserved, but related work is not an ownership claim or an implementation of retained/commit-attributed line metrics."
+    },
+    {
+      "id": "additional-semantic-cases",
+      "metric_ids": [
+        "direct_changes",
+        "accepted_suggestions",
+        "accepted_findings",
+        "issue_resolution",
+        "issue_clarifications",
+        "duplicate_resolution",
+        "title_scope_edits",
+        "reference_links",
+        "closing_links",
+        "project_field_updates",
+        "project_updates",
+        "routing_handoffs",
+        "mentorship",
+        "onboarding"
+      ],
+      "reason": "These definitions require further actual source/receipt inclusion and exclusion cases. A raw activity or generic approved author fact does not prove exact suggestion links, preserved duplicate evidence, meaningful edits, accepted handoffs or consented mentorship/onboarding."
+    }
+  ],
+  "existing_evidence": [
+    {
+      "metric_id": "commits_integrated",
+      "path": "packages/github/test/normalizers.test.mjs",
+      "positive_test": "commit author/committer and verified lineage stay separate and integration is mandatory",
+      "negative_test": "commit author/committer and verified lineage stay separate and integration is mandatory",
+      "limitation": "Integration proof and role attribution are bounded positives/negatives; empty/merge-only/imported cohort completeness is not established here."
+    },
+    {
+      "metric_id": "reverted_delivery",
+      "path": "packages/github/test/normalizers.test.mjs",
+      "positive_test": "explicit revert lineage annotates original delivery without creating reverter merit or deleting history",
+      "negative_test": "explicit revert lineage annotates original delivery without creating reverter merit or deleting history",
+      "limitation": "Original authorship and explicit reviewed lineage are distinguished from textual revert inference; no quality penalty."
+    },
+    {
+      "metric_id": "pr_lines_added",
+      "path": "packages/github/test/normalizers.test.mjs",
+      "positive_test": "physical line classes exclude vendor/generated/locks/binary/imports and disclose net separately",
+      "negative_test": "stacked branch merges keep PR participation while delivered LOC appears once at pinned default integration",
+      "limitation": "Pinned complete default integration and explicit exclusions are checked; owned physical source/cohort work remains with #377/#385."
+    },
+    {
+      "metric_id": "pr_lines_removed",
+      "path": "packages/github/test/normalizers.test.mjs",
+      "positive_test": "physical line classes exclude vendor/generated/locks/binary/imports and disclose net separately",
+      "negative_test": "stacked branch merges keep PR participation while delivered LOC appears once at pinned default integration",
+      "limitation": "Pinned complete default integration and explicit exclusions are checked; owned physical source/cohort work remains with #377/#385."
+    },
+    {
+      "metric_id": "pr_lines_changed",
+      "path": "packages/github/test/normalizers.test.mjs",
+      "positive_test": "physical line classes exclude vendor/generated/locks/binary/imports and disclose net separately",
+      "negative_test": "stacked branch merges keep PR participation while delivered LOC appears once at pinned default integration",
+      "limitation": "Pinned complete default integration and explicit exclusions are checked; owned physical source/cohort work remains with #377/#385."
+    },
+    {
+      "metric_id": "files_changed",
+      "path": "packages/github/test/normalizers.test.mjs",
+      "positive_test": "files_changed emits one canonical count unit per eligible path, never a quantity pretending to be count",
+      "negative_test": "physical line classes exclude vendor/generated/locks/binary/imports and disclose net separately",
+      "limitation": "Counted path units are separate from line quantities and imported/generated classification; all lifetime path semantics not asserted."
+    },
+    {
+      "metric_id": "confirmed_bugs",
+      "path": "apps/pipeline/test/confirmed-bug-admission.test.mjs",
+      "positive_test": "confirmed_bugs: an independently reviewed issue retains its reporter, source fact and existing receipt unit",
+      "negative_test": "confirmed_bugs: missing issue proof cannot reach a receipt callback or qualify directly",
+      "limitation": "The nonsynthetic admission branch is exercised with fictional in-memory source records; this is not a real confirmed bug."
+    },
+    {
+      "metric_id": "reproductions",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "reproductions"
+    },
+    {
+      "metric_id": "issue_answers",
+      "path": "apps/pipeline/test/answer-recognition-time.test.mjs",
+      "positive_test": "issue_answers: equal and later acceptance preserve separate source and accepted clocks",
+      "negative_test": "issue_answers: the pipeline rejects a known future source before invoking host receipt authority",
+      "limitation": "Source and acceptance chronology are meaningful; full question/version selection and answer quality remain separate."
+    },
+    {
+      "metric_id": "items_triaged",
+      "path": "packages/metrics/test/triage-normalizer.test.js",
+      "positive_test": "each triage transition preserves a proven target and counts its observed actor",
+      "negative_test": "target-dependent triage with missing identity stays unknown through normalizer and engine",
+      "limitation": "Includes the exact UTC-hour raw-state grouping; observed actions do not imply qualified outcomes."
+    },
+    {
+      "metric_id": "labels_corrected",
+      "path": "packages/metrics/test/triage-fairness.test.js",
+      "positive_test": "self-triage does not authorize self-recognition or one accepted correction per batch effect",
+      "negative_test": "self-triage does not authorize self-recognition or one accepted correction per batch effect",
+      "limitation": "The independently approved changeset conserves one corrected unit; the host receipt supplies the substantive correction assessment."
+    },
+    {
+      "metric_id": "parent_child_links",
+      "path": "packages/github/test/timeline-relationship-integrity.test.mjs",
+      "positive_test": "all four selected native relationship types retain their own action, identity and endpoint",
+      "negative_test": "native type and endpoint field must agree without a competing endpoint",
+      "limitation": "Actual selected native reader/hydrator paths and approved issue endpoints. All mirrored endpoint/temporal grouping is not certified."
+    },
+    {
+      "metric_id": "blocker_links",
+      "path": "packages/github/test/timeline-relationship-integrity.test.mjs",
+      "positive_test": "all four selected native relationship types retain their own action, identity and endpoint",
+      "negative_test": "native type and endpoint field must agree without a competing endpoint",
+      "limitation": "Actual selected native reader/hydrator paths and approved issue endpoints. All mirrored endpoint/temporal grouping is not certified."
+    },
+    {
+      "metric_id": "related_links",
+      "path": "packages/github/test/normalizers.test.mjs",
+      "positive_test": "relationship endpoint copies conserve one link and never reinterpret related links as blockers",
+      "negative_test": "relationship endpoint copies conserve one link and never reinterpret related links as blockers",
+      "limitation": "Same-transition endpoint reversal, automatic references and private endpoints are checked; no all-history edge grouping claim."
+    },
+    {
+      "metric_id": "project_status_updates",
+      "path": "apps/pipeline/test/project-pr-history.test.mjs",
+      "positive_test": "Project status collection traverses issue and closed-PR inventories and paginated native events",
+      "negative_test": "PR status no-ops and private Projects cannot produce contribution credit",
+      "limitation": "Native source/hydration subject binding, event actor and no-op/private exclusions are checked; no Project snapshot editor inference."
+    },
+    {
+      "metric_id": "issue_field_updates",
+      "path": "packages/github/test/issue-field-normalizer.test.mjs",
+      "positive_test": "native issue fields bind the issue artifact, editor and native clock with unknown execution",
+      "negative_test": "PR subjects, snapshots and absent collected native identities cannot become field history",
+      "limitation": "Actual native-field normalization is distinct from Project fields. New #411 service-account propagation and broader source coverage remain separately owned."
+    },
+    {
+      "metric_id": "label_taxonomy",
+      "path": "packages/metrics/test/triage-definition-days.test.js",
+      "positive_test": "definition facets, renames and reversals share one actor/definition/day while no-op metadata emits no fact",
+      "negative_test": "fixed UTC days respect midnight, source-clock limits, exact duplicates and deterministic replay without changing frozen input",
+      "limitation": "Definition identity/day grouping is distinct from applying labels or milestones to issues."
+    },
+    {
+      "metric_id": "milestone_definitions",
+      "path": "packages/metrics/test/triage-definition-days.test.js",
+      "positive_test": "definition facets, renames and reversals share one actor/definition/day while no-op metadata emits no fact",
+      "negative_test": "fixed UTC days respect midnight, source-clock limits, exact duplicates and deterministic replay without changing frozen input",
+      "limitation": "Definition identity/day grouping is distinct from applying labels or milestones to issues."
+    },
+    {
+      "metric_id": "decision_records",
+      "path": "apps/pipeline/test/research-records.test.mjs",
+      "positive_test": "research records publish pending proof, require exact revision review, conserve accepted credit through replay and withdrawal",
+      "negative_test": "research record activation rejects raw-ranked, wrong-clock and per-observation policies",
+      "limitation": "Actual synthetic runtime receipt/revision and withdrawal cases; no historical real-data acceptance."
+    },
+    {
+      "metric_id": "catalog_proposals",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "catalog_proposals"
+    },
+    {
+      "metric_id": "pricebook_proposals",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "pricebook_proposals"
+    },
+    {
+      "metric_id": "compatibility_proposals",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "compatibility_proposals"
+    },
+    {
+      "metric_id": "primary_sources",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "primary_sources"
+    },
+    {
+      "metric_id": "freshness_checks",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "freshness_checks"
+    },
+    {
+      "metric_id": "reproduced_measurements",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "reproduced_measurements"
+    },
+    {
+      "metric_id": "negative_findings",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "negative_findings"
+    },
+    {
+      "metric_id": "rights_reviews",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "rights_reviews"
+    },
+    {
+      "metric_id": "assumptions_resolved",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "assumptions_resolved"
+    },
+    {
+      "metric_id": "market_research",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "market_research"
+    },
+    {
+      "metric_id": "evidence_manifests",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "evidence_manifests"
+    },
+    {
+      "metric_id": "documentation",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "documentation"
+    },
+    {
+      "metric_id": "tests",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "tests"
+    },
+    {
+      "metric_id": "regressions_prevented",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "regressions_prevented"
+    },
+    {
+      "metric_id": "accessibility",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "accessibility"
+    },
+    {
+      "metric_id": "design",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "design"
+    },
+    {
+      "metric_id": "usability",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "usability"
+    },
+    {
+      "metric_id": "localization",
+      "path": "packages/metrics/test/localization-portfolio.test.js",
+      "positive_test": "reobserved localization acceptance replaces exactly its raw portfolio entry",
+      "negative_test": "invalid, future and withdrawn acceptance keep the original raw portfolio activities",
+      "limitation": "Actual source locale normalization, exact-revision receipt and portfolio selection. Supporting source classification cases exclude generated/imported/no-op/unconfigured locale data."
+    },
+    {
+      "metric_id": "performance",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "performance"
+    },
+    {
+      "metric_id": "security",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "security"
+    },
+    {
+      "metric_id": "automation",
+      "path": "apps/pipeline/test/automation-recognition.test.mjs",
+      "positive_test": "automation: accepted merged participation uses its source period and leaves raw input intact",
+      "negative_test": "automation: absent public source proof cannot reach the receipt callback",
+      "limitation": "Merged participant/source clock/canonical category units and host authorization are tested; current #410 classification is separately owned."
+    },
+    {
+      "metric_id": "discussions_started",
+      "path": "packages/github/test/normalizers.test.mjs",
+      "positive_test": "Discussion hydration validates capability, public identity and exact revision",
+      "negative_test": "Discussion hydration validates capability, public identity and exact revision",
+      "limitation": "Synthetic enabled and disabled capability branches are tested. #395 owns end-to-end disabled-source presentation; no actual enabled repository claim."
+    },
+    {
+      "metric_id": "discussion_answers",
+      "path": "packages/github/test/discussion-answer-time.test.mjs",
+      "positive_test": "native Discussion selection preserves exact answer-author and selector roles with ordered source clocks",
+      "negative_test": "native Discussion unknown answer author never gives credit to the known selector",
+      "limitation": "Trusted native-selection proof is synthetic; no actual enabled Discussion source or independent quality endorsement."
+    },
+    {
+      "metric_id": "appreciation",
+      "path": "apps/controls/test/editorial.test.mjs",
+      "positive_test": "spotlights require contributor opt-in and independent selection of current accepted evidence",
+      "negative_test": "withdrawal, evidence revocation, stale selection and rejection never retain a public spotlight",
+      "limitation": "This is the non-scoring editorial representation, not a computed appreciation count. #408 owns dimension rotation; all selection/consent limits remain."
+    },
+    {
+      "metric_id": "maintenance",
+      "path": "apps/pipeline/test/maintenance-recognition.test.mjs",
+      "positive_test": "maintenance: accepted merged participation uses its source period and leaves raw input intact",
+      "negative_test": "maintenance: absent public source proof cannot reach the receipt callback",
+      "limitation": "Merged participant/source clock/canonical category units and host authorization are tested; current #410 classification is separately owned."
+    },
+    {
+      "metric_id": "data_quality",
+      "path": "apps/pipeline/test/domain-recognition.test.mjs",
+      "positive_test": "${metric}: source-to-engine candidate counts one canonical unit through review and observation replay",
+      "negative_test": "${metric}: reviewed revision and metric-specific evidence qualify; its exclusion does not",
+      "limitation": "Each metric has its own specialist details and explicit exclusion mutation. Fictional in-memory inputs exercise real-mode admission; no actual measurement, source-use approval or real review is claimed.",
+      "case_parameter": "data_quality"
+    },
+    {
+      "metric_id": "first_contribution",
+      "path": "packages/metrics/test/participation-history-roles.test.mjs",
+      "positive_test": "unfiltered reviewed organization history retains the earlier eligible contribution",
+      "negative_test": "an uncertain earlier eligible role cannot certify a newcomer in the selected role",
+      "limitation": "The dedicated participation engine uses eligible facts, reviewed organization history and week denominators. A current public profile still reports unknown newcomer history; no actual participant classification."
+    },
+    {
+      "metric_id": "active_periods",
+      "path": "packages/metrics/test/participation-history-roles.test.mjs",
+      "positive_test": "unfiltered reviewed organization history retains the earlier eligible contribution",
+      "negative_test": "an uncertain earlier eligible role cannot certify a newcomer in the selected role",
+      "limitation": "The dedicated participation engine uses eligible facts, reviewed organization history and week denominators. A current public profile still reports unknown newcomer history; no actual participant classification."
     }
   ]
 }
