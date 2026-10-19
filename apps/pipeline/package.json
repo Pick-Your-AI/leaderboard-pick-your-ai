@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24 <25" },
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
-    "build": "node --check src/publication-windows.mjs && node --check src/index.mjs && node --check src/runtime.mjs && node --check src/github-source.mjs && node --check src/webhook-dispatch.mjs && node --check src/aggregate-explanations.mjs && node --check src/private-attribution.mjs && node --check src/project-context.mjs && node --check src/recognition-adapter.mjs && node --check src/domain-recognition.mjs && node --check src/source-health.mjs && node --check src/operator-health.mjs && node --check src/operator-publication.mjs && node --check src/scan-continuation.mjs && node --check src/derived-retirement.mjs",
-    "typecheck": "node --check src/publication-windows.mjs && node --check src/index.mjs && node --check src/runtime.mjs && node --check src/github-source.mjs && node --check src/webhook-dispatch.mjs && node --check src/aggregate-explanations.mjs && node --check src/private-attribution.mjs && node --check src/project-context.mjs && node --check src/recognition-adapter.mjs && node --check src/domain-recognition.mjs && node --check src/source-health.mjs && node --check src/operator-health.mjs && node --check src/operator-publication.mjs && node --check src/scan-continuation.mjs && node --check src/derived-retirement.mjs",
+    "build": "node --check src/publication-windows.mjs && node --check src/index.mjs && node --check src/runtime.mjs && node --check src/github-source.mjs && node --check src/webhook-dispatch.mjs && node --check src/metadata-enrichment.mjs && node --check src/aggregate-explanations.mjs && node --check src/private-attribution.mjs && node --check src/project-context.mjs && node --check src/recognition-adapter.mjs && node --check src/domain-recognition.mjs && node --check src/source-health.mjs && node --check src/operator-health.mjs && node --check src/operator-publication.mjs && node --check src/scan-continuation.mjs && node --check src/derived-retirement.mjs",
+    "typecheck": "node --check src/publication-windows.mjs && node --check src/index.mjs && node --check src/runtime.mjs && node --check src/github-source.mjs && node --check src/webhook-dispatch.mjs && node --check src/metadata-enrichment.mjs && node --check src/aggregate-explanations.mjs && node --check src/private-attribution.mjs && node --check src/project-context.mjs && node --check src/recognition-adapter.mjs && node --check src/domain-recognition.mjs && node --check src/source-health.mjs && node --check src/operator-health.mjs && node --check src/operator-publication.mjs && node --check src/scan-continuation.mjs && node --check src/derived-retirement.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
@@ -18,5 +20,7 @@
     "@pick-your-ai/controls": "0.1.0",
     "pg": "8.16.3"
   },
-  "devDependencies": { "@electric-sql/pglite": "0.3.14" }
+  "devDependencies": {
+    "@electric-sql/pglite": "0.3.14"
+  }
 }
