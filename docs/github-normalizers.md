@@ -42,7 +42,7 @@ const normalized = await normalize({
 });
 ```
 
-The default adapter hydrates issues, pull requests, commits, reviews, issue comments and releases through read-only API routes. It verifies current repository ID/public visibility, exact subject identity, and source revision against the hydrated immutable SHA or source timestamp. An opaque collection revision needs a trusted `verifyRevision(input, payload)` callback backed by the collector's provenance store. A changed/unknown revision returns an explicit reason, not fabricated historical data. Current issue snapshots can establish immutable creation author/time, but cannot manufacture the latest closer or an edit actor. Review hydration fetches its parent PR independently so reviewer and author remain distinct.
+The default adapter hydrates issues, pull requests, commits, reviews, issue comments, releases and native Discussions through read-only API routes. It verifies current repository ID/public visibility, exact subject identity, and source revision against the hydrated immutable SHA, source timestamp or native Discussion fingerprint. An opaque collection revision needs a trusted `verifyRevision(input, payload)` callback backed by the collector's provenance store. A changed/unknown revision returns an explicit reason, not fabricated historical data. Current issue snapshots can establish immutable creation author/time, but cannot manufacture the latest closer or an edit actor. Review hydration fetches its parent PR independently so reviewer and author remain distinct. Native answer clocks and retained normalization authority follow the [Discussion chronology rule](discussion-answer-chronology.md).
 
 Other event families require an authorized `enrich(input)` callback returning the richer verified envelope. Scope/revision must match the collected fact. The callback can supply actual timeline/webhook events, verified integration/diff manifests and independently reviewed relationship receipts; it must not infer missing fields from snapshots. Optional `acceptance(input, normalized)` is a protected receipt lookup, with an explicit `authorizedReviewerIds` allowlist. Public request bodies must never configure it. Production composition must reject synthetic output and apply suppression directives even when an adapter returns no metric facts.
 
@@ -54,6 +54,8 @@ Other event families require an authorized `enrich(input)` callback returning th
 - Verified readiness cohorts preserve first-ready and first-submitted-review times, including unknown readiness and unresolved censoring. The metric engine supplies distributions/sample counts without speed ranking. Complete source history and cohort selection still require the source capability gate.
 - Commit authors and committers remain separate participation roles. Integrated commit counts require explicit pinned default-branch integration and commit membership; branch presence alone does not establish delivery. Supplied evidence-bearing squash, cherry-pick, mirror and import lineage is retained. Explicit revert lineage annotates original contributors without erasing historical merges, awarding the reverter an outcome, or imposing a penalty.
 - Release publication uses the evidenced sender and event time, including bot/app publication. The release creator does not become every publisher or notes author. Green CI never creates maintenance, deployment or incident merit. These categories require accepted receipts.
+
+See [persisted default-delivery migration](default-delivery-cache-migration.md) for the observed repository-default requirement, built-in/custom provider version contract, retained-cache replacement, and historical publication recovery.
 
 ## Physical changes and local fallback
 
@@ -106,6 +108,11 @@ seed output from the exact legacy normalizer using a
 unchanged source revisions and observation clocks, and verify that current and
 pinned boards, evidence and JSON/CSV exports obey the new suppression. They also
 verify that the original cached documents and frozen inputs remain intact.
+
+Frozen reads also retain the pre-transfer Review, Discussion and default-delivery
+cache generations, including delivery wrappers on enriched source families.
+Their source-version, exact source-binding and document-hash checks still apply.
+Reprocessing adds the current generation without changing the retained record.
 
 GitHub's native GraphQL
 [`TransferredEvent`](https://docs.github.com/en/graphql/reference/issues#transferredevent)
