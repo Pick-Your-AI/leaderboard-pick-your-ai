@@ -113,7 +113,9 @@ function boundedJSON(value: unknown) {
       seen.add(item);
       if (Object.getOwnPropertySymbols(item).length) invalid();
       if (Array.isArray(item)) {
+        // Later checks use array methods; inherited hooks must not hide supplied records.
         if (
+          Object.getPrototypeOf(item) !== Array.prototype ||
           item.length > 20_000 ||
           Object.keys(item).length !== item.length ||
           Object.getOwnPropertyNames(item).length !== item.length + 1

@@ -626,6 +626,93 @@ test("bounded JSON and closed protocol fields reject oversized, cyclic and acces
   assert.equal(getterCalls, 0);
 });
 
+test("history and retained proof reads reject inherited array hooks before they can hide an unresolved record", async (t) => {
+  let supplied = participationHistorySource().state.pair;
+  const app = createService({ source: { read: async () => null, readParticipationHistory: async () => supplied } });
+  t.after(() => app.close());
+  const original = (await read(app)).json().history;
+  let getterCalls = 0;
+  let methodCalls = 0;
+  const prototype = Object.create(Array.prototype);
+  Object.defineProperty(prototype, "some", {
+    get() {
+      getterCalls++;
+      return () => {
+        methodCalls++;
+        return false;
+      };
+    },
+  });
+  supplied.history.unresolved.push({ actorId: "101", reason: "withheld" });
+  assert.equal((await read(app)).json().history.reason, "history_evidence_unavailable");
+  Object.setPrototypeOf(supplied.history.unresolved, prototype);
+  for (const path of [historyPath, proofPath(original)]) {
+    const response = await app.inject(path);
+    assert.equal(response.statusCode, 503, response.body);
+    assert.equal(response.json().error, "participation_history_invalid");
+  }
+  assert.equal(getterCalls, 0);
+  assert.equal(methodCalls, 0);
+  assert.equal(Object.getPrototypeOf(supplied.history.unresolved), prototype);
+  assert.deepEqual(supplied.history.unresolved[0], { actorId: "101", reason: "withheld" });
+});
+
+test("the history JSON boundary rejects custom array prototypes throughout the paired input", () => {
+  class ProviderArray extends Array {}
+  const arrays = [
+    (pair) => pair.current.selected.actors,
+    (pair) => pair.history.admission.sourceInventory,
+    (pair) => pair.history.admission.policies,
+    (pair) => pair.history.dataset.sourceInventory,
+    (pair) => pair.history.publication.selected.portfolioEvidence,
+    (pair) => pair.history.publication.selected.snapshot.coverage,
+    (pair) => pair.history.proofSources,
+    (pair) => pair.history.unresolved,
+  ];
+  for (const select of arrays) {
+    for (const prototype of [null, Object.create(Array.prototype), ProviderArray.prototype]) {
+      const pair = participationHistorySource().state.pair;
+      const value = select(pair);
+      Object.setPrototypeOf(value, prototype);
+      assert.throws(() => validateParticipationHistoryRead(pair), {
+        status: 503,
+        code: "participation_history_invalid",
+      });
+      assert.equal(Object.getPrototypeOf(value), prototype);
+    }
+  }
+});
+
+test("ordinary dense frozen history arrays retain known proofs and unresolved-history withholding", async (t) => {
+  let supplied = participationHistorySource().state.pair;
+  const freezeArrays = (value) => {
+    if (value === null || typeof value !== "object") return;
+    for (const entry of Object.values(value)) freezeArrays(entry);
+    if (Array.isArray(value)) Object.freeze(value);
+  };
+  freezeArrays(supplied);
+  const before = structuredClone(supplied);
+  assert.equal(validateParticipationHistoryRead(supplied), supplied);
+  const app = createService({ source: { read: async () => null, readParticipationHistory: async () => supplied } });
+  t.after(() => app.close());
+  const original = (await read(app)).json().history;
+  assert.equal(original.state, "known");
+  assert.deepEqual((await read(app, proofPath(original))).json().history, original);
+  assert.deepEqual(supplied, before);
+  assert.ok(Object.isFrozen(supplied.history.proofSources));
+
+  supplied = participationHistorySource().state.pair;
+  supplied.history.unresolved.push({ actorId: "101", reason: "withheld" });
+  freezeArrays(supplied);
+  const history = (await read(app)).json().history;
+  assert.equal(history.state, "unknown");
+  assert.equal(history.reason, "history_evidence_unavailable");
+  assert.equal(history.firstProof, null);
+  assert.equal(history.newcomer, null);
+  assert.equal((await app.inject(proofPath(original))).statusCode, 409);
+  assert.ok(Object.isFrozen(supplied.history.unresolved));
+});
+
 test("public results exclude private admission, frozen input and backfill fields and never mutate the provider", async (t) => {
   const { app, pair } = harness(t),
     original = structuredClone(pair);
