@@ -1,10 +1,14 @@
 import { createHash } from "node:crypto";
-import { compareSourceInstants, sourceEventSchema } from "@pick-your-ai/contracts";
+import { compareSourceInstants, sourceEventSchema, maintenanceClassificationVersion } from "@pick-your-ai/contracts";
 import {
   validateAutomationSource,
   validateMaintenanceSource,
   validateReleaseChangesSource,
 } from "@pick-your-ai/github";
+import {
+  qualifyMaintenanceClassification,
+  validateMaintenanceClassificationBinding,
+} from "./maintenance-classification.mjs";
 import { domainDateBasis, qualifyDomainRecognition } from "./domain-recognition.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
 import { releaseReviewRequest, parseReleaseReviewTarget } from "../../controls/src/release-review.mjs";
@@ -17,6 +21,8 @@ import {
 
 // Private controls only. Never accept a public claim projection as authentication.
 export function recognitionFingerprint(state, bindings = []) {
+  // An unsupported opt-in cannot keep an old saved hash current without rematerialization.
+  for (const binding of bindings) validateMaintenanceClassificationBinding(binding);
   const requests = Object.values(state.requests ?? {})
     .filter((r) => r.kind === "evidence")
     .sort((a, b) => a.id.localeCompare(b.id));
@@ -54,6 +60,10 @@ export function recognitionFingerprint(state, bindings = []) {
   // Prior maintenance receipts lacked merged-participant, clock and unit admission.
   if (bindings.some((binding) => binding.metricId === "maintenance"))
     authority.push("maintenance-merged-participant/v1");
+  // Retire only explicitly opted-in classification authority. Generic maintenance
+  // and every unrelated binding keep their exact established fingerprint format.
+  if (bindings.some((binding) => binding.metricId === "maintenance" && binding.maintenanceClassification !== undefined))
+    authority.push(maintenanceClassificationVersion);
   // Tooling receipts independently require verified merged participation as well.
   if (bindings.some((binding) => binding.metricId === "automation")) authority.push("automation-merged-participant/v1");
   // Older generic operations receipts lack the current source, public artifact
@@ -298,6 +308,14 @@ export function materializeRecognition(
         : binding.metricId === "automation"
           ? validateAutomationSource(input, candidates[0].id, acceptedAt)
           : null;
+    const maintenanceClassification = qualifyMaintenanceClassification({
+      input,
+      binding,
+      request,
+      decision,
+      candidate: candidates[0],
+      acceptedAt,
+    });
     const release = releaseTarget
       ? validateReleaseChangesSource(input, candidates[0].id, acceptedAt, releaseTarget)
       : null;
@@ -351,9 +369,19 @@ export function materializeRecognition(
         ...(domain ? { changesetId: domain.changesetId } : {}),
         ...(localeTarget ? { sourceRevision: localeTarget.sourceRevision } : {}),
         ...(releaseTarget ? { releaseInclusion: releaseTarget } : {}),
+        ...(maintenanceClassification ? { maintenanceClassification } : {}),
       },
       binding.reviewerIds,
     );
+    if (maintenanceClassification) {
+      const reasons = [
+        "independent_recognition_receipt",
+        `maintenance_classification_policy:${maintenanceClassificationVersion}`,
+        ...maintenanceClassification.classifications.map(({ kind }) => `maintenance_kind:${kind}`),
+      ];
+      for (const evidence of output.evidence.slice(previousEvidence))
+        domainReasons.set(evidence.contribution.contributionId, reasons);
+    }
     if (domain) {
       // Preserve each registry's event clock; acceptance remains independently
       // recorded. Never substitute the later review time for a merge or recheck.

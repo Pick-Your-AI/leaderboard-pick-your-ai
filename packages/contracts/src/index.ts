@@ -129,3 +129,10 @@ export {
   type PublicWindows,
   type PublicWindowResolver,
 } from "./public-windows.js";
+
+export {
+  maintenanceClassificationVersion,
+  maintenanceClassificationKinds,
+  publicMaintenanceClassificationReasons,
+  type MaintenanceClassificationKind,
+} from "./maintenance-reasons.js";

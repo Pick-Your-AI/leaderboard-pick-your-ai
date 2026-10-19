@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
-import { pathToFileURL, fileURLToPath } from "node:url";
+import { fileURLToPath } from "node:url";
 import { transformWithOxc } from "vite";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -10,13 +9,12 @@ import { evidence, selection } from "../src/remote/client.ts";
 
 // Exercise the real shared TSX renderer without a browser or a copied test renderer.
 const source = new URL("../src/remote/Evidence.tsx", import.meta.url);
-const require = createRequire(source);
 const transformed = await transformWithOxc(await readFile(source, "utf8"), fileURLToPath(source), {
   jsx: { runtime: "classic" },
 });
 const compiled = transformed.code.replace(/from "([^"]+)"/g, (_match, specifier) => {
-  const url = specifier.startsWith(".") ? new URL(specifier, source) : pathToFileURL(require.resolve(specifier));
-  return `from ${JSON.stringify(url.href)}`;
+  const url = specifier.startsWith(".") ? new URL(specifier, source) : import.meta.resolve(specifier);
+  return `from ${JSON.stringify(typeof url === "string" ? url : url.href)}`;
 });
 const { Receipt } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const sourceAt = "2026-10-01T00:00:00.000Z",
@@ -110,4 +108,46 @@ test("shared Receipt renders measure membership canonically without changing sou
   assert.equal(forward, reverse);
   assert.deepEqual(metricIds, ["pr_opened", "documentation"]);
   assert.ok(forward.indexOf(">documentation</a>") < forward.indexOf(">pr_opened</a>"));
+});
+
+test("shared Receipt explains reviewed maintenance facets without schema codes or extra count", () => {
+  const value = {
+    ...base,
+    activityState: "accepted",
+    contribution: {
+      ...base.contribution,
+      metricIds: ["maintenance"],
+      reasonCodes: [
+        "independent_recognition_receipt",
+        "maintenance_classification_policy:maintenance-classification/v1",
+        "maintenance_kind:dependency_maintenance",
+        "maintenance_kind:build_fix",
+        "maintenance_kind:accepted_bug_fix",
+      ],
+    },
+  };
+  const html = render(value);
+  for (const label of [
+    "Dependency maintenance",
+    "Build fix",
+    "Accepted bug fix",
+    "do not add counted units",
+    "Omitted kinds remain unknown",
+  ])
+    assert.ok(html.includes(label), label);
+  assert.doesNotMatch(html, /maintenance_kind:|maintenance_classification_policy:|maintenance-classification\/v1/);
+  const generic = render({
+    ...value,
+    contribution: { ...value.contribution, reasonCodes: ["independent_recognition_receipt"] },
+  });
+  assert.match(generic, /Not established; omitted kinds remain unknown/);
+  const invalid = render({
+    ...value,
+    contribution: {
+      ...value.contribution,
+      reasonCodes: [...value.contribution.reasonCodes, "maintenance_kind:green_workflow"],
+    },
+  });
+  assert.match(invalid, /Classification unavailable: inconsistent public proof/);
+  assert.doesNotMatch(invalid, /Dependency maintenance|Build fix|Accepted bug fix/);
 });

@@ -261,3 +261,10 @@ export {
   type GithubCommentKind,
   type GithubCommentSource,
 } from "./comment-identity.js";
+
+export {
+  parseMaintenanceClassification,
+  validateMaintenanceClassification,
+  type MaintenanceClassificationRecord,
+  type MaintenanceClassificationReference,
+} from "./maintenance-classification.js";

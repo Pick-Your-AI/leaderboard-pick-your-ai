@@ -1,3 +1,4 @@
+import { publicMaintenanceClassificationReasons } from "@pick-your-ai/contracts";
 import { validatePublicationPeriods, publicScopeFromTemplate } from "./publication-windows.mjs";
 import {
   resolveDiscoverablePublicationWindows,
@@ -2228,6 +2229,7 @@ export async function createPipeline(options) {
                 ? [
                     ...c.contracts.publicDocumentationRecognitionReasons(original.contribution),
                     ...c.contracts.publicReproductionRecognitionReasons(original.contribution, true),
+                    ...publicMaintenanceClassificationReasons(original.contribution),
                   ]
                 : []),
             ],

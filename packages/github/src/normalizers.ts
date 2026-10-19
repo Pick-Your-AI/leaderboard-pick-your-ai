@@ -10,6 +10,7 @@ import {
   compareSourceInstants,
   sourceEventSchema,
   publicDocumentationReasons,
+  maintenanceClassificationVersion,
   serviceAccountClassificationSchema,
   type ServiceAccountClassification,
   publicEvidenceActionSchema,
@@ -29,6 +30,10 @@ import {
   verifyGithubRestSnapshotRevision,
 } from "./rest-snapshot.js";
 import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
+import {
+  validateMaintenanceClassification,
+  type MaintenanceClassificationRecord,
+} from "./maintenance-classification.js";
 import {
   collectGithubReleaseInclusion,
   validateGithubReleaseInclusion,
@@ -1374,6 +1379,8 @@ export interface VerifiedRecognitionReceipt {
   sourceRevision?: string;
   /** Exact target authenticated in the private release acceptance audit. */
   releaseInclusion?: GithubReleaseReviewTarget;
+  /** Optional private, source-bound positive facets; never additional counted units. */
+  maintenanceClassification?: MaintenanceClassificationRecord;
 }
 const receiptMetrics = new Set([
   "catalog_proposals",
@@ -1476,6 +1483,15 @@ export function applyRecognitionReceipt(
       : receipt.metricId === "automation"
         ? validateAutomationSource(input, target.id, receipt.acceptedAt)
         : null;
+  if (
+    receipt.maintenanceClassification !== undefined &&
+    (receipt.metricId !== "maintenance" || receipt.decision !== "accepted")
+  )
+    throw new Error("maintenance_classification_unverified");
+  const maintenanceClassification =
+    receipt.maintenanceClassification === undefined
+      ? null
+      : validateMaintenanceClassification(input, target.id, receipt.acceptedAt, receipt.maintenanceClassification);
   const release =
     receipt.metricId === "release_changes"
       ? validateReleaseChangesSource(input, target.id, receipt.acceptedAt, receipt.releaseInclusion)
@@ -1559,6 +1575,12 @@ export function applyRecognitionReceipt(
         qualification: receipt.decision === "accepted" ? "eligible" : "ineligible",
         reasonCodes: [
           "independent_recognition_receipt",
+          ...(maintenanceClassification
+            ? [
+                `maintenance_classification_policy:${maintenanceClassificationVersion}`,
+                ...maintenanceClassification.classifications.map(({ kind }) => `maintenance_kind:${kind}`),
+              ]
+            : []),
           ...(receipt.metricId === target.metricId && ["documentation", "localization"].includes(target.metricId)
             ? publicDocumentationReasons(evidence.contribution)
             : []),

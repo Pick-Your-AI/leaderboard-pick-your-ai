@@ -8,6 +8,7 @@ import {
   publicDocumentationReasons,
   publicDocumentationRecognitionReasons,
   publicReproductionRecognitionReasons,
+  publicMaintenanceClassificationReasons,
   matchesActorFilter,
   type ActorFilter,
   publicEvidenceMetadataSchema,
@@ -441,12 +442,18 @@ export function projectRead(
         checkVisibility(visibilityByArtifact, artifact.stableId, artifact.visibility);
         checkVisibility(visibilityByArtifact, parsed.artifactId, artifact.visibility);
         const classification = publicDocumentationReasons(parsed);
+        const maintenance = publicMaintenanceClassificationReasons(parsed);
         const activityState = (entry as Partial<PortfolioEvidence>).activityState;
         if (
           parsed.metricIds.includes("reproductions") &&
           acceptedReproductions &&
           activityState !== undefined &&
           activityState !== "accepted"
+        )
+          return reject();
+        if (
+          maintenance.length &&
+          (parsed.qualification !== "eligible" || (activityState !== undefined && activityState !== "accepted"))
         )
           return reject();
         const reproduction = publicReproductionRecognitionReasons(
@@ -464,7 +471,11 @@ export function projectRead(
         const contribution = {
           ...parsed,
           ...(parsed.metricIds.some(
-            (metric) => metric === "documentation" || metric === "localization" || metric === "reproductions",
+            (metric) =>
+              metric === "documentation" ||
+              metric === "localization" ||
+              metric === "reproductions" ||
+              metric === "maintenance",
           )
             ? {
                 reasonCodes: [
@@ -481,6 +492,7 @@ export function projectRead(
                   ...classification,
                   ...publicDocumentationRecognitionReasons(parsed),
                   ...reproduction,
+                  ...maintenance,
                 ],
               }
             : {}),
@@ -519,7 +531,8 @@ export function projectRead(
         if (!date(entry.occurredAt) || (entry.sourceRevision !== null && !id(entry.sourceRevision))) return reject();
         const metadata =
           entry.evidenceMetadata === undefined ? undefined : publicEvidenceMetadataSchema.parse(entry.evidenceMetadata);
-        if (reproduction.length > 0 && metadata && metadata.activityState !== "accepted") return reject();
+        if ((reproduction.length > 0 || maintenance.length > 0) && metadata && metadata.activityState !== "accepted")
+          return reject();
         // Absence is part of the metadata projection too: route preference must
         // not choose a legacy copy over a richer copy of the same contribution.
         // Locale units require identical labels on every copy. Earlier generic
@@ -529,6 +542,7 @@ export function projectRead(
           metadata: metadata ?? null,
           classification: parsed.metricIds.includes("localization") ? classification : null,
           reproduction: parsed.metricIds.includes("reproductions") ? reproduction : null,
+          maintenance: parsed.metricIds.includes("maintenance") ? maintenance : null,
         });
         if (
           metadataByContribution.has(contribution.contributionId) &&
@@ -603,6 +617,7 @@ export function projectRead(
             ? [
                 ...publicDocumentationRecognitionReasons(entry.contribution),
                 ...publicReproductionRecognitionReasons(entry.contribution, true),
+                ...publicMaintenanceClassificationReasons(entry.contribution),
               ]
             : []),
         ],
