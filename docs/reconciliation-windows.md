@@ -26,7 +26,7 @@ reconciliation: {
 | `overlapMs` | Integer from 1,000 through `lookbackMs` | Re-read this interval before the last proven contiguous watermark |
 | `fullAuditsPerCycle` | Integer from 1 through 1,200 | Maximum repository/family pairs receiving full traversal in a cycle |
 
-An absent property preserves the original collector behavior. Explicit null,
+An absent property preserves the original collector policy. Explicit null,
 unknown fields, strings, fractional values and out-of-range bounds are rejected.
 The repository, family, installation, metric, publication, recognition and host
 authorization checks remain required. There are at most 100 configured
@@ -100,12 +100,21 @@ Primary source contracts:
 Scheduled `rc1` issue, pull-request, comment and release snapshots retain a
 versioned content fingerprint plus scan identity. The default adapter validates
 the complete reserved identity, mode and canonical millisecond window before
-source I/O. Legacy dispatch and explicit scans retain their native source
-revisions, so rereading unchanged content preserves their existing publication
-identity and frozen normalization provenance.
+source I/O. An opted-in pipeline uses the same immutable REST observation format
+for webhook dispatch and explicit reconcile, audit and backfill reads. Their
+existing collection run IDs and selection path remain unchanged.
+
+If a later approved configuration removes scheduling, retained versioned REST
+observations keep that format active for their exact repository and family.
+This compatibility decision considers retained observations across generations;
+the existing current configuration, access and generation checks still govern
+every read and publication. Sources with neither the policy nor retained versioned
+observations keep native source revisions and unchanged legacy publication
+behavior. Completed collection rows and frozen dispatches retain their original
+identities and observation cutoffs; replay still requires their exact source proof.
 
 Hydration verifies the fields shared by the list and object endpoints. A real
-scheduled content change is not lost merely because the provider timestamp is
+versioned content change is not lost merely because the provider timestamp is
 unchanged, and a later return to an earlier value remains an immutable new
 observation. Custom sources that explicitly emit the versioned marker retain
 this verification and semantic-history behavior in every mode. Reserved malformed

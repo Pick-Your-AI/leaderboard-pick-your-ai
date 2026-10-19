@@ -504,6 +504,19 @@ export async function createPipeline(options) {
         isSynthetic: dataMode === "synthetic",
         assertAuthorized: () => assertRunConfiguration(),
         onUnavailable: (repo, reason) => denyRepository(repo, reason, utc(now())),
+        async useRestSnapshotRevisions({ repositoryId, family }) {
+          if (reconciliationPolicy) return true;
+          // Keep immutable observation identities after an approved policy change
+          // removes scheduling. This is retained format compatibility, not source
+          // authority or coverage: current selection can still see older retained
+          // generations, and native fact keys can refer to an earlier observation.
+          const retained = await db.query(
+            `SELECT 1 FROM leaderboard_ingestion.source_facts
+             WHERE repository_id=$1 AND family=$2 AND source_revision LIKE 'gh-rest-%' LIMIT 1`,
+            [repositoryId, family],
+          );
+          return retained.rows.length > 0;
+        },
       })
     : null;
   const collectionSource = options.source ?? defaultSource;

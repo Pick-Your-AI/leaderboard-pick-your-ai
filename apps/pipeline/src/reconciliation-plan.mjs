@@ -83,7 +83,7 @@ export function parseReconciliationRunId(value) {
   if (typeof value !== "string") fail("reconciliation_plan_identity_invalid");
   if (!value.startsWith("rc1:")) return null;
   const match = runPattern.exec(value);
-  if (!match || match[0] !== value) fail("reconciliation_plan_identity_invalid");
+  if (!match) fail("reconciliation_plan_identity_invalid");
   const [, contextDigest, token, ordinalText, totalText] = match;
   const ordinal = Number(ordinalText);
   const total = Number(totalText);

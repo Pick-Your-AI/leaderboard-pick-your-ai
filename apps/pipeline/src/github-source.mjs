@@ -85,6 +85,7 @@ export function createGithubCollectionSource({
   maxPages = 100,
   onUnavailable,
   assertAuthorized = () => {},
+  useRestSnapshotRevisions = () => false,
 }) {
   if (
     !readClient?.scanRest ||
@@ -94,7 +95,8 @@ export function createGithubCollectionSource({
     !sourceId ||
     !Number.isInteger(maxPages) ||
     maxPages < 1 ||
-    maxPages > 1000
+    maxPages > 1000 ||
+    typeof useRestSnapshotRevisions !== "function"
   )
     throw new Error("invalid_github_collection_source");
   const approved = new Map(repositories.map((repository) => [repository.id, repository]));
@@ -162,6 +164,13 @@ export function createGithubCollectionSource({
       if (request.cursor !== null && !/^(0|[1-9]\d{0,4})$/.test(request.cursor))
         throw new Error("invalid_source_cursor");
       const offset = request.cursor === null ? 0 : Number(request.cursor);
+      let restSnapshots = Boolean(planned);
+      if (!restSnapshots && isGithubRestSnapshotFamily(request.family)) {
+        assertAuthorized();
+        restSnapshots = await useRestSnapshotRevisions({ repositoryId: repository.id, family: request.family });
+        assertAuthorized();
+        if (typeof restSnapshots !== "boolean") throw new Error("invalid_rest_snapshot_policy");
+      }
       if (["project_current", "project_history"].includes(request.family))
         await assertPublicProjects({
           client,
@@ -377,7 +386,7 @@ export function createGithubCollectionSource({
               ? githubSnapshotRevision(githubReviewRevision(value), request.runId)
               : ["discussions", "project_current"].includes(request.family)
                 ? githubSnapshotRevision(value.source_revision, request.runId)
-                : planned && isGithubRestSnapshotFamily(request.family) && nativeRevision
+                : restSnapshots && isGithubRestSnapshotFamily(request.family) && nativeRevision
                   ? githubRestSnapshotRevision(request.family, value, request.runId)
                   : nativeRevision;
         if (

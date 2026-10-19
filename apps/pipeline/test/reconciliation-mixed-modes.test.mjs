@@ -4,12 +4,7 @@ import { createPipeline } from "../src/index.mjs";
 import { ago } from "./harness.mjs";
 import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
 import { previewAuthorityLimitsV1 } from "../../controls/src/policy-preview-authority.mjs";
-import {
-  operatorAllow,
-  operatorHarness,
-  operatorScopes,
-  queueOperatorReplay,
-} from "./operator-harness.mjs";
+import { operatorAllow, operatorHarness, operatorScopes, queueOperatorReplay } from "./operator-harness.mjs";
 
 async function fixture(t) {
   const payload = {
