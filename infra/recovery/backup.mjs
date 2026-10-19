@@ -21,6 +21,13 @@ function canonical(value) {
 function validateKey(key) {
   if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error("Backup key must be exactly 32 bytes");
 }
+function validateRequiredState({ configuration, policyVersions, watermarks }) {
+  if (!configuration || typeof configuration !== "object" || !Array.isArray(policyVersions) || !policyVersions.length) {
+    throw new Error("Configuration and required policy versions must accompany a backup");
+  }
+  if (!watermarks || typeof watermarks !== "object" || Array.isArray(watermarks))
+    throw new Error("Source watermarks are required");
+}
 function timestamp(value) {
   if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) throw new Error("Invalid backup timestamp");
   return new Date(value).toISOString();
@@ -47,11 +54,7 @@ export function encryptBackup({
   if (!Buffer.isBuffer(databaseDump) || databaseDump.length === 0 || databaseDump.length > maxBytes) {
     throw new Error("Database dump must be nonempty and within the 64 MiB backup bound");
   }
-  if (!configuration || typeof configuration !== "object" || !Array.isArray(policyVersions) || !policyVersions.length) {
-    throw new Error("Configuration and required policy versions must accompany a backup");
-  }
-  if (!watermarks || typeof watermarks !== "object" || Array.isArray(watermarks))
-    throw new Error("Source watermarks are required");
+  validateRequiredState({ configuration, policyVersions, watermarks });
   // An unpooled allocation also isolates the snapshot from the caller's backing ArrayBuffer.
   const capturedDump = Buffer.alloc(databaseDump.length);
   capturedDump.set(databaseDump);
@@ -59,6 +62,8 @@ export function encryptBackup({
     JSON.stringify({ databaseDump: capturedDump.toString("base64"), configuration, policyVersions, watermarks }),
   );
   if (payload.length > maxBytes * 2) throw new Error("Backup payload exceeds serialization bound");
+  // Validate the actual serialized state without invoking caller serializers again.
+  validateRequiredState(JSON.parse(payload.toString("utf8")));
   const metadata = {
     format,
     createdAt,
@@ -96,6 +101,7 @@ export function decryptBackup(envelope, { key, now, expectedDumpSha256, allowExp
   const payload = Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64")), decipher.final()]);
   if (digest(payload) !== metadata.payloadSha256) throw new Error("Backup payload digest mismatch");
   const parsed = JSON.parse(payload.toString("utf8"));
+  validateRequiredState(parsed);
   const databaseDump = Buffer.from(parsed.databaseDump, "base64");
   if (
     digest(databaseDump) !== metadata.dumpSha256 ||
