@@ -18,6 +18,10 @@ import {
 } from "@pick-your-ai/metrics";
 import { materializeRecognition, recognitionFingerprint } from "../src/recognition-adapter.mjs";
 import { domainMetricIds, domainDateBasis } from "../src/domain-recognition.mjs";
+import {
+  attachSyntheticEvidenceIntake,
+  attachSyntheticEvidenceState,
+} from "../../../tests/fixtures/evidence-intake.mjs";
 
 const fixture = JSON.parse(
   readFileSync(new URL("../../../packages/github/test/fixtures/engineering.json", import.meta.url), "utf8"),
@@ -217,7 +221,7 @@ const details = {
     contributorConsent: true,
   },
 };
-function scenario(metric = "catalog_proposals") {
+function scenario(metric = "catalog_proposals", requestOverrides = {}) {
   const input = source(),
     candidate = input.facts.find((f) => f.metricId === "pr_merged");
   const evidence = input.evidence.find((e) => e.contribution.contributionId === candidate.id);
@@ -241,7 +245,9 @@ function scenario(metric = "catalog_proposals") {
     locator: evidence.artifact.publicUrl,
     collaborators: {},
     history: [decision],
+    ...requestOverrides,
   };
+  attachSyntheticEvidenceIntake(request);
   const record = {
     requestId: request.id,
     requestVersion: request.version,
@@ -459,12 +465,17 @@ test("reproductions: generic receipts, unexecuted work and unbound source author
   ];
   for (const [name, mutate] of cases) {
     await t.test(name, () => {
-      const s = scenario("reproductions");
-      mutate(s);
-      assert.throws(
-        () => run(s),
-        (error) => /unverified/.test(error.message) && !error.message.includes("PRIVATE_SENTINEL"),
+      const s = scenario(
+        "reproductions",
+        name === "current collaborator review" ? { collaborators: { 202: "accepted" } } : {},
       );
+      mutate(s);
+      if (name === "stale request version") assert.deepEqual(run(s), s.input);
+      else
+        assert.throws(
+          () => run(s),
+          (error) => /unverified/.test(error.message) && !error.message.includes("PRIVATE_SENTINEL"),
+        );
     });
   }
 });
@@ -739,7 +750,10 @@ test("data_quality: missing origin knowledge and self-introduced errors cannot e
     ],
   ])
     await t.test(name, () => {
-      const s = scenario("data_quality");
+      const s = scenario(
+        "data_quality",
+        name === "collaborator introduced the error" ? { collaborators: { 303: "accepted" } } : {},
+      );
       mutate(s);
       assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
       assert.equal(
@@ -896,6 +910,8 @@ test("data_quality: later proof versions conserve a correction while separately 
     request.id += `:${suffix}`;
     request.history[0].id += `:${suffix}`;
     request.history[0].at += 1000;
+    request.history[0].receipt = request.id;
+    attachSyntheticEvidenceIntake(request);
     s.state.requests[request.id] = request;
     s.state.audit.push(request.history[0]);
     s.binding.domainEvidence.records.push({
@@ -934,11 +950,27 @@ function beforeReproductionFingerprint(s, bindings = [s.binding]) {
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
-test("reproductions: authority retires generic scenarios while preserving every configuration without reproduction bindings", () => {
+// The earlier single-request oracles above remain literal. This separately
+// spells their empty-source form so manual-intake retirement cannot mask an
+// accidental change to unrelated automatic-source authority.
+function emptyDomainAuthority(bindings, correctionFence = false) {
+  const authority = ["localization-review-target/v1", [], [], [], bindings];
+  if (correctionFence && bindings.some((binding) => binding.metricId === "data_quality"))
+    authority.push("data-quality-recognition/v1");
+  return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
+}
+
+test("reproductions: its configuration fence preserves automatic-source authority while manual intake retires old claims", () => {
+  const empty = { requests: {}, profiles: {}, audit: [] };
   for (const metric of domainMetricIds) {
-    const s = scenario(metric),
-      current = recognitionFingerprint(s.state, [s.binding]),
-      previous = beforeReproductionFingerprint(s);
+    const s = scenario(metric);
+    assert.notEqual(
+      recognitionFingerprint(s.state, [s.binding]),
+      beforeReproductionFingerprint(s),
+      `${metric}: manual intake retires prior claim authority`,
+    );
+    const current = recognitionFingerprint(empty, [s.binding]),
+      previous = emptyDomainAuthority([s.binding], true);
     if (metric === "reproductions") assert.notEqual(current, previous);
     else assert.equal(current, previous, `${metric}: exact prior authority bytes survive`);
   }
@@ -946,15 +978,24 @@ test("reproductions: authority retires generic scenarios while preserving every 
     mixed = [s.binding, scenario("data_quality").binding, scenario("reproductions").binding];
   assert.notEqual(recognitionFingerprint(s.state, mixed), beforeReproductionFingerprint(s, mixed));
   const unaffected = mixed.slice(0, 2);
-  assert.equal(recognitionFingerprint(s.state, unaffected), beforeReproductionFingerprint(s, unaffected));
+  assert.notEqual(recognitionFingerprint(s.state, unaffected), beforeReproductionFingerprint(s, unaffected));
+  assert.notEqual(recognitionFingerprint(empty, mixed), emptyDomainAuthority(mixed, true));
+  assert.equal(recognitionFingerprint(empty, unaffected), emptyDomainAuthority(unaffected, true));
 });
 
-test("data_quality: qualifier authority fences legacy correction publications without changing other domain fingerprints", () => {
+test("data_quality: qualifier authority preserves other automatic sources while manual intake retires old publications", () => {
+  const empty = { requests: {}, profiles: {}, audit: [] };
   for (const metric of domainMetricIds) {
-    const s = scenario(metric),
-      current = recognitionFingerprint(s.state, [s.binding]);
-    if (["data_quality", "reproductions"].includes(metric)) assert.notEqual(current, legacyDomainFingerprint(s));
-    else assert.equal(current, legacyDomainFingerprint(s), `${metric}: established publication authority is retained`);
+    const s = scenario(metric);
+    assert.notEqual(
+      recognitionFingerprint(s.state, [s.binding]),
+      legacyDomainFingerprint(s),
+      `${metric}: manual intake retires prior claim authority`,
+    );
+    const current = recognitionFingerprint(empty, [s.binding]),
+      previous = emptyDomainAuthority([s.binding]);
+    if (["data_quality", "reproductions"].includes(metric)) assert.notEqual(current, previous);
+    else assert.equal(current, previous, `${metric}: established automatic-source authority is retained`);
   }
   const mixed = scenario("documentation"),
     bindings = [mixed.binding, scenario("data_quality").binding];
@@ -963,6 +1004,7 @@ test("data_quality: qualifier authority fences legacy correction publications wi
     legacyDomainFingerprint(mixed, bindings),
     "A snapshot bound to a mixed configuration retires as a whole, even without an accepted correction request",
   );
+  assert.notEqual(recognitionFingerprint(empty, bindings), emptyDomainAuthority(bindings));
 });
 
 // These expected clocks follow the canonical definitions, independently of the
@@ -1055,6 +1097,8 @@ for (const [metric, date_basis] of Object.entries(candidateDateBases)) {
     duplicate.id = "replayed-request";
     duplicate.history[0].id = "replayed-decision";
     duplicate.history[0].at += 1000;
+    duplicate.history[0].receipt = duplicate.id;
+    attachSyntheticEvidenceIntake(duplicate);
     s.state.requests[duplicate.id] = duplicate;
     s.state.audit.push(duplicate.history[0]);
     s.binding.domainEvidence.records.push({
@@ -1185,10 +1229,6 @@ test("a reviewer, matching URL or forged manifest cannot replace current exact s
       s.record.requestVersion--;
     },
     (s) => {
-      s.request.version++;
-      s.record.requestVersion = s.request.version;
-    },
-    (s) => {
       s.record.decisionId = "different-decision";
     },
     (s) => {
@@ -1225,9 +1265,6 @@ test("a reviewer, matching URL or forged manifest cannot replace current exact s
       s.state.audit.push(structuredClone(s.decision));
     },
     (s) => {
-      s.request.collaborators["202"] = "accepted";
-    },
-    (s) => {
       s.evidence.sourceRevisionUrl = null;
     },
     (s) => {
@@ -1254,6 +1291,12 @@ test("a reviewer, matching URL or forged manifest cannot replace current exact s
       (error) => /unverified/.test(error.message) && !error.message.includes("PRIVATE_SENTINEL"),
     );
   }
+  const conflict = scenario("catalog_proposals", { collaborators: { 202: "accepted" } });
+  assert.throws(() => run(conflict), /recognition_decision_unverified/);
+  const stale = scenario();
+  stale.request.version++;
+  stale.record.requestVersion = stale.request.version;
+  assert.deepEqual(run(stale), stale.input, "a newer claim cannot reuse its older intake review");
 });
 
 test("pricebook currency requires an actual uppercase three-letter string", () => {
@@ -1334,6 +1377,8 @@ test("malformed accepted decision clocks remain closed before canonical deduplic
     const invalid = structuredClone(s.request);
     invalid.id = "z-invalid-clock";
     invalid.history[0].id = "invalid-clock-decision";
+    invalid.history[0].receipt = invalid.id;
+    attachSyntheticEvidenceIntake(invalid);
     invalid.history[0].at = at;
     s.state.requests[invalid.id] = invalid;
     s.state.audit.push(invalid.history[0]);
@@ -1397,6 +1442,133 @@ test("event clocks preserve merge, acceptance, negative freshness and public-dis
   assert.ok(run(negative).evidence.at(-1).contribution.reasonCodes.includes("domain_outcome:unavailable"));
 });
 
+for (const outcome of ["available", "changed", "unavailable", "unknown", "contradicted"])
+  test(`freshness outcomes: reviewed ${outcome} counts recheck effort without granting fact credit`, () => {
+    const s = scenario("freshness_checks");
+    s.record.details.outcome = outcome;
+    const before = structuredClone(s);
+    const normalized = run(s);
+    const added = normalized.facts.slice(s.input.facts.length);
+    assert.equal(added.length, 1);
+    assert.equal(added[0].metricId, "freshness_checks");
+    assert.equal(added[0].state, "qualified");
+    assert.equal(added[0].occurredAt, occurredAt);
+    assert.equal(added[0].acceptedAt, acceptedAt);
+    const result = aggregateDomain(s, normalized);
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.rows[0].value, 1);
+    assert.equal(result.rows[0].sampleCount, 1);
+    const proof = normalized.evidence.at(-1);
+    assert.deepEqual(proof.contribution.metricIds, ["freshness_checks"]);
+    assert.deepEqual(proof.contribution.reasonCodes, [
+      "independent_recognition_receipt",
+      "domain_metric:freshness_checks",
+      "domain_clock:checked_at",
+      `domain_outcome:${outcome}`,
+    ]);
+    assert.doesNotMatch(JSON.stringify(proof), /private-request|private-review-receipt|publisher:canonical|claim:1/);
+    assert.deepEqual(s, before, "Recognition must preserve the original source and protected reviewer records");
+  });
+
+for (const sourceState of ["available", "changed", "unavailable", "unknown", "contradicted"])
+  test(`freshness outcomes: ${sourceState} retains the separate primary-source admission rule`, () => {
+    for (const evidenceClass of ["primary_source", "publisher_statement", "independent_measurement"]) {
+      const s = scenario("primary_sources");
+      s.record.details.sourceState = sourceState;
+      s.record.details.evidenceClass = evidenceClass;
+      if (sourceState === "available") {
+        const added = run(s).facts.slice(s.input.facts.length);
+        assert.equal(added.length, 1);
+        assert.equal(added[0].metricId, "primary_sources");
+        assert.equal(added[0].state, "qualified");
+      } else assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
+    }
+  });
+
+test("freshness outcomes: another reviewed outcome conserves the interval and a later recheck is distinct", () => {
+  const s = scenario("freshness_checks");
+  s.record.details.outcome = "available";
+  const append = (suffix, checkedAt) => {
+    const request = structuredClone(s.request);
+    request.id += suffix;
+    request.version++;
+    request.history[0].id += suffix;
+    request.history[0].version = request.version;
+    request.history[0].at += 1000;
+    request.history[0].receipt = request.id;
+    attachSyntheticEvidenceIntake(request);
+    s.state.requests[request.id] = request;
+    s.state.audit.push(request.history[0]);
+    s.binding.domainEvidence.records.push({
+      ...structuredClone(s.record),
+      requestId: request.id,
+      requestVersion: request.version,
+      decisionId: request.history[0].id,
+      details: { ...s.record.details, outcome: "contradicted", checkedAt },
+    });
+  };
+  append(":same-interval", "2026-10-07T11:00:00.000Z");
+  const repeated = run(s);
+  assert.equal(repeated.facts.slice(s.input.facts.length).length, 1);
+  assert.equal(aggregateDomain(s, repeated).rows[0].value, 1);
+  s.state.requests = Object.fromEntries(Object.entries(s.state.requests).reverse());
+  assert.deepEqual(run(s), repeated, "Receipt insertion order must not choose the counted unit");
+  append(":next-interval", "2026-10-08T11:00:00.000Z");
+  const next = run(s);
+  const added = next.facts.slice(s.input.facts.length);
+  assert.equal(added.length, 2);
+  assert.equal(new Set(added.map((fact) => fact.canonicalKey)).size, 2);
+  assert.equal(aggregateDomain(s, next).rows[0].value, 2);
+  assert.equal(aggregateDomain(s, next, { from: "2026-10-08T00:00:00.000Z" }).rows[0].value, 1);
+});
+
+for (const [label, change, message, requestOverrides] of [
+  ["missing independent audit", (s) => (s.state.audit = []), "recognition_decision_unverified"],
+  ["self review", (s) => (s.decision.actor = s.request.owner), "recognition_decision_unverified"],
+  [
+    "collaborator review",
+    (s) => (s.request.collaborators[s.decision.actor] = "accepted"),
+    "recognition_decision_unverified",
+    { collaborators: { 202: "accepted" } },
+  ],
+  ["unenrolled reviewer", (s) => (s.binding.reviewerIds = []), "recognition_decision_unverified"],
+  ["changed request version", (s) => s.request.version++, null],
+  ["missing collected pin", (s) => (s.evidence.sourceRevision = null), "domain_recognition_evidence_unverified"],
+  [
+    "mutable reviewer pin",
+    (s) => (s.record.sourceRevisionUrl = "https://github.com/synthetic-owner/repository/blob/main/claim.md"),
+    "domain_recognition_evidence_unverified",
+  ],
+  ["unapproved public use", (s) => (s.record.publicSafe = false), "domain_recognition_evidence_unverified"],
+  ["synthetic source", (s) => (s.input.isSynthetic = true), "domain_recognition_evidence_unverified"],
+  ["expired record", (s) => (s.record.validUntil = acceptedAt), "domain_recognition_evidence_unverified"],
+  ["future check", (s) => (s.record.details.checkedAt = cutoff), "domain_recognition_evidence_unverified"],
+  [
+    "unsupported outcome",
+    (s) => (s.record.details.outcome = "contradiction"),
+    "domain_recognition_evidence_unverified",
+  ],
+])
+  test(`freshness outcomes: contradicted effort still rejects ${label}`, () => {
+    const s = scenario("freshness_checks", requestOverrides);
+    s.record.details.outcome = "contradicted";
+    change(s);
+    if (message === null) assert.deepEqual(run(s), s.input);
+    else assert.throws(() => run(s), { message });
+  });
+
+for (const [label, change] of [
+  ["withdrawn request", (s) => (s.request.status = "withdrawn")],
+  ["suppressed contributor", (s) => (s.state.profiles[s.request.owner] = { suppressed: true })],
+  ["private source", (s) => (s.evidence.artifact.visibility = "private")],
+])
+  test(`freshness outcomes: contradicted effort stays withheld for a ${label}`, () => {
+    const s = scenario("freshness_checks");
+    s.record.details.outcome = "contradicted";
+    change(s);
+    assert.deepEqual(run(s), s.input);
+  });
+
 test("domain clocks normalize supported offsets and reject precision the metric engine cannot preserve", () => {
   for (const [metric, field] of [
     ["freshness_checks", "checkedAt"],
@@ -1452,6 +1624,7 @@ test("the pipeline retains per-source synthetic provenance when flattening recog
       );
   }
   s.request.locator = s.evidence.artifact.publicUrl;
+  attachSyntheticEvidenceState(s.state);
   s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl;
   const h = await harness(t, {
     payloads: [structuredClone(fixture.pull_request)],
@@ -1493,6 +1666,7 @@ test("accepted documentation retains bounded domain reasons through primary and 
     entry.contribution.reasonCodes.push("domain_secret:PRIVATE_SENTINEL");
   }
   s.request.locator = s.evidence.artifact.publicUrl;
+  attachSyntheticEvidenceState(s.state);
   s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl;
   const payload = JSON.parse(JSON.stringify(fixture.pull_request).replace(/synthetic/gi, "fixture"));
   payload.html_url = s.request.locator;
@@ -1570,6 +1744,7 @@ test("data_quality: correction provenance stays private and obsolete generic aut
     entry.contribution.reasonCodes.push("domain_secret:PRIVATE_CORRECTION");
   }
   s.request.locator = s.evidence.artifact.publicUrl;
+  attachSyntheticEvidenceState(s.state);
   s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl;
   for (const pin of [s.record.details.before, s.record.details.after])
     pin.sourceRevisionUrl = pin.sourceRevisionUrl.replace("synthetic-owner/repository", "example-org/example-repo");
@@ -1676,6 +1851,7 @@ test("reproductions: persisted accepted outcomes keep private proof bounded and 
     entry.contribution.reasonCodes.push("domain_secret:PRIVATE_REPRODUCTION");
   }
   s.request.locator = s.evidence.artifact.publicUrl;
+  attachSyntheticEvidenceState(s.state);
   s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl;
   for (const key of ["scenario", "environment", "result"])
     s.record.details[key].sourceRevisionUrl = s.record.details[key].sourceRevisionUrl.replace(
@@ -1786,6 +1962,8 @@ test("canonical units deduplicate aliases independently of request insertion ord
   duplicate.id = "duplicate-request";
   duplicate.history[0].id = "duplicate-decision";
   duplicate.history[0].at += 1000;
+  duplicate.history[0].receipt = duplicate.id;
+  attachSyntheticEvidenceIntake(duplicate);
   s.state.requests[duplicate.id] = duplicate;
   s.state.audit.push(duplicate.history[0]);
   s.binding.domainEvidence.records.push({
@@ -1826,6 +2004,8 @@ test("unrelated requests cannot change the earliest audited canonical receipt in
     binding.scope = request.scope;
     binding.domainEvidence.records[0].requestId = id;
     binding.domainEvidence.records[0].decisionId = request.history[0].id;
+    request.history[0].receipt = request.id;
+    attachSyntheticEvidenceIntake(request);
     requests.push(request);
     bindings.push(binding);
   }
@@ -1942,6 +2122,8 @@ for (const metric of ["documentation", "usability"])
       request.id += ":" + suffix;
       request.history[0].id += ":" + suffix;
       request.history[0].at += 1000;
+      request.history[0].receipt = request.id;
+      attachSyntheticEvidenceIntake(request);
       s.state.requests[request.id] = request;
       s.state.audit.push(request.history[0]);
       s.binding.domainEvidence.records.push({

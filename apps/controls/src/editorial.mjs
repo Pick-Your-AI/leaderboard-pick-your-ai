@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { exactKeys, requireThat, text } from "./store.mjs";
+import { hasReviewedParticipantConsent } from "./evidence-consent.mjs";
+import { hasReviewedEvidenceIntake } from "./evidence-intake.mjs";
 
 export const EDITORIAL_RULE_VERSION = "reviewed-opt-in/v1";
 
@@ -10,6 +12,8 @@ export function nominateSpotlight(state, session, input, now) {
   const claim = state.requests[text(input.claimId, 200)];
   requireThat(claim?.kind === "evidence" && claim.owner === session.actorId, 404, "Not found");
   requireThat(claim.status === "accepted", 409, "Accepted evidence required");
+  requireThat(hasReviewedParticipantConsent(claim), 409, "Current participant consent and review required");
+  requireThat(hasReviewedEvidenceIntake(claim), 409, "Current claim-scoped intake and source-use review required");
   requireThat(!state.profiles[session.actorId]?.suppressed, 409, "Profile is suppressed");
   const nominations = (state.spotlights ||= {});
   requireThat(Object.keys(nominations).length < 10_000, 503, "Nomination capacity reached");
@@ -46,6 +50,8 @@ export function decideSpotlight(state, session, id, input, now) {
     requireThat(session.roles.includes("reviewer"), 403, "Reviewer required");
     const claim = state.requests[entry.claimId];
     requireThat(claim?.status === "accepted" && claim.version === entry.claimVersion, 409, "Accepted evidence changed");
+    requireThat(hasReviewedParticipantConsent(claim), 409, "Current participant consent and review required");
+    requireThat(hasReviewedEvidenceIntake(claim), 409, "Current claim-scoped intake and source-use review required");
     requireThat(
       session.actorId !== entry.owner &&
         !Object.hasOwn(claim.collaborators, session.actorId) &&
@@ -81,6 +87,8 @@ export function projectSpotlights(state, eligibleClaim = () => false) {
     if (
       entry.status !== "accepted" ||
       claim?.status !== "accepted" ||
+      !hasReviewedParticipantConsent(claim) ||
+      !hasReviewedEvidenceIntake(claim) ||
       claim.version !== entry.claimVersion ||
       profile?.suppressed ||
       eligibleClaim({
