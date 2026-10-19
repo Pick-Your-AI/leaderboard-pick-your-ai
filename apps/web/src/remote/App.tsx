@@ -12,7 +12,8 @@ import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
 import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
-import { RankComparisonControls, RankMovementValue } from "./RankComparison.tsx";
+import { RankComparisonControls } from "./RankComparison.tsx";
+import { BoardTable } from "./BoardTable.tsx";
 import { TimeZoneOptions, WindowBounds } from "../components/DisplayTimeZone.tsx";
 import { LastVerifiedSnapshot, type SnapshotReference } from "./LastVerifiedSnapshot.tsx";
 import {
@@ -1003,74 +1004,21 @@ export function RemoteApp() {
                         ? `Approved ${data.value.ranking.direction} ordering. Ties retain the API’s dense ranks.`
                         : "No ranking policy is supplied."}
                   </p>
-                  <div className="table-region" role="region" aria-label="Published contributions" tabIndex={0}>
-                    <table className="board-table" role="table">
-                      <caption>
-                        {data.value.metric.name} · {data.value.metric.definition.unit} · {data.value.totalRows}{" "}
-                        published rows; this page has {data.value.rows.length}
-                      </caption>
-                      <thead role="rowgroup">
-                        <tr role="row">
-                          <th scope="col" role="columnheader">
-                            Rank
-                          </th>
-                          {data.value.comparison && (
-                            <th scope="col" role="columnheader">
-                              Rank movement
-                            </th>
-                          )}
-                          <th scope="col" role="columnheader">
-                            Contributor
-                          </th>
-                          <th scope="col" role="columnheader">
-                            Value and state
-                          </th>
-                          <th scope="col" role="columnheader">
-                            Evidence
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody role="rowgroup">
-                        {data.value.rows.map((row) => (
-                          <tr key={row.actorId} role="row">
-                            <td role="cell" data-label="Rank">
-                              {row.rank === null ? "Unranked" : row.rank}
-                            </td>
-                            {data.value.comparison && (
-                              <td role="cell" data-label="Rank movement">
-                                <RankMovementValue value={row.movement} />
-                              </td>
-                            )}
-                            <th role="rowheader" scope="row">
-                              <a data-api-nav href={uiHref(`/contributors/${encodeURIComponent(row.actorId)}`, pinned)}>
-                                {name(row.actor, row.actorId)}
-                              </a>
-                            </th>
-                            <td role="cell" data-label="Value">
-                              <Value
-                                result={row.result}
-                                pending={row.pending}
-                                diagnostic={data.value.diagnostics.find(
-                                  (item) => item.actorId === row.actorId && item.metricId === row.result.metricId,
-                                )}
-                              />
-                            </td>
-                            <td role="cell" data-label="Evidence">
-                              {row.evidenceIds.length
-                                ? row.evidenceIds.map((id) => (
-                                    <p key={id}>
-                                      <a data-api-proof href={proofHref(url.pathname, pinned, id)}>
-                                        {id}
-                                      </a>
-                                    </p>
-                                  ))
-                                : "No evidence IDs supplied"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <BoardTable
+                    key={uiHref(url.pathname, pinned, { cursor: selected.cursor })}
+                    board={data.value}
+                    selected={pinned}
+                    path={url.pathname}
+                    renderValue={(row) => (
+                      <Value
+                        result={row.result}
+                        pending={row.pending}
+                        diagnostic={data.value.diagnostics.find(
+                          (item) => item.actorId === row.actorId && item.metricId === row.result.metricId,
+                        )}
+                      />
+                    )}
+                  />
                   {data.value.rows.length === 0 && (
                     <p>
                       No public rows are available in this selection. An empty page does not establish zero activity.
