@@ -122,6 +122,9 @@ canonical plans, fail the entire ordering admission. The adapter validates all
 current ordering plans before invoking any ordering receipt callback; neither
 request insertion order nor an earlier duplicate can hide a later conflict.
 The asynchronous normalizer's receipt batch applies the same plan check.
+It retains the earliest valid acceptance for each plan, breaking equal-instant
+ties by receipt ID, without reordering unrelated receipts. A missing slot in a
+sparse receipt batch fails the same validation as an explicit invalid receipt.
 
 This bounded contract cannot discover an undisclosed relationship between two
 different public plan artifacts. Reviewers must provide known aliases and
