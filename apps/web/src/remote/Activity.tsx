@@ -10,7 +10,7 @@ import {
   type Selection,
 } from "./client.ts";
 
-const stateLabel = (state: ActivityGroup["activityState"]) =>
+export const stateLabel = (state: ActivityGroup["activityState"]) =>
   ({
     observed: "Received public activity",
     pending: "In-progress work",
@@ -20,19 +20,16 @@ const stateLabel = (state: ActivityGroup["activityState"]) =>
 function Clock({ value }: { value: string | null }) {
   return value === null ? <>Unknown</> : <time dateTime={value}>{value}</time>;
 }
-function GroupSummary({ group, selected }: { group: ActivityGroup; selected: Selection }) {
+export function ActivityTimes({
+  group,
+}: {
+  group: Pick<
+    ActivityGroup,
+    "latestOccurredAt" | "earliestOccurredAt" | "firstCollectedAt" | "lastCollectedAt" | "unknownCollectionCount"
+  >;
+}) {
   return (
     <>
-      <h2>
-        <a data-api-nav href={uiHref(`/contributors/${encodeURIComponent(group.actorId)}`, selected)}>
-          {group.actor.displayName ?? group.actor.login ?? group.actorId}
-        </a>{" "}
-        · {stateLabel(group.activityState)}
-      </h2>
-      <p>
-        Repository: {group.repositoryId ?? "Unknown"}. {group.artifactCount} artifacts · {group.factCount} canonical
-        facts · {group.proofCount} evidence records.
-      </p>
       <p>
         Action time: <Clock value={group.latestOccurredAt} />
         {group.earliestOccurredAt !== group.latestOccurredAt && (
@@ -61,10 +58,49 @@ function GroupSummary({ group, selected }: { group: ActivityGroup; selected: Sel
             <> Collection occurred after the action; this may be a delayed import.</>
           )}
       </p>
+    </>
+  );
+}
+function GroupSummary({ group, selected }: { group: ActivityGroup; selected: Selection }) {
+  return (
+    <>
+      <h2>
+        <a data-api-nav href={uiHref(`/contributors/${encodeURIComponent(group.actorId)}`, selected)}>
+          {group.actor.displayName ?? group.actor.login ?? group.actorId}
+        </a>{" "}
+        · {stateLabel(group.activityState)}
+      </h2>
+      <p>
+        Repository: {group.repositoryId ?? "Unknown"}. {group.artifactCount} artifacts · {group.factCount} canonical
+        facts · {group.proofCount} evidence records.
+      </p>
+      <ActivityTimes group={group} />
       <p>
         Published categories: {group.categoryIds.join(", ")}. Categories and state groups may overlap for the same fact;
         do not add their counts. No combined score is calculated.
       </p>
+    </>
+  );
+}
+export function ActivityGroupContents({ group, selected }: { group: ActivityGroup; selected: Selection }) {
+  return (
+    <>
+      <GroupSummary group={group} selected={selected} />
+      <ul aria-label="Artifact preview">
+        {group.artifactPreview.map((item) => (
+          <li key={item.artifactId}>
+            <a href={publicLink(item.publicUrl)!} rel="noreferrer nofollow">
+              {item.kind}: {item.artifactId}
+            </a>
+          </li>
+        ))}
+      </ul>
+      {group.artifactCount > group.artifactPreview.length && (
+        <p>{group.artifactCount - group.artifactPreview.length} more artifacts in this group.</p>
+      )}
+      <a data-api-nav href={uiHref(`/activity/${group.groupId}`, selected)}>
+        Explore {group.proofCount} source proofs
+      </a>
     </>
   );
 }
@@ -89,22 +125,7 @@ export function ActivityFeed({ value, selected }: { value: Activity; selected: S
       <ol className="directory" aria-label="Public activity groups">
         {value.groups.map((group) => (
           <li key={group.groupId}>
-            <GroupSummary group={group} selected={selected} />
-            <ul aria-label="Artifact preview">
-              {group.artifactPreview.map((item) => (
-                <li key={item.artifactId}>
-                  <a href={publicLink(item.publicUrl)!} rel="noreferrer nofollow">
-                    {item.kind}: {item.artifactId}
-                  </a>
-                </li>
-              ))}
-            </ul>
-            {group.artifactCount > group.artifactPreview.length && (
-              <p>{group.artifactCount - group.artifactPreview.length} more artifacts in this group.</p>
-            )}
-            <a data-api-nav href={uiHref(`/activity/${group.groupId}`, selected)}>
-              Explore {group.proofCount} source proofs
-            </a>
+            <ActivityGroupContents group={group} selected={selected} />
           </li>
         ))}
       </ol>
