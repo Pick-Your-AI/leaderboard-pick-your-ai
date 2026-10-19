@@ -84,14 +84,22 @@ does not skip current dependency checks or authorize a conflicting receipt.
 Snapshots with available physical context retain the existing private
 `identityEvidence.normalizationSources` pairs and original document hashes.
 Historical reads check those exact retained normalization copies under the
-existing source authorization and locks. A missing copy, corrupted original
-hash or coherently rehashed replacement makes the whole optional context
-unavailable. The check does not fetch GitHub, call the normalizer, rewrite the
-selected snapshot, change its metric quantities or replace its source pins with
-a latest revision. The original explanation hash remains bound across awaited
+existing source authorization and locks. Mandatory source-version admission
+for both the selected publication and current head runs before optional context
+projection. If a copy is required to establish default-delivery, review or
+Discussion authority, its absence, corrupted original hash or coherently
+rehashed replacement withholds the whole public read and exports. Optional
+context cannot keep an otherwise unauthorized publication visible. Where
+ordinary publication authority remains intact, physical-context validation
+still withholds the complete optional context rather than inventing a subtotal.
+Neither path fetches GitHub, calls the normalizer, rewrites the selected
+snapshot, changes its stored metric quantities or replaces source pins with a
+latest revision. The original explanation hash remains bound across awaited
 work, and the existing final confirmation, configuration and privacy checks
 still apply. Mandatory explanation corruption and unexpected storage errors
-retain their existing failure path.
+retain their existing failure path. Valid receipt-less legacy normalizations
+remain distinct: absent optional context does not itself invalidate their
+otherwise admitted metric evidence or imply measured zero.
 
 ## Public response and exports
 

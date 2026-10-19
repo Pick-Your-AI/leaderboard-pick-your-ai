@@ -193,7 +193,6 @@ export class OperatorInbox {
       const current = await access(tx, repositoryId);
       const readScope = { repositoryId, ...current };
       const confirmRead = captureReplayReadGuard(this.options.replayReadGuard, readScope);
-      confirmReturn = confirmRead;
       confirmRead();
       const read = await readOperatorReplayResult(tx, readScope, receiptId, this.options);
       if (JSON.stringify(a) !== JSON.stringify(await authority(authorize, repositoryId)))
@@ -202,6 +201,7 @@ export class OperatorInbox {
         confirmRead();
         if (read.confirmCurrent && read.confirmCurrent() !== true) throw new Error("operation_publication_changed");
       };
+      confirmReturn = beforeSend;
       beforeSend();
       const data = {
         repositoryId,
@@ -227,7 +227,8 @@ export class OperatorInbox {
   ) {
     scope(repositoryId);
     if (typeof this.options.readHealth !== "function") throw new Error("operation_health_unavailable");
-    return this.db.transaction(async (tx) => {
+    let confirmReturn: (() => void) | undefined;
+    const result = await this.db.transaction(async (tx) => {
       const a = await authority(authorize, repositoryId);
       const current = await access(tx, repositoryId);
       const read = await this.options.readHealth!(tx, { repositoryId, ...current });
@@ -236,6 +237,7 @@ export class OperatorInbox {
       const beforeSend = () => {
         if (read.confirmCurrent() !== true) throw new Error("operation_health_changed");
       };
+      confirmReturn = beforeSend;
       beforeSend();
       const data = {
         repositoryId,
@@ -245,8 +247,12 @@ export class OperatorInbox {
         ...read.health,
       };
       await observe?.(data, beforeSend);
+      beforeSend();
       return data;
     });
+    if (!confirmReturn) throw new Error("operation_health_unavailable");
+    confirmReturn();
+    return result;
   }
   async read(repositoryId: number, authorize: OperatorAuthorize) {
     scope(repositoryId);

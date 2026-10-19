@@ -293,6 +293,11 @@ for (const priorFormat of ["before attribution", "before merge pins"])
     );
     const frozen = (await h.db.query("SELECT document FROM leaderboard_pipeline.frozen_inputs")).rows[0].document;
     frozen.identityAuthorization.identityEvidence.normalizationHashes = [legacyHash];
+    // The fixture rewrites retained bytes; update the existing exact source pair as well.
+    if (frozen.identityAuthorization.identityEvidence.normalizationSources)
+      frozen.identityAuthorization.identityEvidence.normalizationSources = [
+        { factKey: saved.fact_key, documentHash: legacyHash },
+      ];
     await h.db.query("UPDATE leaderboard_pipeline.frozen_inputs SET document=$1::jsonb,document_hash=$2", [
       JSON.stringify(frozen),
       comparisonHash(frozen),

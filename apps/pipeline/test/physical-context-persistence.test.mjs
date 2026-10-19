@@ -14,6 +14,8 @@ async function setup(t, legacy = false) {
   const { pull } = physicalSource();
   const h = await harness(t, {
     payloads: [pull],
+    // The instrumentation wrapper delegates source decisions to the current stock adapter.
+    defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
     configure(config) {
       config.repositories[0].families = ["pull_requests"];
       const policy = {
@@ -196,6 +198,22 @@ test("fresh retained reads require original cache hashes while preserving quanti
     assert.doesNotMatch(csv.body, /github-physical-context|canonicalIntegrationId|mergedEvidenceId/);
     return { rows, csv: csv.body };
   };
+  const readUnavailable = async () => {
+    const statuses = [];
+    for (const path of [
+      boardUrl,
+      `${boardUrl}&snapshot=${snapshotId}`,
+      `/api/v1/exports?metric=pr_lines_added&snapshot=${snapshotId}&format=json`,
+      `/api/v1/exports?metric=pr_lines_added&snapshot=${snapshotId}&format=csv`,
+    ]) {
+      const response = await runtime.app.inject(path);
+      assert.equal(response.statusCode, 503, response.body);
+      assert.equal(response.headers["cache-control"], "no-store");
+      assert.deepEqual(response.json(), { error: "public_projection_unavailable" });
+      statuses.push(response.statusCode);
+    }
+    return statuses;
+  };
   const original = await read();
   for (const rows of original.rows) {
     assert.equal(rows[0].result.value, 17);
@@ -230,21 +248,16 @@ test("fresh retained reads require original cache hashes while preserving quanti
         ],
       );
     await reopen();
-    const result = await read();
-    for (const rows of result.rows) assert.equal(rows[0].result.value, 17);
+    // These original normalization copies also establish mandatory default-delivery
+    // authority. Optional physical context cannot keep an invalid publication visible.
     observed.push({
       variant,
-      states: result.rows.map((rows) => rows[0].physicalContext.state),
-      reasons: result.rows.map((rows) => rows[0].physicalContext.reason ?? null),
-      details: result.rows.some((rows) =>
-        ["summary", "samples", "sampleCount", "unitCount"].some((key) => Object.hasOwn(rows[0].physicalContext, key)),
-      ),
-      csvDetails: /beforeUrl|afterUrl|sampleCount|unitCount|summary/.test(result.csv),
+      statuses: await readUnavailable(),
     });
     assert.deepEqual(
       await retainedSnapshot(),
       originalSnapshot,
-      "optional evidence loss never rewrites the selected snapshot",
+      "missing normalization authority never rewrites the selected snapshot or its stored quantities",
     );
   }
   await restore();
@@ -267,10 +280,7 @@ test("fresh retained reads require original cache hashes while preserving quanti
     observed,
     ["deleted", "corrupt_original_hash", "coherently_rehashed_substitution"].map((variant) => ({
       variant,
-      states: ["unknown", "unknown", "unknown"],
-      reasons: ["current_context_unavailable", "current_context_unavailable", "current_context_unavailable"],
-      details: false,
-      csvDetails: false,
+      statuses: [503, 503, 503, 503],
     })),
   );
 });

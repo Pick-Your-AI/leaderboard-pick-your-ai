@@ -4,7 +4,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { normalizeGithubObservation, applyRecognitionReceipt } from "@pick-your-ai/github";
+import {
+  normalizeGithubObservation,
+  applyRecognitionReceipt,
+  defaultDeliveryNormalizationVersion,
+} from "@pick-your-ai/github";
 import {
   aggregateMetric,
   getMetricDefinition,
@@ -1460,6 +1464,8 @@ test("the pipeline retains per-source synthetic provenance when flattening recog
   s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl;
   const h = await harness(t, {
     payloads: [structuredClone(fixture.pull_request)],
+    // These retained fictional inputs were produced by the current branch-checked normalizer.
+    defaultDeliveryNormalizationVersion,
     normalizerFactory: () => async () => ({ ...domainNormalization(s.input), isSynthetic: true }),
     configure(config) {
       config.recognitionBindings = [s.binding];
@@ -1503,6 +1509,8 @@ test("accepted documentation retains bounded domain reasons through primary and 
     markerFreeConfig: true,
     dataMode: "public",
     payloads: [payload],
+    // These retained fictional inputs were produced by the current branch-checked normalizer.
+    defaultDeliveryNormalizationVersion,
     normalizerFactory: () => async () => domainNormalization(s.input),
     configure(config) {
       config.recognitionBindings = [s.binding];
@@ -1580,6 +1588,8 @@ test("data_quality: correction provenance stays private and obsolete generic aut
     markerFreeConfig: true,
     dataMode: "public",
     payloads: [payload],
+    // These retained fictional inputs were produced by the current branch-checked normalizer.
+    defaultDeliveryNormalizationVersion,
     normalizerFactory: () => async () => domainNormalization(s.input),
     configure(config) {
       config.recognitionBindings = [s.binding];
@@ -1688,6 +1698,8 @@ test("reproductions: persisted accepted outcomes keep private proof bounded and 
     markerFreeConfig: true,
     dataMode: "public",
     payloads: [payload],
+    // These retained fictional inputs were produced by the current branch-checked normalizer.
+    defaultDeliveryNormalizationVersion,
     normalizerFactory: () => async () => domainNormalization(s.input),
     configure(config) {
       config.recognitionBindings = [s.binding];
