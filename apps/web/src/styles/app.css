@@ -73,6 +73,14 @@ ol {
   font-variant-numeric: tabular-nums;
   font-family: var(--font-mono);
 }
+.count-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3em;
+  min-width: 24px;
+  min-height: 32px;
+}
 .visually-hidden {
   position: absolute !important;
   width: 1px;

@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { RankCell } from "../components/BoardTable.tsx";
+import { CountLink } from "../components/CountLink.tsx";
 import { WindowBounds } from "../components/DisplayTimeZone.tsx";
 import { Layout, PageHeader, SyntheticDataBanner } from "../components/Layout.tsx";
+import { publicPersonLabel } from "../components/Receipt.tsx";
 import { ScopeIssues } from "../components/ScopeBar.tsx";
 import { ErrorState, FreshnessIndicator, SnapshotNotices } from "../components/status.tsx";
 import { getMetric } from "../data/registry.ts";
@@ -284,7 +286,14 @@ function WallPage({
                             <th scope="row">
                               {row.person.publicState === "deleted" ? "Deleted account" : row.person.displayName}
                             </th>
-                            <td className="numeric">{formatNumber(row.value)}</td>
+                            <td className="numeric">
+                              <CountLink
+                                to={`/leaderboards/${board.metric.id}${serializeScope({ ...wallScope, snapshot: board.snapshot.served.id }, { proof: row.person.login, ui: "prototype", state: params.state, date_basis: params.date_basis })}`}
+                                label={`${formatNumber(row.value)} ${board.metric.definition.unit}, ${publicPersonLabel(row.person)}, ${board.metric.name}`}
+                              >
+                                {formatNumber(row.value)}
+                              </CountLink>
+                            </td>
                           </tr>
                         ))}
                       </tbody>

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { BoardTable, MethodDisclosure, type BoardSort } from "../components/BoardTable.tsx";
+import { CountLink } from "../components/CountLink.tsx";
 import { PageHeader } from "../components/Layout.tsx";
-import { ReceiptDrawer, ReceiptRow } from "../components/Receipt.tsx";
+import { publicPersonLabel, ReceiptDrawer, ReceiptRow } from "../components/Receipt.tsx";
 import { ScopeBar } from "../components/ScopeBar.tsx";
 import {
   CoverageNote,
@@ -148,6 +149,16 @@ export function BoardPage({ metricId }: { metricId: string }) {
     [hrefWith, pathname, params],
   );
 
+  const countHref = useCallback(
+    (login: string, displayed: Board) =>
+      hrefWith(
+        `/leaderboards/${displayed.metric.id}`,
+        { ...params, proof: login, ui: "prototype" },
+        { ...displayed.scope, snapshot: displayed.snapshot.served.id },
+      ),
+    [hrefWith, params],
+  );
+
   const proofRow = useMemo(() => {
     if (state.status !== "ready" || !state.data || !proof) return null;
     const row = state.data.rows.find((candidate) => candidate.person.login === proof);
@@ -199,6 +210,7 @@ export function BoardPage({ metricId }: { metricId: string }) {
           sort={sort}
           limit={limit}
           routeHref={routeHref}
+          countHref={countHref}
           regionRef={regionRef}
           engagement={engagement}
           update={
@@ -218,7 +230,7 @@ export function BoardPage({ metricId }: { metricId: string }) {
       )}
       {proof && state.status === "ready" && (
         <ReceiptDrawer
-          title={proofRow ? `Evidence: ${proofRow.person.displayName}` : "Evidence not found"}
+          title={proofRow ? `Evidence: ${publicPersonLabel(proofRow.person)}` : "Evidence not found"}
           onClose={() => navigate(routeHref({ proof: null }))}
           {...(proofRow
             ? { fullPageHref: hrefWith(`/contributors/${encodeURIComponent(proofRow.person.login)}`) }
@@ -267,6 +279,7 @@ function BoardBody({
   sort,
   limit,
   routeHref,
+  countHref,
   regionRef,
   engagement,
   update,
@@ -276,6 +289,7 @@ function BoardBody({
   sort: BoardSort;
   limit: number;
   routeHref: (extra: Record<string, string | null>) => string;
+  countHref: (login: string, displayed: Board) => string;
   regionRef: React.RefObject<HTMLDivElement | null>;
   engagement: React.HTMLAttributes<HTMLDivElement>;
   update: React.ReactNode;
@@ -337,6 +351,7 @@ function BoardBody({
             limit={limit}
             sortHref={(next) => routeHref({ sort: next === "rank" ? null : next })}
             proofHref={proofHref}
+            countHref={(row) => countHref(row.person.login, board)}
             moreHref={routeHref({ rows: String(limit + PAGE_SIZE) })}
           />
         </div>
@@ -350,8 +365,13 @@ function BoardBody({
           <ul className="people-list">
             {board.pendingOnly.map((entry) => (
               <li key={entry.person.actorId}>
-                <Link to={routeHref({ proof: entry.person.login })}>{entry.person.displayName}</Link>:{" "}
-                {plural(entry.records.length, "pending contribution")}
+                <Link to={routeHref({ proof: entry.person.login })}>{publicPersonLabel(entry.person)}</Link>:{" "}
+                <CountLink
+                  to={countHref(entry.person.login, board)}
+                  label={`${plural(entry.records.length, "pending contribution")}, ${publicPersonLabel(entry.person)}`}
+                >
+                  {plural(entry.records.length, "pending contribution")}
+                </CountLink>
               </li>
             ))}
           </ul>
