@@ -31,7 +31,7 @@ import {
   verifyGithubRestSnapshotRevision,
 } from "./rest-snapshot.js";
 import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
-import { validateDocumentationPurposeSource } from "./documentation-purpose.js";
+import { documentationRecognitionUnit, validateDocumentationPurposeSource } from "./documentation-purpose.js";
 import {
   validateMaintenanceClassification,
   type MaintenanceClassificationRecord,
@@ -48,6 +48,12 @@ import {
 } from "./release-recognition.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
 import { readIssueFieldEvent, issueFieldHistoryRevision } from "./issue-field-history.js";
+import {
+  parseGithubContentEditMetadata,
+  readGithubContentEditMetadata,
+  verifyGithubContentEditRevision,
+  type ContentEditMetadata,
+} from "./content-edit-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
   readPublicSubjectProjectSnapshot,
@@ -265,6 +271,33 @@ export interface GithubLineage {
   targetId: string;
   evidenceIds: string[];
 }
+/** Private provider proof. Generic lineage and public payloads cannot supply this binding. */
+export interface GithubIssueTransfer {
+  schemaVersion: "github-issue-transfer/v1";
+  sourceArtifactId: string;
+  targetArtifactId: string;
+  sourceRepositoryId: string;
+  targetRepositoryId: string;
+  sourceUrl: string;
+  targetUrl: string;
+  observationId: string;
+  sourceRevision: string;
+  observedAt: string;
+  occurredAt: string | null;
+  eventId: string | null;
+}
+/** An actual opened webhook binds creation scope; later snapshots do not. */
+export interface GithubIssueCreationScope {
+  schemaVersion: "github-issue-creation-scope/v1";
+  factId: string;
+  artifactId: string;
+  repositoryId: string;
+  observationId: string;
+  sourceRevision: string;
+  observedAt: string;
+  occurredAt: string;
+  eventId: string;
+}
 export interface NormalizedGithubResult {
   isSynthetic: boolean;
   /** Private provenance retained when the pipeline combines observation results. */
@@ -277,6 +310,8 @@ export interface NormalizedGithubResult {
   observations: GithubObservation[];
   reasons: string[];
   lineage: GithubLineage[];
+  issueTransfers: GithubIssueTransfer[];
+  issueCreationScopes: GithubIssueCreationScope[];
   suppressArtifactIds: string[];
   physicalDiff?: ClassifiedPhysicalDiff;
   /** Private current association; it never creates an action or historical attribution. */
@@ -387,6 +422,8 @@ const result = (): NormalizedGithubResult => ({
   observations: [],
   reasons: [],
   lineage: [],
+  issueTransfers: [],
+  issueCreationScopes: [],
   suppressArtifactIds: [],
   participation: [],
   assistance: [],
@@ -459,6 +496,43 @@ function url(value: unknown, slug: string, allowProject = false): string | null 
   } catch {
     return null;
   }
+}
+/** Transfer endpoints must identify issues in complete repository coordinates. */
+function issueUrl(value: unknown, slug: unknown): string | null {
+  if (typeof slug !== "string" || !/^[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+$/.test(slug)) return null;
+  const parsed = url(value, slug);
+  const prefix = "https://github.com/" + slug + "/issues/";
+  const number = parsed?.startsWith(prefix) ? parsed.slice(prefix.length) : "";
+  return /^[1-9][0-9]*$/.test(number) && Number.isSafeInteger(Number(number)) ? parsed : null;
+}
+// These bounds match private persistence admission. Test the complete string:
+// an end-of-line regex anchor alone would also admit a terminal line feed.
+function issueArtifactId(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 200 && !/[^A-Za-z0-9_=.:-]/.test(value);
+}
+function issueProvenanceText(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 2000 &&
+    value.trim() === value &&
+    !/[\p{Cc}\p{Cf}]/u.test(value)
+  );
+}
+function issueEndpointUrl(value: unknown, slug: unknown): value is string {
+  return typeof value === "string" && value.length <= 2048 && issueUrl(value, slug) === value;
+}
+function issueSourceProof(envelope: GithubEvidenceEnvelope, at: string | null, observedAt: string): boolean {
+  return (
+    ["github_webhook", "github_rest", "github_graphql"].includes(envelope.proof.source) &&
+    issueProvenanceText(envelope.proof.revision) &&
+    issueProvenanceText(envelope.observedAt) &&
+    (envelope.proof.eventId === undefined || issueProvenanceText(envelope.proof.eventId)) &&
+    (envelope.occurredAt === undefined ||
+      envelope.occurredAt === null ||
+      (at !== null && issueProvenanceText(envelope.occurredAt))) &&
+    (at === null || at <= observedAt)
+  );
 }
 function sourceActor(payload: Record<string, unknown>): unknown {
   return payload.sender ?? payload.actor;
@@ -636,7 +710,20 @@ export function normalizeGithubObservation(
     : (url(resource.html_url ?? resource.url, repository.slug, kind === "project") ??
       url(payload.subject_url, repository.slug, kind === "project"));
   if (!id || !publicUrl) {
-    out.reasons.push("missing_public_artifact_identity");
+    // Loss of a public locator cannot keep an already-known issue visible after
+    // an authoritative private/unknown/unapproved transfer destination arrives.
+    const destination = object(payload.destination) ? payload.destination : null;
+    if (
+      id &&
+      envelope.family === "relationship" &&
+      sourceAction === "transferred" &&
+      (!destination || destination.visibility !== "public" || destination.allowed !== true)
+    ) {
+      out.suppressArtifactIds.push(id);
+      out.reasons.push("transfer_destination_private_unknown_or_unapproved");
+    } else {
+      out.reasons.push("missing_public_artifact_identity");
+    }
     return out;
   }
   const at = prComment ? null : time(envelope.occurredAt);
@@ -882,7 +969,41 @@ export function normalizeGithubObservation(
       }
     }
   } else if (envelope.family === "issue") {
-    emit("issues_opened", author, "reporter", time(resource.created_at ?? resource.createdAt), `${id}:opened`);
+    const opened = emit(
+      "issues_opened",
+      author,
+      "reporter",
+      time(resource.created_at ?? resource.createdAt),
+      `${id}:opened`,
+    );
+    if (sourceAction === "opened") {
+      const nativeClocks = [resource.created_at, resource.createdAt].filter((value) => value !== undefined);
+      if (
+        proof.source === "github_webhook" &&
+        issueSourceProof(envelope, at, observedAt) &&
+        issueProvenanceText(proof.eventId) &&
+        issueArtifactId(id) &&
+        !object(payload.pull_request) &&
+        resource.pull_request === undefined &&
+        (resource.__typename === undefined || resource.__typename === "Issue") &&
+        issueEndpointUrl(publicUrl, repository.slug) &&
+        at !== null &&
+        nativeClocks.length > 0 &&
+        nativeClocks.every((value) => issueProvenanceText(value) && time(value) === at)
+      )
+        out.issueCreationScopes.push({
+          schemaVersion: "github-issue-creation-scope/v1",
+          factId: opened.id,
+          artifactId: id,
+          repositoryId: String(repository.id),
+          observationId,
+          sourceRevision: proof.revision,
+          observedAt,
+          occurredAt: at,
+          eventId: proof.eventId,
+        });
+      else out.reasons.push("issue_creation_scope_unverified");
+    }
     if (sourceAction === "closed")
       emit("issue_closure_stewardship", sender, "triager", at, transitionUnit, { rawState: "closed" });
     // Closed, assignee and closer never manufacture implementing contributors.
@@ -1134,9 +1255,14 @@ export function normalizeGithubObservation(
         out.suppressArtifactIds.push(id);
         out.reasons.push("transfer_destination_private_unknown_or_unapproved");
       } else if (
+        object(payload.pull_request) ||
+        resource.pull_request !== undefined ||
+        (resource.__typename !== undefined && resource.__typename !== "Issue") ||
+        !issueUrl(publicUrl, repository.slug) ||
         !positive(destination.repositoryId) ||
+        destination.repositoryId === repository.id ||
         !text(destination.stableId) ||
-        !url(destination.url, String(destination.slug))
+        !issueUrl(destination.url, destination.slug)
       )
         out.reasons.push("transfer_lineage_incomplete");
       else {
@@ -1145,6 +1271,28 @@ export function normalizeGithubObservation(
         emit("issue_transfers", sender, "triager", at, stable(id, targetId, at, sender?.id), {
           rawState: "public_transfer",
         });
+        if (
+          issueSourceProof(envelope, at, observedAt) &&
+          issueArtifactId(id) &&
+          issueArtifactId(targetId) &&
+          issueEndpointUrl(publicUrl, repository.slug) &&
+          issueEndpointUrl(destination.url, destination.slug)
+        )
+          out.issueTransfers.push({
+            schemaVersion: "github-issue-transfer/v1",
+            sourceArtifactId: id,
+            targetArtifactId: targetId,
+            sourceRepositoryId: String(repository.id),
+            targetRepositoryId: String(destination.repositoryId),
+            sourceUrl: publicUrl,
+            targetUrl: destination.url,
+            observationId,
+            sourceRevision: proof.revision,
+            observedAt,
+            occurredAt: at,
+            eventId: proof.eventId ?? null,
+          });
+        else out.reasons.push("issue_transfer_provenance_incomplete");
       }
     } else {
       const relationship = object(payload.relationship) ? payload.relationship : null;
@@ -1527,12 +1675,31 @@ export function applyRecognitionReceipt(
       receipt.evidenceIds[0] !== target.id)
   )
     throw new Error("documentation_purpose_source_unverified");
-  const documentationPurpose =
-    receipt.documentationPurpose === undefined
-      ? null
-      : validateDocumentationPurposeSource(input, target.id, receipt.acceptedAt);
+  // A candidate's generic review must use the same unit as its purpose review.
+  // Source validation supplies identity; it does not grant a purpose claim.
+  const documentationSource =
+    receipt.metricId === "documentation" &&
+    (receipt.documentationPurpose !== undefined ||
+      targetEvidence?.contribution.reasonCodes.some((reason) => reason.startsWith("documentation_purpose_candidate:")))
+      ? validateDocumentationPurposeSource(input, target.id, receipt.acceptedAt)
+      : null;
+  const documentationPurpose = receipt.documentationPurpose === undefined ? null : documentationSource;
   if (documentationPurpose && receipt.sourceRevision !== documentationPurpose.evidence.sourceRevision)
     throw new Error("documentation_purpose_source_unverified");
+  const documentationUnit = documentationSource
+    ? documentationRecognitionUnit(documentationSource, documentationPurpose ? undefined : receipt.changesetId)
+    : null;
+  if (
+    documentationSource &&
+    documentationUnit === documentationSource.unit &&
+    documentationUnit !== target.canonicalKey
+  ) {
+    // Do not split a retained pre-canonical generic approval during an upgrade.
+    // Rebuild that overlay from source; distinct domain categories stay separate.
+    const legacyId = stable("recognized", "documentation", target.canonicalKey, receipt.actorId);
+    if (input.facts.some((fact) => fact.metricId === "documentation" && fact.id === legacyId))
+      throw new Error("documentation_recognition_requires_renormalization");
+  }
   const release =
     receipt.metricId === "release_changes"
       ? validateReleaseChangesSource(input, target.id, receipt.acceptedAt, receipt.releaseInclusion)
@@ -1541,8 +1708,8 @@ export function applyRecognitionReceipt(
     throw new Error("release_inclusion_source_unverified");
   const unit = release
     ? release.membershipUnit
-    : documentationPurpose
-      ? documentationPurpose.unit
+    : documentationUnit
+      ? documentationUnit
       : mergedChange
         ? mergedChange.unit
         : receipt.metricId === "localization"
@@ -1669,6 +1836,7 @@ export interface CollectionNormalizerInput {
     historySubjectId?: string;
     issueFieldId?: string;
     projectSubjectId?: string;
+    contentEditMetadata?: ContentEditMetadata;
     sourceRevision: string;
     sourceUrl: string;
     evidence: "current_state" | "observed_transition";
@@ -1769,6 +1937,49 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       return none("hydrated_source_revision_unverified");
     let repositoryClient: GithubReadClient | undefined;
     const client = () => (repositoryClient ??= options.client.forRepository(input.repository.id));
+    if (
+      input.fact.contentEditMetadata !== undefined ||
+      (typeof input.fact.sourceRevision === "string" && input.fact.sourceRevision.startsWith("gh-content-edit-"))
+    ) {
+      // The reserved metadata path precedes event enrichment. It cannot borrow
+      // body-edit credit, native field history, parent authors or relationship data.
+      if (
+        input.family !== "content_edits" ||
+        Object.keys(input.fact).sort().join(",") !==
+          "actorId,contentEditMetadata,evidence,occurredAt,sourceRevision,sourceUrl,state,subjectId" ||
+        input.fact.evidence !== "current_state" ||
+        input.fact.actorId !== null ||
+        input.fact.occurredAt !== null ||
+        input.fact.state !== "present"
+      )
+        return none("content_edit_collected_binding_unverified");
+      let metadata: ContentEditMetadata;
+      try {
+        metadata = parseGithubContentEditMetadata(input.fact.contentEditMetadata);
+      } catch {
+        return none("content_edit_collected_binding_unverified");
+      }
+      const repository = { id: input.repository.id, slug: input.repository.slug };
+      const route = metadata.parent.kind === "issue" ? "issues" : "pull";
+      if (
+        metadata.parent.id !== input.fact.subjectId ||
+        metadata.parent.url !== input.fact.sourceUrl ||
+        metadata.parent.url !== "https://github.com/" + repository.slug + "/" + route + "/" + metadata.parent.number
+      )
+        return none("content_edit_collected_binding_unverified");
+      const revision = input.fact.sourceRevision;
+      if (!verifyGithubContentEditRevision(metadata, revision)) return none("content_edit_revision_unverified");
+      const hydrated = await readGithubContentEditMetadata({
+        client: options.client,
+        source: options.source,
+        repository,
+        parent: metadata.parent,
+        scanId: input.factKey,
+        ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
+      });
+      if (!verifyGithubContentEditRevision(hydrated, revision)) return none("content_edit_revision_unverified");
+      return none("content_edit_metadata_only");
+    }
     if (input.family === "issue_field_history") {
       const match = input.fact.sourceUrl.match(
         new RegExp("^https://github\\.com/" + input.repository.slug.replaceAll(".", "\\.") + "/issues/([1-9]\\d*)$"),
@@ -1812,6 +2023,12 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         action: "issue_field_changed",
         observedAt: input.observedAt,
         occurredAt: record.event.createdAt,
+        ...(options.reviewedServiceAccounts === undefined
+          ? {}
+          : { reviewedServiceAccounts: options.reviewedServiceAccounts }),
+        ...(options.authorizedClassifierIds === undefined
+          ? {}
+          : { authorizedClassifierIds: options.authorizedClassifierIds }),
         payload: {
           issue: { id: record.subject.id, url: record.subject.url },
           sender: record.event.actor,
@@ -1858,6 +2075,12 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         },
         family: isProject ? "field_change" : "relationship",
         observedAt: input.observedAt,
+        ...(options.reviewedServiceAccounts === undefined
+          ? {}
+          : { reviewedServiceAccounts: options.reviewedServiceAccounts }),
+        ...(options.authorizedClassifierIds === undefined
+          ? {}
+          : { authorizedClassifierIds: options.authorizedClassifierIds }),
         occurredAt: time(event.createdAt),
         action: isProject
           ? "project_status_changed"

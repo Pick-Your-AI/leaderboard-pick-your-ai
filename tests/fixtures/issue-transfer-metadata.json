@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "github-issue-transfer/v1",
+  "sourceArtifactId": "SYNTHETIC_ISSUE_A",
+  "targetArtifactId": "SYNTHETIC_ISSUE_B",
+  "sourceRepositoryId": "2",
+  "targetRepositoryId": "3",
+  "sourceUrl": "https://github.com/synthetic-org/synthetic-source/issues/1",
+  "targetUrl": "https://github.com/synthetic-org/synthetic-target/issues/9",
+  "observationId": "gh:synthetic-transfer-observation",
+  "sourceRevision": "synthetic-transfer-revision",
+  "observedAt": "2026-10-19T01:00:00.000Z",
+  "occurredAt": "2026-10-18T23:00:00.000Z",
+  "eventId": "synthetic-transfer-event"
+}

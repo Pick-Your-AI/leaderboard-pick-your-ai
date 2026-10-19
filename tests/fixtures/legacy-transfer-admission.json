@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "synthetic-legacy-transfer-admission/v1",
+  "producer": {
+    "repository": "Pick-Your-AI/pick-your-ai-leaderboard",
+    "commit": "2af24b39d9f87a8a077cca252d229ac0f3553869",
+    "path": "packages/github/src/normalizers.ts",
+    "gitBlob": "c90447e8d7ac07fb411c4f7179214026c52c6a22",
+    "sha256": "a7ded92217aaec1b568b3f2dae10579bd177cbc5ba7cfe5f701630cd4bb9a4d0"
+  },
+  "scope": "Actual legacy normalizer output for two protected synthetic envelopes. Empty legacy output contains no clocks or revisions and was also verified unchanged under a different observation clock and source revision.",
+  "cases": [
+    {
+      "visibility": "private",
+      "envelope": {
+        "repository": {
+          "id": 2,
+          "slug": "synthetic-org/synthetic-repo",
+          "visibility": "public"
+        },
+        "proof": {
+          "verified": true,
+          "source": "github_webhook",
+          "revision": "2026-06-03T00:00:00.000Z",
+          "eventId": "synthetic-transfer-withdrawal",
+          "isSynthetic": true
+        },
+        "family": "relationship",
+        "action": "transferred",
+        "occurredAt": null,
+        "observedAt": "2026-06-04T00:00:00.000Z",
+        "payload": {
+          "issue": {
+            "node_id": "SYNTHETIC_ISSUE_1"
+          },
+          "destination": {
+            "visibility": "private",
+            "allowed": false
+          }
+        }
+      },
+      "output": {
+        "isSynthetic": true,
+        "facts": [],
+        "actors": [],
+        "evidence": [],
+        "observations": [],
+        "reasons": ["missing_public_artifact_identity"],
+        "lineage": [],
+        "suppressArtifactIds": [],
+        "participation": [],
+        "assistance": [],
+        "decisions": []
+      }
+    },
+    {
+      "visibility": "unapproved",
+      "envelope": {
+        "repository": {
+          "id": 2,
+          "slug": "synthetic-org/synthetic-repo",
+          "visibility": "public"
+        },
+        "proof": {
+          "verified": true,
+          "source": "github_webhook",
+          "revision": "2026-06-03T00:00:00.000Z",
+          "eventId": "synthetic-transfer-withdrawal",
+          "isSynthetic": true
+        },
+        "family": "relationship",
+        "action": "transferred",
+        "occurredAt": null,
+        "observedAt": "2026-06-04T00:00:00.000Z",
+        "payload": {
+          "issue": {
+            "node_id": "SYNTHETIC_ISSUE_1",
+            "html_url": "https://example.invalid/unusable"
+          },
+          "destination": {
+            "visibility": "public",
+            "allowed": false
+          }
+        }
+      },
+      "output": {
+        "isSynthetic": true,
+        "facts": [],
+        "actors": [],
+        "evidence": [],
+        "observations": [],
+        "reasons": ["missing_public_artifact_identity"],
+        "lineage": [],
+        "suppressArtifactIds": [],
+        "participation": [],
+        "assistance": [],
+        "decisions": []
+      }
+    }
+  ]
+}

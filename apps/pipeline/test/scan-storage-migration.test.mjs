@@ -19,6 +19,17 @@ beforeEach(async () => {
 const version = async () => (await db.query("SELECT * FROM leaderboard_pipeline.storage_migrations")).rows;
 const scanTable = async () =>
   (await db.query("SELECT to_regclass('leaderboard_pipeline.scan_continuations') AS name")).rows[0].name;
+const transferRows = {
+  issue_transfer_endpoints: [],
+  issue_transfer_index: [],
+  issue_transfer_migrations: [
+    {
+      version: "pipeline-issue-transfer-index/v1",
+      fingerprint: "d5ea04c0089df6f3665c9b25587cb63874d04d7c0c6b4d10c04c9ce749d48c3f",
+    },
+  ],
+  issue_transfer_unavailable: [],
+};
 
 test("worker initialization preserves the exact completed v2 migration receipt and retained scan across retries", async () => {
   const retained = await seedRetained(db);
@@ -30,7 +41,7 @@ test("worker initialization preserves the exact completed v2 migration receipt a
   await assertPipelineStorage(db);
   assert.equal(await scanTable(), "leaderboard_pipeline.scan_continuations");
   assert.deepEqual(await version(), originalVersion);
-  assert.deepEqual(await retainedRows(db), { ...originalRows, scan_continuations: [] });
+  assert.deepEqual(await retainedRows(db), { ...originalRows, ...transferRows, scan_continuations: [] });
   await db.query(
     `INSERT INTO leaderboard_pipeline.scan_continuations
      (configuration_key,context_hash,cycle_token,scope_heads,event_cutoff,observation_cutoff)
@@ -100,8 +111,8 @@ test("interrupted worker schema creation retains the committed v2 upgrade and re
   await assertPipelineStorage(db);
   assert.equal(await scanTable(), null, "the interrupted scan-table transaction must roll back");
   assert.deepEqual(await version(), committedVersion);
-  assert.deepEqual(await retainedRows(db), rows);
+  assert.deepEqual(await retainedRows(db), { ...rows, ...transferRows });
   await migratePipeline(db);
   assert.deepEqual(await version(), committedVersion);
-  assert.deepEqual(await retainedRows(db), { ...rows, scan_continuations: [] });
+  assert.deepEqual(await retainedRows(db), { ...rows, ...transferRows, scan_continuations: [] });
 });

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { assertPipelineStorage, pipelineKeySQL } from "./scope-storage.mjs";
+import { lockIssueTransferRetirementDependencies, retireIssueTransferMetadata } from "./issue-transfer-store.mjs";
 
 // Private host API. These are work/memory bounds, not retention windows.
 export const derivedRetirementLimits = Object.freeze({ records: 100, documentBytes: 16 * 1024 * 1024 });
@@ -346,6 +347,7 @@ export class PipelineDerivedRetirementStore {
     await authorized(authorize, value);
     return this.#db.transaction(async (tx) => {
       await tx.query("SELECT pg_advisory_xact_lock(hashtext('pipeline-derived-retirement:v1'))");
+      await lockIssueTransferRetirementDependencies(tx, value.repositoryId);
       const authority = await this.#authority(tx, value);
       await authorized(authorize, value);
       const result = await work(tx, authority, await indexedStorage(tx));
@@ -1055,6 +1057,7 @@ export class PipelineDerivedRetirementStore {
             ).rows[0];
             check(fact && String(fact.repository_id) === String(value.repositoryId), "derived_source_binding_invalid");
           }
+          if (manifest.stage === "normalizations") await retireIssueTransferMetadata(tx, row);
           const deleted = await tx.query(
             `DELETE FROM leaderboard_pipeline.${spec.table} WHERE ${predicate} RETURNING ${spec.keys[0]}`,
             record.keys,
