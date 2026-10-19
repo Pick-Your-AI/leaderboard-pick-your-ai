@@ -526,11 +526,12 @@ function previousAuthority(state, bindings) {
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
-test("automation: authority fence changes only configurations containing automation", () => {
+test("automation: prior authority retires automation and later answer-clock bindings", () => {
   const s = scenario();
   for (const metric of metricRegistryV1.metrics) {
     const bindings = [{ ...s.binding, metricId: metric.id }];
-    if (metric.id === "automation")
+    // Keep the literal pre-automation authority; the answer clock has its own fence.
+    if (["automation", "issue_answers"].includes(metric.id))
       assert.notEqual(recognitionFingerprint(s.state, bindings), previousAuthority(s.state, bindings));
     else assert.equal(recognitionFingerprint(s.state, bindings), previousAuthority(s.state, bindings), metric.id);
   }

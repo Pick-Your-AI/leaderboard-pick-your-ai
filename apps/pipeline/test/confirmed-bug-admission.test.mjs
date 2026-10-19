@@ -287,13 +287,15 @@ function previousAuthority(state, bindings) {
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
-test("confirmed_bugs: old authority retires only configurations containing this binding, including mixed snapshots", () => {
+test("confirmed_bugs: prior authority retires bug and later answer-clock bindings, including mixed snapshots", () => {
   const s = scenario();
   for (const metric of metricRegistryV1.metrics) {
     const bindings = [{ ...s.binding, metricId: metric.id }];
     const prior = previousAuthority(s.state, bindings);
     const current = recognitionFingerprint(s.state, bindings);
-    if (metric.id === "confirmed_bugs") assert.notEqual(current, prior);
+    // Keep the literal historical oracle above: the later answer-clock fence
+    // independently retires that destination without changing the old format.
+    if (["confirmed_bugs", "issue_answers"].includes(metric.id)) assert.notEqual(current, prior);
     else assert.equal(current, prior, `${metric.id}: exact established authority bytes remain`);
   }
   const other = { ...s.binding, metricId: "accepted_findings" };

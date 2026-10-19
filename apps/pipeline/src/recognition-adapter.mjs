@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { compareSourceInstants, sourceEventSchema } from "@pick-your-ai/contracts";
 import { validateAutomationSource, validateMaintenanceSource } from "@pick-your-ai/github";
 import { domainDateBasis, qualifyDomainRecognition } from "./domain-recognition.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
@@ -32,6 +33,9 @@ export function recognitionFingerprint(state, bindings = []) {
   // Earlier generic bug receipts admitted non-issue and explicitly synthetic sources.
   if (bindings.some((binding) => binding.metricId === "confirmed_bugs"))
     authority.push("confirmed-bug-source-admission/v1");
+  // Earlier answer receipts could precede their known source occurrence. Retire
+  // only configurations whose destination is affected by that missing bound.
+  if (bindings.some((binding) => binding.metricId === "issue_answers")) authority.push("issue-answer-source-time/v1");
   // Prior maintenance receipts lacked merged-participant, clock and unit admission.
   if (bindings.some((binding) => binding.metricId === "maintenance"))
     authority.push("maintenance-merged-participant/v1");
@@ -203,6 +207,16 @@ export function materializeRecognition(
     );
     if (!candidates.length) continue;
     if (candidates.length !== 1) throw new Error("ambiguous_recognition_target");
+    // Check after uniqueness: chronology must not silently select one of two
+    // matching facts. Unknown source time supplies no invented lower bound.
+    const sourceTime = candidates[0].occurredAt;
+    if (
+      binding.metricId === "issue_answers" &&
+      typeof sourceTime === "string" &&
+      sourceEventSchema.shape.occurredAt.safeParse(sourceTime).success &&
+      compareSourceInstants(sourceTime, acceptedAt) > 0
+    )
+      throw new Error("recognition_source_time_invalid");
     if (binding.metricId === "confirmed_bugs") {
       const target = candidates[0];
       const evidence = input.evidence.filter((entry) => entry.contribution.contributionId === target.id);
