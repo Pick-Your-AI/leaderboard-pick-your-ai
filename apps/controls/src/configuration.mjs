@@ -78,7 +78,7 @@ export function normalizeConfiguration(value) {
         id: identifier(metric.id),
         enabled: metric.enabled,
         reason: metric.enabled
-          ? metric.reason === undefined
+          ? metric.reason === undefined || metric.reason === ""
             ? ""
             : text(metric.reason, 500)
           : text(metric.reason, 500),

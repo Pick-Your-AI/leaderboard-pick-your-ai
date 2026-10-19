@@ -8,6 +8,7 @@ import {
 import { createHash } from "node:crypto";
 import {
   compareSourceInstants,
+  sourceEventSchema,
   publicDocumentationReasons,
   serviceAccountClassificationSchema,
   type ServiceAccountClassification,
@@ -19,6 +20,7 @@ import {
   type PublicEvidenceAction,
 } from "@pick-your-ai/contracts";
 import { GithubReadClient } from "./client.js";
+import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
@@ -1319,6 +1321,17 @@ export function applyRecognitionReceipt(
   ) {
     throw new Error("Independent verified recognition receipt is required");
   }
+  // An accepted answer cannot precede its known source occurrence. Preserve
+  // unknown clocks and the separate accepted-at ranking rule; a collection or
+  // revision time is not a substitute for the original source event.
+  if (
+    receipt.metricId === "issue_answers" &&
+    receipt.decision === "accepted" &&
+    typeof target.occurredAt === "string" &&
+    sourceEventSchema.shape.occurredAt.safeParse(target.occurredAt).success &&
+    compareSourceInstants(target.occurredAt, receipt.acceptedAt) > 0
+  )
+    throw new Error("Answer acceptance cannot predate its known source occurrence");
   // A generic receipt cannot turn a PR, closing action or synthetic fixture into
   // a confirmed report. The issue proof must identify this exact source fact.
   if (
@@ -1338,7 +1351,17 @@ export function applyRecognitionReceipt(
     throw new Error("Confirmed bug recognition requires a nonsynthetic issue source");
   // Localization is one PR/language/category unit. A bulk changeset must never
   // collapse different languages or mint another unit for the same source fact.
-  const unit = receipt.metricId === "localization" ? target.canonicalKey : (receipt.changesetId ?? target.canonicalKey);
+  const mergedChange =
+    receipt.metricId === "maintenance"
+      ? validateMaintenanceSource(input, target.id, receipt.acceptedAt)
+      : receipt.metricId === "automation"
+        ? validateAutomationSource(input, target.id, receipt.acceptedAt)
+        : null;
+  const unit = mergedChange
+    ? mergedChange.unit
+    : receipt.metricId === "localization"
+      ? target.canonicalKey
+      : (receipt.changesetId ?? target.canonicalKey);
   if (receipt.metricId === "localization" && target.state !== "observed")
     throw new Error("Localization acceptance must target its original observed source fact");
   if (
@@ -1370,7 +1393,7 @@ export function applyRecognitionReceipt(
   if (evidence)
     out.evidence.push({
       ...structuredClone(evidence),
-      occurredAt: receipt.metricId === "localization" ? target.occurredAt : fact.acceptedAt,
+      occurredAt: receipt.metricId === "localization" || mergedChange ? target.occurredAt : fact.acceptedAt,
       ...(evidence.evidenceMetadata
         ? {
             evidenceMetadata: {
