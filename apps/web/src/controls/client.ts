@@ -158,6 +158,7 @@ export async function control<T>(path: string, session?: Session, input?: unknow
 export function verifiedSession(value: Session): Session {
   if (
     !value ||
+    typeof value.actorId !== "string" ||
     !/^[1-9][0-9]{0,19}$/.test(value.actorId) ||
     typeof value.csrf !== "string" ||
     !/^[A-Za-z0-9_-]{43}$/.test(value.csrf) ||

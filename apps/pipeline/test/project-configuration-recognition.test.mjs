@@ -779,6 +779,48 @@ test("project configuration: policy and old publication authority are explicitly
   assert.notEqual(recognitionFingerprint(s.state, [binding]), recognitionFingerprint(s.state, [s.binding]));
 });
 
+test("project configuration: no manual requests preserve exact prior automatic-source authority", () => {
+  const s = scenario();
+  const other = { ...s.binding, metricId: "accepted_findings" };
+  const states = [
+    { requests: {}, profiles: {}, audit: [] },
+    {
+      requests: { correction: { id: "correction", kind: "correction", status: "pending" } },
+      profiles: { 303: { suppressed: true }, 404: { suppressed: false } },
+      audit: [{ id: "unrelated", actor: "202", action: "login", at: Date.parse(acceptedAt) }],
+    },
+  ];
+  for (const state of states) {
+    const original = structuredClone(state);
+    const suppressed = Object.entries(state.profiles)
+      .filter(([, profile]) => profile.suppressed)
+      .map(([id]) => id)
+      .sort();
+    for (const bindings of [[], [s.binding], [other], [other, s.binding]]) {
+      // Literal pre-Project serialization: unrelated controls are not manual evidence.
+      const prior = ["localization-review-target/v1", [], suppressed, [], bindings];
+      assert.equal(recognitionFingerprint(state, bindings), sha256(JSON.stringify(prior)));
+    }
+    assert.deepEqual(state, original);
+  }
+});
+
+test("project configuration: pending and withdrawn manual requests still retire generic receipt authority", () => {
+  for (const status of ["pending", "withdrawn"]) {
+    const s = scenario();
+    s.request.status = status;
+    const prior = [
+      "localization-review-target/v1",
+      [s.request],
+      [],
+      s.state.audit.map((event) => JSON.stringify(event)).sort(),
+      [s.binding],
+      evidenceIntakeAuthority(),
+    ];
+    assert.notEqual(recognitionFingerprint(s.state, [s.binding]), sha256(JSON.stringify(prior)));
+  }
+});
+
 for (const state of ["withdrawn", "pending", "appealed", "rejected"])
   test(`project configuration: ${state} requests retain source observations without accepted credit`, () => {
     const s = scenario();

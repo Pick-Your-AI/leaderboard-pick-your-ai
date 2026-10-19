@@ -42,7 +42,8 @@ export function recognitionFingerprint(state, bindings = []) {
   // Generic reproduction receipts had no scenario/environment/result boundary.
   if (bindings.some((binding) => binding.metricId === "reproductions")) authority.push("reproduction-recognition/v1");
   // Earlier generic Project receipts did not bind a typed before/after change set.
-  if (bindings.some((binding) => binding.metricId === "project_configuration"))
+  // Without a manual request there is no receipt to retire; preserve automatic authority.
+  if (requests.length && bindings.some((binding) => binding.metricId === "project_configuration"))
     authority.push("project-configuration-evidence/v1");
   // Earlier generic bug receipts admitted non-issue and explicitly synthetic sources.
   if (bindings.some((binding) => binding.metricId === "confirmed_bugs"))

@@ -112,7 +112,7 @@ One independently reviewed workflow configuration change with 100 raw automated 
 
 ## Currentness, withdrawal and output
 
-The existing recognition fingerprint includes the complete private requests, accepted audit records and configured bindings. A scoped `project-configuration-evidence/v1` authority marker also retires publications produced under the earlier generic Project-receipt semantics. Unaffected bindings retain their previous fingerprint format.
+The existing recognition fingerprint includes the complete private requests, accepted audit records and configured bindings. When a manual evidence request exists and a Project configuration binding is configured, a scoped `project-configuration-evidence/v1` authority marker also retires publications produced under the earlier generic Project-receipt semantics. Pending or withdrawn evidence requests retain this retirement. With no manual evidence request, automatic-source authority keeps its exact previous format; unrelated controls do not activate the marker. Unaffected bindings retain their previous fingerprint format.
 
 Current source/configuration authorization, normalization generation, replay confirmation and final publication/read fences remain the worker's responsibility. The typed helper is synchronous and is invoked inside that existing flow. `validUntil` is checked against the frozen observation cutoff; it is not a wall-clock revocation scheduler. A host that revokes Project visibility, source use, reviewer authority or a factual attestation must revoke or replace the current configuration/worker authority and relevant private review state. Keeping an obsolete worker and unchanged approval callback does not establish current authorization.
 
