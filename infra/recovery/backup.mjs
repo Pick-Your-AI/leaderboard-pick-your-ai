@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { readFile, open, link, stat, unlink, readdir } from "node:fs/promises";
+import { open, link, lstat, unlink, readdir } from "node:fs/promises";
 import { dirname, join, basename, resolve } from "node:path";
 
 const format = "leaderboard-backup/v1";
@@ -52,8 +52,11 @@ export function encryptBackup({
   }
   if (!watermarks || typeof watermarks !== "object" || Array.isArray(watermarks))
     throw new Error("Source watermarks are required");
+  // An unpooled allocation also isolates the snapshot from the caller's backing ArrayBuffer.
+  const capturedDump = Buffer.alloc(databaseDump.length);
+  capturedDump.set(databaseDump);
   const payload = Buffer.from(
-    JSON.stringify({ databaseDump: databaseDump.toString("base64"), configuration, policyVersions, watermarks }),
+    JSON.stringify({ databaseDump: capturedDump.toString("base64"), configuration, policyVersions, watermarks }),
   );
   if (payload.length > maxBytes * 2) throw new Error("Backup payload exceeds serialization bound");
   const metadata = {
@@ -61,7 +64,7 @@ export function encryptBackup({
     createdAt,
     expiresAt,
     sourceCutoff,
-    dumpSha256: digest(databaseDump),
+    dumpSha256: digest(capturedDump),
     payloadSha256: digest(payload),
   };
   const iv = randomBytes(12);
@@ -139,9 +142,42 @@ export async function writeBackup(path, envelope) {
   };
 }
 
+async function readBackupFile(path, operation, consume) {
+  const file = await open(path, "r");
+  try {
+    const identity = await file.stat({ bigint: true });
+    const limit = maxBytes * 3;
+    const exceedsBound = () => new Error(`Backup file exceeds ${operation} bound`);
+    if (identity.size > BigInt(limit)) throw exceedsBound();
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      // Read at most one byte past the limit, including when the file grows
+      // after stat. Decode only after the opened descriptor reaches EOF.
+      const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, limit - total + 1), null);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+      if (total > limit) throw exceedsBound();
+      chunks.push(Buffer.from(buffer.subarray(0, bytesRead)));
+    }
+    const assertUnchanged = async () => {
+      const current = await lstat(path, { bigint: true });
+      if (
+        !current.isFile() ||
+        ["dev", "ino", "size", "mtimeNs", "ctimeNs"].some((field) => current[field] !== identity[field])
+      ) {
+        throw new Error("Backup changed during expiry");
+      }
+    };
+    return await consume(Buffer.concat(chunks, total).toString("utf8"), assertUnchanged);
+  } finally {
+    await file.close();
+  }
+}
+
 export async function readBackup(path, options) {
-  if ((await stat(path)).size > maxBytes * 3) throw new Error("Backup file exceeds restore bound");
-  return decryptBackup(JSON.parse(await readFile(path, "utf8")), options);
+  return readBackupFile(path, "restore", (text) => decryptBackup(JSON.parse(text), options));
 }
 
 /** Only this directory's regular .lbbackup files are eligible; symlinks are skipped. */
@@ -152,14 +188,17 @@ export async function expireBackups(directory, { now, key }) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     if (!entry.isFile() || !entry.name.endsWith(".lbbackup")) continue;
     const path = join(resolve(directory), entry.name);
-    if ((await stat(path)).size > maxBytes * 3) throw new Error("Backup file exceeds expiry bound");
-    const envelope = JSON.parse(await readFile(path, "utf8"));
-    if (envelope.format !== format) continue;
-    decryptBackup(envelope, { key, now, allowExpired: true });
-    if (Date.parse(timestamp(envelope.expiresAt)) <= cutoff) {
-      await unlink(path);
-      expired.push({ file: entry.name, dumpSha256: envelope.dumpSha256 });
-    }
+    const receipt = await readBackupFile(path, "expiry", async (text, assertUnchanged) => {
+      const envelope = JSON.parse(text);
+      if (envelope.format !== format) return;
+      decryptBackup(envelope, { key, now, allowExpired: true });
+      if (Date.parse(timestamp(envelope.expiresAt)) <= cutoff) {
+        await assertUnchanged();
+        await unlink(path);
+        return { file: entry.name, dumpSha256: envelope.dumpSha256 };
+      }
+    });
+    if (receipt) expired.push(receipt);
   }
   return { format: "backup-expiry-receipt/v1", at: new Date(cutoff).toISOString(), expired };
 }
