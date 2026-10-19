@@ -1,0 +1,675 @@
+{
+  "format": "engineering-provider-role-audit/v1",
+  "auditDate": "2026-10-19",
+  "workPackage": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/86",
+  "purpose": "Separately dated current provider-role and immutable commit observations for the four frozen historical samples.",
+  "historicalObservation": {
+    "file": "engineering-source-reconciliation-2026-10-18.json",
+    "sha256": "1f00ea18b0cf36a875a11d9833cd5c1a0721d0d9a5dbe1597324be0040fe4334",
+    "unchanged": true
+  },
+  "currentObservationWindows": {
+    "researchApi": {
+      "startedAt": "2026-10-19 04:11:19 UTC",
+      "finishedAt": "2026-10-19 04:12:10 UTC"
+    },
+    "researchGit": {
+      "startedAt": "2026-10-19T04:14:41.254167Z",
+      "finishedAt": "2026-10-19T04:14:41.385258Z"
+    },
+    "websiteApi": {
+      "start": "2026-10-19 04:20:23 UTC",
+      "end": "2026-10-19 04:20:24 UTC"
+    },
+    "websiteGit": "2026-10-19T04:26:09.915402+00:00",
+    "websiteCanonicalRepositoryAndIntegrationRange": {
+      "start": "2026-10-19 04:27:02 UTC",
+      "end": "2026-10-19 04:27:03 UTC"
+    }
+  },
+  "repositories": [
+    {
+      "id": 1421934086,
+      "fullName": "Pick-Your-AI/pick-your-ai-research"
+    },
+    {
+      "id": 1422238606,
+      "fullName": "Pick-Your-AI/pick-your-ai-website",
+      "historicalFullName": "Pick-Your-AI/pickyour.ai",
+      "renamePreservesRepositoryIdentity": true
+    }
+  ],
+  "samples": [
+    {
+      "id": "research_352",
+      "repositoryId": 1421934086,
+      "pullRequestUrl": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/352",
+      "prRange": {
+        "before": "be60732a1353f9d4efab9d1a4c5fbf7627d49abf",
+        "head": "fe4c0ca7e30fd126ca58889facd2e9d878a3b43e",
+        "orderedCommits": [
+          "d09052a721e75c29a2fb74f318e566f68d30fc3a",
+          "fe4c0ca7e30fd126ca58889facd2e9d878a3b43e"
+        ]
+      },
+      "actualIntegration": {
+        "before": "0510f87c45a4e7a5f88d6e6750e45b84f447bb3d",
+        "after": "4f1c22bac91783a00384b3037bb64b040250c072"
+      },
+      "currentPrAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentMerger": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentPrState": "closed",
+      "currentMerged": true,
+      "completePrList": {
+        "perPage": 100,
+        "page1Count": 2,
+        "page2Count": 0,
+        "metadataCountMatches": true
+      },
+      "prListEqualsBoundedReachability": true
+    },
+    {
+      "id": "research_348",
+      "repositoryId": 1421934086,
+      "pullRequestUrl": "https://github.com/Pick-Your-AI/pick-your-ai-research/pull/348",
+      "prRange": {
+        "before": "4f1c22bac91783a00384b3037bb64b040250c072",
+        "head": "197af1a64ca34b4553d571bc60daec9b0f939105",
+        "orderedCommits": [
+          "9dc003a03ef426afaf45feefbe591c04be15fdf6",
+          "d81f4cb34099e757096a59b7ad1fe3fda5d8509c",
+          "8fdb54943d374b3f6840256e9b7beafc96560e40",
+          "b6d72c907680cdc875dadeb2eb9235b70a48369c",
+          "197af1a64ca34b4553d571bc60daec9b0f939105"
+        ]
+      },
+      "actualIntegration": {
+        "before": "4f1c22bac91783a00384b3037bb64b040250c072",
+        "after": "8cf075b1a887459337bfe886958b4c7d7f3c362f"
+      },
+      "currentPrAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentMerger": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentPrState": "closed",
+      "currentMerged": true,
+      "completePrList": {
+        "perPage": 100,
+        "page1Count": 5,
+        "page2Count": 0,
+        "metadataCountMatches": true
+      },
+      "prListEqualsBoundedReachability": true
+    },
+    {
+      "id": "website_14",
+      "repositoryId": 1422238606,
+      "pullRequestUrl": "https://github.com/Pick-Your-AI/pick-your-ai-website/pull/14",
+      "originalPullRequestUrl": "https://github.com/Pick-Your-AI/pickyour.ai/pull/14",
+      "prRange": {
+        "before": "5d6994c5c335965fdfc257148a2908b3ebcbea71",
+        "head": "850e15cbd73ff407f82566e94306654f63b01821",
+        "orderedCommits": [
+          "850e15cbd73ff407f82566e94306654f63b01821"
+        ]
+      },
+      "actualIntegration": {
+        "before": "65bce2b71e9821deecafd7ced2cdd6a32e1b7d64",
+        "after": "f560f2c96e5002ce91076827da3d2d3044b7347a"
+      },
+      "currentPrAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentMerger": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentPrState": "closed",
+      "currentMerged": true,
+      "completePrList": {
+        "perPage": 100,
+        "page1Count": 1,
+        "page2Count": 0,
+        "metadataCountMatches": true
+      },
+      "prListEqualsBoundedReachability": true
+    },
+    {
+      "id": "website_294",
+      "repositoryId": 1422238606,
+      "pullRequestUrl": "https://github.com/Pick-Your-AI/pick-your-ai-website/pull/294",
+      "originalPullRequestUrl": "https://github.com/Pick-Your-AI/pickyour.ai/pull/294",
+      "prRange": {
+        "before": "dc66a9e269917ab7241c7d08fd0e7f2a2f039872",
+        "head": "73d3ca4d91f29020837828c5e965f38934f39229",
+        "orderedCommits": [
+          "73d3ca4d91f29020837828c5e965f38934f39229"
+        ]
+      },
+      "actualIntegration": null,
+      "currentPrAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentMerger": null,
+      "currentPrState": "open",
+      "currentMerged": false,
+      "completePrList": {
+        "perPage": 100,
+        "page1Count": 1,
+        "page2Count": 0,
+        "metadataCountMatches": true
+      },
+      "prListEqualsBoundedReachability": true
+    }
+  ],
+  "commits": [
+    {
+      "repositoryId": 1421934086,
+      "sha": "d09052a721e75c29a2fb74f318e566f68d30fc3a",
+      "sourceUrl": "https://github.com/Pick-Your-AI/pick-your-ai-research/commit/d09052a721e75c29a2fb74f318e566f68d30fc3a",
+      "orderedParents": [
+        "be60732a1353f9d4efab9d1a4c5fbf7627d49abf"
+      ],
+      "treeSha": "0941d8eaba9ec6981d39233bfff0e0c4b19cf2c6",
+      "prMembership": [
+        "research_352"
+      ],
+      "integrationMembership": [],
+      "currentAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentCommitter": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "authorClock": {
+        "epochSeconds": 1792336246,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:10:46Z"
+      },
+      "committerClock": {
+        "epochSeconds": 1792336246,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:10:46Z"
+      },
+      "gitObjectHashMatches": true,
+      "standardCoauthorTrailerCount": 0,
+      "coauthorLabelLineCount": 0,
+      "coauthorAccountAssociation": "not_observed_no_trailer"
+    },
+    {
+      "repositoryId": 1421934086,
+      "sha": "fe4c0ca7e30fd126ca58889facd2e9d878a3b43e",
+      "sourceUrl": "https://github.com/Pick-Your-AI/pick-your-ai-research/commit/fe4c0ca7e30fd126ca58889facd2e9d878a3b43e",
+      "orderedParents": [
+        "d09052a721e75c29a2fb74f318e566f68d30fc3a"
+      ],
+      "treeSha": "998a320067955938f4c83f4b1be16b21e5ccc8f3",
+      "prMembership": [
+        "research_352"
+      ],
+      "integrationMembership": [],
+      "currentAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentCommitter": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "authorClock": {
+        "epochSeconds": 1792336486,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:14:46Z"
+      },
+      "committerClock": {
+        "epochSeconds": 1792336486,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:14:46Z"
+      },
+      "gitObjectHashMatches": true,
+      "standardCoauthorTrailerCount": 0,
+      "coauthorLabelLineCount": 0,
+      "coauthorAccountAssociation": "not_observed_no_trailer"
+    },
+    {
+      "repositoryId": 1421934086,
+      "sha": "9dc003a03ef426afaf45feefbe591c04be15fdf6",
+      "sourceUrl": "https://github.com/Pick-Your-AI/pick-your-ai-research/commit/9dc003a03ef426afaf45feefbe591c04be15fdf6",
+      "orderedParents": [
+        "07e8b9ad1c44973b3ddf2185bc2fa2cd8bbe9d24"
+      ],
+      "treeSha": "f63d7c8635efa4d948740d1577491b54dd106561",
+      "prMembership": [
+        "research_348"
+      ],
+      "integrationMembership": [],
+      "currentAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentCommitter": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "authorClock": {
+        "epochSeconds": 1792334041,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T14:34:01Z"
+      },
+      "committerClock": {
+        "epochSeconds": 1792334041,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T14:34:01Z"
+      },
+      "gitObjectHashMatches": true,
+      "standardCoauthorTrailerCount": 0,
+      "coauthorLabelLineCount": 0,
+      "coauthorAccountAssociation": "not_observed_no_trailer"
+    },
+    {
+      "repositoryId": 1421934086,
+      "sha": "d81f4cb34099e757096a59b7ad1fe3fda5d8509c",
+      "sourceUrl": "https://github.com/Pick-Your-AI/pick-your-ai-research/commit/d81f4cb34099e757096a59b7ad1fe3fda5d8509c",
+      "orderedParents": [
+        "9dc003a03ef426afaf45feefbe591c04be15fdf6"
+      ],
+      "treeSha": "0df599c3152042c70bd81fd241841469c0f988ac",
+      "prMembership": [
+        "research_348"
+      ],
+      "integrationMembership": [],
+      "currentAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentCommitter": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "authorClock": {
+        "epochSeconds": 1792334900,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T14:48:20Z"
+      },
+      "committerClock": {
+        "epochSeconds": 1792334900,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T14:48:20Z"
+      },
+      "gitObjectHashMatches": true,
+      "standardCoauthorTrailerCount": 0,
+      "coauthorLabelLineCount": 0,
+      "coauthorAccountAssociation": "not_observed_no_trailer"
+    },
+    {
+      "repositoryId": 1421934086,
+      "sha": "8fdb54943d374b3f6840256e9b7beafc96560e40",
+      "sourceUrl": "https://github.com/Pick-Your-AI/pick-your-ai-research/commit/8fdb54943d374b3f6840256e9b7beafc96560e40",
+      "orderedParents": [
+        "d81f4cb34099e757096a59b7ad1fe3fda5d8509c",
+        "be60732a1353f9d4efab9d1a4c5fbf7627d49abf"
+      ],
+      "treeSha": "ff4bb87ccf9f6556750e4bc05822c2e4e84bf8f9",
+      "prMembership": [
+        "research_348"
+      ],
+      "integrationMembership": [],
+      "currentAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentCommitter": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "authorClock": {
+        "epochSeconds": 1792336521,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:15:21Z"
+      },
+      "committerClock": {
+        "epochSeconds": 1792336521,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:15:21Z"
+      },
+      "gitObjectHashMatches": true,
+      "standardCoauthorTrailerCount": 0,
+      "coauthorLabelLineCount": 0,
+      "coauthorAccountAssociation": "not_observed_no_trailer"
+    },
+    {
+      "repositoryId": 1421934086,
+      "sha": "b6d72c907680cdc875dadeb2eb9235b70a48369c",
+      "sourceUrl": "https://github.com/Pick-Your-AI/pick-your-ai-research/commit/b6d72c907680cdc875dadeb2eb9235b70a48369c",
+      "orderedParents": [
+        "8fdb54943d374b3f6840256e9b7beafc96560e40",
+        "0510f87c45a4e7a5f88d6e6750e45b84f447bb3d"
+      ],
+      "treeSha": "380712bb5fe0e5059c9622d3978e8987158068c1",
+      "prMembership": [
+        "research_348"
+      ],
+      "integrationMembership": [],
+      "currentAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentCommitter": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "authorClock": {
+        "epochSeconds": 1792336659,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:17:39Z"
+      },
+      "committerClock": {
+        "epochSeconds": 1792336659,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:17:39Z"
+      },
+      "gitObjectHashMatches": true,
+      "standardCoauthorTrailerCount": 0,
+      "coauthorLabelLineCount": 0,
+      "coauthorAccountAssociation": "not_observed_no_trailer"
+    },
+    {
+      "repositoryId": 1421934086,
+      "sha": "197af1a64ca34b4553d571bc60daec9b0f939105",
+      "sourceUrl": "https://github.com/Pick-Your-AI/pick-your-ai-research/commit/197af1a64ca34b4553d571bc60daec9b0f939105",
+      "orderedParents": [
+        "b6d72c907680cdc875dadeb2eb9235b70a48369c",
+        "4f1c22bac91783a00384b3037bb64b040250c072"
+      ],
+      "treeSha": "f6201368f43cb8978284ed975b09a80ae6484f30",
+      "prMembership": [
+        "research_348"
+      ],
+      "integrationMembership": [],
+      "currentAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentCommitter": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "authorClock": {
+        "epochSeconds": 1792336851,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:20:51Z"
+      },
+      "committerClock": {
+        "epochSeconds": 1792336851,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:20:51Z"
+      },
+      "gitObjectHashMatches": true,
+      "standardCoauthorTrailerCount": 0,
+      "coauthorLabelLineCount": 0,
+      "coauthorAccountAssociation": "not_observed_no_trailer"
+    },
+    {
+      "repositoryId": 1421934086,
+      "sha": "4f1c22bac91783a00384b3037bb64b040250c072",
+      "sourceUrl": "https://github.com/Pick-Your-AI/pick-your-ai-research/commit/4f1c22bac91783a00384b3037bb64b040250c072",
+      "orderedParents": [
+        "0510f87c45a4e7a5f88d6e6750e45b84f447bb3d"
+      ],
+      "treeSha": "f5bc60578b166e3c9ccba4b20695219da5caa3e8",
+      "prMembership": [],
+      "integrationMembership": [
+        "research_352"
+      ],
+      "currentAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentCommitter": {
+        "databaseId": 19864447,
+        "nodeId": "MDQ6VXNlcjE5ODY0NDQ3",
+        "providerType": "User"
+      },
+      "authorClock": {
+        "epochSeconds": 1792336751,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:19:11Z"
+      },
+      "committerClock": {
+        "epochSeconds": 1792336751,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:19:11Z"
+      },
+      "gitObjectHashMatches": true,
+      "standardCoauthorTrailerCount": 0,
+      "coauthorLabelLineCount": 0,
+      "coauthorAccountAssociation": "not_observed_no_trailer"
+    },
+    {
+      "repositoryId": 1421934086,
+      "sha": "8cf075b1a887459337bfe886958b4c7d7f3c362f",
+      "sourceUrl": "https://github.com/Pick-Your-AI/pick-your-ai-research/commit/8cf075b1a887459337bfe886958b4c7d7f3c362f",
+      "orderedParents": [
+        "4f1c22bac91783a00384b3037bb64b040250c072"
+      ],
+      "treeSha": "f6201368f43cb8978284ed975b09a80ae6484f30",
+      "prMembership": [],
+      "integrationMembership": [
+        "research_348"
+      ],
+      "currentAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentCommitter": {
+        "databaseId": 19864447,
+        "nodeId": "MDQ6VXNlcjE5ODY0NDQ3",
+        "providerType": "User"
+      },
+      "authorClock": {
+        "epochSeconds": 1792337252,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:27:32Z"
+      },
+      "committerClock": {
+        "epochSeconds": 1792337252,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-18T15:27:32Z"
+      },
+      "gitObjectHashMatches": true,
+      "standardCoauthorTrailerCount": 0,
+      "coauthorLabelLineCount": 0,
+      "coauthorAccountAssociation": "not_observed_no_trailer"
+    },
+    {
+      "repositoryId": 1422238606,
+      "sha": "850e15cbd73ff407f82566e94306654f63b01821",
+      "sourceUrl": "https://github.com/Pick-Your-AI/pick-your-ai-website/commit/850e15cbd73ff407f82566e94306654f63b01821",
+      "orderedParents": [
+        "5d6994c5c335965fdfc257148a2908b3ebcbea71"
+      ],
+      "treeSha": "96d5c049bfa1fc2af287c98a1dc1602ced717df5",
+      "prMembership": [
+        "website_14"
+      ],
+      "integrationMembership": [],
+      "currentAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentCommitter": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "authorClock": {
+        "epochSeconds": 1792165459,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-16T15:44:19Z"
+      },
+      "committerClock": {
+        "epochSeconds": 1792165459,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-16T15:44:19Z"
+      },
+      "gitObjectHashMatches": true,
+      "standardCoauthorTrailerCount": 1,
+      "coauthorLabelLineCount": 1,
+      "coauthorAccountAssociation": "unknown_trailer_does_not_bind_account"
+    },
+    {
+      "repositoryId": 1422238606,
+      "sha": "73d3ca4d91f29020837828c5e965f38934f39229",
+      "sourceUrl": "https://github.com/Pick-Your-AI/pick-your-ai-website/commit/73d3ca4d91f29020837828c5e965f38934f39229",
+      "orderedParents": [
+        "dc66a9e269917ab7241c7d08fd0e7f2a2f039872"
+      ],
+      "treeSha": "cf838c3df6763e32a9c00b0669121bbfeb98a96b",
+      "prMembership": [
+        "website_294"
+      ],
+      "integrationMembership": [],
+      "currentAuthor": null,
+      "currentCommitter": null,
+      "authorClock": {
+        "epochSeconds": 1792283123,
+        "offset": "+0000",
+        "normalizedUtc": "2026-10-18T00:25:23Z"
+      },
+      "committerClock": {
+        "epochSeconds": 1792283123,
+        "offset": "+0000",
+        "normalizedUtc": "2026-10-18T00:25:23Z"
+      },
+      "gitObjectHashMatches": true,
+      "standardCoauthorTrailerCount": 0,
+      "coauthorLabelLineCount": 0,
+      "coauthorAccountAssociation": "not_observed_no_trailer"
+    },
+    {
+      "repositoryId": 1422238606,
+      "sha": "f560f2c96e5002ce91076827da3d2d3044b7347a",
+      "sourceUrl": "https://github.com/Pick-Your-AI/pick-your-ai-website/commit/f560f2c96e5002ce91076827da3d2d3044b7347a",
+      "orderedParents": [
+        "65bce2b71e9821deecafd7ced2cdd6a32e1b7d64"
+      ],
+      "treeSha": "b4c6de1b18669541e88fc130cf04cabeb547b0fc",
+      "prMembership": [],
+      "integrationMembership": [
+        "website_14"
+      ],
+      "currentAuthor": {
+        "databaseId": 5861166,
+        "nodeId": "MDQ6VXNlcjU4NjExNjY=",
+        "providerType": "User"
+      },
+      "currentCommitter": {
+        "databaseId": 19864447,
+        "nodeId": "MDQ6VXNlcjE5ODY0NDQ3",
+        "providerType": "User"
+      },
+      "authorClock": {
+        "epochSeconds": 1792165668,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-16T15:47:48Z"
+      },
+      "committerClock": {
+        "epochSeconds": 1792165668,
+        "offset": "-0400",
+        "normalizedUtc": "2026-10-16T15:47:48Z"
+      },
+      "gitObjectHashMatches": true,
+      "standardCoauthorTrailerCount": 1,
+      "coauthorLabelLineCount": 1,
+      "coauthorAccountAssociation": "unknown_trailer_does_not_bind_account"
+    }
+  ],
+  "observedCounts": {
+    "sampledPullRequests": 4,
+    "prCommitObjects": 9,
+    "actualIntegrationCommitObjects": 3,
+    "uniqueExaminedCommitObjects": 12,
+    "nullAuthorAssociations": 1,
+    "nullCommitterAssociations": 1,
+    "standardCoauthorTrailerOccurrences": 2
+  },
+  "method": [
+    "Retain the original four source heads and their separate actual integration ranges; do not substitute a PR base-tip field for the reviewed comparison boundary.",
+    "Read complete current PR commit lists with per_page=100 and a terminal empty second page; reconcile the bounded graph and fixed heads.",
+    "Read REST author/committer provider bindings and cross-check PR-list bindings; retain null as unknown.",
+    "Rehash all twelve immutable Git commit objects and reconcile ordered parents, trees and original clock offsets with the UTC API fields.",
+    "Parse only actual standard Co-authored-by trailer occurrence counts using git interpret-trailers --parse; inspect matching label presence without retaining names, emails or raw messages.",
+    "Verify the renamed website repository by unchanged database identity and canonical public metadata; retain historical links in the prior observation."
+  ],
+  "discrepanciesAndCaveats": [
+    {
+      "id": "website294-unbound-commit-roles",
+      "state": "publicly_caveated_unknown",
+      "description": "Source73d3 has null author and committer platform bindings despite the PR author binding5861166. PR ownership does not fill either missing commit role."
+    },
+    {
+      "id": "integration-committer-role",
+      "state": "current_roles_separately_observed",
+      "description": "All three actual squash integrations bind their author to5861166 and committer to19864447; their PR merger binding5861166 remains a separate role."
+    },
+    {
+      "id": "website14-coauthor-declarations",
+      "state": "declaration_observed_account_unknown",
+      "description": "Website14 source850e and acceptedf560 each contain one standard Co-authored-by trailer. The declared account, distinct-person count, role allocation and contribution credit are not established."
+    },
+    {
+      "id": "observation-time",
+      "state": "separate_current_observation",
+      "description": "Current account bindings are not assigned retrospectively to the 2026-10-18 observation windows."
+    }
+  ],
+  "limits": [
+    "ProviderType User is a provider classification, not evidence of a human operator, automation absence or independent human review.",
+    "Commit clocks are recorded Git fields, not verified action times, receipt times or work durations.",
+    "PR author, commit author, committer, merger, reviewer and coauthor declaration are different roles even where identifiers coincide.",
+    "Neither raw line counts nor commit counts establish original authorship, effort, quality or accepted recognition.",
+    "Trailer presence is an unverified declaration; absence does not prove no collaboration. No account is joined using names or emails.",
+    "An open PR has no accepted integration in this sample; its reported merge_commit_sha, if present, is not used as accepted evidence.",
+    "Prior reviewer source-head and COMMENT-versus-APPROVED limits remain as originally recorded.",
+    "No private source collection, personal profile lookup, contributor credit, identity override, metric activation or historical record rewrite is performed.",
+    "Metric-specific acceptance, unresolved provider/coauthor bindings and whole-work-package prerequisites remain open."
+  ]
+}
