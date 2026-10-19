@@ -50,9 +50,9 @@ export function recognitionFingerprint(state, bindings = []) {
   // and affected-owner evidence boundary. Unrelated configurations stay exact.
   if (bindings.some((binding) => ["governance", "deployment_work", "incidents"].includes(binding.metricId)))
     authority.push("operations-contribution-evidence/v1");
-  // Generic release receipts lacked a collected immutable inclusion and publication clock.
+  // Retire generic receipts and the earlier pre-collection release observation authority.
   if (bindings.some((binding) => binding.metricId === "release_changes"))
-    authority.push("release-inclusion-recognition/v1");
+    authority.push("release-inclusion-recognition/v2");
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 

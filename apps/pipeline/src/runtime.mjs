@@ -262,7 +262,11 @@ export async function createPipeline(options) {
   // A newly selected release must collect its own proof even when the PR's
   // ordinary source revision and metric arithmetic remain unchanged.
   const normalizationSignature = config.releaseInclusionTargets?.length
-    ? digest(["github-release-inclusion/v1", projectNormalizationSignature, config.releaseInclusionTargets])
+    ? digest([
+        dataMode === "public" ? "github-release-inclusion/v2" : "github-release-inclusion/v1",
+        projectNormalizationSignature,
+        config.releaseInclusionTargets,
+      ])
     : projectNormalizationSignature;
   const frozenNormalizationSignatures = [
     normalizationSignature,
@@ -602,6 +606,7 @@ export async function createPipeline(options) {
           documentationPolicies: config.documentationPolicies ?? [],
           researchPolicies: config.researchPolicies ?? [],
           releaseInclusionTargets: config.releaseInclusionTargets ?? [],
+          now: () => utc(now()),
           projectWorkstreamMappings,
           ...(options.githubEnrich ? { enrich: options.githubEnrich } : {}),
         })
@@ -860,7 +865,7 @@ export async function createPipeline(options) {
             entry.artifact.publicUrl === dispatch.lease.observation.sourceUrl,
         ),
     );
-  async function normalizeStored(repositoryIds, cutoff, dispatch) {
+  async function normalizeStored(repositoryIds, cutoff, dispatch, releasePass = null) {
     // Current association is selected from one completed whole-repository scan.
     // A partial later run cannot replace it, and subjects absent from the latest
     // complete inventory cannot inherit older membership rows.
@@ -928,6 +933,15 @@ export async function createPipeline(options) {
     const outputs = [];
     for (const row of sourceRows) {
       const repository = config.repositories.find((repo) => String(repo.id) === String(row.repository_id));
+      const releaseTargets =
+        dataMode === "public" && row.family === "pull_requests"
+          ? (config.releaseInclusionTargets ?? []).filter(
+              (target) =>
+                target.repositoryId === repository.id &&
+                row.document.sourceUrl === `https://github.com/${repository.slug}/pull/${target.pullRequestNumber}`,
+            )
+          : [];
+      if (releasePass && !releaseTargets.length) continue;
       const cached = (
         await db.query(
           "SELECT document,document_hash FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=$2",
@@ -952,12 +966,36 @@ export async function createPipeline(options) {
           currentProjectNormalizer &&
           hasDispatchEvidence(cached.document, dispatch, row)
         ) {
+          if (releaseTargets.length && !releasePass?.collect) {
+            const records = cached.document.releaseInclusions;
+            if (
+              !Array.isArray(records) ||
+              !records.length ||
+              !records.every(
+                (record) =>
+                  c.contracts.sourceEventSchema.shape.observedAt.safeParse(record?.observedAt).success &&
+                  c.contracts.compareSourceInstants(record.observedAt, cutoff) <= 0,
+              ) ||
+              !releaseTargets.every((target) =>
+                records.some(
+                  (record) =>
+                    record.request?.repositoryId === target.repositoryId &&
+                    record.request?.releaseId === target.releaseId &&
+                    record.request?.pullRequestNumber === target.pullRequestNumber,
+                ),
+              )
+            )
+              fail("release_inclusion_frozen_normalization_unavailable");
+          }
           normalizedProjectContext(cached.document, row, repository, projectWorkstreamMappings);
           await retainSourceArtifacts(db, row.fact_key, cached.document);
           outputs.push({ document: cached.document, source: sourceBinding(row) });
           continue;
         }
       }
+      // A frozen publication may only consume proof collected before its cutoff.
+      // Missing compatible caches require a fresh cycle, never a backdated lookup.
+      if (releaseTargets.length && !releasePass?.collect) fail("release_inclusion_frozen_normalization_unavailable");
       const normalizationStarted = performance.now();
       let output;
       try {
@@ -2090,6 +2128,7 @@ export async function createPipeline(options) {
             runConfigurationRevision,
             recognitionBindings.length ? runRecognitionFingerprint : null,
             sources,
+            ...(dataMode === "public" && config.releaseInclusionTargets?.length ? [normalizationSignature] : []),
           ]),
           cutoff,
           sources,
@@ -2136,6 +2175,17 @@ export async function createPipeline(options) {
         progress.push({ repositoryId: repo.id, family, runId, status });
         if (status !== "complete") return { state: "collecting", progress, publications: [] };
       }
+    }
+    // New release proof is a separate observation from the immutable PR row.
+    // Complete only explicitly selected public lookups before freezing the cycle;
+    // a frozen retry reuses its exact compatible cache and never recollects it.
+    if (dataMode === "public" && config.releaseInclusionTargets?.length) {
+      const releaseRepositoryIds = config.repositories
+        .filter((repo) => config.releaseInclusionTargets.some((target) => target.repositoryId === repo.id))
+        .map((repo) => repo.id);
+      await normalizeStored(releaseRepositoryIds, scan?.observationCutoff ?? utc(now()), null, {
+        collect: !scan?.observationCutoff,
+      });
     }
     const publications = [];
     let observationCutoff = utc(now());

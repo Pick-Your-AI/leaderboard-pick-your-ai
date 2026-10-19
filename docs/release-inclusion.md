@@ -17,6 +17,23 @@ only for its exact selected PR URL. Without targets, unrelated normalization and
 HTTP traffic retain their preceding behavior. Changing targets changes the private
 normalization cache identity even when the PR revision has not changed.
 
+The original PR observation remains immutable. Selected release reads use the
+protected normalizer `now` clock (actual UTC by default), recording their completed
+lookup time after the collector and its authorization checks. Invalid or backward
+clocks fail closed. The pipeline completes only those selected public lookups
+before freezing a new observation cutoff. It then consumes the same target-bound
+cache without a second lookup. A compatible frozen retry reuses that exact proof;
+missing or later proof cannot be recollected into an earlier frozen snapshot.
+Custom host normalizers keep their existing input shape and remain responsible
+for truthful private proof observations. No-target and synthetic paths do not run
+this extra collection phase.
+
+Public target-bound caches use `github-release-inclusion/v2`. The same scoped
+signature also participates in implicit scan context, so an incompatible pending
+v1 scan is retired through the existing atomic context replacement. Existing
+configuration keys and unrelated normalizations remain unchanged. Old rows and
+publications are retained with their original clocks and identities.
+
 `collectGithubReleaseInclusion` performs actual bounded reads through the existing
 repository-scoped `GithubReadClient`: public repository, release ID, merged PR,
 tag ref, annotated tag objects where needed, and an immutable-SHA comparison.
@@ -105,9 +122,10 @@ This route does not infer equivalence across separate cherry-pick, squash, mirro
 or imported PRs from names or commit strings. Those broader work-lineage adapters
 require their own source and review evidence before cross-PR conservation is claimed.
 
-`release-inclusion-recognition/v1` changes saved authority only for configurations
-binding `release_changes`. Old generic snapshots are withheld from current and
-pinned proofs, exports, previews and explanations until actual recomputation.
+`release-inclusion-recognition/v2` changes saved authority only for configurations
+binding `release_changes`. Old generic snapshots and earlier release-clock
+snapshots are withheld from current and pinned proofs, exports, previews and
+explanations until actual recomputation.
 All earlier category markers and all other metric fingerprints remain unchanged.
 The 98 metric definitions and current UI maturity are preserved; this bounded
 implementation does not claim a selectable public release board.

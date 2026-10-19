@@ -21,7 +21,11 @@ import {
 } from "@pick-your-ai/contracts";
 import { GithubReadClient } from "./client.js";
 import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
-import { collectGithubReleaseInclusion, type GithubReleaseInclusionRecord } from "./release-inclusion.js";
+import {
+  collectGithubReleaseInclusion,
+  validateGithubReleaseInclusion,
+  type GithubReleaseInclusionRecord,
+} from "./release-inclusion.js";
 import {
   validateReleaseChangesSource,
   type GithubReleaseReviewTarget,
@@ -1546,6 +1550,8 @@ export interface CollectionNormalizerInput {
 }
 export interface GithubEvidenceNormalizerOptions {
   client: GithubReadClient;
+  /** Protected actual clock for new release lookups; original source observation stays unchanged. */
+  now?: () => string;
   /** Synchronous host authorization rechecked by the transport before every HTTP attempt. */
   assertAuthorized?: () => void;
   source: string;
@@ -1574,6 +1580,7 @@ export interface GithubEvidenceNormalizerOptions {
 
 /** Read-only collection-to-metric adapter. Lossy snapshots are hydrated rather than guessed. */
 export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizerOptions) {
+  const releaseNow = options.now ?? (() => new Date().toISOString());
   const releaseTargets = structuredClone(options.releaseInclusionTargets ?? []);
   if (
     !Array.isArray(releaseTargets) ||
@@ -2029,18 +2036,33 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       );
       if (candidates.length) {
         const records: GithubReleaseInclusionRecord[] = [];
-        for (const target of candidates)
-          records.push(
-            await collectGithubReleaseInclusion({
-              client: client(),
-              source: options.source,
-              repository: input.repository,
-              releaseId: target.releaseId,
-              pullRequestNumber: target.pullRequestNumber,
-              observedAt: input.observedAt,
-              assertAuthorized: options.assertAuthorized!,
-            }),
-          );
+        const authorizeRelease = options.assertAuthorized!;
+        const readClock = () => {
+          if (typeof releaseNow !== "function") throw new Error("release_inclusion_observation_clock_invalid");
+          const value = releaseNow();
+          if (typeof value !== "string" || !sourceEventSchema.shape.observedAt.safeParse(value).success)
+            throw new Error("release_inclusion_observation_clock_invalid");
+          return value;
+        };
+        for (const target of candidates) {
+          const startedAt = readClock();
+          const record = await collectGithubReleaseInclusion({
+            client: client(),
+            source: options.source,
+            repository: input.repository,
+            releaseId: target.releaseId,
+            pullRequestNumber: target.pullRequestNumber,
+            observedAt: startedAt,
+            assertAuthorized: authorizeRelease,
+          });
+          const completedAt = readClock();
+          if (compareSourceInstants(completedAt, startedAt) < 0)
+            throw new Error("release_inclusion_observation_clock_invalid");
+          authorizeRelease();
+          // A retained PR can precede this release. Its original source clock is
+          // not the observation time of these new, fully completed proof reads.
+          records.push(validateGithubReleaseInclusion({ ...record, observedAt: completedAt }));
+        }
         normalized.releaseInclusions = records;
       }
     }
