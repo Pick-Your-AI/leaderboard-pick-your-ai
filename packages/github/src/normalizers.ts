@@ -1759,7 +1759,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
   if (
     !Array.isArray(releaseTargets) ||
     releaseTargets.length > 1000 ||
-    releaseTargets.some(
+    Array.from(releaseTargets).some(
       (target) =>
         !object(target) ||
         Object.keys(target).sort().join(",") !== "pullRequestNumber,releaseId,repositoryId" ||
