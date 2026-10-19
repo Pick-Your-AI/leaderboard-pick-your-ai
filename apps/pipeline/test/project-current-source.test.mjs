@@ -15,6 +15,7 @@ import {
 import { syntheticCheckpointStore } from "../../../packages/github/test/synthetic-client.mjs";
 import { aggregateMetric, getMetricDefinition, metricRegistryV1 } from "../../../packages/metrics/dist/index.js";
 import { createGithubCollectionSource } from "../src/github-source.mjs";
+import { applyCurrentProjectContexts, normalizedProjectContext } from "../src/project-context.mjs";
 
 const repository = {
   id: 37,
@@ -306,7 +307,7 @@ test("real current Project collection emits one marked native issue/PR row, incl
     assert.deepEqual(output.facts, []);
     assert.deepEqual(output.actors, []);
     assert.deepEqual(output.evidence, []);
-    assert.equal(output.projectContext.schemaVersion, "github-current-project-context/v1");
+    assert.equal(output.projectContext.schemaVersion, "github-current-project-context/v2");
     assert.equal(output.projectContext.subjectId, fact.subjectId);
     assert.equal(output.projectContext.sourceRevision, fact.sourceRevision);
     assert.equal(output.projectContext.observedAt, observedAt);
@@ -319,6 +320,7 @@ test("real current Project collection emits one marked native issue/PR row, incl
     workstreams: [],
     workstreamsKnown: true,
     projectScope: repository.allowedProjectIds,
+    workstreamScope: ["engineering"],
   });
 });
 
@@ -544,3 +546,84 @@ test("a matching future-dated item snapshot cannot describe current membership a
   assert.deepEqual(output.facts, []);
   assert.ok(output.reasons.length > 0);
 });
+
+for (const scenario of [
+  {
+    name: "empty subject without a mapping",
+    empty: true,
+    mapped: false,
+    requested: ["outside"],
+    reason: "unknown_membership_context",
+  },
+  {
+    name: "empty subject outside a bounded mapping",
+    empty: true,
+    requested: ["outside"],
+    reason: "unknown_membership_context",
+  },
+  { name: "mapped nonempty subject outside its mapping", requested: ["outside"], reason: "unknown_membership_context" },
+  {
+    name: "empty subject within the proved mapping",
+    empty: true,
+    requested: ["engineering"],
+    reason: "workstream_filter",
+  },
+  {
+    name: "absent configured Project still proves workstream scope",
+    requested: ["research"],
+    reason: "workstream_filter",
+  },
+  {
+    name: "unmatched mixed union remains unknown",
+    requested: ["research", "outside"],
+    reason: "unknown_membership_context",
+  },
+  { name: "proved positive survives an outside union member", requested: ["engineering", "outside"], reason: null },
+  {
+    name: "proved positive survives another unmapped membership",
+    partial: true,
+    requested: ["engineering"],
+    reason: null,
+  },
+]) {
+  test(`workstream scope: ${scenario.name}`, async () => {
+    const h = harness();
+    if (scenario.empty) h.state.memberships.I_synthetic = [];
+    if (scenario.partial) h.state.memberships.I_synthetic.push(member("gamma"));
+    const configured = mapping();
+    configured.projects[2].fields[0].options[0].workstreamId = "research";
+    if (scenario.partial) configured.projects.pop();
+    const mappings = scenario.mapped === false ? [] : [configured];
+    const collected = (await h.source.readPage(request)).facts.find((fact) => fact.subjectId === "I_synthetic");
+    const output = await h.normalizer(mappings)(h.input(collected));
+    const original = await ordinary(h);
+    const originalBytes = JSON.stringify(original);
+    const retained = normalizedProjectContext(
+      output,
+      {
+        family: "project_current",
+        document: collected,
+        repository_id: repository.id,
+        subject_id: collected.subjectId,
+        observed_at: observedAt,
+      },
+      repository,
+      mappings,
+    );
+    assert.ok(retained.projectContext);
+    assert.deepEqual([output.facts, output.actors, output.evidence], [[], [], []]);
+    const input = {
+      ...frozen(original, null),
+      facts: applyCurrentProjectContexts(original.facts, [retained]),
+    };
+    const result = aggregateMetric(input, policy(), { ...scope, context: "current", workstreams: scenario.requested });
+    assert.equal(JSON.stringify(original), originalBytes, "context overlay must not mutate the source facts");
+    if (scenario.reason === null) {
+      assert.equal(result.rows[0].value, 1, "one native action contributes once to an OR scope");
+    } else {
+      assert.deepEqual(result.rows, []);
+      assert.equal(result.audit.length, 1);
+      assert.equal(result.audit[0].reason, scenario.reason);
+    }
+  });
+}
