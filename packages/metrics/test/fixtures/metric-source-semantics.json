@@ -367,15 +367,15 @@
       "metric_id": "pr_lines_added",
       "path": "packages/github/test/normalizers.test.mjs",
       "positive_test": "physical line classes exclude vendor/generated/locks/binary/imports and disclose net separately",
-      "negative_test": "stacked branch merges keep PR participation while delivered LOC appears once at pinned default integration",
-      "limitation": "Pinned complete default integration and explicit exclusions are checked; owned physical source/cohort work remains with #377/#385."
+      "negative_test": "physical line classes exclude vendor/generated/locks/binary/imports and disclose net separately",
+      "limitation": "The classifier directly checks additions and exclusions for vendor/generated/lock/binary/import/formatting files. This reference does not establish a separate added-line default-integration exclusion; owned physical source/cohort work remains with #377/#385."
     },
     {
       "metric_id": "pr_lines_removed",
       "path": "packages/github/test/normalizers.test.mjs",
       "positive_test": "physical line classes exclude vendor/generated/locks/binary/imports and disclose net separately",
-      "negative_test": "stacked branch merges keep PR participation while delivered LOC appears once at pinned default integration",
-      "limitation": "Pinned complete default integration and explicit exclusions are checked; owned physical source/cohort work remains with #377/#385."
+      "negative_test": "physical line classes exclude vendor/generated/locks/binary/imports and disclose net separately",
+      "limitation": "The classifier directly checks deletions and exclusions for vendor/generated/lock/binary/import/formatting files. This reference does not establish a separate removed-line default-integration exclusion; owned physical source/cohort work remains with #377/#385."
     },
     {
       "metric_id": "pr_lines_changed",
@@ -473,8 +473,8 @@
       "metric_id": "milestone_definitions",
       "path": "packages/metrics/test/triage-definition-days.test.js",
       "positive_test": "definition facets, renames and reversals share one actor/definition/day while no-op metadata emits no fact",
-      "negative_test": "fixed UTC days respect midnight, source-clock limits, exact duplicates and deterministic replay without changing frozen input",
-      "limitation": "Definition identity/day grouping is distinct from applying labels or milestones to issues."
+      "negative_test": "definition facets, renames and reversals share one actor/definition/day while no-op metadata emits no fact",
+      "limitation": "The shared label/milestone body checks milestone no-op exclusion and repeated actor/definition/day units. The separately named label-only midnight/clock test is not milestone evidence. Definition curation remains distinct from applying milestones to issues."
     },
     {
       "metric_id": "decision_records",
@@ -694,10 +694,10 @@
     },
     {
       "metric_id": "active_periods",
-      "path": "packages/metrics/test/participation-history-roles.test.mjs",
-      "positive_test": "unfiltered reviewed organization history retains the earlier eligible contribution",
-      "negative_test": "an uncertain earlier eligible role cannot certify a newcomer in the selected role",
-      "limitation": "The dedicated participation engine uses eligible facts, reviewed organization history and week denominators. A current public profile still reports unknown newcomer history; no actual participant classification."
+      "path": "packages/metrics/test/participation-scale.test.mjs",
+      "positive_test": "partitioned participation keeps actor ordering, historic scope and sorted active weeks",
+      "negative_test": "partitioned participation keeps actor ordering, historic scope and sorted active weeks",
+      "limitation": "Eligible events in distinct UTC weeks produce distinct active weeks; repeated events within one week count once. The case also keeps selected active weeks separate from earlier organization history. It does not establish unknown in-scope state exclusion or month projection, and the five-week calendar context is not certification of a fully covered participation share. No actual participant classification."
     }
   ]
 }

@@ -77,6 +77,16 @@ editorial consent. Each maps a literal positive and exclusion test; parameterize
 domain cases also name their metric input. These are bounded source-review
 references, not 47 new executions or a claim that every remaining facet is done.
 
+An inclusion and an exclusion may be asserted by the same named test. The
+milestone reference uses the body that actually constructs milestone no-ops and
+repeated day units; a label-only midnight test is not substituted for it. The
+added/removed-line references use their actual classifier quantity and exclusion
+assertions, without borrowing the separate changed-line integration result.
+The active-period reference checks distinct UTC weeks and repeated events in one
+week. It does not borrow an out-of-window, other-role newcomer uncertainty case
+as evidence for unknown in-scope active-week exclusion. Its calendar denominator
+is context, not a certified fully covered participation share or month projection.
+
 The remaining dispositions distinguish seven IDs with currently owned
 implementations, twelve genuine derivation/admission prerequisites (including
 signed repository net lines), and fourteen IDs whose complete semantic cases
