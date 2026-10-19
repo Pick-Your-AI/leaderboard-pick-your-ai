@@ -11,6 +11,12 @@ Refs #112, #105, #120. This is implementation and synthetic verification evidenc
 - Public evidence contains only existing allowlisted artifact/contribution metadata, explicit activity state and collection time. Raw facts, acceptance/correction receipt contents, actor emails, membership, aliases and private text are not published. Hidden/deleted/unlinked actors and withdrawn metrics remain unavailable under current controls even for pinned snapshots.
 - The UI uses labelled username/category controls, stable snapshot links and ordinary keyboard-accessible pagination. Navigation replaces one bounded page, rather than retaining an unbounded client-side history. Browser Back restores a prior pinned page.
 
+## Portfolio response binding
+
+The browser validates every timeline contribution against the enclosing profile actor. With a selected category, every timeline contribution must include that category and every metric result must identify it, including on the legacy response path without an optional participation summary. Existing summary validation, requested-URL actor checks and role/snapshot/scope checks remain in effect.
+
+Category totals remain independent: a contribution can belong to several categories, so a filtered profile may legitimately retain overlapping category totals. Eligibility without an explicit accepted state remains unknown; these response checks do not infer acceptance, supply missing source evidence or create an overall score.
+
 ## Acceptance still required
 
 Source capability and configuration approvals; identity/display policy choices for aliases, former/newcomer/unlinked presentation; independent security, accessibility and metric-owner review; real participant and assistive-technology testing; deployment and anonymous production readback remain open. No employment, popularity, membership or overall productivity classification is inferred.

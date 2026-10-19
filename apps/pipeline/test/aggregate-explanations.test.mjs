@@ -94,6 +94,8 @@ async function arithmeticHarness(t) {
   const options = {
     ...h.options,
     config,
+    // This protected synthetic provider deliberately supplies physical arithmetic facts.
+    defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
     normalizer: async ({ fact }) => {
       if (fact.subjectId !== "SYNTHETIC_ISSUE_1") return { facts: [], actors: [], evidence: [] };
       return {
