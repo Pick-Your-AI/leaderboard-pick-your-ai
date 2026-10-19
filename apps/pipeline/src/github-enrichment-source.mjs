@@ -283,6 +283,9 @@ export function createGithubEnrichmentSource(options) {
           abort = () => reject(new Error("github_enrichment_unavailable"));
           addListener.call(signal, "abort", abort, { once: true });
         });
+        // A synchronous fence can abort before step installs its race. Observe
+        // that rejection now; the original promise still rejects the race.
+        void aborted.catch(() => undefined);
         const step = async (work) => {
           fence();
           const pending = Promise.resolve().then(() => {
