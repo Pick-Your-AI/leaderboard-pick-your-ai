@@ -272,6 +272,7 @@ export function hasSparseDomainIdentifierAuthority(binding, request) {
   )
     return true;
   if (metric === "pricebook_proposals" && sparseIdAuthority(detail?.units)) return true;
+  if (metric === "deployment_work" && sparseIdAuthority(detail?.deploymentIds)) return true;
   return metric === "accessibility" && sparseIdAuthority(detail?.criteria);
 }
 
