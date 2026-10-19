@@ -115,6 +115,18 @@ function checkAuthorization(source: string, check?: () => void): void {
   }
 }
 
+function serializeRequest(value: unknown, source: string): string {
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) throw new Error("Missing JSON request");
+    return serialized;
+  } catch {
+    // Local input conversion cannot become a retryable transport failure or
+    // expose a caller's getter/toJSON error through the public client.
+    throw new GithubClientError({ kind: "unsafe_request" }, source);
+  }
+}
+
 /** Read-only, credential-scoped transport. No upstream mutation entry points. */
 export class GithubReadClient {
   private readonly origin: URL;
@@ -331,7 +343,7 @@ export class GithubReadClient {
   private async request(
     source: string,
     rawUrl: string,
-    query?: { query: string; variables: Record<string, unknown> },
+    query?: string,
     assertAuthorized?: () => void,
   ): Promise<{ body: unknown; link: string | null }> {
     const authorize = () => this.authorize(source, assertAuthorized);
@@ -402,7 +414,7 @@ export class GithubReadClient {
           headers,
           redirect: "manual",
           signal: AbortSignal.timeout(this.options.timeoutMs),
-          ...(query ? { body: JSON.stringify(query) } : {}),
+          ...(query ? { body: query } : {}),
         });
         // Access can change while fetch is pending, before any response is consumed.
         await authorize();
@@ -530,7 +542,10 @@ export class GithubReadClient {
   ): Promise<T> {
     if (!readOnlyQuery(query)) throw new GithubClientError({ kind: "unsafe_request" }, source);
     try {
-      const { body } = await this.request(source, this.options.graphqlPath, { query, variables }, assertAuthorized);
+      // Capture wire bytes before any await, including token preparation. Every
+      // retry sends the same data while authorization remains a live check.
+      const requestBody = serializeRequest({ query, variables }, source);
+      const { body } = await this.request(source, this.options.graphqlPath, requestBody, assertAuthorized);
       if (!object(body) || !("data" in body) || body.data === null)
         throw new GithubClientError({ kind: "invalid_response" }, source);
       return body.data as T;
@@ -612,61 +627,93 @@ export class GithubReadClient {
   }
 
   async scanRest<T>(options: RestScan<T>): Promise<T[]> {
-    const initialUrl = this.trustedUrl(options.url, options.source);
-    const fingerprint = hash(["rest/v1", initialUrl, this.options.apiVersion, options.key]);
+    const { source, key, url, maxPages, refresh, select, assertAuthorized } = options;
+    const initialUrl = this.trustedUrl(url, source);
+    const fingerprint = hash(["rest/v1", initialUrl, this.options.apiVersion, key]);
     return this.scan(
-      options.source,
-      options.key,
+      source,
+      key,
       fingerprint,
       initialUrl,
-      options.maxPages,
-      options.refresh,
+      maxPages,
+      refresh,
       async (url) => {
-        const page = await this.request(options.source, url, undefined, options.assertAuthorized);
-        await this.authorize(options.source, options.assertAuthorized);
+        const page = await this.request(source, url, undefined, assertAuthorized);
+        await this.authorize(source, assertAuthorized);
         const link = nextRestLink(page.link);
-        return { items: options.select(page.body), next: link ? this.trustedUrl(link, options.source) : null };
+        return { items: select.call(options, page.body), next: link ? this.trustedUrl(link, source) : null };
       },
-      options.assertAuthorized,
+      assertAuthorized,
     );
   }
 
   async scanGraphql<T>(options: GraphqlScan<T>): Promise<T[]> {
-    const first = options.first ?? 100;
+    const {
+      source,
+      key,
+      query,
+      variables: inputVariables,
+      first: pageSize,
+      maxPages,
+      refresh,
+      select,
+      assertAuthorized,
+    } = options;
+    const first = pageSize ?? 100;
     if (!Number.isInteger(first) || first < 1 || first > 100)
       throw new RangeError("GraphQL first must be 1 through 100");
-    if (options.variables && ("first" in options.variables || "after" in options.variables))
+    if (inputVariables && ("first" in inputVariables || "after" in inputVariables))
       throw new Error("first and after are managed scan variables");
+    let variables: Record<string, unknown>;
+    try {
+      // Match JSON wire conversion once, including nested toJSON/Date values,
+      // without retaining mutable caller data or hooks between pages. The
+      // wrapper preserves the same conversion key as a GraphQL request.
+      const snapshot: unknown = JSON.parse(serializeRequest({ variables: inputVariables ?? {} }, source));
+      if (
+        !object(snapshot) ||
+        !object(snapshot.variables) ||
+        "first" in snapshot.variables ||
+        "after" in snapshot.variables
+      )
+        throw new GithubClientError({ kind: "unsafe_request" }, source);
+      variables = snapshot.variables;
+    } catch (error) {
+      // Keep rejection subject to current host and repository authority even
+      // though no scan/checkpoint/request has started for this local failure.
+      await this.authorize(source, assertAuthorized);
+      throw error;
+    }
     const fingerprint = hash([
       "graphql/v1",
       this.options.apiOrigin,
       this.options.graphqlPath,
       this.options.apiVersion,
-      options.query,
-      options.variables ?? {},
+      query,
+      variables,
       first,
-      options.key,
+      key,
     ]);
     return this.scan(
-      options.source,
-      options.key,
+      source,
+      key,
       fingerprint,
       "",
-      options.maxPages,
-      options.refresh,
+      maxPages,
+      refresh,
       async (cursor) => {
         const data = await this.graphql(
-          options.source,
-          options.query,
+          source,
+          query,
           {
-            ...options.variables,
+            ...variables,
             first,
             after: cursor || null,
           },
-          options.assertAuthorized,
+          assertAuthorized,
         );
-        await this.authorize(options.source, options.assertAuthorized);
-        const page = options.select(data);
+        await this.authorize(source, assertAuthorized);
+        const page = select.call(options, data);
         if (
           !object(page) ||
           page.errors?.length ||
@@ -675,10 +722,10 @@ export class GithubReadClient {
           !(page.pageInfo.endCursor === null || typeof page.pageInfo.endCursor === "string") ||
           (page.pageInfo.hasNextPage && !page.pageInfo.endCursor)
         )
-          throw new GithubClientError({ kind: "invalid_response" }, options.source);
+          throw new GithubClientError({ kind: "invalid_response" }, source);
         return { items: page.nodes, next: page.pageInfo.hasNextPage ? page.pageInfo.endCursor : null };
       },
-      options.assertAuthorized,
+      assertAuthorized,
     );
   }
 
