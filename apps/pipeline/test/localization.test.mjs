@@ -7,6 +7,11 @@ import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
 import { record as recordControlsDecision } from "../../controls/src/store.mjs";
 import { localizationReviewRequest } from "../../controls/src/localization-review.mjs";
 import { components, harness, publicScope } from "./harness.mjs";
+import {
+  attachSyntheticEvidenceState,
+  syntheticEvidenceIntakeInput,
+  syntheticSourceUseReviewInput,
+} from "../../../tests/fixtures/evidence-intake.mjs";
 
 async function localizationHarness(t, configure = () => {}, enrich = (value) => value) {
   const now = Math.floor(Date.now() / 1000) * 1000;
@@ -205,6 +210,7 @@ async function acceptLocale(h, { id = "synthetic-locale-cache-request", at = h.a
       evidenceRequest: localizationReviewRequest(request),
     });
     state.requests[request.id] = request;
+    attachSyntheticEvidenceState(state);
     return { request, decision: request.history.at(-1) };
   });
 }
@@ -284,6 +290,7 @@ test("actual controls locale acceptance survives restart but cannot be retargete
     collaborators: [],
     consent: true,
     detail: "Synthetic French source proof for independent review",
+    intake: syntheticEvidenceIntakeInput(),
   });
   assert.equal(submitted.response.status, 201);
   const target = {
@@ -297,6 +304,7 @@ test("actual controls locale acceptance survives restart but cannot be retargete
     reason: "Reviewed the exact synthetic locale merge",
     conflict: false,
     sourceReviewedPublic: true,
+    sourceUseReview: syntheticSourceUseReviewInput(),
     policyVersion: binding.policyVersion,
     localization: target,
   });
@@ -343,6 +351,7 @@ test("locale collaborator consent returns changed attribution to review and perm
     collaborators: ["303"],
     consent: true,
     detail: "Synthetic locale work with declared collaborator",
+    intake: syntheticEvidenceIntakeInput(["303"]),
   });
   assert.equal(submitted.response.status, 201);
   const target = {
@@ -357,14 +366,29 @@ test("locale collaborator consent returns changed attribution to review and perm
       reason: "Reviewed exact merged source and current attribution",
       conflict: false,
       sourceReviewedPublic: true,
+      sourceUseReview: syntheticSourceUseReviewInput(),
       policyVersion: binding.policyVersion,
       localization: target,
     });
+  const consentInput = async (version) => {
+    const invitations = await client.call("/controls/invitations", collaborator);
+    assert.equal(invitations.response.status, 200);
+    const invitation = invitations.data.invitations.find((entry) => entry.id === submitted.data.id);
+    assert.equal(invitation.version, version);
+    return {
+      version,
+      consent: true,
+      claimDigest: invitation.claimDigest,
+      termsVersion: invitation.terms.version,
+      termsDigest: invitation.terms.digest,
+    };
+  };
   assert.equal((await review(submitted.data.version)).response.status, 409);
-  const consented = await client.call(`/controls/requests/${submitted.data.id}/consent`, collaborator, {
-    version: submitted.data.version,
-    consent: true,
-  });
+  const consented = await client.call(
+    `/controls/requests/${submitted.data.id}/consent`,
+    collaborator,
+    await consentInput(submitted.data.version),
+  );
   assert.equal(consented.response.status, 200);
   assert.equal(consented.data.status, "pending");
   let accepted = await review(consented.data.version);
@@ -396,20 +420,22 @@ test("locale collaborator consent returns changed attribution to review and perm
     2,
   );
   assert.equal((await review(changed.data.version)).response.status, 409);
-  const renewed = await client.call(`/controls/requests/${submitted.data.id}/consent`, collaborator, {
-    version: changed.data.version,
-    consent: true,
-  });
+  const renewed = await client.call(
+    `/controls/requests/${submitted.data.id}/consent`,
+    collaborator,
+    await consentInput(changed.data.version),
+  );
   assert.equal(renewed.response.status, 200);
   assert.equal(renewed.data.status, "pending");
   assert.equal((await client.call("/controls/public")).data.claims.length, 0);
   accepted = await review(renewed.data.version);
   assert.equal(accepted.response.status, 200);
   assert.equal(accepted.data.status, "accepted");
-  const unchanged = await client.call(`/controls/requests/${submitted.data.id}/consent`, collaborator, {
-    version: accepted.data.version,
-    consent: true,
-  });
+  const unchanged = await client.call(
+    `/controls/requests/${submitted.data.id}/consent`,
+    collaborator,
+    await consentInput(accepted.data.version),
+  );
   assert.equal(unchanged.response.status, 200);
   assert.equal(unchanged.data.status, "accepted");
   assert.equal(unchanged.data.version, accepted.data.version);
@@ -437,6 +463,7 @@ test("actual controls cannot preapprove a future merge and unbound historical pu
     collaborators: [],
     consent: true,
     detail: "Synthetic locale proposal before final merge",
+    intake: syntheticEvidenceIntakeInput(),
   };
   const submitted = await client.call("/controls/requests", client.owner, requestInput);
   assert.equal(submitted.response.status, 201);
@@ -446,6 +473,7 @@ test("actual controls cannot preapprove a future merge and unbound historical pu
     reason: "Synthetic review before source merge",
     conflict: false,
     sourceReviewedPublic: true,
+    sourceUseReview: syntheticSourceUseReviewInput(),
     policyVersion: binding.policyVersion,
     localization: target,
   };
@@ -474,6 +502,8 @@ test("actual controls cannot preapprove a future merge and unbound historical pu
     scope: requestInput.scope,
     detail: "The synthetic source has now merged",
     collaborators: [],
+    consent: true,
+    intake: syntheticEvidenceIntakeInput(),
   });
   assert.equal(amended.response.status, 200);
   const reviewed = await laterClient.call(`/controls/requests/${submitted.data.id}/review`, laterClient.reviewer, {

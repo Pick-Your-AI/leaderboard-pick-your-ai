@@ -4,6 +4,11 @@ import { validateAutomationSource, validateMaintenanceSource } from "@pick-your-
 import { domainDateBasis, qualifyDomainRecognition } from "./domain-recognition.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
 import { hasRequiredParticipantConsent, hasReviewedParticipantConsent } from "../../controls/src/evidence-consent.mjs";
+import {
+  evidenceIntakeAuthority,
+  hasConsentedEvidenceIntake,
+  hasReviewedEvidenceIntake,
+} from "../../controls/src/evidence-intake.mjs";
 
 // Private controls only. Never accept a public claim projection as authentication.
 export function recognitionFingerprint(state, bindings = []) {
@@ -46,6 +51,9 @@ export function recognitionFingerprint(state, bindings = []) {
     authority.push("maintenance-merged-participant/v1");
   // Tooling receipts independently require verified merged participation as well.
   if (bindings.some((binding) => binding.metricId === "automation")) authority.push("automation-merged-participant/v1");
+  // Missing legacy intake cannot keep manual recognition current, even without collaborators.
+  // No-manual-request automatic source authority keeps its existing exact format.
+  if (requests.length) authority.push(evidenceIntakeAuthority());
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
@@ -75,6 +83,7 @@ export function materializeRecognition(
       (request) =>
         request.status === "accepted" &&
         hasReviewedParticipantConsent(request) &&
+        hasConsentedEvidenceIntake(request) &&
         !state.profiles?.[request.owner]?.suppressed,
     )
     .sort((a, b) => {
@@ -166,6 +175,7 @@ export function materializeRecognition(
     )
       throw new Error("recognition_decision_time_invalid");
     if (acceptedAt > cutoff) continue;
+    if (!hasReviewedEvidenceIntake(request)) continue;
     let localeTarget = null;
     if (localeReasons !== null) {
       // Earlier generic receipts did not record the reviewed locale/revision.

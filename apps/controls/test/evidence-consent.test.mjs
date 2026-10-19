@@ -7,6 +7,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ControlStore } from "../src/store.mjs";
 import { createControlsServer } from "../src/server.mjs";
+import {
+  syntheticEvidenceIntakeInput,
+  syntheticSourceUseReviewInput,
+} from "../../../tests/fixtures/evidence-intake.mjs";
 
 // Fictional actors, OAuth exchanges and evidence; only a disposable local server is contacted.
 const origin = "https://consent.example.test";
@@ -19,6 +23,7 @@ const evidence = (collaborators) => ({
   consent: true,
   detail: "Synthetic private supporting detail",
   scope: "One synthetic voluntary contribution",
+  intake: syntheticEvidenceIntakeInput(collaborators),
 });
 
 async function harness(t) {
@@ -156,7 +161,21 @@ async function change(h, user, action, input, expectedStatus = 200) {
   if (response.status === 200) h.receipt = response.data;
   return response;
 }
-const consent = (h, id, value) => change(h, h.peers.get(id), "consent", { consent: value });
+async function consent(h, id, value) {
+  const input = { consent: value };
+  if (value) {
+    const response = await h.call("/controls/invitations", { user: h.peers.get(id) });
+    assert.equal(response.status, 200);
+    const invitation = response.data.invitations.find((entry) => entry.id === h.receipt.id);
+    assert.ok(invitation);
+    Object.assign(input, {
+      claimDigest: invitation.claimDigest,
+      termsVersion: invitation.terms.version,
+      termsDigest: invitation.terms.digest,
+    });
+  }
+  return change(h, h.peers.get(id), "consent", input);
+}
 const accept = (h, user = h.reviewer, status = 200) =>
   change(
     h,
@@ -167,6 +186,7 @@ const accept = (h, user = h.reviewer, status = 200) =>
       reason: "Synthetic independently reviewed public source",
       conflict: false,
       sourceReviewedPublic: true,
+      sourceUseReview: syntheticSourceUseReviewInput(),
       policyVersion: policy,
     },
     status,
@@ -268,6 +288,8 @@ test("amending accepted evidence resets retained participants' consent and requi
     scope: "A revised synthetic voluntary contribution",
     detail: "Synthetic amended private supporting detail",
     collaborators: ["2"],
+    consent: true,
+    intake: syntheticEvidenceIntakeInput(["2"]),
   });
   assert.equal(h.receipt.status, "pending");
   assert.equal(persisted(h).policyVersion, undefined);
@@ -312,6 +334,9 @@ function seedLegacyAcceptedPublication(h, { lateConsent = false } = {}) {
   // Preserve a pre-fix accepted row and its old materialized public claim. The new API must not create this state.
   const state = h.store.read();
   const request = state.requests[h.receipt.id];
+  // This is the original pre-intake stored shape, even though its surrounding
+  // authenticated session was created by the current test harness.
+  delete request.intake;
   request.status = "accepted";
   request.policyVersion = policy;
   const entry = {
@@ -389,22 +414,33 @@ test("legacy consent granted after acceptance cannot publish an unreviewed reque
   assert.deepEqual(await publicClaims(h), []);
 });
 
-test("legacy acceptance of the current fully consented revision remains publishable", async (t) => {
+test("legacy acceptance of a fully consented revision still requires current scoped intake", async (t) => {
   const h = await submission(t);
   await consent(h, "2", true);
   seedLegacyAcceptedPublication(h);
   const stored = persisted(h);
   assert.equal(stored.history.findLast((entry) => entry.action === "accepted").version, stored.version);
-  const published = await publicClaims(h);
-  assert.equal(published.length, 1);
-  assert.deepEqual(published[0].collaborators, ["2"]);
+  assert.equal(stored.intake, undefined);
+  assert.deepEqual(await publicClaims(h), []);
   await h.reopen();
-  assert.deepEqual(await publicClaims(h), published);
+  assert.deepEqual(await publicClaims(h), []);
+  assert.deepEqual(persisted(h), stored, "Startup cannot manufacture current intake for a historical acceptance");
 });
 
-test("repeating consent on an invalid legacy acceptance opens a fresh independent review", async (t) => {
+test("legacy consent needs owner amendment, current intake and fresh independent review before publication", async (t) => {
   const h = await submission(t);
   seedLegacyAcceptedPublication(h, { lateConsent: true });
+  await blockedAcceptance(h);
+  await change(h, h.owner, "amend", {
+    reason: "Synthetic owner presents this legacy contribution under current terms",
+    locator: evidence(["2"]).locator,
+    category: "governance",
+    scope: "One synthetic voluntary contribution",
+    detail: "Synthetic reviewed legacy supporting detail",
+    collaborators: ["2"],
+    consent: true,
+    intake: syntheticEvidenceIntakeInput(["2"]),
+  });
   await consent(h, "2", true);
   assert.equal(h.receipt.status, "pending");
   assert.equal(persisted(h).policyVersion, undefined);
