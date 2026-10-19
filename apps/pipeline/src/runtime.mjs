@@ -35,6 +35,7 @@ import { readOperatorHealth } from "./operator-health.mjs";
 import { createOperatorPublicationVerifier } from "./operator-publication.mjs";
 import { ScanContinuationStore, ScanSupersededError, scanContinuationSchema } from "./scan-continuation.mjs";
 import { createHash } from "node:crypto";
+import { types } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 
 const fail = (code) => {
@@ -314,6 +315,35 @@ export async function createPipeline(options) {
     );
   const identityNormalizationSignatures = [...new Set(frozenNormalizationSignatures)];
   const verifyConfig = options.verifyConfiguration ?? (async () => false);
+  const discoveryAuthorityBinding = Object.freeze({
+    configurationHash: policyDigest(c.metrics.stableJSON(config)),
+    configurationVersion: config.version,
+    dataMode,
+  });
+  function drainDiscoveryPromise(value, seen = new WeakSet()) {
+    // Reject foreign thenables without inspecting their properties. Constructor
+    // and species behavior of native promises remains trusted host code.
+    if (!types.isPromise(value) || seen.has(value)) return;
+    seen.add(value);
+    try {
+      void Promise.prototype.then.call(
+        value,
+        () => undefined,
+        (reason) => drainDiscoveryPromise(reason, seen),
+      );
+    } catch {}
+  }
+  function discoveryEpoch() {
+    try {
+      const value = options.configurationAuthorityEpoch?.(discoveryAuthorityBinding);
+      if (typeof value === "string" && value.length >= 1 && value.length <= 100 && !/[^A-Za-z0-9_.:-]/.test(value))
+        return value;
+      drainDiscoveryPromise(value);
+    } catch (error) {
+      drainDiscoveryPromise(error);
+    }
+    return null;
+  }
   const authorizeCorrection = options.authorizeCorrection ?? (async () => false);
   const now = options.now ?? (() => new Date().toISOString());
   // Only bounded named templates need whole-second producer event cutoffs.
@@ -2064,9 +2094,22 @@ export async function createPipeline(options) {
   const source = {
     async readWindows(scope, signal) {
       const requested = c.contracts.canonicalPublicScope(scope);
-      if (requested.start !== null || requested.end !== null || signal.aborted) return null;
+      if (
+        requested.start !== null ||
+        requested.end !== null ||
+        signal.aborted ||
+        typeof options.configurationAuthorityEpoch !== "function"
+      )
+        return null;
       // One bounded index lookup supplies only explicitly confirmed choices.
-      // Reuse one SQL transaction and its source locks for every unique scope.
+      // Reuse the first transaction for every unique scope, then re-admit its
+      // complete SQL authority after the final awaited host verification.
+      const repositoryIds = repositoriesFor(requested).map((repo) => repo.id);
+      const accessIdentity = (rows) =>
+        rows
+          .map((row) => [String(row.repository_id), String(row.installation_id), row.state, String(row.generation)])
+          .sort((left, right) => left[0].localeCompare(right[0]));
+      let capturedAuthority;
       let finalRead = () => null;
       const result = await db.transaction(async (tx) => {
         if (!(await approved(tx)) || signal.aborted) return null;
@@ -2084,7 +2127,6 @@ export async function createPipeline(options) {
         }
         // Even a legitimate empty menu still requires current repository and
         // installation authority; no history scan or GET-side repair occurs.
-        const repositoryIds = repositoriesFor(requested).map((repo) => repo.id);
         const access = (
           await tx.query(
             "SELECT repository_id,installation_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE",
@@ -2111,6 +2153,7 @@ export async function createPipeline(options) {
             [repositoryIds],
           )
         ).rows.map((row) => row.subject_id);
+        capturedAuthority = { access: accessIdentity(access), removed: [...removed].sort() };
         if (!(await approved(tx)) || signal.aborted) return null;
         finalRead = () => {
           // No awaits below: the complete index, current privacy authority,
@@ -2169,10 +2212,55 @@ export async function createPipeline(options) {
         };
         return finalRead();
       });
-      // COMMIT can await after the transaction callback returns. Recheck host
-      // approval, then the complete synchronous fence, before returning pointers.
+      // The first COMMIT and the host verifier can both yield to SQL writers.
+      // Do not hold source locks while awaiting that external callback.
       if (!result || signal.aborted || !(await verifyConfig(copy(config))) || signal.aborted) return null;
-      return finalRead();
+      const epoch = discoveryEpoch();
+      if (epoch === null) return null;
+      const admitted = await db.transaction(async (tx) => {
+        if (signal.aborted || discoveryEpoch() !== epoch) return null;
+        // One statement snapshot is the final SQL authorization point. It checks
+        // full tuples and expanded removal sets even for an empty menu, together
+        // with persisted Project denials that need not change SQLite revisions.
+        const rows = (
+          await tx.query(
+            `WITH access AS MATERIALIZED (
+            SELECT repository_id,installation_id,state,generation
+            FROM leaderboard_ingestion.repository_access
+            WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE
+          ), removed AS (
+            ${sourceSuppressionQuery}
+            UNION SELECT artifact_id AS subject_id FROM leaderboard_pipeline.corrections
+              WHERE repository_id=ANY($1::bigint[])
+          )
+          SELECT 'access' AS kind,repository_id::text,installation_id::text,state,generation::text,NULL::text AS subject_id FROM access
+          UNION ALL SELECT 'removed',NULL,NULL,NULL,NULL,subject_id FROM removed
+          UNION ALL SELECT 'denial',NULL,NULL,NULL,NULL,receipt.operation_key
+            FROM unnest($2::text[]) AS requested(operation_key)
+            JOIN leaderboard_pipeline.receipts AS receipt
+              ON receipt.operation_hash=pg_catalog.sha256(pg_catalog.convert_to(requested.operation_key,'UTF8'))
+              AND receipt.operation_key=requested.operation_key
+            WHERE receipt.kind='project_scope_denial'`,
+            [repositoryIds, config.repositories.map(projectDenialKey)],
+          )
+        ).rows;
+        if (signal.aborted || discoveryEpoch() !== epoch || rows.some((row) => row.kind === "denial")) return null;
+        const currentAuthority = {
+          access: accessIdentity(rows.filter((row) => row.kind === "access")),
+          removed: rows
+            .filter((row) => row.kind === "removed")
+            .map((row) => row.subject_id)
+            .sort(),
+        };
+        if (canonical(currentAuthority) !== canonical(capturedAuthority)) return null;
+        const current = finalRead();
+        return discoveryEpoch() === epoch ? current : null;
+      });
+      // SQL authorization linearizes at the statement above, not at HTTP send.
+      // COMMIT may yield, so retain the final synchronous private-state fence.
+      if (!admitted || signal.aborted || discoveryEpoch() !== epoch) return null;
+      const current = finalRead();
+      return discoveryEpoch() === epoch ? current : null;
     },
     async readComparison(scope, pin, previous, signal) {
       if (c.contracts.publicScopeFilterKey(scope) !== c.contracts.publicScopeFilterKey(previous.scope)) return null;
