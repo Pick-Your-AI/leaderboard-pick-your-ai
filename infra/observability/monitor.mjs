@@ -40,6 +40,7 @@ export class OperationalMonitor {
       throw new Error("Invalid telemetry");
     const sourceKey = this.sourceKey(source);
     const at = this.now();
+    this.sources.delete(`${sourceKey}:${stage}`);
     this.sources.set(`${sourceKey}:${stage}`, { at, lastSuccessAt: at, failed: false, revision });
     this.entries.push({ at, sourceKey, stage, state: "success", latencyMs, revision });
     return this.purge();
@@ -56,6 +57,7 @@ export class OperationalMonitor {
     const sourceKey = this.sourceKey(source);
     const at = this.now();
     const prior = this.sources.get(`${sourceKey}:${stage}`);
+    this.sources.delete(`${sourceKey}:${stage}`);
     this.sources.set(`${sourceKey}:${stage}`, {
       at,
       lastSuccessAt: prior?.lastSuccessAt ?? null,
