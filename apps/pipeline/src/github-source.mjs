@@ -258,7 +258,7 @@ export function createGithubCollectionSource({
                 nodes { id url updatedAt createdAt answerChosenAt
                   author { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }
                   answerChosenBy { __typename ... on User { id databaseId } ... on Bot { id databaseId } }
-                  answer { id isAnswer author { __typename ... on User { id databaseId } ... on Bot { id databaseId } } }
+                  answer { id isAnswer createdAt author { __typename ... on User { id databaseId } ... on Bot { id databaseId } } }
                 }
                 pageInfo { hasNextPage endCursor }
               }

@@ -20,7 +20,7 @@ import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
-import { reviewSourceNormalizationVersion } from "@pick-your-ai/github";
+import { discussionSourceNormalizationVersion, reviewSourceNormalizationVersion } from "@pick-your-ai/github";
 import {
   canonicalProjectWorkstreamMappings,
   normalizedProjectContext,
@@ -260,9 +260,11 @@ export async function createPipeline(options) {
     verifiedMergeNormalizationSignature,
     projectWorkstreamMappings,
   ]);
-  // Review identity changes have a separate immutable cache generation.
+  // Family-specific source rules have separate immutable cache generations.
   const reviewNormalizationSignature = digest([reviewSourceNormalizationVersion, normalizationSignature]);
+  const discussionNormalizationSignature = digest([discussionSourceNormalizationVersion, normalizationSignature]);
   const frozenNormalizationSignatures = [
+    discussionNormalizationSignature,
     reviewNormalizationSignature,
     normalizationSignature,
     verifiedMergeNormalizationSignature,
@@ -376,14 +378,18 @@ export async function createPipeline(options) {
     row.family !== "reviews" ||
     (digest(row.document) === row.document_hash &&
       row.document.reviewSourceNormalizationVersion === reviewSourceNormalizationVersion);
-  async function legacyInputHasReviews(tx, authorization, cutoff = null) {
+  const discussionEvidenceCurrent = (row) =>
+    row.family !== "discussions" ||
+    (digest(row.document) === row.document_hash &&
+      row.document.discussionSourceNormalizationVersion === discussionSourceNormalizationVersion);
+  async function legacyInputHasFamily(tx, authorization, family, cutoff = null) {
     return (
       (
         await tx.query(
           `SELECT 1 FROM leaderboard_ingestion.source_facts
-         WHERE repository_id=ANY($1::bigint[]) AND family='reviews'
-           AND ($2::timestamptz IS NULL OR observed_at <= $2) LIMIT 1`,
-          [authorization.sources.map((source) => source.repositoryId), cutoff],
+         WHERE repository_id=ANY($1::bigint[]) AND family=$2
+           AND ($3::timestamptz IS NULL OR observed_at <= $3) LIMIT 1`,
+          [authorization.sources.map((source) => source.repositoryId), family, cutoff],
         )
       ).rows.length !== 0
     );
@@ -391,7 +397,7 @@ export async function createPipeline(options) {
   // The caller holds the existing repository access locks. Source facts can
   // only be erased after retirement, which is incompatible with those locks
   // and a public source. Unrelated retained views keep their frozen-read rules.
-  async function publicationReviewBinding(tx, scope, publication, explanation) {
+  async function publicationFamilyBinding(tx, scope, publication, explanation, family, evidenceCurrent, reason) {
     const authorization = explanation.authorization;
     if (
       canonical(authorization.sources.map((entry) => entry.repositoryId).sort()) !==
@@ -401,11 +407,11 @@ export async function createPipeline(options) {
           .sort(),
       )
     )
-      fail("public_review_source_scope_mismatch");
-    if (!(await legacyInputHasReviews(tx, authorization, explanation.cutoff))) return false;
+      fail(`public_${reason}_source_scope_mismatch`);
+    if (!(await legacyInputHasFamily(tx, authorization, family, explanation.cutoff))) return false;
     const rows = await readNormalizationEvidence(tx, authorization);
-    if (rows === null || !rows.every(reviewEvidenceCurrent)) return null;
-    if (!rows.some((row) => row.family === "reviews")) return false;
+    if (rows === null || !rows.every(evidenceCurrent)) return null;
+    if (!rows.some((row) => row.family === family)) return false;
     const retained = (
       await tx.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
         publication.snapshotId,
@@ -423,9 +429,21 @@ export async function createPipeline(options) {
       canonical(retained.document.identityAuthorization?.sources) !== canonical(authorization.sources) ||
       canonical(retained.document.identityAuthorization?.identityEvidence) !== canonical(authorization.identityEvidence)
     )
-      fail("public_review_frozen_input_integrity_error");
+      fail(`public_${reason}_frozen_input_integrity_error`);
     return true;
   }
+  const publicationReviewBinding = (tx, scope, publication, explanation) =>
+    publicationFamilyBinding(tx, scope, publication, explanation, "reviews", reviewEvidenceCurrent, "review");
+  const publicationDiscussionBinding = (tx, scope, publication, explanation) =>
+    publicationFamilyBinding(
+      tx,
+      scope,
+      publication,
+      explanation,
+      "discussions",
+      discussionEvidenceCurrent,
+      "discussion",
+    );
   // Source read locks span the final reviewer reauthentication and synchronous
   // private result transaction. No source/network permission is granted here.
   async function withAuthorizedComparisonInputs(authorizations, work, transaction) {
@@ -464,10 +482,20 @@ export async function createPipeline(options) {
         const binding = authorization.identityEvidence;
         const rows = await readNormalizationEvidence(tx, authorization);
         if (rows === null) {
-          requireThat(!(await legacyInputHasReviews(tx, authorization)), 409, "Frozen review evidence unavailable");
+          requireThat(
+            !(await legacyInputHasFamily(tx, authorization, "reviews")),
+            409,
+            "Frozen review evidence unavailable",
+          );
+          requireThat(
+            !(await legacyInputHasFamily(tx, authorization, "discussions")),
+            409,
+            "Frozen Discussion evidence unavailable",
+          );
           continue;
         }
         requireThat(rows.every(reviewEvidenceCurrent), 409, "Frozen review normalization obsolete");
+        requireThat(rows.every(discussionEvidenceCurrent), 409, "Frozen Discussion normalization obsolete");
         const normalizationSources = binding.normalizationSources;
         // Hash-only legacy captures did not bind source ordering. They retain
         // their identical-label rule rather than gaining unproven rename history.
@@ -986,7 +1014,12 @@ export async function createPipeline(options) {
     if (unlabeled.length) fail("cross_mode_or_unproven_source_data");
     const outputs = [];
     for (const row of sourceRows) {
-      const signature = row.family === "reviews" ? reviewNormalizationSignature : normalizationSignature;
+      const signature =
+        row.family === "reviews"
+          ? reviewNormalizationSignature
+          : row.family === "discussions"
+            ? discussionNormalizationSignature
+            : normalizationSignature;
       if (
         row.family === "reviews" &&
         (options.normalizer || options.githubEnrich
@@ -994,6 +1027,13 @@ export async function createPipeline(options) {
           : c.github.reviewSourceNormalizationVersion) !== reviewSourceNormalizationVersion
       )
         fail("review_normalizer_version_unverified");
+      if (
+        row.family === "discussions" &&
+        (options.normalizer || options.githubEnrich
+          ? options.discussionSourceNormalizationVersion
+          : c.github.discussionSourceNormalizationVersion) !== discussionSourceNormalizationVersion
+      )
+        fail("discussion_normalizer_version_unverified");
       const repository = config.repositories.find((repo) => String(repo.id) === String(row.repository_id));
       const cached = (
         await db.query(
@@ -1018,6 +1058,11 @@ export async function createPipeline(options) {
           currentHistoryNormalizer &&
           currentProjectNormalizer &&
           reviewEvidenceCurrent({
+            family: row.family,
+            document: cached.document,
+            document_hash: cached.document_hash,
+          }) &&
+          discussionEvidenceCurrent({
             family: row.family,
             document: cached.document,
             document_hash: cached.document_hash,
@@ -1149,6 +1194,7 @@ export async function createPipeline(options) {
       if (!hasDispatchEvidence(output, dispatch, row)) fail("dispatch_enrichment_unavailable");
       const document = {
         ...(row.family === "reviews" ? { reviewSourceNormalizationVersion } : {}),
+        ...(row.family === "discussions" ? { discussionSourceNormalizationVersion } : {}),
         ...(row.family === "project_history" ? { projectHistoryNormalizationVersion: "collected-subject/v2" } : {}),
         ...(row.family === "project_current" && row.document.projectSubjectId !== undefined
           ? { projectContextNormalizationVersion: "subject-membership/v1" }
@@ -1213,6 +1259,8 @@ export async function createPipeline(options) {
     confirmation.revision === revision &&
     (confirmation.reviewSourceNormalizationVersion === undefined ||
       confirmation.reviewSourceNormalizationVersion === reviewSourceNormalizationVersion) &&
+    (confirmation.discussionSourceNormalizationVersion === undefined ||
+      confirmation.discussionSourceNormalizationVersion === discussionSourceNormalizationVersion) &&
     typeof confirmation.aggregateExplanationHash === "string" &&
     /^[a-f0-9]{64}$/.test(confirmation.aggregateExplanationHash);
   function confirmPublication(scope, publication, comparisonInput) {
@@ -1243,6 +1291,9 @@ export async function createPipeline(options) {
         ...(publication.reviewSourceNormalizationVersion === undefined
           ? {}
           : { reviewSourceNormalizationVersion: publication.reviewSourceNormalizationVersion }),
+        ...(publication.discussionSourceNormalizationVersion === undefined
+          ? {}
+          : { discussionSourceNormalizationVersion: publication.discussionSourceNormalizationVersion }),
         recognitionFingerprint: recognitionBindings.length ? runRecognitionFingerprint : null,
         configurationVersion: config.version,
         configurationHash: digest(config),
@@ -1336,7 +1387,7 @@ export async function createPipeline(options) {
             ...explanationBinding(scope, priorPublication),
             digest: controlsStore.read().pipelinePublications[prior.snapshot_id].aggregateExplanationHash,
           }).document;
-          const reviewBinding = await db.transaction(async (tx) => {
+          const sourceBindings = await db.transaction(async (tx) => {
             await outbox.assertLease(tx, dispatch.lease);
             const access = (
               await tx.query(
@@ -1356,10 +1407,17 @@ export async function createPipeline(options) {
               )
             )
               fail("dispatch_source_generation_changed");
-            return publicationReviewBinding(tx, scope, priorPublication, explanation);
+            return {
+              review: await publicationReviewBinding(tx, scope, priorPublication, explanation),
+              discussion: await publicationDiscussionBinding(tx, scope, priorPublication, explanation),
+            };
           });
-          if (reviewBinding === null) fail("dispatch_review_normalization_obsolete");
-          if (reviewBinding) priorPublication.reviewSourceNormalizationVersion = reviewSourceNormalizationVersion;
+          if (sourceBindings.review === null) fail("dispatch_review_normalization_obsolete");
+          if (sourceBindings.discussion === null) fail("dispatch_discussion_normalization_obsolete");
+          if (sourceBindings.review)
+            priorPublication.reviewSourceNormalizationVersion = reviewSourceNormalizationVersion;
+          if (sourceBindings.discussion)
+            priorPublication.discussionSourceNormalizationVersion = discussionSourceNormalizationVersion;
           confirmPublication(scope, priorPublication);
           return priorPublication;
         }
@@ -1390,6 +1448,7 @@ export async function createPipeline(options) {
       dispatch,
     );
     const hasReviewSources = normalized.some((entry) => entry.family === "reviews");
+    const hasDiscussionSources = normalized.some((entry) => entry.family === "discussions");
     let outputs = normalized.map((entry) => entry.document);
     const actorSources = new Map(normalized.map((entry) => [entry.document, entry.source]));
     // Only persisted provider normalizations can restore identity; recognition overlays are transient.
@@ -1667,6 +1726,7 @@ export async function createPipeline(options) {
     }
     const content = {
       ...(hasReviewSources ? { reviewSourceNormalizationVersion } : {}),
+      ...(hasDiscussionSources ? { discussionSourceNormalizationVersion } : {}),
       approvedPublic: true,
       scope: copy(scope),
       actors: actorContracts([...actors.values()]),
@@ -1708,9 +1768,9 @@ export async function createPipeline(options) {
         identityEvidence: {
           schemaVersion: "pipeline-identity-evidence/v1",
           normalizationHashes,
-          // Reviews bind exact source pairs even when labels did not change;
+          // Reviews and Discussions bind exact source pairs even when labels did not change;
           // hash-only historical captures can otherwise be ambiguous across families.
-          ...(identity.hasRenames || hasReviewSources ? { normalizationSources } : {}),
+          ...(identity.hasRenames || hasReviewSources || hasDiscussionSources ? { normalizationSources } : {}),
         },
         sources: generations.map((row) => ({
           repositoryId: String(row.repository_id),
@@ -1871,6 +1931,7 @@ export async function createPipeline(options) {
       // PostgreSQL can commit while controls change. Confirm publication only in
       // the same synchronous SQLite boundary used by configuration activation.
       if (hasReviewSources) publication.reviewSourceNormalizationVersion = reviewSourceNormalizationVersion;
+      if (hasDiscussionSources) publication.discussionSourceNormalizationVersion = discussionSourceNormalizationVersion;
       confirmPublication(scope, publication, comparisonInputFor(publication));
       monitorSuccess(
         publicationMonitorIdentity(scopeKey(scope)),
@@ -2039,6 +2100,8 @@ export async function createPipeline(options) {
               digest: confirmation.aggregateExplanationHash,
             }).document;
             if ((await publicationReviewBinding(tx, scope, { snapshotId: id, revision }, explanation)) === null)
+              return null;
+            if ((await publicationDiscussionBinding(tx, scope, { snapshotId: id, revision }, explanation)) === null)
               return null;
           }
           const removed = (
@@ -2349,6 +2412,8 @@ export async function createPipeline(options) {
         }).document;
         if ((await publicationReviewBinding(tx, selectedScope, publication, explanation)) === null)
           fail("dispatch_review_normalization_obsolete");
+        if ((await publicationDiscussionBinding(tx, selectedScope, publication, explanation)) === null)
+          fail("dispatch_discussion_normalization_obsolete");
       }
       assertRunConfiguration();
     },

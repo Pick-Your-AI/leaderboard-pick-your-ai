@@ -66,6 +66,9 @@ export function githubReviewRevision(value: Record<string, unknown>): string {
     .digest("hex");
 }
 
+/** Native answer selection is bound to source creation and observation clocks. */
+export const discussionSourceNormalizationVersion = "discussion-answer-chronology/v1";
+
 export function githubDiscussionRevision(value: Record<string, unknown>): string {
   const identity = (value: unknown) =>
     object(value) ? [value.databaseId ?? value.id ?? null, value.__typename ?? value.type ?? null] : null;
@@ -79,6 +82,7 @@ export function githubDiscussionRevision(value: Record<string, unknown>): string
         value.answerChosenAt ?? null,
         object(value.answer) ? (value.answer.id ?? null) : null,
         object(value.answer) ? (value.answer.isAnswer ?? null) : null,
+        object(value.answer) ? (value.answer.createdAt ?? null) : null,
         object(value.answer) ? identity(value.answer.author) : null,
         identity(value.answerChosenBy),
       ]),
@@ -883,14 +887,28 @@ export function normalizeGithubObservation(
       const answerAuthor = register(resource.answer.author);
       const chosenBy = register(resource.answerChosenBy);
       const chosenAt = time(resource.answerChosenAt);
+      const discussionCreatedAt = time(resource.createdAt);
+      const answerCreatedAt = time(resource.answer.createdAt);
       const answerId = resourceId(resource.answer, "other", repository.id);
-      if (answerId && resource.answer.isAnswer === true && chosenAt) {
+      if (!answerId || resource.answer.isAnswer !== true) {
+        out.reasons.push("discussion_answer_selection_unverified");
+      } else if (!chosenAt || !discussionCreatedAt || !answerCreatedAt) {
+        // Never borrow the parent/update/collection clock for an unavailable
+        // answer creation or selection. Native source ordering is unverified.
+        out.reasons.push("discussion_answer_time_unverified");
+      } else if (
+        compareSourceInstants(discussionCreatedAt, answerCreatedAt) > 0 ||
+        compareSourceInstants(answerCreatedAt, chosenAt) > 0 ||
+        compareSourceInstants(chosenAt, observedAt) > 0
+      ) {
+        out.reasons.push("discussion_answer_chronology_invalid");
+      } else {
         emit("discussion_answers", answerAuthor, "author", chosenAt, `${id}:answer:${answerId}`, {
           acceptedAt: chosenAt,
           acceptedBy: chosenBy?.id ?? null,
           rawState: "native_answer_selection",
         });
-      } else out.reasons.push("discussion_answer_selection_unverified");
+      }
     }
     if (!envelope.discussionAnswerSelection?.verified)
       out.reasons.push("discussion_answer_requires_selected_current_revision");
@@ -1717,7 +1735,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
                 id url createdAt updatedAt answerChosenAt
                 author { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }
                 answerChosenBy { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }
-                answer { id isAnswer author { __typename login ... on User { id databaseId } ... on Bot { id databaseId } } }
+                answer { id isAnswer createdAt author { __typename login ... on User { id databaseId } ... on Bot { id databaseId } } }
               }
             }
           }`,
