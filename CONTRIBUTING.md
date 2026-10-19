@@ -68,7 +68,7 @@ Early contributors push branches named `contrib/<your-login>/<topic>` to this re
 
 ### Access and roles
 
-As of 2026-10-19, repository access comes from the `Websites` team (Write) and its child team `Lead Maintainers` (Admin). The Lead Maintainers are @CompleteDotTech and @BunsDev, who are also the maintainers of the `Websites` team; @karutoil and @pushingsquares are team members with Write. [CODEOWNERS](.github/CODEOWNERS) routes review only and grants no access, and team membership does not waive the pull request approval and required checks above.
+As of 2026-10-19, access follows the Pick-Your-AI team model: parent teams under `Maintainers` get Triage, and push access is held by child teams. For this repository, the `Lead Maintainers` team (@CompleteDotTech and @BunsDev) has Admin, the `leaderboard.pickyour.ai` team (@CompleteDotTech, @karutoil, @BunsDev and @pushingsquares) has Write, the `Websites` parent team has Triage, and the `Early Contributors` team has Write for `contrib/<your-login>/<topic>` branches. Only the Lead Maintainers change team membership. [CODEOWNERS](.github/CODEOWNERS) routes review only and grants no access, and team membership does not waive the pull request approval and required checks above.
 
 ## Review and completion
 
