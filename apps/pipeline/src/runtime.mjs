@@ -342,6 +342,14 @@ export async function createPipeline(options) {
     "typed-history-actor-classification/v1",
     projectNormalizationSignature,
   ]);
+  // Before release selection changed the source generation, reviews and
+  // Discussions retained their own Project v2 wrappers. Keep both frozen
+  // identity forms and their delivery migration hints without reusing them.
+  const projectReviewNormalizationSignature = digest([reviewSourceNormalizationVersion, projectNormalizationSignature]);
+  const projectDiscussionNormalizationSignature = digest([
+    discussionSourceNormalizationVersion,
+    projectNormalizationSignature,
+  ]);
   // Family-specific source rules have separate immutable cache generations.
   const reviewNormalizationSignature = digest([reviewSourceNormalizationVersion, normalizationSignature]);
   const discussionNormalizationSignature = digest([discussionSourceNormalizationVersion, normalizationSignature]);
@@ -387,6 +395,10 @@ export async function createPipeline(options) {
     normalizationSignature,
     projectNormalizationSignature,
     defaultDeliverySignature(projectNormalizationSignature),
+    projectReviewNormalizationSignature,
+    defaultDeliverySignature(projectReviewNormalizationSignature),
+    projectDiscussionNormalizationSignature,
+    defaultDeliverySignature(projectDiscussionNormalizationSignature),
     defaultDeliverySignature(previousProjectNormalizationSignature),
     defaultDeliverySignature(previousReviewNormalizationSignature),
     defaultDeliverySignature(previousDiscussionNormalizationSignature),
@@ -1409,9 +1421,16 @@ export async function createPipeline(options) {
               ? typedHistoryNormalizationSignature
               : normalizationSignature;
       const deliverySignature = defaultDeliverySignature(baseSignature);
+      const projectBaseSignature =
+        row.family === "reviews"
+          ? projectReviewNormalizationSignature
+          : row.family === "discussions"
+            ? projectDiscussionNormalizationSignature
+            : projectNormalizationSignature;
       const previousBaseSignatures = [
         ...new Set([
           ...(typedHistory ? [normalizationSignature, projectNormalizationSignature] : []),
+          ...(projectBaseSignature !== baseSignature ? [projectBaseSignature] : []),
           ...(typedHistory && previousTypedHistoryNormalizationSignature !== typedHistoryNormalizationSignature
             ? [previousTypedHistoryNormalizationSignature]
             : []),
