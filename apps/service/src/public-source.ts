@@ -104,6 +104,8 @@ export interface PublicRead {
     version: string;
     suppressedActorIds: string[];
     suppressedArtifactIds: string[];
+    /** Provider-private exact qualified units; absent for legacy correction controls. */
+    suppressedContributionIds?: string[];
     revokedSnapshotIds: string[];
   };
 }
@@ -198,6 +200,20 @@ export function safePublicUrl(value: string | null | undefined): string | null {
 }
 const date = (value: string | null) => sourceEventSchema.shape.occurredAt.safeParse(value).success;
 const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,200}$/.test(value);
+
+/** Validate before projection or pair comparison; return a copy without normalizing authority. */
+export function readSuppressedContributionIds(controls: PublicRead["controls"]): string[] {
+  if (!Object.hasOwn(controls, "suppressedContributionIds")) return [];
+  const supplied = controls.suppressedContributionIds;
+  if (!Array.isArray(supplied) || supplied.length > 20000)
+    throw new PublicReadError(503, "public_projection_unavailable");
+  // Materialize holes before validation, and require canonical IDs even where
+  // a proof's contract parser can normalize surrounding whitespace.
+  const values = [...supplied];
+  if (!values.every((value) => id(value) && value.trim() === value) || new Set(values).size !== values.length)
+    throw new PublicReadError(503, "public_projection_unavailable");
+  return values;
+}
 
 /** Validate and construct a fresh allowlisted public object. Never serialize provider objects. */
 export function projectRead(
@@ -357,6 +373,7 @@ export function projectRead(
     throw new PublicReadError(410, "snapshot_revoked_refetch");
   const suppressedActors = new Set(controls.suppressedActorIds);
   const suppressedArtifacts = new Set(controls.suppressedArtifactIds);
+  const suppressedContributions = new Set(readSuppressedContributionIds(controls));
   // Check the whole identity set before privacy filtering. Dropping a hidden or
   // unresolved duplicate first could expose a contradictory public copy.
   if (new Set(selected.actors.map((entry) => entry.actorId)).size !== selected.actors.length) return reject();
@@ -517,6 +534,7 @@ export function projectRead(
           entry.artifact.visibility === "public" &&
           safePublicUrl(entry.artifact.publicUrl) !== null &&
           !suppressedArtifacts.has(entry.artifact.stableId!) &&
+          !suppressedContributions.has(entry.contribution.contributionId) &&
           entry.contribution.metricIds.length > 0 &&
           entry.contribution.qualification === "eligible" &&
           entry.contribution.artifactId === entry.artifact.stableId &&

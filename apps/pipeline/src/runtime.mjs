@@ -38,6 +38,14 @@ import { createOperatorPublicationVerifier } from "./operator-publication.mjs";
 import { ScanContinuationStore, ScanSupersededError, scanContinuationSchema } from "./scan-continuation.mjs";
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
+import { materializeReversionEffectiveness, reversionProjection } from "./reversion-effectiveness.mjs";
+import {
+  readCorrectionState,
+  reversionCapture,
+  assertReversionCapture,
+  applyReviewedReversion,
+  addReversionNotices,
+} from "./reversion-store.mjs";
 
 const fail = (code) => {
   throw new Error(code);
@@ -301,6 +309,13 @@ export async function createPipeline(options) {
   const policyComparisons = new PolicyComparisonStore(controlsStore, c.metrics, { now: () => Date.parse(utc(now())) });
   const aggregateExplanations = new AggregateExplanationStore(controlsStore);
   const computationVersion = `${dataMode}-pipeline-${digest(Array.isArray(config.policies) ? config.policies.map((item) => item?.signature) : []).slice(0, 16)}`;
+  const currentControlsVersion = (controls, overlay, access, removed, corrections, cutoff) =>
+    `controls-${controls.revision}-${overlay.revision}-${digest([
+      config.version,
+      access.map((row) => [String(row.repository_id), String(row.generation)]),
+      [...removed].sort(),
+      ...(corrections.decisions.length ? [reversionCapture(corrections, cutoff)] : []),
+    ]).slice(0, 16)}`;
   const explanationBinding = (scope, publication) => ({
     scopeKey: scopeKey(scope),
     revision: publication.revision,
@@ -433,13 +448,17 @@ export async function createPipeline(options) {
         restoredActors.set(digest(authorization), identity.actors);
       }
       const removed = await sourceSuppressions(tx, ids);
-      const corrections = (
-        await tx.query(
-          "SELECT artifact_id,document FROM leaderboard_pipeline.corrections WHERE repository_id=ANY($1::bigint[])",
-          [ids],
-        )
-      ).rows;
-      for (const correction of corrections)
+      const corrections = await readCorrectionState(tx, ids);
+      for (const authorization of authorizations)
+        assertReversionCapture(
+          authorization,
+          await readCorrectionState(
+            tx,
+            authorization.sources.map((source) => Number(source.repositoryId)),
+          ),
+          utc(now()),
+        );
+      for (const correction of corrections.legacy)
         if (
           authorizations.some(
             (authorization) =>
@@ -1428,11 +1447,21 @@ export async function createPipeline(options) {
         evidence.set(id, selectEvidenceMetadata(previous, entry));
       }
     }
-    const corrections = (
-      await db.query("SELECT document FROM leaderboard_pipeline.corrections WHERE repository_id=ANY($1::bigint[])", [
-        repos.map((repo) => repo.id),
-      ])
-    ).rows.map((row) => row.document.fact);
+    const correctionState = await readCorrectionState(
+      db,
+      repos.map((repo) => repo.id),
+    );
+    const reversion = materializeReversionEffectiveness(
+      {
+        facts,
+        policies: config.policies,
+        evidence: [...evidence.values()],
+      },
+      correctionState.decisions,
+      observationCutoff,
+    );
+    const corrections = [...correctionState.legacy.map((row) => row.document.fact), ...reversion.overlays];
+    const reversionBinding = reversionCapture(correctionState, observationCutoff);
     // Keep legacy imports literal. Versioned observations retain every read,
     // while unchanged audits do not manufacture another semantic history epoch.
     // Committed pages of a later-failed audit remain part of its actual evidence.
@@ -1637,7 +1666,11 @@ export async function createPipeline(options) {
     const publicEvidence = [...evidence.values()].filter((entry) => usedIds.has(entry.contribution.contributionId));
     // Evidence period filtering follows the metric's declared clock, with raw time preserved upstream.
     for (const entry of publicEvidence) {
-      const fact = facts.find((fact) => fact.id === entry.contribution.contributionId);
+      // A restored qualified unit uses the same last effective reviewed revision
+      // as the aggregate and portfolio; the immutable raw source stays in facts.
+      const fact =
+        reversion.overlays.findLast((fact) => fact.id === entry.contribution.contributionId) ??
+        facts.find((fact) => fact.id === entry.contribution.contributionId);
       if (fact) {
         entry.occurredAt =
           fact[config.policies.find((item) => item.policy.metricId === fact.metricId).policy.dateBasis];
@@ -1670,6 +1703,7 @@ export async function createPipeline(options) {
       coverage,
       configVersion: config.version,
       repositoryIds: repos.map((repo) => repo.id),
+      ...reversionBinding,
     };
     const snapshotId = digest(content);
     if (priorPublication && priorPublication.snapshotId !== snapshotId) fail("dispatch_snapshot_replay_changed");
@@ -1694,6 +1728,7 @@ export async function createPipeline(options) {
           repositoryId: String(row.repository_id),
           generation: String(row.generation),
         })),
+        ...reversionBinding,
       },
     });
     const publicationStarted = performance.now();
@@ -1757,6 +1792,17 @@ export async function createPipeline(options) {
           ),
         );
         if (facts.some((fact) => removed.has(fact.artifactId))) fail("source_suppressed_before_publication");
+        // Corrections share the source write lock but do not increment its
+        // generation. Recheck complete joined rows/seals while that lock is held.
+        if (
+          (
+            await readCorrectionState(
+              tx,
+              repos.map((repo) => repo.id),
+            )
+          ).fingerprint !== correctionState.fingerprint
+        )
+          fail("reversion_changed_before_publication");
         const current = (
           await tx.query(
             `SELECT snapshot_id,revision FROM leaderboard_pipeline.heads WHERE scope_hash=${pipelineKeySQL("$1")} AND scope_key=$1`,
@@ -1796,6 +1842,7 @@ export async function createPipeline(options) {
           dataMode,
           diagnostics,
           methodology: content.methodology,
+          ...reversionBinding,
           snapshot: {
             schemaVersion: "leaderboard/v1",
             snapshotId,
@@ -1889,19 +1936,20 @@ export async function createPipeline(options) {
         ).rows;
         if (signal.aborted || access.length !== repositoryIds.length || access.some((row) => row.state !== "public"))
           return null;
-        const removed = (
-          await tx.query(
-            `${sourceSuppressionQuery}
-          UNION SELECT artifact_id AS subject_id FROM leaderboard_pipeline.corrections WHERE repository_id=ANY($1::bigint[])`,
-            [repositoryIds],
-          )
-        ).rows.map((row) => row.subject_id);
+        const corrections = await readCorrectionState(tx, repositoryIds);
+        const removed = [
+          ...new Set([
+            ...(await sourceSuppressions(tx, repositoryIds)),
+            ...corrections.legacy.map((row) => row.artifact_id),
+          ]),
+        ];
+        const authorityAt = utc(now());
         if (!(await approved(tx)) || signal.aborted) return null;
         // No awaits below: configuration, recognition, confirmed heads and exact
         // current privacy/source signatures fence both captured projections.
         const controls = controlsStore.read(),
           overlay = restrictConfiguration(controls);
-        const version = `controls-${controls.revision}-${overlay.revision}-${digest([config.version, access.map((row) => [String(row.repository_id), String(row.generation)]), [...removed].sort()]).slice(0, 16)}`;
+        const version = currentControlsVersion(controls, overlay, access, removed, corrections, authorityAt);
         const suppressedActors = Object.entries(controls.profiles)
           .filter(([, profile]) => profile.suppressed)
           .map(([id]) => id)
@@ -1913,6 +1961,11 @@ export async function createPipeline(options) {
             read.controls.version !== version ||
             canonical([...read.controls.suppressedActorIds].sort()) !== canonical(suppressedActors) ||
             canonical([...read.controls.suppressedArtifactIds].sort()) !== canonical([...removed].sort()) ||
+            canonical([...(read.controls.suppressedContributionIds ?? [])].sort()) !==
+              canonical(
+                reversionProjection(corrections.decisions, read.selected.reversionAuthority, authorityAt)
+                  .suppressedContributionIds,
+              ) ||
             !confirmationMatches(head, selectedScope, read.head.snapshotId, read.head.revision) ||
             !confirmationMatches(
               controls.pipelinePublications?.[read.selected.snapshot.snapshotId],
@@ -1938,6 +1991,15 @@ export async function createPipeline(options) {
                   digest: controls.pipelinePublications[read.selected.snapshot.snapshotId].aggregateExplanationHash,
                 }).document,
               );
+        // A valid old pin can require stricter restoration proof than the new
+        // current snapshot. Preserve current values and withhold only that baseline;
+        // malformed or stale global authority already failed above.
+        if (
+          prior &&
+          canonical(current.controls.suppressedContributionIds ?? []) !==
+            canonical(prior.controls.suppressedContributionIds ?? [])
+        )
+          return { current, previous: null, currentHistory: history(current), previousHistory: null };
         return { current, previous: prior, currentHistory: history(current), previousHistory: history(prior) };
       });
     },
@@ -2012,13 +2074,13 @@ export async function createPipeline(options) {
             )
           )
             return null;
-          const removed = (
-            await tx.query(
-              `${sourceSuppressionQuery}
-      UNION SELECT artifact_id AS subject_id FROM leaderboard_pipeline.corrections WHERE repository_id=ANY($1::bigint[])`,
-              [selected.repository_ids],
-            )
-          ).rows.map((row) => row.subject_id);
+          const corrections = await readCorrectionState(tx, selected.repository_ids);
+          const removed = [
+            ...new Set([
+              ...(await sourceSuppressions(tx, selected.repository_ids)),
+              ...corrections.legacy.map((row) => row.artifact_id),
+            ]),
+          ];
           const healthRepositories = health
             ? repositoriesFor(scope).filter((repo) =>
                 selected.document.snapshot.coverage.some(
@@ -2074,6 +2136,9 @@ export async function createPipeline(options) {
             });
           }
           const document = copy(selected.document);
+          const authorityAt = utc(now());
+          const reversion = reversionProjection(corrections.decisions, document.reversionAuthority, authorityAt);
+          addReversionNotices(document, reversion.notices, c.contracts.publicEvidenceMetadataSchema);
           document.disabledMetrics = overlay.disabledMetrics.map((entry) => ({
             ...entry,
             reason: /^[a-z0-9_:-]{1,100}$/.test(entry.reason)
@@ -2096,7 +2161,10 @@ export async function createPipeline(options) {
             },
             selected: document,
             controls: {
-              version: `controls-${controls.revision}-${overlay.revision}-${digest([config.version, access.map((row) => [String(row.repository_id), String(row.generation)]), [...removed].sort()]).slice(0, 16)}`,
+              version: currentControlsVersion(controls, overlay, access, removed, corrections, authorityAt),
+              ...(corrections.decisions.length
+                ? { suppressedContributionIds: reversion.suppressedContributionIds }
+                : {}),
               suppressedActorIds: Object.entries(controls.profiles)
                 .filter(([, profile]) => profile.suppressed)
                 .map(([id]) => id),
@@ -2440,7 +2508,11 @@ export async function createPipeline(options) {
     if (
       !read ||
       input.frozen.actors.some((actor) => read.controls.suppressedActorIds.includes(actor.id)) ||
-      input.frozen.facts.some((fact) => read.controls.suppressedArtifactIds.includes(fact.artifactId))
+      input.frozen.facts.some(
+        (fact) =>
+          read.controls.suppressedArtifactIds.includes(fact.artifactId) ||
+          read.controls.suppressedContributionIds?.includes(fact.id),
+      )
     )
       fail("policy_input_revoked");
     return digest([
@@ -2538,9 +2610,16 @@ export async function createPipeline(options) {
       )
         fail("correction_not_authorized");
       const operationBinding = { requestId, expectedVersion, factId, operatorId, approvalReceipt };
-      const priorCorrection = (
-        await db.query("SELECT document FROM leaderboard_pipeline.corrections WHERE request_id=$1", [requestId])
-      ).rows[0]?.document;
+      const priorRow = (
+        await db.query("SELECT document,repository_id FROM leaderboard_pipeline.corrections WHERE request_id=$1", [
+          requestId,
+        ])
+      ).rows[0];
+      if (priorRow) {
+        await readCorrectionState(db, [Number(priorRow.repository_id)]);
+        if (Object.hasOwn(priorRow.document, "kind")) fail("correction_retry_mismatch");
+      }
+      const priorCorrection = priorRow?.document;
       if (priorCorrection && c.metrics.stableJSON(priorCorrection.operation) !== c.metrics.stableJSON(operationBinding))
         fail("correction_retry_mismatch");
       const state = controlsStore.read(),
@@ -2592,6 +2671,8 @@ export async function createPipeline(options) {
             requestId,
           ])
         ).rows[0];
+        await readCorrectionState(tx, [Number(fact.repoId)]);
+        if (Object.hasOwn(persisted.document, "kind")) fail("correction_retry_mismatch");
         if (c.metrics.stableJSON(persisted.document.operation) !== c.metrics.stableJSON(operationBinding))
           fail("correction_retry_mismatch");
         return receipt(tx, `correction:${requestId}:${expectedVersion}`, "correction_applied", {
@@ -2616,6 +2697,116 @@ export async function createPipeline(options) {
           { publish: true },
         );
       return { receiptId, requestId, status: "applied" };
+    });
+  }
+  async function applyReversionDecision({ operation, lineageEvidenceIds }) {
+    const invocation = copy({ operation, lineageEvidenceIds });
+    return serialize(async () => {
+      if (stopped) fail("pipeline_stopped");
+      return applyReviewedReversion({
+        db,
+        controlsStore,
+        ...invocation,
+        configurationHash: digest(config),
+        dataMode,
+        now: () => utc(now()),
+        approved,
+        authorize: options.authorizeReversionDecision,
+        suppressedArtifacts: sourceSuppressions,
+        receipt,
+        verifyFrozen(saved, access, state) {
+          const authorization = saved.input.identityAuthorization;
+          const scope = saved.snapshot.scope;
+          const snapshot = saved.snapshot.snapshot;
+          const overlay = restrictConfiguration(state);
+          const confirmation = state.pipelinePublications?.[snapshot.snapshotId];
+          assertPipelineSourcesNotRetired(
+            controlsStore,
+            access.map((row) => Number(row.repository_id)),
+          );
+          if (
+            !authorization ||
+            authorization.configurationHash !== digest(config) ||
+            authorization.dataMode !== dataMode ||
+            saved.snapshot.dataMode !== dataMode ||
+            canonical(saved.input.policies) !== canonical(config.policies) ||
+            authorization.controlsConfigurationRevision !== overlay.revision ||
+            !configuredScope(scope) ||
+            !confirmationMatches(confirmation, scope, snapshot.snapshotId, snapshot.revision) ||
+            confirmation.controlsConfigurationRevision !== overlay.revision ||
+            (recognitionBindings.length &&
+              confirmation.recognitionFingerprint !== recognitionFingerprint(state, recognitionBindings)) ||
+            !Array.isArray(authorization.sources) ||
+            authorization.sources.length !== access.length ||
+            authorization.sources.some(
+              (source) =>
+                !access.some(
+                  (row) =>
+                    String(row.repository_id) === source.repositoryId &&
+                    String(row.generation) === source.generation &&
+                    config.repositories.some(
+                      (repo) =>
+                        repo.id === Number(row.repository_id) &&
+                        String(repo.installationId) === String(row.installation_id),
+                    ),
+                ),
+            )
+          )
+            fail("reversion_frozen_authority_changed");
+          const selected = new Set([
+            invocation.operation.originalFactId,
+            invocation.operation.revertingFactId,
+            ...invocation.operation.targetFactIds,
+          ]);
+          if (
+            saved.input.frozen.facts.some(
+              (fact) =>
+                selected.has(fact.id) &&
+                (state.profiles[fact.actorId]?.suppressed || overlay.disabledMetricIds.includes(fact.metricId)),
+            )
+          )
+            fail("reversion_frozen_authority_changed");
+          aggregateExplanations.verify(snapshot.snapshotId, {
+            ...explanationBinding(scope, snapshot),
+            digest: confirmation.aggregateExplanationHash,
+          });
+        },
+        markApplied(result, operation) {
+          controlsStore.transaction(
+            (state) => {
+              const target = state.requests[operation.requestId];
+              if (!target || target.owner === operation.operatorId || target.kind !== "correction")
+                fail("reversion_request_conflict");
+              if (target.status === "applied") {
+                const events = target.history.filter(
+                  (event) =>
+                    event.action === "pipeline-correction-applied" &&
+                    event.receiptId === result.receiptId &&
+                    event.decisionHash === result.document.decisionHash &&
+                    event.actor === operation.operatorId &&
+                    event.version === operation.expectedVersion + 1,
+                );
+                if (
+                  target.version !== operation.expectedVersion + 1 ||
+                  events.length !== 1 ||
+                  state.audit.filter((event) => canonical(event) === canonical(events[0])).length !== 1
+                )
+                  fail("reversion_applied_audit_changed");
+                return;
+              }
+              if (target.status !== "pending" || target.version !== operation.expectedVersion)
+                fail("reversion_request_conflict");
+              target.status = "applied";
+              c.controls.record(state, target, operation.operatorId, "pipeline-correction-applied", Date.parse(now()), {
+                receiptId: result.receiptId,
+                decisionHash: result.document.decisionHash,
+                authorityVersion: result.document.kind,
+              });
+            },
+            { publish: true },
+          );
+        },
+      });
     });
   }
   async function start({ public: publicAddress = { host: "127.0.0.1", port: 0 }, webhook, controls } = {}) {
@@ -2739,6 +2930,7 @@ export async function createPipeline(options) {
     dispatchOnce,
     runOnce,
     applyCorrection,
+    applyReversionDecision,
     previewPolicy,
     approvePolicyComparison,
     // Privileged host composition only; never attached to the public service.

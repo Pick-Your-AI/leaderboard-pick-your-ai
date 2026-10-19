@@ -141,6 +141,10 @@ export function createOperatorPublicationVerifier({
         repositoryIds: config.repositories
           .filter((repo) => document.scope.repository === null || String(repo.id) === document.scope.repository)
           .map((repo) => repo.id),
+        ...(Object.hasOwn(document, "reversionAuthority") ? { reversionAuthority: document.reversionAuthority } : {}),
+        ...(Object.hasOwn(document, "reversionRecordsHash")
+          ? { reversionRecordsHash: document.reversionRecordsHash }
+          : {}),
       };
       if (digest(content) !== expected.snapshotId) return null;
       const proof = aggregateExplanations.read(expected.snapshotId);
