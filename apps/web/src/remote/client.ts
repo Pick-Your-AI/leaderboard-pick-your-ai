@@ -1345,7 +1345,7 @@ export function profile(value: unknown, selected: Selection): Profile {
       }))
   )
     throw new ReadFailure(502, "invalid_participation_response");
-  return {
+  const parsed = {
     ...meta,
     actorId: identity(data.actorId),
     actor: selectedActor(data.actor, selected),
@@ -1362,6 +1362,16 @@ export function profile(value: unknown, selected: Selection): Profile {
     categories: categoryTotals(data.categories ?? []),
     evidenceCount: integer(data.evidenceCount),
   };
+  if (parsed.timeline.some((entry) => entry.contribution.actorId !== parsed.actorId))
+    throw new ReadFailure(502, "api_actor_mismatch");
+  const category = selected.category;
+  if (
+    category !== null &&
+    (parsed.results.some((result) => result.metricId !== category) ||
+      parsed.timeline.some((entry) => !entry.contribution.metricIds.includes(category)))
+  )
+    throw new ReadFailure(502, "api_filter_mismatch");
+  return parsed;
 }
 export interface Health extends Metadata {
   status: "recently_reconciled" | "stale_or_degraded";
