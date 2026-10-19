@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { compareSourceInstants, sourceEventSchema } from "@pick-your-ai/contracts";
-import { validateAutomationSource, validateMaintenanceSource } from "@pick-your-ai/github";
+import { validateAutomationSource, validateMaintenanceSource, registerOrderingPlan } from "@pick-your-ai/github";
 import { domainDateBasis, qualifyDomainRecognition } from "./domain-recognition.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
 import { hasRequiredParticipantConsent, hasReviewedParticipantConsent } from "../../controls/src/evidence-consent.mjs";
@@ -51,6 +51,8 @@ export function recognitionFingerprint(state, bindings = []) {
     authority.push("maintenance-merged-participant/v1");
   // Tooling receipts independently require verified merged participation as well.
   if (bindings.some((binding) => binding.metricId === "automation")) authority.push("automation-merged-participant/v1");
+  // Even an empty current intake must retire the former generic ordering authority.
+  if (bindings.some((binding) => binding.metricId === "issue_ordering")) authority.push("reviewed-ordering-plan/v1");
   // Missing legacy intake cannot keep manual recognition current, even without collaborators.
   // No-manual-request automatic source authority keeps its existing exact format.
   if (requests.length) authority.push(evidenceIntakeAuthority());
@@ -66,10 +68,20 @@ export function materializeRecognition(
   cutoff,
   publicReasons = () => [],
 ) {
+  if (bindings.some((binding) => binding.metricId === "issue_ordering")) {
+    // Freeze the invocation before any host receipt callback can change a later
+    // source, claim, scope enrollment or policy used by this same evaluation.
+    input = structuredClone(input);
+    state = structuredClone(state);
+    bindings = structuredClone(bindings);
+    policies = structuredClone(policies);
+  }
   let output = structuredClone(input);
   const domainUnits = new Set();
   const mergedChangeUnits = new Set();
   const domainReasons = new Map();
+  const orderingPlans = new Map();
+  const orderingJobs = [];
   const decisionTime = (request) => {
     const at = request.history?.findLast((event) => event.action === "accepted")?.at;
     const time = typeof at === "number" ? at : typeof at === "string" ? Date.parse(at) : NaN;
@@ -270,6 +282,13 @@ export function materializeRecognition(
       acceptedAt,
       cutoff,
     });
+    if (domain?.ordering) {
+      // Validate every plan and alias before awarding any ordering unit. A
+      // conflicting later alias cannot hide behind an earlier deduplication.
+      if (!registerOrderingPlan(orderingPlans, domain.ordering))
+        orderingJobs.push({ domain, decision, binding, request, target: candidates[0], acceptedAt });
+      continue;
+    }
     if (domain) {
       const unit = JSON.stringify([request.owner, domain.changesetId]);
       if (domainUnits.has(unit)) continue;
@@ -310,6 +329,28 @@ export function materializeRecognition(
         domainReasons.set(evidence.contribution.contributionId, domain.publicReasonCodes);
       }
     }
+  }
+  for (const { domain, decision, binding, request, target, acceptedAt } of orderingJobs) {
+    const previousEvidence = output.evidence.length;
+    output = applyReceipt(
+      output,
+      {
+        id: decision.id,
+        verified: true,
+        targetFactId: target.id,
+        metricId: "issue_ordering",
+        actorId: request.owner,
+        reviewerId: decision.actor,
+        acceptedAt,
+        decision: "accepted",
+        evidenceIds: [target.id],
+        ordering: domain.ordering,
+        orderingAuthority: domain.orderingAuthority,
+      },
+      binding.reviewerIds,
+    );
+    for (const evidence of output.evidence.slice(previousEvidence))
+      domainReasons.set(evidence.contribution.contributionId, domain.publicReasonCodes);
   }
   // Audit receipt identifiers remain private even when the normalizer annotates evidence.
   for (const entry of output.evidence.slice(input.evidence.length))

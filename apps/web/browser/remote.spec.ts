@@ -743,6 +743,121 @@ test("successful same-selection background recheck preserves keyboard DOM; suppr
   }
 });
 
+test("API follow releases a removed actor's obsolete focus hold after a privacy recheck", async ({
+  page,
+}, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.addInitScript(() =>
+    Object.defineProperty(window, "EventSource", { value: undefined, configurable: true }),
+  );
+  const api = await service(page);
+  try {
+    await page.goto("/leaderboards/pr_merged?ui=api");
+    const follow = page.getByRole("checkbox", { name: /Follow while/ });
+    const provenance = page.getByRole("region", { name: "Snapshot provenance" });
+    const actor = page.getByRole("link", { name: "Synthetic API A", exact: true });
+    await expect(actor).toBeVisible();
+    await expect(follow).not.toBeChecked();
+    await follow.check();
+    await page.mouse.move(0, 0);
+    await actor.focus();
+
+    api.next();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByText("Update held: snapshot api-2 is available.")).toBeVisible();
+    await expect(provenance).toContainText("Snapshot api-1");
+    await expect(actor).toBeFocused();
+    await expect(follow).toBeChecked();
+
+    api.suppress();
+    // A click would move focus before removal and conceal an obsolete hold.
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(actor).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Synthetic API B", exact: true })).toBeVisible();
+    await testInfo.attach("removed-focus-follow-observation.json", {
+      body: JSON.stringify({
+        activeElement: await page.evaluate(() => ({
+          tag: document.activeElement?.tagName,
+          text: document.activeElement === document.body ? null : document.activeElement?.textContent,
+        })),
+        followChecked: await follow.isChecked(),
+        provenance: await provenance.innerText(),
+        suppressedActorCount: await actor.count(),
+      }),
+      contentType: "application/json",
+    });
+    await expect(provenance).toContainText("Snapshot api-2");
+    await expect(provenance).toContainText("privacy-2");
+    await expect(follow).toBeChecked();
+    await expect(actor).toHaveCount(0);
+  } finally {
+    await api.close();
+  }
+});
+
+test("API follow keeps a removed actor's update held until the pointer leaves the board", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.addInitScript(() =>
+    Object.defineProperty(window, "EventSource", { value: undefined, configurable: true }),
+  );
+  const api = await service(page);
+  try {
+    await page.goto("/leaderboards/pr_merged?ui=api");
+    const follow = page.getByRole("checkbox", { name: /Follow while/ });
+    const provenance = page.getByRole("region", { name: "Snapshot provenance" });
+    const actor = page.getByRole("link", { name: "Synthetic API A", exact: true });
+    const survivor = page.getByRole("link", { name: "Synthetic API B", exact: true });
+    await expect(actor).toBeVisible();
+    await follow.check();
+    await page.mouse.move(0, 0);
+    await actor.focus();
+
+    api.next();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByText("Update held: snapshot api-2 is available.")).toBeVisible();
+    await expect(provenance).toContainText("Snapshot api-1");
+    await page.getByRole("columnheader", { name: "Rank", exact: true }).hover();
+    await expect(actor).toBeFocused();
+
+    api.suppress();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(actor).toHaveCount(0);
+    await expect(survivor).toBeVisible();
+    await expect(provenance).toContainText("privacy-2");
+    await expect(page.getByText("Rechecking…")).toHaveCount(0);
+    expect(await page.getByRole("table").evaluate((element) => element.matches(":hover"))).toBe(true);
+
+    // Observe the settled privacy response across five frame/task boundaries
+    // and at least 250 ms; an immediate assertion could precede the apply effect.
+    const held = await provenance.evaluate(async (element) => {
+      const observations = [];
+      for (let frame = 0; frame < 5; frame++) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 50)));
+        observations.push({ connected: element.isConnected, text: element.textContent });
+      }
+      return observations;
+    });
+    for (const observation of held) {
+      expect(observation.connected).toBe(true);
+      expect(observation.text).toContain("Snapshot api-1");
+      expect(observation.text).toContain("privacy-2");
+    }
+    expect(
+      api.calls.some((call) => call.pathname.endsWith("/boards") && call.searchParams.get("snapshot") === "api-2"),
+    ).toBe(false);
+    expect(await page.getByRole("table").evaluate((element) => element.matches(":hover"))).toBe(true);
+    await expect(follow).toBeChecked();
+
+    await page.mouse.move(0, 0);
+    await expect(provenance).toContainText("Snapshot api-2");
+    await expect(provenance).toContainText("privacy-2");
+    await expect(follow).toBeChecked();
+    await expect(actor).toHaveCount(0);
+  } finally {
+    await api.close();
+  }
+});
+
 test("new heads remain held until applied; unsupported query is rejected before any provider read", async ({
   page,
 }) => {

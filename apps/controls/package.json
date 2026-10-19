@@ -3,7 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24 <25" },
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "dependencies": {
+    "@pick-your-ai/github": "0.1.0"
+  },
   "scripts": {
     "build": "node --check src/server.mjs && node --check src/store.mjs && node --check src/github.mjs && node --check src/configuration.mjs && node --check src/overlay.mjs && node --check src/policy-comparison.mjs && node --check src/policy-preview-authority.mjs && node --check src/localization-review.mjs",
     "test": "node --test test/*.test.mjs"
