@@ -102,8 +102,8 @@ Primary source contracts:
 
 - [List repository issues](https://docs.github.com/en/rest/issues/issues?apiVersion=2022-11-28#list-repository-issues)
 - [List repository issue comments](https://docs.github.com/en/rest/issues/comments?apiVersion=2022-11-28#list-issue-comments-for-a-repository)
-- [GraphQL Issue and its timeline items](https://docs.github.com/en/graphql/reference/objects#issue)
-- [GraphQL PullRequest and its timeline items](https://docs.github.com/en/graphql/reference/objects#pullrequest)
+- [GraphQL Issue and its timeline items](https://docs.github.com/en/graphql/reference/issues#issue)
+- [GraphQL PullRequest and its timeline items](https://docs.github.com/en/graphql/reference/pulls#pullrequest)
 
 Scheduled `rc1` issue, pull-request, comment and release snapshots retain a
 versioned content fingerprint plus scan identity. The default adapter validates
