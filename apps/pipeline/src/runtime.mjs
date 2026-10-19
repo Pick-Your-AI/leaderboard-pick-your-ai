@@ -1796,7 +1796,8 @@ export async function createPipeline(options) {
       if (requested.start !== null || requested.end !== null || signal.aborted) return null;
       // One bounded index lookup supplies only explicitly confirmed choices.
       // Reuse one SQL transaction and its source locks for every unique scope.
-      return db.transaction(async (tx) => {
+      let finalRead = () => null;
+      const result = await db.transaction(async (tx) => {
         if (!(await approved(tx)) || signal.aborted) return null;
         const initialControls = controlsStore.read();
         restrictConfiguration(initialControls);
@@ -1840,60 +1841,67 @@ export async function createPipeline(options) {
           )
         ).rows.map((row) => row.subject_id);
         if (!(await approved(tx)) || signal.aborted) return null;
-        // No awaits below: the complete index, current privacy authority,
-        // confirmations, recognition and explanations fence all captured reads.
-        const controls = controlsStore.read();
-        const overlay = restrictConfiguration(controls);
-        const current = windowIndex().read(controls, requested);
-        if (!current || canonical(current) !== canonical(initial)) return null;
-        const version = `controls-${controls.revision}-${overlay.revision}-${digest([config.version, access.map((row) => [String(row.repository_id), String(row.generation)]), [...removed].sort()]).slice(0, 16)}`;
-        const suppressedActors = Object.entries(controls.profiles)
-          .filter(([, profile]) => profile.suppressed)
-          .map(([id]) => id)
-          .sort();
-        const fingerprint = recognitionBindings.length ? recognitionFingerprint(controls, recognitionBindings) : null;
-        for (const entry of current.windows) {
-          const read = reads.get(scopeKey(entry.scope));
-          const selected = read?.selected.snapshot;
-          const head = controls.pipelineHeads?.[scopeKey(entry.scope)];
-          if (
-            !read ||
-            scopeKey(read.selected.scope) !== scopeKey(entry.scope) ||
-            selected.snapshotId !== entry.confirmation.snapshotId ||
-            selected.revision !== entry.confirmation.revision ||
-            read.head.snapshotId !== entry.confirmation.snapshotId ||
-            read.head.revision !== entry.confirmation.revision ||
-            read.controls.version !== version ||
-            canonical([...read.controls.suppressedActorIds].sort()) !== canonical(suppressedActors) ||
-            canonical([...read.controls.suppressedArtifactIds].sort()) !== canonical([...removed].sort()) ||
-            canonical(read.controls.revokedSnapshotIds) !== canonical([]) ||
-            !confirmationMatches(head, entry.scope, read.head.snapshotId, read.head.revision) ||
-            !confirmationMatches(
-              controls.pipelinePublications?.[selected.snapshotId],
-              entry.scope,
-              selected.snapshotId,
-              selected.revision,
-            ) ||
-            (recognitionBindings.length &&
-              [read.head.snapshotId, selected.snapshotId].some(
-                (id) => controls.pipelinePublications?.[id]?.recognitionFingerprint !== fingerprint,
-              ))
-          )
-            return null;
-        }
-        for (const read of reads.values()) {
-          // Each chosen publication is its current confirmed head. Aliases use
-          // this same captured read and need only one final explanation check.
-          aggregateExplanations.verify(read.selected.snapshot.snapshotId, {
-            ...explanationBinding(read.selected.scope, read.selected.snapshot),
-            digest: controls.pipelinePublications[read.selected.snapshot.snapshotId].aggregateExplanationHash,
-          });
-        }
-        return {
-          scope: requested,
-          windows: current.windows.map((entry) => ({ period: entry.period, read: reads.get(scopeKey(entry.scope)) })),
+        finalRead = () => {
+          // No awaits below: the complete index, current privacy authority,
+          // confirmations, recognition and explanations fence all captured reads.
+          const controls = controlsStore.read();
+          const overlay = restrictConfiguration(controls);
+          const current = windowIndex().read(controls, requested);
+          if (!current || canonical(current) !== canonical(initial)) return null;
+          const version = `controls-${controls.revision}-${overlay.revision}-${digest([config.version, access.map((row) => [String(row.repository_id), String(row.generation)]), [...removed].sort()]).slice(0, 16)}`;
+          const suppressedActors = Object.entries(controls.profiles)
+            .filter(([, profile]) => profile.suppressed)
+            .map(([id]) => id)
+            .sort();
+          const fingerprint = recognitionBindings.length ? recognitionFingerprint(controls, recognitionBindings) : null;
+          for (const entry of current.windows) {
+            const read = reads.get(scopeKey(entry.scope));
+            const selected = read?.selected.snapshot;
+            const head = controls.pipelineHeads?.[scopeKey(entry.scope)];
+            if (
+              !read ||
+              scopeKey(read.selected.scope) !== scopeKey(entry.scope) ||
+              selected.snapshotId !== entry.confirmation.snapshotId ||
+              selected.revision !== entry.confirmation.revision ||
+              read.head.snapshotId !== entry.confirmation.snapshotId ||
+              read.head.revision !== entry.confirmation.revision ||
+              read.controls.version !== version ||
+              canonical([...read.controls.suppressedActorIds].sort()) !== canonical(suppressedActors) ||
+              canonical([...read.controls.suppressedArtifactIds].sort()) !== canonical([...removed].sort()) ||
+              canonical(read.controls.revokedSnapshotIds) !== canonical([]) ||
+              !confirmationMatches(head, entry.scope, read.head.snapshotId, read.head.revision) ||
+              !confirmationMatches(
+                controls.pipelinePublications?.[selected.snapshotId],
+                entry.scope,
+                selected.snapshotId,
+                selected.revision,
+              ) ||
+              (recognitionBindings.length &&
+                [read.head.snapshotId, selected.snapshotId].some(
+                  (id) => controls.pipelinePublications?.[id]?.recognitionFingerprint !== fingerprint,
+                ))
+            )
+              return null;
+          }
+          for (const read of reads.values()) {
+            // Each chosen publication is its current confirmed head. Aliases use
+            // this same captured read and need only one final explanation check.
+            aggregateExplanations.verify(read.selected.snapshot.snapshotId, {
+              ...explanationBinding(read.selected.scope, read.selected.snapshot),
+              digest: controls.pipelinePublications[read.selected.snapshot.snapshotId].aggregateExplanationHash,
+            });
+          }
+          return {
+            scope: requested,
+            windows: current.windows.map((entry) => ({ period: entry.period, read: reads.get(scopeKey(entry.scope)) })),
+          };
         };
+        return finalRead();
       });
+      // COMMIT can await after the transaction callback returns. Recheck host
+      // approval, then the complete synchronous fence, before returning pointers.
+      if (!result || signal.aborted || !(await verifyConfig(copy(config))) || signal.aborted) return null;
+      return finalRead();
     },
     async readComparison(scope, pin, previous, signal) {
       if (c.contracts.publicScopeFilterKey(scope) !== c.contracts.publicScopeFilterKey(previous.scope)) return null;
