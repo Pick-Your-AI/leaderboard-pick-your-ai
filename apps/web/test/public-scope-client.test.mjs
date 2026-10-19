@@ -306,7 +306,7 @@ test("complete public request URLs stay within the service budget before fetch",
     throw Error("unexpected fetch");
   };
   try {
-    const params = new URLSearchParams({ project: "A".repeat(4090) });
+    const params = new URLSearchParams({ project: "A".repeat(48 * 1024) });
     await assert.rejects(
       () => request("https://synthetic.invalid/api/v1", "health", params, new AbortController().signal),
       /query_too_large/,
@@ -314,10 +314,17 @@ test("complete public request URLs stay within the service budget before fetch",
     const projects = Array.from({ length: 100 }, (_, i) => `PVT_${i}_` + "A".repeat(100));
     const value = selected(canonicalPublicScope({ ...legacyScope, projects }), { snapshot: "s1" });
     await assert.rejects(
-      () => exportPage("https://synthetic.invalid/api/v1", value, "json", new AbortController().signal, {}),
+      () =>
+        exportPage(
+          "https://synthetic.invalid/" + "a".repeat(48 * 1024),
+          value,
+          "json",
+          new AbortController().signal,
+          {},
+        ),
       /query_too_large/,
     );
-    assert.throws(() => selection("?project=" + Array(100).fill("A".repeat(42)).join(",")), /selection_too_large/);
+    assert.throws(() => selection("?project=" + "A".repeat(48 * 1024)), /selection_too_large/);
     assert.equal(calls, 0);
   } finally {
     globalThis.fetch = original;
@@ -330,12 +337,15 @@ test("encoded live scope is budgeted before any polling or stream transport star
   assert.ok(raw.length < 4096);
   const value = selection(raw);
   assert.ok(parameters(value).toString().length > 4096);
+  const longBase = "/api/v1/" + "a".repeat(48 * 1024 - raw.length - 32);
+  assert.ok((longBase + "/updates" + raw).length < 48 * 1024);
+  assert.ok((longBase + "/updates?" + parameters(value)).length > 48 * 1024);
   let fetches = 0,
     streams = 0;
   assert.throws(
     () =>
       startLiveUpdates({
-        scope: Object.fromEntries(liveParameters("https://synthetic.invalid/api/v1", value)),
+        scope: Object.fromEntries(liveParameters("https://synthetic.invalid" + longBase, value)),
         fetch: async () => {
           fetches++;
           throw Error("unexpected fetch");
@@ -358,7 +368,7 @@ test("encoded live scope is budgeted before any polling or stream transport star
   }
   // The complete base path and the longer updates path participate in the budget.
   const minimal = selected(legacyScope);
-  const base = "/" + "a".repeat(4087 - parameters(minimal).toString().length);
-  assert.equal((base + "/health?" + parameters(minimal)).length, 4096);
+  const base = "/" + "a".repeat(48 * 1024 - 9 - parameters(minimal).toString().length);
+  assert.equal((base + "/health?" + parameters(minimal)).length, 48 * 1024);
   assert.throws(() => liveParameters(base, minimal), /query_too_large/);
 });

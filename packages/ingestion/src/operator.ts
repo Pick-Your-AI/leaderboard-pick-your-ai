@@ -10,6 +10,7 @@ import type {
   OperatorHealth,
   OperatorReadAuthority,
   OperatorReadObserver,
+  OperatorReadScope,
   ReadOperatorHealth,
 } from "./operator-health.js";
 
@@ -58,6 +59,37 @@ async function authority(authorize: OperatorAuthorize, repositoryId: number) {
   const a = await authorize(repositoryId);
   if (!a || !identity(a.policyVersion) || !identity(a.revision)) throw new Error("operation_not_authorized");
   return { policyVersion: a.policyVersion, revision: a.revision };
+}
+function drainUnexpectedPromise(value: unknown) {
+  try {
+    if (value && typeof (value as PromiseLike<unknown>).then === "function")
+      void Promise.resolve(value).catch(() => undefined);
+  } catch {
+    // Untrusted host return values and exceptions never become diagnostics.
+  }
+}
+function captureReplayReadGuard(factory: unknown, scope: OperatorReadScope): () => void {
+  if (factory === undefined) return () => {};
+  try {
+    const current = typeof factory === "function" ? factory(Object.freeze({ ...scope })) : factory;
+    if (typeof current !== "function") {
+      drainUnexpectedPromise(current);
+      throw new Error("operation_result_unavailable");
+    }
+    return () => {
+      try {
+        const value: unknown = current();
+        if (value === true) return;
+        drainUnexpectedPromise(value);
+      } catch (error) {
+        drainUnexpectedPromise(error);
+      }
+      throw new Error("operation_result_changed");
+    };
+  } catch (error) {
+    drainUnexpectedPromise(error);
+    throw new Error("operation_result_unavailable");
+  }
 }
 const revision = (repositoryId: number, generation: string, a: Authority, row: Record<string, unknown>) =>
   digest([
@@ -139,7 +171,11 @@ function batchAudit(audit: Record<string, unknown>) {
 export class OperatorInbox {
   constructor(
     readonly db: SqlDatabase,
-    readonly options: OperatorReplayResultOptions & { readHealth?: ReadOperatorHealth } = {},
+    readonly options: OperatorReplayResultOptions & {
+      readHealth?: ReadOperatorHealth;
+      /** Trusted host opt-in. Capture one synchronous currentness fence for every retained result state. */
+      replayReadGuard?: (scope: Readonly<OperatorReadScope>) => () => boolean;
+    } = {},
   ) {}
   /** A queued receipt is distinct from an independently verified publication. */
   async readReplayResult(
@@ -151,13 +187,19 @@ export class OperatorInbox {
     scope(repositoryId);
     if (typeof receiptId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(receiptId))
       throw new Error("invalid_replay_receipt");
-    return this.db.transaction(async (tx) => {
+    let confirmReturn: (() => void) | undefined;
+    const result = await this.db.transaction(async (tx) => {
       const a = await authority(authorize, repositoryId);
       const current = await access(tx, repositoryId);
-      const read = await readOperatorReplayResult(tx, { repositoryId, ...current }, receiptId, this.options);
+      const readScope = { repositoryId, ...current };
+      const confirmRead = captureReplayReadGuard(this.options.replayReadGuard, readScope);
+      confirmReturn = confirmRead;
+      confirmRead();
+      const read = await readOperatorReplayResult(tx, readScope, receiptId, this.options);
       if (JSON.stringify(a) !== JSON.stringify(await authority(authorize, repositoryId)))
         throw new Error("operation_authority_changed");
       const beforeSend = () => {
+        confirmRead();
         if (read.confirmCurrent && read.confirmCurrent() !== true) throw new Error("operation_publication_changed");
       };
       beforeSend();
@@ -168,9 +210,15 @@ export class OperatorInbox {
         authorityRevision: a.revision,
         ...read.result,
       };
-      await observe?.(data, beforeSend);
+      if (observe) {
+        await observe(data, beforeSend);
+        beforeSend();
+      }
       return data;
     });
+    if (!confirmReturn) throw new Error("operation_result_unavailable");
+    confirmReturn();
+    return result;
   }
   async readHealth(
     repositoryId: number,
@@ -210,7 +258,11 @@ export class OperatorInbox {
         await tx.query(
           `SELECT count(*) FILTER(WHERE state='pending')::integer AS pending,
         count(*) FILTER(WHERE state='leased')::integer AS leased,count(*) FILTER(WHERE state='quarantined')::integer AS quarantined,
-        count(*) FILTER(WHERE state='done')::integer AS completed FROM leaderboard_ingestion.inbox WHERE envelope->>'repositoryId'=$1 AND envelope->>'installationId'=$2`,
+        count(*) FILTER(WHERE state='done')::integer AS completed
+        FROM leaderboard_ingestion.inbox AS intake
+        LEFT JOIN leaderboard_ingestion.delivery_payload_expiries AS expiry USING (delivery_id)
+        WHERE COALESCE(envelope->>'repositoryId',expiry.repository_id::text)=$1
+          AND COALESCE(envelope->>'installationId',expiry.installation_id::text)=$2`,
           [String(repositoryId), installationId],
         )
       ).rows[0]!;

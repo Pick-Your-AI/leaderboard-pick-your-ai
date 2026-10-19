@@ -1,6 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
-import type { PublicScope } from "@pick-your-ai/contracts";
+import { canonicalPublicScope, publicScopeParameters, type PublicScope } from "@pick-your-ai/contracts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { preview, type PreviewServer } from "vite";
+import { buildConfiguredApp, webRoot } from "../test/securityBuild.ts";
 
 test.use({ storageState: { cookies: [], origins: [] } });
 const selected = { context: "current", project: "PVT_A,PVT_B=", role: "author,reviewer", actors: "user" };
@@ -269,33 +274,75 @@ test("pinned membership views recheck current privacy and disclose exact frozen 
 });
 
 test("percent-encoding expansion is rejected before live polling or EventSource construction", async ({ page }) => {
+  test.setTimeout(90_000);
+  const directory = await mkdtemp(join(tmpdir(), "leaderboard-scope-capacity-"));
+  let server: PreviewServer | undefined;
   let apiCalls = 0;
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.route("**/api/v1/**", async (route) => {
-    apiCalls++;
-    await route.abort();
-  });
-  await page.addInitScript(() => {
-    const record = window as unknown as { scopeStreamAttempts: number };
-    record.scopeStreamAttempts = 0;
-    window.EventSource = class {
-      constructor() {
-        record.scopeStreamAttempts++;
-        throw Error("unexpected scoped stream");
-      }
-    } as unknown as typeof EventSource;
-  });
-  const projects = Array.from({ length: 31 }, (_, i) => `PVT_${i}_` + ":".repeat(100));
-  const path = "/leaderboards/pr_merged?ui=api&project=" + projects.join(",");
-  expect(path.length).toBeLessThan(4096);
-  await page.goto(path);
-  await expect(page.getByRole("alert")).toContainText("query_too_large");
-  await page.getByRole("button", { name: "Retry this selection", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("query_too_large");
-  expect(apiCalls).toBe(0);
-  expect(await page.evaluate(() => (window as unknown as { scopeStreamAttempts: number }).scopeStreamAttempts)).toBe(0);
-  expect(errors).toEqual([]);
+  try {
+    await page.route("**/api/v1/**", async (route) => {
+      apiCalls++;
+      await route.abort();
+    });
+    await page.addInitScript(() => {
+      const record = window as unknown as { scopeStreamAttempts: number };
+      record.scopeStreamAttempts = 0;
+      window.EventSource = class {
+        constructor() {
+          record.scopeStreamAttempts++;
+          throw Error("unexpected scoped stream");
+        }
+      } as unknown as typeof EventSource;
+    });
+    const projects = Array.from({ length: 31 }, (_, i) => `PVT_${i}_` + ":".repeat(100));
+    const path = "/leaderboards/pr_merged?ui=api&project=" + projects.join(",");
+    expect(path.length).toBeLessThan(4096);
+    const scope = canonicalPublicScope({
+      organization: "Pick-Your-AI",
+      repository: null,
+      workstream: null,
+      start: null,
+      end: null,
+      projects,
+    });
+    const values = publicScopeParameters(scope);
+    const raw = Object.entries(values)
+      .map(([key, value]) => `${key}=${value}`)
+      .join("&");
+    const encoded = new URLSearchParams(values).toString();
+    const limit = 48 * 1024;
+    const prefix = "/api/v1/";
+    const apiBase = prefix + "a".repeat(limit - prefix.length - "/updates?".length - raw.length - 1);
+    // The selected scope remains valid. Its complete unencoded target fits;
+    // only actual percent-encoding crosses the service/browser target bound.
+    expect((apiBase + "/updates?" + raw).length).toBeLessThan(limit);
+    expect((apiBase + "/health?" + encoded).length).toBeGreaterThan(limit);
+    const built = await buildConfiguredApp(directory, apiBase);
+    server = await preview({
+      root: webRoot,
+      logLevel: "error",
+      build: { outDir: built.outDir },
+      preview: { host: "127.0.0.1", port: 0, strictPort: false },
+    });
+    const base = server.resolvedUrls?.local[0];
+    expect(base).toBeTruthy();
+    await page.goto(new URL(path, base!).href);
+    await expect(page.getByRole("alert")).toContainText("query_too_large");
+    await page.getByRole("button", { name: "Retry this selection", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("query_too_large");
+    expect(apiCalls).toBe(0);
+    expect(await page.evaluate(() => (window as unknown as { scopeStreamAttempts: number }).scopeStreamAttempts)).toBe(
+      0,
+    );
+    expect(errors).toEqual([]);
+  } finally {
+    try {
+      await server?.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
 });
 
 test("long in-budget Project scopes keep overlay controls visible and disclose every selected ID", async ({ page }) => {

@@ -137,6 +137,17 @@ receipts by matching timestamps or a delivery's earlier publication. Roll back 0
 before 004 on disposable databases only; its rollback removes the added result
 records and must not discard retained production audit evidence.
 
+The updated retained-object and operator readers also require migration 006.
+Apply `008_dispatch_publication_scope_capacity.up.sql` after 006 to align its
+completion recognizer with the producer and replay readers' 16,384-character
+scope-key limit. This versioned function change preserves every retained value
+and all existing expiry eligibility and authorization checks. Its atomic down
+migration restores the legacy bound only when no retained completion exceeds it,
+under read-committed isolation and an immediate exclusive lock that refuses
+active outbox access, including workers awaiting publication confirmation. Roll
+back 008 before 006 on disposable databases only; stop and drain workers first and
+resume only with the matching source version.
+
 For the native pipeline integration, explicitly supply `operatorDiagnostics` to
 `createPipeline`:
 
@@ -154,6 +165,27 @@ provided; a separately mounted controls server can receive `runtime.operations`.
 The existing session, operator role and current `authorizeRepository` grant remain
 required. None of these options chooses an installation, acquires a public-source
 grant or enables the synthetic dispatcher for public data.
+
+Every runtime replay-result read captures its current source binding and private
+configuration revision before reading the retained result. The host currentness
+check applies to legacy, queued, processing, failed, superseded, processed and
+unavailable results as well as verified publications. It runs again after final
+operator reauthorization, at the synchronous HTTP serialization/send fence, and
+after an awaited native observer. The native adapter also rechecks its captured
+host fence after asynchronous transaction completion before returning data.
+A stopped runtime cannot serve
+retained diagnostics; an independently authorized fresh runtime can read the same
+immutable receipts. Publication verification remains an additional requirement
+for publication references, so an authorized pending or unavailable result does
+not require a publication proof.
+
+A trusted standalone `OperatorInbox` host can opt into the same per-read fence
+with `replayReadGuard(scope)`, returning a synchronous closure that returns exactly
+`true` while that captured read remains authorized. A supplied invalid factory or
+closure fails closed with a fixed error, and returned rejected promises are
+drained. Omitting this optional host adapter leaves the existing explicitly
+authorized retained reader available; it does not opt a pipeline runtime into
+diagnostics.
 
 | Protected GET route | Meaning |
 | --- | --- |
@@ -221,8 +253,12 @@ the same version. Invalid, missing, future or backward clocks never become zero
 delay or successful completion. A later correction or loss of current authority
 can make an earlier successful result unavailable without rewriting its audit.
 
-Verification reads at most 100 publication references and enforces a combined
-16 MiB budget for SQL snapshot documents and private proof material. It checks
+Verification reads at most 100 publication references. Each retained scope key
+is bounded at 16,384 characters, admitting the canonical 100-Project scope with
+all approved contribution roles and maximum-length identity fields without
+truncation. The control client retains its 2,000,000-byte response budget.
+Verification also enforces a combined 16 MiB budget for SQL snapshot documents
+and private proof material. It checks
 the SQL size manifest before loading document payloads, deduplicates private
 authorization sets, and bounds their normalization identities at 10,000. The
 existing source/cache validation budget remains in force. The host must still

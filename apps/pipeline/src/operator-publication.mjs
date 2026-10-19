@@ -16,6 +16,7 @@ export function createOperatorPublicationVerifier({
   policyVersion,
   computationVersion,
   scopeKey,
+  publicationScopesAt,
   digest,
   approved,
   controlsStore,
@@ -43,7 +44,8 @@ export function createOperatorPublicationVerifier({
       binding.sourceGenerations.length !== config.repositories.length
     )
       return null;
-    const scopes = new Map(config.scopes.map((scope) => [scopeKey(scope), scope]));
+    // The persisted event cutoff owns the scopes, independently of later read clocks.
+    const scopes = new Map(publicationScopesAt(operation.cutoff).map((scope) => [scopeKey(scope), scope]));
     if (
       scopes.size !== binding.publications.length ||
       new Set(binding.publications.map((item) => item.scopeKey)).size !== scopes.size ||
