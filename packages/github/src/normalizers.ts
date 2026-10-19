@@ -21,6 +21,7 @@ import {
 } from "@pick-your-ai/contracts";
 import { GithubReadClient } from "./client.js";
 import { readGithubCommentSource, readGithubCommentIdentity } from "./comment-identity.js";
+import { consistentReviewCohortIdentities, reviewParentMatches, reviewSourceMatches } from "./review-cohort.js";
 import {
   hasGithubRestSnapshotPrefix,
   isGithubRestSnapshotFamily,
@@ -45,24 +46,40 @@ import {
   type ClassifiedPhysicalDiff,
 } from "./physical-diff.js";
 
+/** Cache generation for separately observed repository default-branch admission. */
+export const defaultDeliveryNormalizationVersion = "default-delivery-scope/v1";
+
 /** Hash only explicit source fields; text contributes to revision identity but is never retained. */
 export function githubReviewRevision(value: Record<string, unknown>): string {
   const user = value.user !== null && typeof value.user === "object" ? (value.user as Record<string, unknown>) : {};
+  // Missing optional source identities are permitted; explicitly malformed ones
+  // are not. Preserve that distinction in the collected cache identity as well.
+  const supplied = (record: Record<string, unknown>, key: string) => [record[key] !== undefined, record[key] ?? null];
+  const links = object(value._links)
+    ? ["links", supplied(value._links, "html"), supplied(value._links, "pull_request")]
+    : supplied(value, "_links");
   return createHash("sha256")
     .update(
       JSON.stringify([
         value.id ?? null,
-        value.node_id ?? null,
+        supplied(value, "node_id"),
         value.state ?? null,
         value.submitted_at ?? null,
         value.commit_id ?? null,
         user.id ?? null,
         user.type ?? null,
         value.body ?? null,
+        value.html_url ?? null,
+        supplied(value, "pull_request_url"),
+        supplied(user, "node_id"),
+        links,
       ]),
     )
     .digest("hex");
 }
+
+/** Native answer selection is bound to source creation and observation clocks. */
+export const discussionSourceNormalizationVersion = "discussion-answer-chronology/v1";
 
 export function githubDiscussionRevision(value: Record<string, unknown>): string {
   const identity = (value: unknown) =>
@@ -77,6 +94,7 @@ export function githubDiscussionRevision(value: Record<string, unknown>): string
         value.answerChosenAt ?? null,
         object(value.answer) ? (value.answer.id ?? null) : null,
         object(value.answer) ? (value.answer.isAnswer ?? null) : null,
+        object(value.answer) ? (value.answer.createdAt ?? null) : null,
         object(value.answer) ? identity(value.answer.author) : null,
         identity(value.answerChosenBy),
       ]),
@@ -936,14 +954,28 @@ export function normalizeGithubObservation(
       const answerAuthor = register(resource.answer.author);
       const chosenBy = register(resource.answerChosenBy);
       const chosenAt = time(resource.answerChosenAt);
+      const discussionCreatedAt = time(resource.createdAt);
+      const answerCreatedAt = time(resource.answer.createdAt);
       const answerId = resourceId(resource.answer, "other", repository.id);
-      if (answerId && resource.answer.isAnswer === true && chosenAt) {
+      if (!answerId || resource.answer.isAnswer !== true) {
+        out.reasons.push("discussion_answer_selection_unverified");
+      } else if (!chosenAt || !discussionCreatedAt || !answerCreatedAt) {
+        // Never borrow the parent/update/collection clock for an unavailable
+        // answer creation or selection. Native source ordering is unverified.
+        out.reasons.push("discussion_answer_time_unverified");
+      } else if (
+        compareSourceInstants(discussionCreatedAt, answerCreatedAt) > 0 ||
+        compareSourceInstants(answerCreatedAt, chosenAt) > 0 ||
+        compareSourceInstants(chosenAt, observedAt) > 0
+      ) {
+        out.reasons.push("discussion_answer_chronology_invalid");
+      } else {
         emit("discussion_answers", answerAuthor, "author", chosenAt, `${id}:answer:${answerId}`, {
           acceptedAt: chosenAt,
           acceptedBy: chosenBy?.id ?? null,
           rawState: "native_answer_selection",
         });
-      } else out.reasons.push("discussion_answer_selection_unverified");
+      }
     }
     if (!envelope.discussionAnswerSelection?.verified)
       out.reasons.push("discussion_answer_requires_selected_current_revision");
@@ -1804,7 +1836,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
                 id url createdAt updatedAt answerChosenAt
                 author { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }
                 answerChosenBy { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }
-                answer { id isAnswer author { __typename login ... on User { id databaseId } ... on Bot { id databaseId } } }
+                answer { id isAnswer createdAt author { __typename login ... on User { id databaseId } ... on Bot { id databaseId } } }
               }
             }
           }`,
@@ -1871,6 +1903,15 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         if (!comment || comment.kind !== family || comment.sourceUrl !== input.fact.sourceUrl)
           return none("comment_source_identity_unverified");
       }
+      if (family === "review" && pull) {
+        const parentApiUrl = `https://api.github.com/repos/${input.repository.slug}/pulls/${pull[1]}`;
+        if (
+          !reviewParentMatches(pullResource, sourceUrl, pull[1]!) ||
+          !reviewSourceMatches(payload, sourceUrl, parentApiUrl) ||
+          payload.html_url !== input.fact.sourceUrl
+        )
+          return none("review_parent_or_source_identity_unverified");
+      }
       const identities = [payload.node_id, payload.id, payload.sha].filter((value) => value !== undefined).map(String);
       if (!identities.includes(input.fact.subjectId)) return none("hydrated_subject_identity_mismatch");
       const revisionMatches = hasGithubRestSnapshotPrefix(input.fact.sourceRevision)
@@ -1916,6 +1957,12 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         const ids = new Set<string>();
         const complete =
           cohort.length <= 10000 &&
+          consistentReviewCohortIdentities(
+            cohort,
+            payload,
+            sourceUrl,
+            `https://api.github.com/repos/${input.repository.slug}/pulls/${pull[1]}`,
+          ) &&
           cohort.every((review) => {
             if (!object(review)) return false;
             const reviewId = resourceId(review, "review", input.repository.id);
@@ -1923,11 +1970,13 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
             ids.add(reviewId);
             return (
               review.state === "PENDING" ||
-              (submittedStates.includes(String(review.state)) &&
+              (typeof review.state === "string" &&
+                submittedStates.includes(review.state) &&
                 time(review.submitted_at) !== null &&
                 object(review.user) &&
                 positive(review.user.id) &&
-                pinnedSha(String(review.commit_id)))
+                typeof review.commit_id === "string" &&
+                pinnedSha(review.commit_id))
             );
           });
         const currentId = resourceId(payload, "review", input.repository.id);
@@ -1938,9 +1987,11 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         if (
           complete &&
           object(current) &&
+          current.id === payload.id &&
           current.state === payload.state &&
           current.submitted_at === payload.submitted_at &&
           current.commit_id === payload.commit_id &&
+          current.node_id === payload.node_id &&
           object(current.user) &&
           current.user.id === reviewerId &&
           Number.isSafeInteger(reviewerId)
@@ -1948,7 +1999,8 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           const submissions = cohort.filter(
             (review): review is Record<string, unknown> =>
               object(review) &&
-              submittedStates.includes(String(review.state)) &&
+              typeof review.state === "string" &&
+              submittedStates.includes(review.state) &&
               object(review.user) &&
               review.user.id === reviewerId,
           );

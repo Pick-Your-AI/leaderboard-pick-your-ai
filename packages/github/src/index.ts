@@ -4,6 +4,7 @@ export * from "./client.js";
 export * from "./checkpoints.js";
 export type { QuotaResource, QuotaObservation, QuotaDiagnostics } from "./quota.js";
 export * from "./normalizers.js";
+export { reviewSourceNormalizationVersion } from "./review-cohort.js";
 export * from "./rest-snapshot.js";
 export * from "./project-snapshots.js";
 export * from "./project-context.js";

@@ -5,6 +5,7 @@ import { createPipeline } from "../src/index.mjs";
 import { aggregateExplanationHash } from "../src/aggregate-explanations.mjs";
 import { retainedRankHistory } from "../src/rank-history.mjs";
 import { harness, components, clock, ago, boardUrl } from "./harness.mjs";
+import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-intake.mjs";
 
 async function twoSnapshots(t, extra = {}, beforePublish) {
   const scope = {
@@ -78,6 +79,7 @@ const recognitionPair = (t) =>
           history: [event],
         };
         state.audit.push(event);
+        attachSyntheticEvidenceState(state);
       });
     },
   );

@@ -124,7 +124,7 @@ async function service(page: Page, approved = true) {
   let corruptAchievementCoverage = false;
   let calls = 0;
   const categories: (string | null)[] = [];
-  const fulfilledAchievements = new WeakMap<Request, { status: number; body: string }>();
+  const fulfilledAchievements = new WeakMap<Request, { url: string; status: number; body: string }>();
   const app = createService({
     approvedAchievementRuleVersion: approved ? "accepted-evidence/v1" : undefined,
     source: {
@@ -154,7 +154,7 @@ async function service(page: Page, approved = true) {
     }
     await route.fulfill({ status: response.statusCode, headers, body });
     if (url.pathname.endsWith("/achievements")) {
-      fulfilledAchievements.set(request, { status: response.statusCode, body });
+      fulfilledAchievements.set(request, { url: url.href, status: response.statusCode, body });
     }
   });
   return {
@@ -236,13 +236,16 @@ test("real controls current spotlights reject filtered scope and disappear after
   const api = await service(page);
   const { ControlStore } = await import(new URL("../../controls/src/store.mjs", import.meta.url).href);
   const { createControlsServer } = await import(new URL("../../controls/src/server.mjs", import.meta.url).href);
+  const { attachSyntheticEvidenceIntake } = await import(
+    new URL("../../../tests/fixtures/evidence-intake.mjs", import.meta.url).href
+  );
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const directory = mkdtempSync(join(tmpdir(), "synthetic-recognition-browser-"));
   const store = new ControlStore(join(directory, "controls.sqlite"));
   store.transaction((state: any) => {
-    state.requests.claim = {
+    state.requests.claim = attachSyntheticEvidenceIntake({
       id: "claim",
       owner: "1",
       kind: "evidence",
@@ -250,7 +253,13 @@ test("real controls current spotlights reject filtered scope and disappear after
       version: 2,
       locator: "https://github.com/synthetic/example/issues/1",
       category: "governance",
-    };
+      scope: "Synthetic reviewed governance claim",
+      collaborators: {},
+      policyVersion: "synthetic-recognition-v1",
+      history: [
+        { actor: "3", action: "accepted", at: Date.parse(at), version: 2, policyVersion: "synthetic-recognition-v1" },
+      ],
+    });
     state.spotlights = {
       nomination: {
         id: "nomination",
@@ -284,6 +293,8 @@ test("real controls current spotlights reject filtered scope and disappear after
     await page.clock.install();
     await page.goto("/?ui=api");
     await expect(page.getByRole("heading", { name: "Public contribution evidence", exact: true })).toBeVisible();
+    // Health and the optional spotlight module mount from the same loaded-data render.
+    await expect(page.getByRole("heading", { name: /^(Recently reconciled|Stale or degraded)$/ })).toBeVisible();
     if (!(await page.getByRole("heading", { name: "Editorial spotlights", exact: true }).count())) {
       expect(calls).toBe(0);
       return; // An unconfigured controls deployment must not be auto-enabled by the UI.
@@ -363,7 +374,10 @@ test("contradictory achievement coverage clears visible awards while keeping the
     expect(response.status()).toBe(200);
     const request = response.request();
     await expect.poll(() => api.fulfilledAchievement(request)?.status).toBe(200);
-    const supplied = JSON.parse(api.fulfilledAchievement(request)!.body);
+    const delivered = api.fulfilledAchievement(request)!;
+    expect(delivered.url).toBe(response.url());
+    expect(delivered.status).toBe(response.status());
+    const supplied = JSON.parse(delivered.body);
     expect(supplied.coverage).toEqual([]);
     expect(supplied.achievements).toHaveLength(1);
     await expect.poll(() => api.calls()).toBeGreaterThan(before);

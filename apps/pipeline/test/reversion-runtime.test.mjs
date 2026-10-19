@@ -105,6 +105,7 @@ async function scenario(t, extra = {}) {
   const reviewed = [];
   const h = await harness(t, {
     now: () => current,
+    defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
     normalizerFactory:
       () =>
       async ({ fact }) =>

@@ -472,3 +472,62 @@ test("export ranking directions require literal enum values instead of coercible
     await assert.rejects(() => h.download(h.selected, h.expected, "json"), invalid);
   }
 });
+
+// Alter every copy of a timestamp so metadata equality cannot mask the date
+// admission check. Both formats still traverse the real exportPage boundary.
+function withExportTime(h, format, target, value) {
+  if (format === "json") {
+    const document = JSON.parse(h.json);
+    if (target === "generatedAt") document.generatedAt = value;
+    else {
+      assert.ok(document[target].length > 0, target);
+      for (const entry of document[target]) entry.occurredAt = value;
+    }
+    return JSON.stringify(document);
+  }
+  return altered(h.original, (records, col) => {
+    if (target === "generatedAt") {
+      for (const row of records.slice(1)) row[col("generated_at")] = value;
+      return;
+    }
+    const column = target === "pendingEvidence" ? "pending_evidence" : "evidence";
+    let changed = 0;
+    for (const row of records.slice(2)) {
+      const entries = JSON.parse(row[col(column)]);
+      for (const entry of entries) {
+        entry.occurredAt = value;
+        changed++;
+      }
+      row[col(column)] = JSON.stringify(entries);
+    }
+    assert.ok(changed > 0, target);
+  });
+}
+
+for (const format of ["json", "csv"]) {
+  for (const target of ["generatedAt", "evidence", "pendingEvidence"]) {
+    test(`${format} export rejects malformed ${target} timestamps without rank comparison`, async (t) => {
+      const h = await harness(t);
+      assert.equal(h.selected.compare, undefined);
+      const download = () => h.download(h.selected, h.expected, format);
+      for (const invalidTime of ["", "not-a-date", "2026-13-19T03:00:00Z", "2026-10-19", "2026-10-19T03:00:00"]) {
+        h.reply(withExportTime(h, format, target, invalidTime), format);
+        await assert.rejects(download, invalid, `${target}: ${JSON.stringify(invalidTime)}`);
+      }
+    });
+  }
+
+  test(`${format} export preserves valid offset precision and unknown evidence times exactly`, async (t) => {
+    const h = await harness(t);
+    const download = () => h.download(h.selected, h.expected, format);
+    for (const target of ["generatedAt", "evidence", "pendingEvidence"]) {
+      const values = ["2026-10-19T03:00:00Z", "2026-10-19T08:30:00.123456789+05:30", "2026-10-18T22:30:00-04:30"];
+      if (target !== "generatedAt") values.push(null);
+      for (const value of values) {
+        const wire = withExportTime(h, format, target, value);
+        h.reply(wire, format);
+        assert.equal(await (await download()).text(), wire, `${target}: ${JSON.stringify(value)}`);
+      }
+    }
+  });
+}

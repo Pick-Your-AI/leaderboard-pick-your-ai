@@ -13,6 +13,10 @@ import {
   selectMetricView,
 } from "@pick-your-ai/metrics";
 import { materializeRecognition, recognitionFingerprint } from "../src/recognition-adapter.mjs";
+import {
+  attachSyntheticEvidenceIntake,
+  attachSyntheticEvidenceState,
+} from "../../../tests/fixtures/evidence-intake.mjs";
 
 const fixture = JSON.parse(
   readFileSync(new URL("../../../packages/github/test/fixtures/engineering.json", import.meta.url), "utf8"),
@@ -21,7 +25,14 @@ const mergedAt = "2026-10-07T10:00:00.000Z";
 const acceptedAt = "2026-10-09T10:00:00.000Z";
 const cutoff = "2026-10-10T10:00:00.000Z";
 
-function scenario({ lifecycle = "merged", coauthor = false, number = 10, markerFree = false } = {}) {
+function scenario({
+  lifecycle = "merged",
+  coauthor = false,
+  number = 10,
+  markerFree = false,
+  collaborators = {},
+  accepted = acceptedAt,
+} = {}) {
   const data = markerFree ? JSON.parse(JSON.stringify(fixture).replace(/synthetic/gi, "fixture")) : fixture;
   const slug = markerFree ? "example-org/example-repo" : "synthetic-owner/repository";
   const family = lifecycle === "issue" ? "issue" : "pull_request";
@@ -68,23 +79,29 @@ function scenario({ lifecycle = "merged", coauthor = false, number = 10, markerF
   const decision = {
     id: `private-maintenance-review-${number}-${candidate.actorId}`,
     action: "accepted",
+    version: 2,
     actor: "202",
-    at: Date.parse(acceptedAt),
+    at: Date.parse(accepted),
     policyVersion: "maintenance-policy-v1",
   };
   const request = {
     id: `private-maintenance-claim-${number}-${candidate.actorId}`,
     kind: "evidence",
     status: "accepted",
+    version: 2,
     owner: candidate.actorId,
     category: "maintenance",
     scope: `repository:2:maintenance:${sourceMetricId}`,
     policyVersion: decision.policyVersion,
     locator: evidence.artifact.publicUrl,
-    collaborators: {},
+    collaborators: structuredClone(collaborators),
     history: [decision],
   };
-  const state = { requests: { [request.id]: request }, profiles: {}, audit: [structuredClone(decision)] };
+  const state = attachSyntheticEvidenceState({
+    requests: { [request.id]: request },
+    profiles: {},
+    audit: [structuredClone(decision)],
+  });
   const binding = {
     category: request.category,
     scope: request.scope,
@@ -266,12 +283,7 @@ const invalidSources = {
     s.input.actors.push(structuredClone(s.input.actors.find((actor) => actor.id === s.candidate.actorId)));
     return s;
   },
-  "acceptance before the merge": () => {
-    const s = scenario();
-    s.decision.at = Date.parse("2026-10-06T10:00:00.000Z");
-    s.state.audit = [structuredClone(s.decision)];
-    return s;
-  },
+  "acceptance before the merge": () => scenario({ accepted: "2026-10-06T10:00:00.000Z" }),
 };
 for (const [name, create] of Object.entries(invalidSources)) {
   test(`maintenance: pipeline rejects ${name} before custom receipt authority`, () => {
@@ -312,7 +324,9 @@ function duplicateRequest(s, offset = 1000) {
   const request = structuredClone(s.request);
   request.id = "private-maintenance-alias";
   request.history[0].id = "private-maintenance-alias-review";
+  request.history[0].receipt = request.id;
   request.history[0].at += offset;
+  attachSyntheticEvidenceIntake(request);
   s.state.requests[request.id] = request;
   s.state.audit.push(structuredClone(request.history[0]));
   return request;
@@ -424,18 +438,11 @@ test("maintenance: withdrawal, rejection, reviewer conflicts and audit removal r
     s.request.status = status;
     assert.deepEqual(s.run(), s.input);
   }
-  for (const mutate of [
-    (s) => {
-      s.request.collaborators["202"] = "accepted";
-    },
-    (s) => {
-      s.state.audit = [];
-    },
-  ]) {
-    const s = scenario();
-    mutate(s);
-    assert.throws(() => s.run(), /recognition_decision_unverified/);
-  }
+  const conflict = scenario({ collaborators: { 202: "accepted" } });
+  assert.throws(() => conflict.run(), /recognition_decision_unverified/);
+  const missingAudit = scenario();
+  missingAudit.state.audit = [];
+  assert.throws(() => missingAudit.run(), /recognition_decision_unverified/);
 });
 
 // Isolate missing maintenance authority while retaining the other independent
@@ -467,16 +474,21 @@ function previousAuthority(state, bindings) {
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
-test("maintenance: prior authority retires maintenance and later answer-clock bindings", () => {
+test("maintenance: configuration fences preserve automatic sources while manual intake retires prior claim authority", () => {
   const s = scenario();
+  const empty = { requests: {}, profiles: {}, audit: [] };
   for (const metric of metricRegistryV1.metrics) {
     const bindings = [{ ...s.binding, metricId: metric.id }];
+    assert.notEqual(
+      recognitionFingerprint(s.state, bindings),
+      previousAuthority(s.state, bindings),
+      `${metric.id}: manual intake retires prior claim authority`,
+    );
     // Keep the literal pre-maintenance authority; the answer clock has its own fence.
     if (["maintenance", "issue_answers"].includes(metric.id))
-      assert.notEqual(recognitionFingerprint(s.state, bindings), previousAuthority(s.state, bindings));
-    else assert.equal(recognitionFingerprint(s.state, bindings), previousAuthority(s.state, bindings), metric.id);
+      assert.notEqual(recognitionFingerprint(empty, bindings), previousAuthority(empty, bindings));
+    else assert.equal(recognitionFingerprint(empty, bindings), previousAuthority(empty, bindings), metric.id);
   }
-  const empty = { requests: {}, profiles: {}, audit: [] };
   const unrelated = { ...s.binding, metricId: "accepted_findings" };
   assert.notEqual(
     recognitionFingerprint(empty, [unrelated, s.binding]),
@@ -497,6 +509,7 @@ test("maintenance: obsolete authority withholds persisted public proofs and priv
     dataMode: "public",
     payloads: [s.payload],
     normalizerFactory: () => async () => structuredClone(s.input),
+    defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
     authorizePolicyPreview: async () => true,
     configure(config) {
       config.repositories[0].families = ["pull_requests"];

@@ -3,6 +3,7 @@ import test from "node:test";
 import { join } from "node:path";
 import { createPipeline } from "../src/index.mjs";
 import { harness, components, publicScope, fixtureId } from "./harness.mjs";
+import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-intake.mjs";
 
 const { canonicalPublicScope, publicScopeKey, publicScopeParameters, publicWindowPeriods, parsePublicWindows } =
   components.contracts;
@@ -458,6 +459,7 @@ test("the final discovery fence rechecks recognition withdrawal after every capt
       history: [event],
     };
     state.audit.push(event);
+    attachSyntheticEvidenceState(state);
   });
   await h.runtime.runOnce({ cutoff });
   const initial = await menu(h.runtime);

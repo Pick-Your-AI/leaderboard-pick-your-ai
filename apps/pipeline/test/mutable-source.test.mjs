@@ -79,7 +79,7 @@ test("mutable review and Discussion snapshots replace current credit while pinne
     author: graphqlActor(101),
     answerChosenAt: at,
     answerChosenBy: graphqlActor(202),
-    answer: { id: "DC_SYNTHETIC_5", isAnswer: true, author: graphqlActor(404) },
+    answer: { id: "DC_SYNTHETIC_5", createdAt: at, isAnswer: true, author: graphqlActor(404) },
   };
   const graphqlPaths = [];
   const githubClient = new components.github.GithubReadClient({
@@ -93,6 +93,7 @@ test("mutable review and Discussion snapshots replace current credit while pinne
       if (url.pathname === "/graphql") {
         const request = JSON.parse(options.body);
         graphqlPaths.push(request.query);
+        assert.match(request.query, /answer\s*\{[^}]*\bcreatedAt\b/, "collection and hydration bind answer creation");
         if (request.query.includes("discussion(number:"))
           assert.match(
             request.query,
