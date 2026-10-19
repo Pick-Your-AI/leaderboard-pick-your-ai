@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { types } from "node:util";
 import { sourceFamilies, type SourceFact, type SourceFamily } from "./collection.js";
 import type { SqlDatabase, SqlSession } from "./store.js";
 
@@ -64,6 +65,21 @@ function capturedScope(value?: EnrichmentScope): EnrichmentScope | null {
   };
 }
 
+function drainUnexpectedPromise(value: unknown, seen = new WeakSet<object>()): void {
+  // Invalid authority values must not execute foreign then getters or methods.
+  if (!types.isPromise(value) || seen.has(value)) return;
+  seen.add(value);
+  try {
+    // Observe native rejection reasons once, including cycles; discard fulfilled
+    // values. Promise constructor/species behavior remains trusted host code.
+    void Promise.prototype.then.call(
+      value,
+      () => undefined,
+      (reason) => drainUnexpectedPromise(reason, seen),
+    );
+  } catch {}
+}
+
 function current(scope: EnrichmentScope | null): void {
   if (!scope) return;
   if (scope.signal?.aborted) throw new Error("enrichment_authorization_changed");
@@ -71,10 +87,9 @@ function current(scope: EnrichmentScope | null): void {
     const result: unknown = scope.current();
     if (result === true) return;
     // Supplied host functions are synchronous; a promise is not authorization.
-    if (result && typeof (result as PromiseLike<unknown>).then === "function")
-      void Promise.resolve(result).catch(() => undefined);
-  } catch {
-    /* fixed denial below */
+    drainUnexpectedPromise(result);
+  } catch (error) {
+    drainUnexpectedPromise(error);
   }
   throw new Error("enrichment_authorization_changed");
 }
