@@ -7,6 +7,63 @@ const escape = (value: string) =>
     (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]!,
   );
 
+const svgGraphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
+
+/** Keep the existing free-text budget without manufacturing half a surrogate pair or grapheme. */
+function svgLabel(value: string): string {
+  const text = value;
+  if (text.length <= 115) return text;
+  let end = 0;
+  for (const part of svgGraphemes.segment(text)) {
+    if (part.index + part.segment.length > 112) break;
+    end = part.index + part.segment.length;
+  }
+  return text.slice(0, end) + "…";
+}
+
+/** Explicit fixed-pitch lengths constrain glyphs as well as spacing; no proportional-font width estimate. */
+function svgRows(lines: string[]): { text: string; length: string }[] {
+  const rows: { text: string; length: string }[] = [];
+  const widthOf = (segment: string) => (/^[\x00-\x7F]+$/.test(segment) ? segment.length : 2);
+  for (const line of lines) {
+    const wrapped: { text: string; length: string }[] = [];
+    let text = "";
+    let cells = 0;
+    const append = () => wrapped.push({ text, length: ((cells * 84) / 10).toFixed(1) });
+    for (const { segment } of svgGraphemes.segment(line)) {
+      const width = widthOf(segment);
+      if (cells + width > 108) {
+        append();
+        text = "";
+        cells = 0;
+      }
+      text += segment;
+      cells += width;
+    }
+    if (text) append();
+    // Keep embeds readable even for 100 maximum-length Project IDs. The
+    // accessible description below retains the complete bounded logical line.
+    if (wrapped.length > 3) {
+      const suffix = "… [full text in description]";
+      const suffixCells = suffix.length + 1;
+      text = "";
+      cells = 0;
+      for (const { segment } of svgGraphemes.segment(wrapped[2]!.text)) {
+        const width = widthOf(segment);
+        if (cells + width + suffixCells > 108) break;
+        text += segment;
+        cells += width;
+      }
+      wrapped.splice(2, wrapped.length - 2, {
+        text: text + suffix,
+        length: (((cells + suffixCells) * 84) / 10).toFixed(1),
+      });
+    }
+    rows.push(...wrapped);
+  }
+  return rows;
+}
+
 /** A source page may support several distinct contributions, but is still one public link. */
 function publicSourceLinks(read: PublicRead, evidenceIds: string[]): string[] {
   const selectedIds = new Set(evidenceIds);
@@ -102,7 +159,12 @@ export function renderContributorCardImage(
   const row = read.selected.rows.find((entry) => entry.actorId === actorId && entry.result.metricId === metric.id);
   if (!actor || !row) throw new PublicReadError(404, "card_unavailable");
   const { snapshot, scope } = read.selected;
-  const context = measurementContext(read, row, metric);
+  const context = measurementContext(read, row, metric).map(([label, value], index) => [
+    label,
+    // Registry prose is not length-bounded by the schema. Later context values
+    // are bounded numbers, fixed labels or canonical Project/role selections.
+    index < 3 ? svgLabel(value) : value,
+  ]);
   const contextLines = context.slice(0, 3).map(([label, value]) => `${label}: ${value}`);
   for (let index = 3; index < context.length; index += 2)
     contextLines.push(
@@ -114,19 +176,19 @@ export function renderContributorCardImage(
   const method = read.selected.methodology?.find((entry) => entry.metricId === metric.id);
   const sources = publicSourceLinks(read, row.evidenceIds);
   const lines = [
-    `${metric.name}: ${row.result.value ?? row.result.state} (${row.result.state})`,
-    actor.actor.login ?? actorId,
+    `${svgLabel(metric.name)}: ${row.result.value ?? row.result.state} (${row.result.state})`,
+    actor.actor.login == null ? actorId : svgLabel(actor.actor.login),
     ...contextLines,
-    `${archived ? "Archived" : "Current dated"} snapshot: ${snapshot.generatedAt}`,
+    `${archived ? "Archived" : "Current dated"} snapshot: ${svgLabel(snapshot.generatedAt)}`,
     `Period: ${scope.start ?? "available history"} to ${scope.end ?? "snapshot date"}`,
     `Scope: ${[scope.organization, scope.repository, scope.workstream].filter(Boolean).join(" / ")} / ${actorFilterLabels[read.actorFilter ?? "all"]}`,
-    `Registry: ${snapshot.metricDefinitionVersion}`,
+    `Registry: ${svgLabel(snapshot.metricDefinitionVersion)}`,
     `Policy: ${method?.policyVersion ?? "not supplied"}`,
     `Coverage: ${row.result.coverage.state}`,
     `Source: ${sources[0] ?? "public link unavailable"}${sources.length > 1 ? ` (+${sources.length - 1} more in portfolio)` : ""}`,
     "Dated evidence, not a live activity or productivity claim.",
   ];
-  const bounded = (line: string) => escape(line.length > 115 ? line.slice(0, 112) + "…" : line);
-  const height = 76 + (lines.length - 1) * 36;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="${height}" viewBox="0 0 960 ${height}" role="img" aria-labelledby="title description"><title id="title">${bounded(`${metric.name} — dated contribution card`)}</title><desc id="description">${lines.map(bounded).join("; ")}</desc><rect width="960" height="${height}" rx="12" fill="#ffffff" stroke="#334155"/><g fill="#172033" font-family="sans-serif" font-size="14">${lines.map((line, index) => `<text x="24" y="${38 + index * 36}">${bounded(line)}</text>`).join("")}</g></svg>`;
+  const rows = svgRows(lines);
+  const height = 76 + (rows.length - 1) * 36;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="${height}" viewBox="0 0 960 ${height}" role="img" aria-labelledby="title description"><title id="title">${escape(`${svgLabel(metric.name)} — dated contribution card`)}</title><desc id="description">${lines.map(escape).join("; ")}</desc><rect width="960" height="${height}" rx="12" fill="#ffffff" stroke="#334155"/><g fill="#172033" font-family="monospace" font-size="14">${rows.map((line, index) => `<text x="24" y="${38 + index * 36}" textLength="${line.length}" lengthAdjust="spacingAndGlyphs" xml:space="preserve">${escape(line.text)}</text>`).join("")}</g></svg>`;
 }
