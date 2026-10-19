@@ -58,6 +58,40 @@ function replaceContext(raw, mutate) {
   });
 }
 
+for (const [beforeWidth, afterWidth] of [
+  [40, 40],
+  [64, 64],
+  [40, 64],
+  [64, 40],
+])
+  test(`physical ${beforeWidth}/${afterWidth} pins agree in the public schema, board, JSON and CSV`, async (t) => {
+    const h = await documents(t);
+    const mutate = (context) => {
+      const sample = context.samples[0];
+      sample.before = "b".repeat(beforeWidth);
+      sample.after = "c".repeat(afterWidth);
+      const base = sample.sourceUrl.replace(/\/pull\/[1-9]\d*$/, "/commit/");
+      sample.beforeUrl = base + sample.before;
+      sample.afterUrl = base + sample.after;
+    };
+    const changedBoard = structuredClone(h.board);
+    mutate(changedBoard.rows[0].physicalContext);
+    const changedJSON = JSON.parse(h.json);
+    mutate(changedJSON.rows[0].physicalContext);
+    const readers = [
+      () => board(changedBoard, h.selected),
+      () => validateExport(parseExportJSON(JSON.stringify(changedJSON)), h.selected, h.metric),
+      () => validateExport(parseCSVExport(replaceContext(h.csv, mutate), h.metric, 20), h.selected, h.metric),
+    ];
+    const admitted = beforeWidth === afterWidth;
+    assert.equal(publicPhysicalContextSchema.safeParse(changedBoard.rows[0].physicalContext).success, admitted);
+    for (const read of readers)
+      if (admitted) assert.doesNotThrow(read);
+      else assert.throws(read, /invalid_physical_context/);
+    assert.deepEqual(changedBoard.rows[0].value, h.board.rows[0].value);
+    assert.deepEqual(changedBoard.rows[0].physicalContext.summary, h.board.rows[0].physicalContext.summary);
+  });
+
 const substitutions = [
   [
     "snapshot",

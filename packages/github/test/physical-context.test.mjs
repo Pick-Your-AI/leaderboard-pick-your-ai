@@ -98,6 +98,23 @@ test("one pinned integration retains exact physical classes and original emitted
   assert.equal(receipt.summary.eligible.additions, 17);
 });
 
+for (const [beforeWidth, afterWidth] of [
+  [40, 40],
+  [64, 64],
+  [40, 64],
+  [64, 40],
+])
+  test(`private physical receipt ${beforeWidth}/${afterWidth} pins require one storage-format width`, () => {
+    const original = normalizeGithubObservation(observation()).physicalContext;
+    assert.ok(original);
+    const receipt = structuredClone(original);
+    receipt.before = "b".repeat(beforeWidth);
+    receipt.after = "c".repeat(afterWidth);
+    assert.equal(githubPhysicalContextReceiptSchema.safeParse(receipt).success, beforeWidth === afterWidth);
+    assert.deepEqual(receipt.facts, original.facts);
+    assert.deepEqual(receipt.summary, original.summary);
+  });
+
 test("complete zero and negative descriptive net remain separate from missing context", () => {
   const zero = normalizeGithubObservation(observation([])).physicalContext;
   assert.ok(zero);

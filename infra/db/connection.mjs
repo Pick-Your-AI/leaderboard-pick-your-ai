@@ -18,6 +18,14 @@ export function localDatabaseUrl() {
   if (url.searchParams.has("host")) {
     throw new Error("Database scaffold commands do not allow query-string host overrides");
   }
+  // A decoded NUL can add startup parameters, including a different database.
+  // URL fields retain escapes; searchParams has already decoded exactly once.
+  if (
+    [url.username, url.password, url.pathname].some((part) => /%00/.test(part)) ||
+    [...url.searchParams].some(([name, content]) => name.includes("\0") || content.includes("\0"))
+  ) {
+    throw new Error("Database scaffold commands do not allow NUL characters in connection fields");
+  }
   return value;
 }
 

@@ -89,6 +89,7 @@ const sample = z
     const base = value.sourceUrl.replace(/\/pull\/[1-9]\d*$/, "/commit/");
     if (
       value.before === value.after ||
+      value.before.length !== value.after.length ||
       value.beforeUrl !== base + value.before ||
       value.afterUrl !== base + value.after
     )

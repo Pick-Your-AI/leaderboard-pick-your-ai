@@ -120,6 +120,7 @@ export const githubPhysicalContextReceiptSchema = z
       ctx.addIssue({ code: "custom", message: "Physical receipt must bind one complete integration" });
     if (
       value.before === value.after ||
+      value.before.length !== value.after.length ||
       value.summary.raw.files > 10_000 ||
       new Set(value.facts.map((fact) => fact.factId)).size !== value.facts.length ||
       new Set(value.facts.map((fact) => fact.canonicalKey)).size !== value.facts.length
