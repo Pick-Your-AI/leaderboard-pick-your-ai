@@ -120,7 +120,13 @@ export function classifyGithubFailure(input: GithubFailureInput): EndpointOutcom
     // GitHub's guidance is to wait at least 60 seconds when a secondary-limit
     // response gives neither Retry-After nor a primary reset time.
     const fallback = new Date(now.getTime() + 60_000);
-    const retryAt = retryAfter ?? (remaining === "0" ? reset : undefined) ?? fallback;
+    // Both applicable limits must elapse; a shorter Retry-After cannot discard
+    // the independently exhausted primary budget's reset.
+    const exhaustedReset = remaining === "0" ? reset : undefined;
+    const retryAt =
+      retryAfter && exhaustedReset
+        ? new Date(Math.max(retryAfter.getTime(), exhaustedReset.getTime()))
+        : (retryAfter ?? exhaustedReset ?? fallback);
     return { kind: "rate_limited", visibility: "unknown", retryAt: retryAt.toISOString(), scope: "source" };
   }
   if (input.status === 401) return { kind: "authentication_required", visibility: "unknown", status: 401 };
