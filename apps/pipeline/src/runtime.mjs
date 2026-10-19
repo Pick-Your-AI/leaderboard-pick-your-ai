@@ -2259,6 +2259,11 @@ export async function createPipeline(options) {
     ? new c.ingestion.OperatorInbox(db, {
         now: () => utc(now()),
         verifyPublications: verifyReplayPublications,
+        replayReadGuard: (scope) => {
+          const revision = restrictConfiguration(controlsStore.read()).revision;
+          return () =>
+            diagnosticConfigurationCurrent(scope) && restrictConfiguration(controlsStore.read()).revision === revision;
+        },
         readHealth: async (tx, scope) => {
           const repository = config.repositories.find(
             (repo) => repo.id === scope.repositoryId && String(repo.installationId) === scope.installationId,
