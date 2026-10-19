@@ -7,6 +7,9 @@ import {
   publicScopeKey,
   publicScopeParameters,
   publicRoleScopeSchemaVersion,
+  achievementMilestoneVersion,
+  achievementMilestonesPageSchema,
+  participationHistoryResponseByteLimit,
   metricRegistrySchema,
   type ActorFilter,
   type MetricRegistry,
@@ -14,9 +17,11 @@ import {
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { comparePublishedRanks, type ComparedRanks } from "./rank-comparison.js";
 import { acceptedAchievements, ACHIEVEMENT_RULE_VERSION } from "./achievements.js";
+import { acceptedMilestones } from "./achievement-milestones.js";
 import { renderContributorCard, renderContributorCardImage } from "./cards.js";
 import { renderPublicExport } from "./exports.js";
 import { publicParticipation } from "./participation.js";
+import { publicOrganizationHistory, validateParticipationHistoryRead } from "./participation-history.js";
 import {
   activityGroupingVersion,
   activityIndex,
@@ -45,7 +50,7 @@ export interface ServiceOptions {
   maxConcurrentStreams?: number;
   cursorSecret?: string;
   serviceVersion?: string;
-  approvedAchievementRuleVersion?: typeof ACHIEVEMENT_RULE_VERSION;
+  approvedAchievementRuleVersion?: typeof ACHIEVEMENT_RULE_VERSION | typeof achievementMilestoneVersion;
 }
 const allowed = new Set([
   "actors",
@@ -793,13 +798,104 @@ export function createService(options: ServiceOptions = {}) {
       evidenceIds: timeline.map((entry) => entry.contribution.contributionId),
     });
   });
+  async function participationHistory(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    actorId: string,
+    proof: { historyKey: string; contributionId: string } | null,
+  ) {
+    const q = query(request);
+    const params = new URL(request.url, "http://localhost").searchParams;
+    if (
+      !identifier.test(actorId) ||
+      actorId === "." ||
+      actorId === ".." ||
+      ["metric", "search", "cursor", "limit", "format"].some((key) => params.has(key))
+    )
+      fail(400, "invalid_history_query");
+    if (
+      proof &&
+      (!/^[a-f0-9]{64}$/.test(proof.historyKey) ||
+        !identifier.test(proof.contributionId) ||
+        proof.contributionId === "." ||
+        proof.contributionId === "..")
+    )
+      fail(400, "invalid_history_query");
+    const historyReader = source.readParticipationHistory?.bind(source);
+    const paired = historyReader
+      ? validateParticipationHistoryRead(
+          await boundedRead((signal) => historyReader(canonicalPublicScope(q.scope), q.snapshot, actorId, signal)),
+        )
+      : null;
+    const read = historyReader
+      ? project(paired?.current ?? null, q.scope, q.snapshot, q.actors)
+      : await load(q.scope, q.snapshot, q.actors);
+    if (!read.selected.actors.some((entry) => entry.actorId === actorId)) fail(404, "contributor_unavailable");
+    const history = publicOrganizationHistory(paired, read, actorId, q.category, registry.metrics);
+    if (
+      proof &&
+      (history.state !== "known" ||
+        history.historyKey !== proof.historyKey ||
+        history.firstProof.proof.contributionId !== proof.contributionId)
+    )
+      fail(409, "participation_history_changed_refetch");
+    const body = { ...meta(read), actorId, profileCategory: q.category, history };
+    if (Buffer.byteLength(JSON.stringify(body)) > participationHistoryResponseByteLimit)
+      fail(503, "participation_history_response_too_large");
+    return send(request, reply, body, "application/json; charset=utf-8", "no-store");
+  }
+  app.get<{ Params: { actorId: string } }>("/api/v1/contributors/:actorId/participation-history", (request, reply) =>
+    participationHistory(request, reply, request.params.actorId, null),
+  );
+  app.get<{ Params: { actorId: string; historyKey: string; contributionId: string } }>(
+    "/api/v1/contributors/:actorId/participation-history/:historyKey/evidence/:contributionId",
+    (request, reply) =>
+      participationHistory(request, reply, request.params.actorId, {
+        historyKey: request.params.historyKey,
+        contributionId: request.params.contributionId,
+      }),
+  );
   app.get<{ Params: { actorId: string } }>("/api/v1/contributors/:actorId/achievements", async (request, reply) => {
     const q = query(request);
-    if (q.metric || q.category || q.cursor || q.search || q.format !== "json") fail(400, "unsupported_filter");
-    if (options.approvedAchievementRuleVersion !== ACHIEVEMENT_RULE_VERSION) fail(503, "achievement_policy_unapproved");
-    const read = await load(q.scope, q.snapshot, q.actors);
+    const version = options.approvedAchievementRuleVersion;
+    const milestones = version === achievementMilestoneVersion;
+    if (q.metric || (!milestones && (q.category || q.cursor)) || q.search || q.format !== "json")
+      fail(400, "unsupported_filter");
+    if (version !== ACHIEVEMENT_RULE_VERSION && !milestones) fail(503, "achievement_policy_unapproved");
+    const cursor = q.cursor ? decodeCursor(q.cursor) : null;
+    const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors);
     if (!read.selected.actors.some((actor) => actor.actorId === request.params.actorId))
       fail(404, "profile_unavailable");
+    if (milestones) {
+      if (read.selected.disabledMetrics?.some((entry) => entry.id === q.category)) fail(503, "metric_disabled");
+      const result = acceptedMilestones(read, request.params.actorId, q.category, registry.metrics);
+      // Bind paging to the actual current projection as well as the existing policy/snapshot
+      // token. Changed privacy, names or proof cannot silently replace an earlier page cohort.
+      const digest = createHash("sha256");
+      for (const entry of [...result.achievements, ...result.coContributions])
+        digest.update(JSON.stringify(entry)).update("\n");
+      const binding = JSON.stringify([
+        "achievement-milestones/v2",
+        request.params.actorId,
+        cursorScope(q.scope),
+        q.category,
+        q.limit,
+        q.actors,
+        digest.digest("hex"),
+      ]);
+      boundCursor(q, binding);
+      const { entries, nextCursor } = page(result.coContributions, q, read, cursor, binding, 1_000_000);
+      const extension = achievementMilestonesPageSchema.parse({
+        ...result,
+        coContributions: entries,
+        totalCoContributions: result.coContributions.length,
+        pageSize: q.limit,
+        nextCursor,
+      });
+      const body = { ...meta(read), actorId: request.params.actorId, ...extension };
+      if (Buffer.byteLength(JSON.stringify(body)) > 1_500_000) fail(503, "achievement_response_too_large");
+      return send(request, reply, body, "application/json; charset=utf-8", "no-store");
+    }
     return send(
       request,
       reply,

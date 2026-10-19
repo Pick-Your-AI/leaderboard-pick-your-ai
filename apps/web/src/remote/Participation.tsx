@@ -20,8 +20,9 @@ export function ContributorParticipation({
         ranks.
       </p>
       <p>
-        Newcomer status is unknown: reviewed organization-wide history is unavailable. The earliest dated evidence below
-        is limited to this snapshot and selection; it is not a joining date or proof that no earlier work exists.
+        Newcomer status is unknown from this selected-snapshot summary. The separate organization-history section checks
+        whether reviewed history is available. The earliest dated evidence below is limited to this snapshot and
+        selection; it is not a joining date or proof that no earlier work exists.
       </p>
       {!value ? (
         <p>Participation data is unavailable for this publication.</p>

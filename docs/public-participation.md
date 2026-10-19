@@ -35,14 +35,16 @@ result. Earliest effective timestamps must fall within the selected half-open
 interval, and a measured zero summary requires a zero metric result. Missing
 legacy summaries and explicit unknown states remain supported.
 
-**Newcomer status remains unknown.** Complete coverage of one selected window is
-not reviewed organization-wide origin evidence. The public protocol cannot yet
-carry that origin and all required historical scopes, so this extension has an
-explicit unavailable-history state and never labels a person new or established.
-The earliest visible receipt is not a joining date or proof of no earlier work.
-The separate metric-engine `participationView` still owns its reviewed-history
-calculation; completing its protected-to-public origin authority is remaining
-implementation/acceptance work, not a silently enabled inference in this UI.
+**This extension keeps newcomer status unknown.** Complete coverage of one
+selected window is not reviewed organization-wide origin evidence. The separate
+[reviewed organization-history protocol](participation-history.md) can carry that
+basis through an optional protected provider and dedicated first-proof route.
+It does not reinterpret this selected-summary contract or install a real history
+admission in the stock pipeline. The earliest visible receipt below remains
+limited to this selection; it is not a joining date or proof of no earlier work.
+The metric-engine `participationView` also retains its own reviewed-history
+calculation. Real origin/source admission and producer integration remain
+explicit acceptance work.
 
 The client validates the versioned extension, its selected-window denominator and
 its metric membership against the same profile response. Older publications that
