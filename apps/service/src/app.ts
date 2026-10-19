@@ -1,3 +1,4 @@
+import { projectPublicWindows } from "./public-windows.js";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
@@ -608,6 +609,7 @@ export function createService(options: ServiceOptions = {}) {
         : "No approved public snapshot source is configured.",
       endpoints: [
         "metrics",
+        "windows",
         "boards",
         "contributors",
         "contributors/:actorId",
@@ -623,6 +625,20 @@ export function createService(options: ServiceOptions = {}) {
       ],
     }),
   );
+  app.get("/api/v1/windows", async (request, reply) => {
+    const params = new URL(request.url, "http://localhost").searchParams;
+    const dimensions = new Set(["organization", "repository", "workstream", "context", "project", "role"]);
+    for (const key of params.keys())
+      if (!dimensions.has(key) || params.getAll(key).length !== 1) fail(400, "invalid_window_query");
+    const { scope } = query(request);
+    if (!source.readWindows) fail(503, "public_windows_unavailable");
+    const result = await boundedRead((signal) => source.readWindows!(canonicalPublicScope(scope), signal));
+    const body = projectPublicWindows(result, scope, (read, selectedScope) =>
+      project(read, selectedScope, null, "all"),
+    );
+    // Always return the freshly authorized result, including conditional requests.
+    return reply.header("Cache-Control", "no-store").header("X-Content-Type-Options", "nosniff").send(body);
+  });
   app.get("/api/v1/metrics", async (request, reply) => {
     query(request);
     return send(request, reply, registry);
