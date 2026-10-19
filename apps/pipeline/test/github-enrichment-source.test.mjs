@@ -692,6 +692,20 @@ test("GitHub enrichment: already aborted work starts no I/O and late rejection i
   assert.equal(h.decisions.length, 0);
 });
 
+test("GitHub enrichment: abort from the first post-listener fence has no unhandled rejection", async () => {
+  const h = fixture();
+  let fences = 0;
+  h.request.assertAuthorized = () => {
+    if (++fences === 2) h.controller.abort();
+  };
+  await assert.rejects(h.read(), denied);
+  // Let Node's test harness observe any orphaned abort-promise rejection.
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fences, 2);
+  assert.deepEqual(h.calls, []);
+  assert.deepEqual(h.decisions, []);
+});
+
 test("GitHub enrichment: construction captures scope, methods, clock and decision callback", async () => {
   const h = fixture();
   const source = h.create();
