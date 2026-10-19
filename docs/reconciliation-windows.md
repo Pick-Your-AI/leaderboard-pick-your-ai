@@ -84,6 +84,14 @@ preserves pagination even when a page contributes no in-window objects. Current
 state observed after the requested event cutoff remains current observation
 evidence; it does not acquire a fabricated historical actor or transition time.
 
+REST issue, pull-request, comment and release inventories must contain each source
+subject at most once before interval filtering or output paging. A repeated object
+with either the same or a changed revision rejects the inventory; its observations
+cannot inflate an exact count or advance reconciliation coverage. No row is silently
+discarded or selected as the winner. This detects visible duplicate identities,
+not every possible change during provider pagination. Retained checkpoints are not
+reset by this check; a corrected inventory requires a fresh authorized scan identity.
+
 Typed Project and relationship history use GraphQL `timelineItems(since:)` while
 enumerating the full approved parent inventory. The adapter filters actual event
 timestamps to the exact saved interval. A cursor, timestamp or unsupported source
