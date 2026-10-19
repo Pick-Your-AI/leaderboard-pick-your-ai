@@ -41,6 +41,10 @@ export function recognitionFingerprint(state, bindings = []) {
     authority.push("maintenance-merged-participant/v1");
   // Tooling receipts independently require verified merged participation as well.
   if (bindings.some((binding) => binding.metricId === "automation")) authority.push("automation-merged-participant/v1");
+  // Older generic operations receipts lack the current source, public artifact
+  // and affected-owner evidence boundary. Unrelated configurations stay exact.
+  if (bindings.some((binding) => ["governance", "deployment_work", "incidents"].includes(binding.metricId)))
+    authority.push("operations-contribution-evidence/v1");
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
@@ -57,6 +61,7 @@ export function materializeRecognition(
   const domainUnits = new Set();
   const mergedChangeUnits = new Set();
   const domainReasons = new Map();
+  const reviewedOperationArtifacts = new Map();
   const decisionTime = (request) => {
     const at = request.history?.findLast((event) => event.action === "accepted")?.at;
     const time = typeof at === "number" ? at : typeof at === "string" ? Date.parse(at) : NaN;
@@ -253,6 +258,12 @@ export function materializeRecognition(
       acceptedAt,
       cutoff,
     });
+    if (domain?.reviewedArtifact) {
+      const { url, hash } = domain.reviewedArtifact;
+      const previous = reviewedOperationArtifacts.get(url);
+      if (previous !== undefined && previous !== hash) throw new Error("domain_recognition_evidence_unverified");
+      reviewedOperationArtifacts.set(url, hash);
+    }
     if (domain) {
       const unit = JSON.stringify([request.owner, domain.changesetId]);
       if (domainUnits.has(unit)) continue;

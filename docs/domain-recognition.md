@@ -1,6 +1,7 @@
 # Revision-bound specialist contribution evidence
 
-Partial implementation for [#80](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/80),
+Partial implementation for [#77](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/77),
+[#80](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/80),
 [#81](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/81),
 [#82](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/82),
 [#88](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/88),
@@ -8,9 +9,9 @@ Partial implementation for [#80](https://github.com/Pick-Your-AI/pick-your-ai-le
 [#90](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/90) and
 [#96](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/96).
 
-The private pipeline can materialize reviewed research, catalog and craft
-contributions from an exact collected source revision. These are the existing
-21 registry metrics, with their existing units and event clocks. Decision records
+The private pipeline can materialize reviewed research, catalog, craft and
+operations contributions from an exact collected source revision. These are the
+existing 24 registry metrics, with their existing units and event clocks. Decision records
 and localization retain their separate record/blob and locale/category source
 adapters. No metric,
 source grant, production catalog, reviewer roster or policy is activated by this
@@ -30,7 +31,7 @@ these keys:
 | Key | Meaning |
 | --- | --- |
 | `version` | `domain-evidence/v1` |
-| `ownerIds` | Enrolled affected-owner reviewers for catalog, pricebook, compatibility, evidence-manifest, data-correction and reproduction acceptance |
+| `ownerIds` | Enrolled affected-owner reviewers for catalog, pricebook, compatibility, evidence-manifest, data-correction, reproduction, governance, deployment-work and reliability acceptance |
 | `contractReviewerIds` | Central compatibility reviewers, additionally required for compatibility recognition |
 | `disclosureReviewerIds` | Public-disclosure reviewers, additionally required for security recognition |
 | `freshnessIntervalSeconds` | Reviewed recheck interval, an integer from 1 second through 366 days, used only for freshness units |
@@ -102,6 +103,9 @@ executable schemas are in `apps/pipeline/src/domain-recognition.mjs`.
 | `usability` | Study/version and individually accepted finding/version, explicit method and sources; user studies require approved sanitized aggregates | Study/finding identity | Acceptance |
 | `performance` | Scoped result/run, independent comparison of the same conditions, metric and units across distinct revisions, actual improvement | Result/scope | Acceptance |
 | `security` | Disclosure/version/time, public-disclosure approval, contributor consent and enrolled disclosure reviewer | Disclosure identity | Public disclosure |
+| `governance` | Original merged-PR author, accepted public decision/version, affected-owner review and exact public record pin; permission administration alone excluded | Decision/version | Acceptance |
+| `deployment_work` | Original merged-PR author, reviewed public improvement linked to deployment identities, affected-owner review and exact sanitized public record pin | Work artifact identity | Acceptance |
+| `incidents` | Original merged-PR author, approved public postmortem/remediation narrative, affected-owner review and exact sanitized public record pin | Reliability contribution identity; spotlight only | Acceptance |
 
 Canonical units include the metric and repository. Repeated accepted requests
 for the same actor and canonical unit retain the earliest accepted request,
@@ -187,6 +191,16 @@ to UTC for metric events. Finer fractions are rejected because the metric engine
 cannot preserve them; they cannot silently round into a different event order or
 collapse distinct pricebook as-of units.
 
+The three operations metrics have the stricter original-source and reviewed
+public-record boundary specified in [operations recognition](operations-recognition.md).
+The stock adapter supports an observed `pr_merged` author with a complete current
+default-branch pin. It does not invent coauthor, reviewer, deployment-operator or
+external attribution. Governance versions can be separate accepted decisions;
+new deployment executions, proof versions or reliability receipt aliases do not
+multiply the same canonical work. Bot and execution classifications remain source
+facts; a user account is not proof of manual work. Reliability stays a spotlight
+definition with no selectable board.
+
 ## Publication, revocation and privacy
 
 Raw source facts are retained. Recognition is recomputed from current controls
@@ -229,6 +243,13 @@ marker. A mixed configuration containing reproduction bindings retires its whole
 snapshot; this applies even if its accepted requests currently belong to other
 metrics.
 
+Bindings for `governance`, `deployment_work` or `incidents` additionally pin
+`operations-contribution-evidence/v1`. Their earlier generic authority cannot
+retain a current or historical publication after the evidence boundary changes.
+A mixed configuration retires its whole snapshot. Every configuration without
+these three metrics retains its exact preceding fingerprint, including all
+previous category markers; private and raw history are preserved.
+
 Public evidence carries its immutable source link and fixed, bounded explanation
 codes for the metric, clock, reviewed outcome/method and contribution class.
 Private request text, receipt IDs, source-ID lists, conditions hashes, participant
@@ -259,14 +280,16 @@ environment or result hashes, private receipt contents or arbitrary proof fields
 
 ## Verification and remaining acceptance
 
-The synthetic suite exercises all 21 qualification/exclusion pairs, immutable
+The synthetic suite exercises all 24 qualification/exclusion pairs, immutable
 revision mismatches, stale or ambiguous audits, reviewer roles, policy clocks,
 private-field rejection, source-mode provenance, canonical aliases and proof
-variations, withdrawal and exact performance arithmetic. Each of the 21 metrics
+variations, withdrawal and exact performance arithmetic. Each of the 23 board-capable metrics
 also has a source-to-qualification-to-engine case that counts one canonical unit,
 preserves it through repeated review and observation delivery in either order,
 and checks exact half-open event-clock boundaries. These cases support only the
 listed qualified candidate combinations in the [UI registry](../packages/metrics/UI_REGISTRY.md).
+Reliability instead exercises accepted/rejected narrative qualification and the
+existing prohibition on contributor ranking; it has no selectable candidate board.
 Documentation's merge-date domain candidate is additive: its existing acceptance-date
 prototype default and overview/wall behavior remain. The prototype rejects every
 domain-only combination, and these metadata entries do not enable a public source.

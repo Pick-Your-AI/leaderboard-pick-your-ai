@@ -212,6 +212,40 @@ const details = {
     publicDisclosureApproved: true,
     contributorConsent: true,
   },
+  governance: {
+    decisionId: "decision:1",
+    decisionVersion: "v1",
+    kind: "governance_decision",
+    disposition: "accepted",
+    publicRecord: {
+      revision: after,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/blob/${after}/docs/governance.md`,
+      contentHash: hash,
+    },
+  },
+  deployment_work: {
+    workArtifactId: "deployment-work:1",
+    workVersion: "v1",
+    workKind: "deployment_improvement",
+    deploymentIds: ["deployment:1"],
+    sourceUse: "approved_public",
+    publicRecord: {
+      revision: after,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/blob/${after}/docs/deployment.md`,
+      contentHash: hash,
+    },
+  },
+  incidents: {
+    contributionId: "reliability-work:1",
+    contributionVersion: "v1",
+    workKind: "postmortem",
+    narrativeApproved: true,
+    publicRecord: {
+      revision: after,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/blob/${after}/docs/postmortem.md`,
+      contentHash: hash,
+    },
+  },
 };
 function scenario(metric = "catalog_proposals") {
   const input = source(),
@@ -931,7 +965,11 @@ function beforeReproductionFingerprint(s, bindings = [s.binding]) {
 }
 
 test("reproductions: authority retires generic scenarios while preserving every configuration without reproduction bindings", () => {
-  for (const metric of domainMetricIds) {
+  // Preserve the original 21-metric historical oracle byte for byte. The
+  // later operations authority has independent regression coverage.
+  for (const metric of domainMetricIds.filter(
+    (metric) => !["governance", "deployment_work", "incidents"].includes(metric),
+  )) {
     const s = scenario(metric),
       current = recognitionFingerprint(s.state, [s.binding]),
       previous = beforeReproductionFingerprint(s);
@@ -946,7 +984,11 @@ test("reproductions: authority retires generic scenarios while preserving every 
 });
 
 test("data_quality: qualifier authority fences legacy correction publications without changing other domain fingerprints", () => {
-  for (const metric of domainMetricIds) {
+  // Preserve the original 21-metric historical oracle byte for byte. The
+  // later operations authority has independent regression coverage.
+  for (const metric of domainMetricIds.filter(
+    (metric) => !["governance", "deployment_work", "incidents"].includes(metric),
+  )) {
     const s = scenario(metric),
       current = recognitionFingerprint(s.state, [s.binding]);
     if (["data_quality", "reproductions"].includes(metric)) assert.notEqual(current, legacyDomainFingerprint(s));
@@ -985,6 +1027,8 @@ const candidateDateBases = {
   usability: "acceptedAt",
   performance: "acceptedAt",
   security: "occurredAt",
+  governance: "acceptedAt",
+  deployment_work: "acceptedAt",
 };
 
 function aggregateDomain(s, normalized, scope = {}) {
@@ -1027,7 +1071,8 @@ function aggregateDomain(s, normalized, scope = {}) {
 
 for (const [metric, date_basis] of Object.entries(candidateDateBases)) {
   test(`${metric}: source-to-engine candidate counts one canonical unit through review and observation replay`, () => {
-    assert.deepEqual(Object.keys(candidateDateBases).sort(), [...domainMetricIds].sort());
+    // Reliability receipts remain spotlight-only, without a selectable board.
+    assert.deepEqual(Object.keys(candidateDateBases).sort(), domainMetricIds.filter((id) => id !== "incidents").sort());
     const s = scenario(metric);
     s.policies[0].policy.dateBasis = date_basis;
     const normalized = run(s),
@@ -1143,6 +1188,15 @@ const exclusions = {
   },
   security: (s) => {
     s.record.details.publicDisclosureApproved = false;
+  },
+  governance: (s) => {
+    s.record.details.disposition = "rejected";
+  },
+  deployment_work: (s) => {
+    s.record.details.workKind = "execution_only";
+  },
+  incidents: (s) => {
+    s.record.details.narrativeApproved = false;
   },
 };
 for (const metric of domainMetricIds) {

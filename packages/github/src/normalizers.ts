@@ -1338,6 +1338,7 @@ const receiptMetrics = new Set([
   "automation",
   "deployment_work",
   "incidents",
+  "governance",
   "maintenance",
   "reproductions",
   "issue_answers",
