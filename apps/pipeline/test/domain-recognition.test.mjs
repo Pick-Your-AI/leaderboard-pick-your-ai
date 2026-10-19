@@ -1393,6 +1393,129 @@ test("event clocks preserve merge, acceptance, negative freshness and public-dis
   assert.ok(run(negative).evidence.at(-1).contribution.reasonCodes.includes("domain_outcome:unavailable"));
 });
 
+for (const outcome of ["available", "changed", "unavailable", "unknown", "contradicted"])
+  test(`freshness outcomes: reviewed ${outcome} counts recheck effort without granting fact credit`, () => {
+    const s = scenario("freshness_checks");
+    s.record.details.outcome = outcome;
+    const before = structuredClone(s);
+    const normalized = run(s);
+    const added = normalized.facts.slice(s.input.facts.length);
+    assert.equal(added.length, 1);
+    assert.equal(added[0].metricId, "freshness_checks");
+    assert.equal(added[0].state, "qualified");
+    assert.equal(added[0].occurredAt, occurredAt);
+    assert.equal(added[0].acceptedAt, acceptedAt);
+    const result = aggregateDomain(s, normalized);
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.rows[0].value, 1);
+    assert.equal(result.rows[0].sampleCount, 1);
+    const proof = normalized.evidence.at(-1);
+    assert.deepEqual(proof.contribution.metricIds, ["freshness_checks"]);
+    assert.deepEqual(proof.contribution.reasonCodes, [
+      "independent_recognition_receipt",
+      "domain_metric:freshness_checks",
+      "domain_clock:checked_at",
+      `domain_outcome:${outcome}`,
+    ]);
+    assert.doesNotMatch(JSON.stringify(proof), /private-request|private-review-receipt|publisher:canonical|claim:1/);
+    assert.deepEqual(s, before, "Recognition must preserve the original source and protected reviewer records");
+  });
+
+for (const sourceState of ["available", "changed", "unavailable", "unknown", "contradicted"])
+  test(`freshness outcomes: ${sourceState} retains the separate primary-source admission rule`, () => {
+    for (const evidenceClass of ["primary_source", "publisher_statement", "independent_measurement"]) {
+      const s = scenario("primary_sources");
+      s.record.details.sourceState = sourceState;
+      s.record.details.evidenceClass = evidenceClass;
+      if (sourceState === "available") {
+        const added = run(s).facts.slice(s.input.facts.length);
+        assert.equal(added.length, 1);
+        assert.equal(added[0].metricId, "primary_sources");
+        assert.equal(added[0].state, "qualified");
+      } else assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
+    }
+  });
+
+test("freshness outcomes: another reviewed outcome conserves the interval and a later recheck is distinct", () => {
+  const s = scenario("freshness_checks");
+  s.record.details.outcome = "available";
+  const append = (suffix, checkedAt) => {
+    const request = structuredClone(s.request);
+    request.id += suffix;
+    request.version++;
+    request.history[0].id += suffix;
+    request.history[0].version = request.version;
+    request.history[0].at += 1000;
+    s.state.requests[request.id] = request;
+    s.state.audit.push(request.history[0]);
+    s.binding.domainEvidence.records.push({
+      ...structuredClone(s.record),
+      requestId: request.id,
+      requestVersion: request.version,
+      decisionId: request.history[0].id,
+      details: { ...s.record.details, outcome: "contradicted", checkedAt },
+    });
+  };
+  append(":same-interval", "2026-10-07T11:00:00.000Z");
+  const repeated = run(s);
+  assert.equal(repeated.facts.slice(s.input.facts.length).length, 1);
+  assert.equal(aggregateDomain(s, repeated).rows[0].value, 1);
+  s.state.requests = Object.fromEntries(Object.entries(s.state.requests).reverse());
+  assert.deepEqual(run(s), repeated, "Receipt insertion order must not choose the counted unit");
+  append(":next-interval", "2026-10-08T11:00:00.000Z");
+  const next = run(s);
+  const added = next.facts.slice(s.input.facts.length);
+  assert.equal(added.length, 2);
+  assert.equal(new Set(added.map((fact) => fact.canonicalKey)).size, 2);
+  assert.equal(aggregateDomain(s, next).rows[0].value, 2);
+  assert.equal(aggregateDomain(s, next, { from: "2026-10-08T00:00:00.000Z" }).rows[0].value, 1);
+});
+
+for (const [label, change, message] of [
+  ["missing independent audit", (s) => (s.state.audit = []), "recognition_decision_unverified"],
+  ["self review", (s) => (s.decision.actor = s.request.owner), "recognition_decision_unverified"],
+  [
+    "collaborator review",
+    (s) => (s.request.collaborators[s.decision.actor] = "contributor"),
+    "recognition_decision_unverified",
+  ],
+  ["unenrolled reviewer", (s) => (s.binding.reviewerIds = []), "recognition_decision_unverified"],
+  ["changed request version", (s) => s.request.version++, "domain_recognition_evidence_unverified"],
+  ["missing collected pin", (s) => (s.evidence.sourceRevision = null), "domain_recognition_evidence_unverified"],
+  [
+    "mutable reviewer pin",
+    (s) => (s.record.sourceRevisionUrl = "https://github.com/synthetic-owner/repository/blob/main/claim.md"),
+    "domain_recognition_evidence_unverified",
+  ],
+  ["unapproved public use", (s) => (s.record.publicSafe = false), "domain_recognition_evidence_unverified"],
+  ["synthetic source", (s) => (s.input.isSynthetic = true), "domain_recognition_evidence_unverified"],
+  ["expired record", (s) => (s.record.validUntil = acceptedAt), "domain_recognition_evidence_unverified"],
+  ["future check", (s) => (s.record.details.checkedAt = cutoff), "domain_recognition_evidence_unverified"],
+  [
+    "unsupported outcome",
+    (s) => (s.record.details.outcome = "contradiction"),
+    "domain_recognition_evidence_unverified",
+  ],
+])
+  test(`freshness outcomes: contradicted effort still rejects ${label}`, () => {
+    const s = scenario("freshness_checks");
+    s.record.details.outcome = "contradicted";
+    change(s);
+    assert.throws(() => run(s), { message });
+  });
+
+for (const [label, change] of [
+  ["withdrawn request", (s) => (s.request.status = "withdrawn")],
+  ["suppressed contributor", (s) => (s.state.profiles[s.request.owner] = { suppressed: true })],
+  ["private source", (s) => (s.evidence.artifact.visibility = "private")],
+])
+  test(`freshness outcomes: contradicted effort stays withheld for a ${label}`, () => {
+    const s = scenario("freshness_checks");
+    s.record.details.outcome = "contradicted";
+    change(s);
+    assert.deepEqual(run(s), s.input);
+  });
+
 test("domain clocks normalize supported offsets and reject precision the metric engine cannot preserve", () => {
   for (const [metric, field] of [
     ["freshness_checks", "checkedAt"],
