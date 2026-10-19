@@ -24,6 +24,7 @@ import { AggregateExplanationStore } from "./aggregate-explanations.mjs";
 import { assertPipelineSourcesNotRetired } from "./derived-retirement.mjs";
 import { requireThat } from "../../controls/src/store.mjs";
 import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-metadata.mjs";
+import { createPublicProjectContextProjector } from "./public-project-context.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createMetadataEnrichment } from "./metadata-enrichment.mjs";
 import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
@@ -1878,6 +1879,7 @@ export async function createPipeline(options) {
       actors: "all",
       context: scope.context ?? "event",
     };
+    const projectContextFor = createPublicProjectContextProjector(normalized, engineScope.context, observationCutoff);
     const state = controlsStore.read();
     assertRunConfiguration();
     for (const actor of actors.values()) if (state.profiles[actor.id]?.suppressed) actor.publicState = "suppressed";
@@ -2016,6 +2018,7 @@ export async function createPipeline(options) {
               sourceRevision: original.sourceRevision,
               sourceRevisionUrl: original.sourceRevisionUrl,
               ...materializeEvidenceMetadata(original, fact),
+              ...projectContextFor(original, fact),
             },
           ];
         }),
@@ -2056,6 +2059,7 @@ export async function createPipeline(options) {
           sourceRevision: original.sourceRevision,
           sourceRevisionUrl: original.sourceRevisionUrl,
           ...materializeEvidenceMetadata(original, fact),
+          ...projectContextFor(original, fact),
         },
       ];
     });
@@ -2072,6 +2076,7 @@ export async function createPipeline(options) {
         entry.occurredAt =
           fact[config.policies.find((item) => item.policy.metricId === fact.metricId).policy.dateBasis];
         Object.assign(entry, materializeEvidenceMetadata(entry, fact));
+        Object.assign(entry, projectContextFor(entry, fact));
       }
     }
     const content = {

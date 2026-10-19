@@ -12,6 +12,9 @@ import {
   type ActorFilter,
   publicEvidenceMetadataSchema,
   type PublicEvidenceMetadata,
+  publicProjectContextSchema,
+  publicProjectContextMatches,
+  type PublicProjectContext,
   actorSchema,
   artifactSchema,
   publicArtifactIdSchema,
@@ -34,6 +37,7 @@ import { compareSourceInstants } from "./source-time.js";
 export type { PublicScope } from "@pick-your-ai/contracts";
 export interface PublicEvidence {
   evidenceMetadata?: PublicEvidenceMetadata;
+  projectContext?: PublicProjectContext;
   artifact: Artifact;
   contribution: Contribution;
   occurredAt: string | null;
@@ -519,6 +523,13 @@ export function projectRead(
         if (!date(entry.occurredAt) || (entry.sourceRevision !== null && !id(entry.sourceRevision))) return reject();
         const metadata =
           entry.evidenceMetadata === undefined ? undefined : publicEvidenceMetadataSchema.parse(entry.evidenceMetadata);
+        const projectContext =
+          entry.projectContext === undefined ? undefined : publicProjectContextSchema.parse(entry.projectContext);
+        if (
+          projectContext &&
+          !publicProjectContextMatches(projectContext, artifact, contribution, scope.context ?? "event")
+        )
+          return reject();
         if (reproduction.length > 0 && metadata && metadata.activityState !== "accepted") return reject();
         // Absence is part of the metadata projection too: route preference must
         // not choose a legacy copy over a richer copy of the same contribution.
@@ -527,6 +538,7 @@ export function projectRead(
         // so retain their readability without inventing missing classifications.
         const serialized = JSON.stringify({
           metadata: metadata ?? null,
+          projectContext: projectContext ?? null,
           classification: parsed.metricIds.includes("localization") ? classification : null,
           reproduction: parsed.metricIds.includes("reproductions") ? reproduction : null,
         });
@@ -546,6 +558,7 @@ export function projectRead(
           return reject();
         return {
           ...(metadata === undefined ? {} : { evidenceMetadata: metadata }),
+          ...(projectContext === undefined ? {} : { projectContext }),
           artifact,
           contribution,
           occurredAt: entry.occurredAt,
