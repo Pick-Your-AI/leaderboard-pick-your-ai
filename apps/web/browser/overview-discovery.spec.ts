@@ -215,7 +215,11 @@ test("same-item refresh preserves proof focus and a removed approved item moves 
     await page.clock.fastForward(30_001);
     await expect(section).toContainText("Editorial selections are unavailable for this view.");
     await expect(section.getByRole("article")).toHaveCount(0);
-    await expect(section.getByRole("button")).toHaveCount(0);
+    await expect(section.getByRole("group", { name: "Editorial spotlight controls", exact: true })).toHaveCount(0);
+    await expect(section.getByRole("button", { name: "Previous spotlight", exact: true })).toHaveCount(0);
+    await expect(section.getByRole("button", { name: "Next spotlight", exact: true })).toHaveCount(0);
+    await expect(section.getByRole("button", { name: "Explore editorial dimensions", exact: true })).toBeEnabled();
+    await expect(section.getByRole("button")).toHaveCount(1);
   } finally {
     await api.close();
   }
@@ -320,6 +324,7 @@ test("filtered and historical homepages keep the directory entry without reading
       expect(url.searchParams.get(key)).toBe(key === "organization" ? "Pick-Your-AI" : selected.get(key));
     for (const key of ["category", "search", "cursor", "newcomer"]) expect(url.searchParams.has(key)).toBe(false);
     await expect(spotlights(page)).toContainText("Editorial selections are unavailable for this view.");
+    await expect(spotlights(page).getByRole("button")).toHaveCount(0);
     expect(api.controlsCalls()).toBe(0);
     expect(api.apiCalls.some((call) => /\/contributors(?:\/|$)/.test(call.pathname))).toBe(false);
   } finally {

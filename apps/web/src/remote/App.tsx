@@ -1085,6 +1085,7 @@ export function RemoteApp() {
           {data?.kind === "health" && url.pathname === "/" && import.meta.env.VITE_PUBLIC_CONTROLS_BASE && (
             <EditorialSpotlights
               controlsBase={import.meta.env.VITE_PUBLIC_CONTROLS_BASE}
+              publicBase={parsed.base}
               organization="Pick-Your-AI"
               selected={selected}
             />
