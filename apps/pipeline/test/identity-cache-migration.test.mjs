@@ -39,9 +39,12 @@ async function retainedContexts(t, count, bindSources) {
   assert.equal(
     seed.policy_signature,
     comparisonHash([
-      "project-membership-context/v1",
-      comparisonHash(["verified-default-branch-merge-pins/v1", attributionSignature]),
-      [],
+      "github-issue-transfer-admission/v1",
+      comparisonHash([
+        "project-membership-context/v1",
+        comparisonHash(["verified-default-branch-merge-pins/v1", attributionSignature]),
+        [],
+      ]),
     ]),
   );
   // These disposable actor-only source contexts carry no credited event. Their

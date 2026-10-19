@@ -96,6 +96,17 @@ normalizer into the synthetic PGlite/SQLite runtime and verify durable suppressi
 cached-board filtering, pinned evidence withdrawal and JSON/CSV export filtering.
 They do not represent live GitHub events or installed-service qualification.
 
+The `github-issue-transfer-admission/v1` normalization generation also reprocesses
+unchanged source revisions cached before these admission rules. It retains the
+previous normalization generation for frozen identity authorization and preserves
+historical normalization documents and frozen inputs. The two
+[cache migration cases](../apps/pipeline/test/transfer-cache-migration.test.mjs)
+seed output from the exact legacy normalizer using a
+[synthetic fixture](../tests/fixtures/legacy-transfer-admission.json), restart with
+unchanged source revisions and observation clocks, and verify that current and
+pinned boards, evidence and JSON/CSV exports obey the new suppression. They also
+verify that the original cached documents and frozen inputs remain intact.
+
 GitHub's native GraphQL
 [`TransferredEvent`](https://docs.github.com/en/graphql/reference/issues#transferredevent)
 exposes the source repository and associated issue, but no immutable historical

@@ -255,13 +255,18 @@ export async function createPipeline(options) {
   // Retained Project history still participates after active collection stops.
   // Keep its new semantics in a distinct cache generation for every configuration,
   // so reprocessing cannot overwrite an earlier frozen normalization dependency.
-  const normalizationSignature = digest([
+  const projectNormalizationSignature = digest([
     "project-membership-context/v1",
     verifiedMergeNormalizationSignature,
     projectWorkstreamMappings,
   ]);
+  // Transfer admission now retains authoritative withdrawals without a usable
+  // source URL. Recompute unchanged raw revisions in a separate cache generation
+  // while preserving the earlier documents that authorize frozen identity reads.
+  const normalizationSignature = digest(["github-issue-transfer-admission/v1", projectNormalizationSignature]);
   const frozenNormalizationSignatures = [
     normalizationSignature,
+    projectNormalizationSignature,
     verifiedMergeNormalizationSignature,
     documentationNormalizationSignature,
     attributionNormalizationSignature,
