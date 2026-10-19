@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { publicEvidenceMetadataSchema, sourceEventSchema } from "@pick-your-ai/contracts";
+import { qualifyProjectConfiguration } from "./project-configuration-recognition.mjs";
 
 // These are existing registry definitions, not new metrics or source permissions.
 const clocks = {
@@ -30,7 +31,13 @@ const clocks = {
 };
 export const domainMetricIds = Object.freeze(Object.keys(clocks));
 export const domainDateBasis = (metricId) =>
-  Object.hasOwn(clocks, metricId) ? (clocks[metricId] === "accepted_at" ? "acceptedAt" : "occurredAt") : null;
+  metricId === "project_configuration"
+    ? "acceptedAt"
+    : Object.hasOwn(clocks, metricId)
+      ? clocks[metricId] === "accepted_at"
+        ? "acceptedAt"
+        : "occurredAt"
+      : null;
 const authorMetrics = new Set([
   "catalog_proposals",
   "pricebook_proposals",
@@ -275,6 +282,8 @@ export function hasSparseDomainIdentifierAuthority(binding, request) {
  */
 export function qualifyDomainRecognition({ input, request, decision, binding, candidate, acceptedAt, cutoff }) {
   const metric = binding.metricId;
+  if (metric === "project_configuration")
+    return qualifyProjectConfiguration({ input, request, decision, binding, candidate, acceptedAt, cutoff });
   if (!Object.hasOwn(clocks, metric)) return null;
   require(input.isSynthetic !== true && !(input.syntheticFactIds ?? []).includes(candidate.id));
   const domain = object(binding.domainEvidence, [

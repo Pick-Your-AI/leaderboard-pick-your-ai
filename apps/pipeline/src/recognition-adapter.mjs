@@ -20,6 +20,7 @@ import {
   qualifyDomainRecognition,
   hasSparseDomainIdentifierAuthority,
 } from "./domain-recognition.mjs";
+import { verifyProjectConfigurationConsistency } from "./project-configuration-recognition.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
 import { releaseReviewRequest, parseReleaseReviewTarget } from "../../controls/src/release-review.mjs";
 import { hasRequiredParticipantConsent, hasReviewedParticipantConsent } from "../../controls/src/evidence-consent.mjs";
@@ -64,6 +65,10 @@ export function recognitionFingerprint(state, bindings = []) {
   if (bindings.some((binding) => binding.metricId === "data_quality")) authority.push("data-quality-recognition/v1");
   // Generic reproduction receipts had no scenario/environment/result boundary.
   if (bindings.some((binding) => binding.metricId === "reproductions")) authority.push("reproduction-recognition/v1");
+  // Earlier generic Project receipts did not bind a typed before/after change set.
+  // Without a manual request there is no receipt to retire; preserve automatic authority.
+  if (requests.length && bindings.some((binding) => binding.metricId === "project_configuration"))
+    authority.push("project-configuration-evidence/v1");
   // Earlier generic bug receipts admitted non-issue and explicitly synthetic sources.
   if (bindings.some((binding) => binding.metricId === "confirmed_bugs"))
     authority.push("confirmed-bug-source-admission/v1");
@@ -125,6 +130,8 @@ export function materializeRecognition(
   for (const binding of bindings) validateDocumentationPurposeBinding(binding);
   let output = structuredClone(input);
   const domainUnits = new Set();
+  const projectChangesets = new Map();
+  const projectArtifacts = new Map();
   const mergedChangeUnits = new Set();
   const releaseMemberships = new Set();
   const domainReasons = new Map();
@@ -382,6 +389,7 @@ export function materializeRecognition(
       reviewedOperationArtifacts.set(url, hash);
     }
     if (domain) {
+      verifyProjectConfigurationConsistency(domain, projectChangesets, projectArtifacts);
       const unit = JSON.stringify([request.owner, domain.changesetId]);
       if (domainUnits.has(unit)) continue;
       domainUnits.add(unit);
