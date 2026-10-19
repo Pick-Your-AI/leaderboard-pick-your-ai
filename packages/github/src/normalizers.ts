@@ -30,7 +30,7 @@ import {
   verifyGithubRestSnapshotRevision,
 } from "./rest-snapshot.js";
 import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
-import { validateDocumentationPurposeSource } from "./documentation-purpose.js";
+import { documentationRecognitionUnit, validateDocumentationPurposeSource } from "./documentation-purpose.js";
 import {
   validateMaintenanceClassification,
   type MaintenanceClassificationRecord,
@@ -1506,12 +1506,31 @@ export function applyRecognitionReceipt(
       receipt.evidenceIds[0] !== target.id)
   )
     throw new Error("documentation_purpose_source_unverified");
-  const documentationPurpose =
-    receipt.documentationPurpose === undefined
-      ? null
-      : validateDocumentationPurposeSource(input, target.id, receipt.acceptedAt);
+  // A candidate's generic review must use the same unit as its purpose review.
+  // Source validation supplies identity; it does not grant a purpose claim.
+  const documentationSource =
+    receipt.metricId === "documentation" &&
+    (receipt.documentationPurpose !== undefined ||
+      targetEvidence?.contribution.reasonCodes.some((reason) => reason.startsWith("documentation_purpose_candidate:")))
+      ? validateDocumentationPurposeSource(input, target.id, receipt.acceptedAt)
+      : null;
+  const documentationPurpose = receipt.documentationPurpose === undefined ? null : documentationSource;
   if (documentationPurpose && receipt.sourceRevision !== documentationPurpose.evidence.sourceRevision)
     throw new Error("documentation_purpose_source_unverified");
+  const documentationUnit = documentationSource
+    ? documentationRecognitionUnit(documentationSource, documentationPurpose ? undefined : receipt.changesetId)
+    : null;
+  if (
+    documentationSource &&
+    documentationUnit === documentationSource.unit &&
+    documentationUnit !== target.canonicalKey
+  ) {
+    // Do not split a retained pre-canonical generic approval during an upgrade.
+    // Rebuild that overlay from source; distinct domain categories stay separate.
+    const legacyId = stable("recognized", "documentation", target.canonicalKey, receipt.actorId);
+    if (input.facts.some((fact) => fact.metricId === "documentation" && fact.id === legacyId))
+      throw new Error("documentation_recognition_requires_renormalization");
+  }
   const release =
     receipt.metricId === "release_changes"
       ? validateReleaseChangesSource(input, target.id, receipt.acceptedAt, receipt.releaseInclusion)
@@ -1520,8 +1539,8 @@ export function applyRecognitionReceipt(
     throw new Error("release_inclusion_source_unverified");
   const unit = release
     ? release.membershipUnit
-    : documentationPurpose
-      ? documentationPurpose.unit
+    : documentationUnit
+      ? documentationUnit
       : mergedChange
         ? mergedChange.unit
         : receipt.metricId === "localization"
