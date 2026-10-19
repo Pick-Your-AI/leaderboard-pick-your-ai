@@ -1,10 +1,11 @@
 import React from "react";
+import { CountLink } from "../components/CountLink.tsx";
 import { PageHeader } from "../components/Layout.tsx";
-import { PersonName, ReceiptRow } from "../components/Receipt.tsx";
+import { PersonName, publicPersonLabel, ReceiptDrawer, ReceiptRow } from "../components/Receipt.tsx";
 import { ScopeBar } from "../components/ScopeBar.tsx";
 import { EmptyState, ErrorState, FreshnessIndicator, Loading, SnapshotNotices } from "../components/status.tsx";
 import { families, familyLabel } from "../data/registry.ts";
-import { buildProfile, listContributors } from "../data/source.ts";
+import { buildProfile, contributorProofSelector, listContributors, matchesContributorProof } from "../data/source.ts";
 import { formatDate, formatNumber, plural } from "../lib/format.ts";
 import { useLatestSnapshotId, useRead, useScope } from "../lib/hooks.ts";
 import { Link, useRouter, ScopedLink } from "../lib/router.tsx";
@@ -51,6 +52,9 @@ export function ContributorsPage() {
                 (entry.person.login.toLowerCase().includes(query) ||
                   entry.person.displayName.toLowerCase().includes(query))),
           );
+          const proof = state.data.entries.find((entry) =>
+            matchesContributorProof(params.proof, entry.person, entry.records),
+          );
           if (state.data.entries.length === 0) {
             return (
               <EmptyState title="No contributors in this scope">
@@ -76,12 +80,54 @@ export function ContributorsPage() {
                     <PersonName person={entry.person} link={entry.person.publicState !== "deleted"} />
                     <span className="muted">
                       {entry.families.map(familyLabel).join(", ") || "Unclassified"} ·{" "}
-                      {plural(entry.observedCount, "contribution")} in scope · first observed in scope{" "}
-                      {formatDate(entry.firstObservedAt)}
+                      <CountLink
+                        to={hrefWith(
+                          pathname,
+                          { ...params, proof: contributorProofSelector(entry.person, entry.records), ui: "prototype" },
+                          { ...state.data.scope, snapshot: state.data.snapshot.served.id },
+                        )}
+                        label={`${plural(entry.observedCount, "contribution")} in scope for ${publicPersonLabel(entry.person)}`}
+                      >
+                        {plural(entry.observedCount, "contribution")} in scope
+                      </CountLink>{" "}
+                      · first observed in scope {formatDate(entry.firstObservedAt)}
                     </span>
                   </li>
                 ))}
               </ul>
+              {params.proof && (
+                <ReceiptDrawer
+                  title={proof ? `Contributions: ${publicPersonLabel(proof.person)}` : "Evidence not found"}
+                  onClose={() => navigate(hrefWith(pathname, { ...params, proof: null }))}
+                  {...(proof && proof.person.publicState === "visible"
+                    ? {
+                        fullPageHref: hrefWith(
+                          `/contributors/${encodeURIComponent(proof.person.login)}`,
+                          { ui: "prototype" },
+                          { ...state.data.scope, snapshot: state.data.snapshot.served.id },
+                        ),
+                      }
+                    : {})}
+                >
+                  {proof ? (
+                    <>
+                      <p className="muted">
+                        Fixture explanation: {plural(proof.observedCount, "contribution")} in this scope and snapshot.
+                        Each attributable record is included once, even when it supports several measures. Pending and
+                        observed work count for directory inclusion; excluded records do not. This is not a rank or an
+                        overall score.
+                      </p>
+                      <ul className="receipt-list">
+                        {proof.records.map((record) => (
+                          <ReceiptRow key={record.id} record={record} />
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <p>No public contribution explanation is available for this selection.</p>
+                  )}
+                </ReceiptDrawer>
+              )}
             </>
           );
         })()}
@@ -186,10 +232,32 @@ export function ProfilePage({ login }: { login: string }) {
                       </Link>
                     </th>
                     <td className="numeric" data-label="Counted">
-                      {formatNumber(measure.value)} <span className="unit">{measure.metric.definition.unit}</span>
+                      <CountLink
+                        to={hrefWith(
+                          `/leaderboards/${measure.metric.id}`,
+                          { proof: person.login, ui: "prototype" },
+                          { ...profile.scope, snapshot: profile.snapshot.served.id },
+                        )}
+                        label={`${formatNumber(measure.value)} ${measure.metric.definition.unit}, ${person.displayName}, ${measure.metric.name}`}
+                      >
+                        {formatNumber(measure.value)} <span className="unit">{measure.metric.definition.unit}</span>
+                      </CountLink>
                     </td>
                     <td className="numeric" data-label="Pending">
-                      {measure.pending ? formatNumber(measure.pending) : <span className="muted">None</span>}
+                      {measure.pending ? (
+                        <CountLink
+                          to={hrefWith(
+                            `/leaderboards/${measure.metric.id}`,
+                            { proof: person.login, ui: "prototype" },
+                            { ...profile.scope, snapshot: profile.snapshot.served.id },
+                          )}
+                          label={`${plural(measure.pending, "pending contribution")}, ${person.displayName}, ${measure.metric.name}`}
+                        >
+                          {formatNumber(measure.pending)}
+                        </CountLink>
+                      ) : (
+                        <span className="muted">None</span>
+                      )}
                     </td>
                     <td data-label="Board position">
                       {measure.rank ?? <span className="muted">Listed, not ranked</span>}

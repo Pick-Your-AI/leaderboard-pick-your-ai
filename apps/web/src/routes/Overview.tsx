@@ -1,7 +1,8 @@
 import React from "react";
 import { RankCell } from "../components/BoardTable.tsx";
+import { CountLink } from "../components/CountLink.tsx";
 import { PageHeader } from "../components/Layout.tsx";
-import { PersonName, ReceiptRow } from "../components/Receipt.tsx";
+import { PersonName, publicPersonLabel, ReceiptRow } from "../components/Receipt.tsx";
 import { ReferenceScope, ScopeBar } from "../components/ScopeBar.tsx";
 import {
   CoverageLabel,
@@ -21,7 +22,14 @@ import {
   metricsInFamily,
   searchMetrics,
 } from "../data/registry.ts";
-import { buildBoard, combinedCoverageState, coverageFor, listActivity, listContributors } from "../data/source.ts";
+import {
+  buildBoard,
+  combinedCoverageState,
+  contributorProofSelector,
+  coverageFor,
+  listActivity,
+  listContributors,
+} from "../data/source.ts";
 import { fixtureMetrics } from "../data/synthetic.ts";
 import { formatDate, formatNumber } from "../lib/format.ts";
 import { useLatestSnapshotId, useRead, useScope } from "../lib/hooks.ts";
@@ -104,7 +112,23 @@ export function OverviewPage() {
                                 </span>
                                 <PersonName person={row.person} />
                                 <span className="numeric">
-                                  {formatNumber(row.value)} <span className="unit">{board.metric.definition.unit}</span>
+                                  <CountLink
+                                    to={hrefWith(
+                                      `/leaderboards/${board.metric.id}`,
+                                      {
+                                        proof: contributorProofSelector(row.person, [
+                                          ...row.ranked,
+                                          ...row.pendingRecords,
+                                        ]),
+                                        ui: "prototype",
+                                      },
+                                      { ...board.scope, snapshot: board.snapshot.served.id },
+                                    )}
+                                    label={`${formatNumber(row.value)} ${board.metric.definition.unit}, ${publicPersonLabel(row.person)}, ${board.metric.name}`}
+                                  >
+                                    {formatNumber(row.value)}{" "}
+                                    <span className="unit">{board.metric.definition.unit}</span>
+                                  </CountLink>
                                 </span>
                               </li>
                             ))}
