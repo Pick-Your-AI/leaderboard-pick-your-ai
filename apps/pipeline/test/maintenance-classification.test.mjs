@@ -316,18 +316,18 @@ function previousClassificationAuthority(state, bindings = []) {
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
-test("maintenance classification: all98 unrelated binding authorities and generic maintenance stay exact", () => {
+test("maintenance classification: all98 bindings retain prior or independently retired authority", () => {
   const s = scenario(),
     empty = { requests: {}, profiles: {}, audit: [] };
   for (const metric of metricRegistryV1.metrics) {
     const binding = { ...s.binding, metricId: metric.id };
     delete binding.maintenanceClassification;
-    for (const state of [empty, s.state])
-      assert.equal(
-        recognitionFingerprint(state, [binding]),
-        previousClassificationAuthority(state, [binding]),
-        metric.id,
-      );
+    for (const state of [empty, s.state]) {
+      const current = recognitionFingerprint(state, [binding]);
+      const prior = previousClassificationAuthority(state, [binding]);
+      if (metric.id === "release_stewardship") assert.notEqual(current, prior);
+      else assert.equal(current, prior, metric.id);
+    }
   }
   for (const state of [empty, s.state]) {
     assert.notEqual(recognitionFingerprint(state, [s.binding]), previousClassificationAuthority(state, [s.binding]));

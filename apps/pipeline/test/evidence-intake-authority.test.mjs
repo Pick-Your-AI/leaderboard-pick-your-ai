@@ -168,7 +168,13 @@ test("zero manual requests preserve unaffected prior authority and independently
     const all = metricRegistryV1.metrics.map((metric) => ({ ...binding, metricId: metric.id }));
     for (const bindings of [[], ...all.map((entry) => [entry]), all]) {
       const current = recognitionFingerprint(state, bindings);
-      const receivedCategories = ["governance", "deployment_work", "incidents", "release_changes"];
+      const receivedCategories = [
+        "governance",
+        "deployment_work",
+        "incidents",
+        "release_changes",
+        "release_stewardship",
+      ];
       if (bindings.some((entry) => receivedCategories.includes(entry.metricId)))
         assert.notEqual(current, beforeReceivedIntakeAuthority(state, bindings));
       else assert.equal(current, beforeReceivedIntakeAuthority(state, bindings));

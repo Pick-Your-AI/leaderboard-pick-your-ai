@@ -14,6 +14,7 @@ export * from "./physical-diff.js";
 export * from "./documentation.js";
 export * from "./research.js";
 export * from "./maintenance.js";
+export * from "./release-stewardship-source.js";
 export * from "./release-inclusion.js";
 export * from "./release-recognition.js";
 
