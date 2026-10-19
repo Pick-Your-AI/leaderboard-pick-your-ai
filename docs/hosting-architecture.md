@@ -255,10 +255,13 @@ The provider's [PostgreSQL restoration](https://docs.digitalocean.com/products/d
 creates a new cluster and retains seven days of recovery history; deleting the
 original cluster also deletes its provider backups. Budget restore overlap and
 keep independently retained encrypted exports. Managed SQL recovery and VM
-images cover different boundaries. Neither alone proves the project's proposed
-15-minute RPO or four-hour RTO across all stores. The independent encrypted
-recovery tests and a deployed coordinated
-restore drill retain separate evidence under
+images cover different boundaries. Neither alone proves the proposed four-hour
+RTO or the [release policy's recovery-point objective](release-decision.md#recovery-time-and-recoverable-data):
+at most 24 hours of acknowledged public source observations unrecovered after
+reconciliation. Privacy, consent, correction, revocation and deletion state remain
+outside that loss allowance. A tighter objective requires a separately reviewed
+and costed decision. The independent encrypted recovery tests and a deployed
+coordinated restore drill retain separate evidence under
 [#103](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/103).
 
 ## Actual ownership and acceptance

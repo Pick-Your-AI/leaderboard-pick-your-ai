@@ -3,7 +3,7 @@ import test from "node:test";
 import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
 import { createPipeline } from "../src/index.mjs";
 import { normalizationDocumentVersion } from "../src/private-attribution.mjs";
-import { harness } from "./harness.mjs";
+import { components, harness } from "./harness.mjs";
 
 async function retainedContexts(t, count, bindSources) {
   const h = await harness(t, {
@@ -36,10 +36,15 @@ async function retainedContexts(t, count, bindSources) {
   ]);
   const attributionSignature = comparisonHash([normalizationDocumentVersion, policySignature]);
   const standaloneLocaleSignature = comparisonHash([normalizationDocumentVersion, policySignature, []]);
+  const projectV1Signature = comparisonHash([
+    "project-membership-context/v1",
+    comparisonHash(["verified-default-branch-merge-pins/v1", attributionSignature]),
+    [],
+  ]);
   assert.equal(
     seed.policy_signature,
     comparisonHash([
-      "project-membership-context/v1",
+      "project-membership-context/v2",
       comparisonHash(["verified-default-branch-merge-pins/v1", attributionSignature]),
       [],
     ]),
@@ -118,6 +123,7 @@ async function retainedContexts(t, count, bindSources) {
     policySignature,
     attributionSignature,
     standaloneLocaleSignature,
+    projectV1Signature,
   };
 }
 
@@ -176,3 +182,51 @@ test("exact frozen source bindings survive duplicate cache generations without a
   await setup.replaceFrozen(missing);
   await assert.rejects(restarted.previewPolicy(request), /Frozen identity evidence unavailable/);
 });
+
+for (const [generation, wrappers] of [
+  ["base", []],
+  ["review", [components.github.reviewSourceNormalizationVersion]],
+  ["Discussion", [components.github.discussionSourceNormalizationVersion]],
+  ["delivery", [components.github.defaultDeliveryNormalizationVersion]],
+  [
+    "review delivery",
+    [components.github.reviewSourceNormalizationVersion, components.github.defaultDeliveryNormalizationVersion],
+  ],
+  [
+    "Discussion delivery",
+    [components.github.discussionSourceNormalizationVersion, components.github.defaultDeliveryNormalizationVersion],
+  ],
+])
+  test(`v1 Project ${generation} cache identities remain eligible after restart without rewriting retained documents`, async (t) => {
+    const setup = await retainedContexts(t, 3, true);
+    const { h, seed, request, projectV1Signature } = setup;
+    const signature = wrappers.reduce((value, version) => comparisonHash([version, value]), projectV1Signature);
+    const before = await h.runtime.previewPolicy(request);
+    await setup.duplicateGeneration(signature);
+    await h.db.query("DELETE FROM leaderboard_pipeline.normalizations WHERE policy_signature=$1", [
+      seed.policy_signature,
+    ]);
+    const retained = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY fact_key")).rows;
+    const frozen = (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id")).rows;
+    assert.ok(retained.every((row) => row.policy_signature === signature));
+    await h.runtime.stop();
+    await h.reopenDatabase();
+    const restarted = await createPipeline(h.options);
+    t.after(() => restarted.stop());
+    assert.deepEqual(await restarted.previewPolicy(request), before);
+    assert.deepEqual(
+      (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY fact_key")).rows,
+      retained,
+    );
+    assert.deepEqual(
+      (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id")).rows,
+      frozen,
+    );
+    await h.db.query(
+      `UPDATE leaderboard_pipeline.normalizations
+     SET document=jsonb_set(document,'{actors,0,githubNodeId}','"U_SYNTHETIC_TAMPERED"'::jsonb)
+     WHERE fact_key=$1 AND policy_signature=$2`,
+      [seed.fact_key, signature],
+    );
+    await assert.rejects(restarted.previewPolicy(request), /Frozen identity evidence integrity failure/);
+  });

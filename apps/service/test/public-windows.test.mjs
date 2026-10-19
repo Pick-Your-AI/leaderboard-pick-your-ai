@@ -355,3 +355,42 @@ test("discovery retains a read-budget slot until a canceled provider actually se
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal((await h.app.inject(url())).statusCode, 200);
 });
+
+test("discovery rejects unequal qualified-unit suppression across otherwise matching current choices", async (t) => {
+  const input = choices();
+  input.windows[0].read.controls.suppressedContributionIds = ["synthetic-withdrawn-unit"];
+  const before = structuredClone(input);
+  const h = harness(t, async () => structuredClone(input));
+  const response = await h.app.inject({ url: url(), headers: { "if-none-match": "*" } });
+  assert.equal(response.statusCode, 503, response.body);
+  assert.deepEqual(response.json(), { error: "public_windows_authority_changed" });
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.equal(response.headers.etag, undefined);
+  assert.deepEqual(input, before);
+});
+
+test("discovery accepts equal qualified-unit sets and legacy absence without exposing private identities", async (t) => {
+  const input = choices();
+  for (const [index, entry] of input.windows.entries())
+    entry.read.controls.suppressedContributionIds =
+      index % 2
+        ? ["synthetic-withdrawn-a", "synthetic-withdrawn-b"]
+        : ["synthetic-withdrawn-b", "synthetic-withdrawn-a"];
+  const before = structuredClone(input);
+  const h = harness(t, async () => structuredClone(input));
+  const matching = await h.app.inject(url());
+  assert.equal(matching.statusCode, 200, matching.body);
+  assert.doesNotMatch(matching.body, /synthetic-withdrawn|suppressedContributionIds/);
+  assert.deepEqual(input, before);
+  for (const [index, entry] of input.windows.entries()) {
+    if (index % 2) delete entry.read.controls.suppressedContributionIds;
+    else entry.read.controls.suppressedContributionIds = [];
+  }
+  const legacy = await h.app.inject(url());
+  assert.equal(legacy.statusCode, 200, legacy.body);
+  assert.deepEqual(legacy.json(), matching.json());
+  input.windows[0].read.controls.suppressedContributionIds = ["synthetic-withdrawn-a", "synthetic-withdrawn-a"];
+  const malformed = await h.app.inject(url());
+  assert.equal(malformed.statusCode, 503, malformed.body);
+  assert.equal(malformed.json().windows, undefined);
+});

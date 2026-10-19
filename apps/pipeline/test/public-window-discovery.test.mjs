@@ -3,6 +3,7 @@ import test from "node:test";
 import { join } from "node:path";
 import { createPipeline } from "../src/index.mjs";
 import { harness, components, publicScope, fixtureId } from "./harness.mjs";
+import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-intake.mjs";
 
 const { canonicalPublicScope, publicScopeKey, publicScopeParameters, publicWindowPeriods, parsePublicWindows } =
   components.contracts;
@@ -368,7 +369,7 @@ function finalReadFault(h, change) {
         query: async (sql, params) => {
           const result = await tx.query(sql, params);
           if (sql.includes("SELECT selected.document")) observed.reads++;
-          if (sql.includes("UNION SELECT artifact_id AS subject_id FROM leaderboard_pipeline.corrections")) {
+          if (sql.includes("SELECT subject_id") && sql.includes("UNION SELECT dependency.artifact_id")) {
             observed.authorityQueries++;
             if (observed.authorityQueries === 3) {
               assert.equal(observed.reads, 2, "the edit must follow both complete individually authorized reads");
@@ -458,6 +459,7 @@ test("the final discovery fence rechecks recognition withdrawal after every capt
       history: [event],
     };
     state.audit.push(event);
+    attachSyntheticEvidenceState(state);
   });
   await h.runtime.runOnce({ cutoff });
   const initial = await menu(h.runtime);

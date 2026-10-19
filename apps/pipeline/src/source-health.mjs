@@ -1,10 +1,30 @@
 const timestamp = (value) => (value instanceof Date ? value.toISOString() : null);
 const oldest = (values) => (values.length && values.every((value) => value !== null) ? values.sort()[0] : null);
 
+/** Private adapter: both health surfaces project the same verified interval rows. */
+export function reconciliationHealthRows(progress) {
+  const date = (value) => (value === null ? null : new Date(value));
+  return progress.map((row) => ({
+    repository_id: row.repositoryId,
+    access_generation: row.generation,
+    family: row.family,
+    state: row.state,
+    reason: row.reason,
+    attempted_at: date(row.lastAttemptAt),
+    last_success_at: date(row.lastSuccessfulSync),
+    until_at: date(row.reconciledThrough),
+    last_window_end: date(row.lastWindowEnd),
+    item_count: row.itemCount,
+    expected_count: row.expectedCount,
+    page_count: row.pageCount,
+    window_complete: row.windowComplete,
+  }));
+}
+
 /** Read inside the publication read's repository-access locks and final authority fence.
  * These are current repository collection receipts, never historical coverage or connectivity proof.
  */
-export async function readCurrentSourceHealth(tx, repositories, now) {
+export async function readCurrentSourceHealth(tx, repositories, now, reconciliationProgress) {
   const requested = repositories.flatMap((repo) =>
     [...new Set(repo.families)].map((family) => ({
       repository_id: repo.id,
@@ -12,9 +32,11 @@ export async function readCurrentSourceHealth(tx, repositories, now) {
       family,
     })),
   );
-  const runs = (
-    await tx.query(
-      `WITH wanted AS (
+  const runs =
+    reconciliationProgress === undefined
+      ? (
+          await tx.query(
+            `WITH wanted AS (
         SELECT * FROM jsonb_to_recordset($1::jsonb) AS item(repository_id bigint,installation_id bigint,family text)
       ) SELECT wanted.repository_id,wanted.family,latest.state,latest.attempted_at,latest.item_count,latest.expected_count,
         successful.last_success_at,successful.until_at
@@ -31,9 +53,10 @@ export async function readCurrentSourceHealth(tx, repositories, now) {
           AND run.state='complete' AND run.last_success_at IS NOT NULL
         ORDER BY last_success_at DESC,until_at DESC,run_id DESC LIMIT 1
       ) AS successful ON true`,
-      [JSON.stringify(requested)],
-    )
-  ).rows;
+            [JSON.stringify(requested)],
+          )
+        ).rows
+      : reconciliationHealthRows(reconciliationProgress);
   const inbox = (
     await tx.query(
       `WITH wanted AS (
@@ -72,9 +95,22 @@ export async function readCurrentSourceHealth(tx, repositories, now) {
         ? "unknown"
         : families.some((row) => row.state !== "complete")
           ? "collecting"
-          : families.every((row) => row.item_count === 0 && row.expected_count === 0)
-            ? "no_activity_in_window"
-            : "reconciled";
+          : reconciliationProgress !== undefined &&
+              families.some(
+                (row) =>
+                  row.window_complete !== true ||
+                  row.last_success_at === null ||
+                  row.until_at === null ||
+                  row.last_window_end === null ||
+                  row.until_at < row.last_window_end ||
+                  row.expected_count === null ||
+                  row.expected_count !== row.item_count ||
+                  row.page_count < 1,
+              )
+            ? "unknown"
+            : families.every((row) => row.item_count === 0 && row.expected_count === 0)
+              ? "no_activity_in_window"
+              : "reconciled";
     return {
       scopeId: String(repo.id),
       state,
