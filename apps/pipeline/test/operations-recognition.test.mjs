@@ -4,10 +4,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { normalizeGithubObservation, applyRecognitionReceipt } from "@pick-your-ai/github";
+import {
+  normalizeGithubObservation,
+  applyRecognitionReceipt,
+  defaultDeliveryNormalizationVersion,
+} from "@pick-your-ai/github";
 import { aggregateMetric, getMetricDefinition, getMetricUi, metricRegistryV1 } from "@pick-your-ai/metrics";
 import { materializeRecognition, recognitionFingerprint } from "../src/recognition-adapter.mjs";
-import { attachSyntheticEvidenceIntake } from "../../../tests/fixtures/evidence-intake.mjs";
+import {
+  attachSyntheticEvidenceIntake,
+  attachSyntheticEvidenceState,
+} from "../../../tests/fixtures/evidence-intake.mjs";
 import { evidenceIntakeAuthority } from "../../controls/src/evidence-intake.mjs";
 
 const fixture = JSON.parse(
@@ -938,3 +945,279 @@ for (const metric of metrics) {
     }
   });
 }
+
+// Deployment IDs are private selected authority, not additional contribution units.
+// Preserve the same prior hash oracle used by the owner-roster controls above.
+for (const shape of ["sparse", "undefined"]) {
+  test(`operations deployment ID authority: selected ${shape} IDs retire their prior fingerprint`, () => {
+    const s = scenario("deployment_work");
+    const sparse = ["private-deployment-one"];
+    sparse.length = 2;
+    const explicit = ["private-deployment-one", undefined];
+    s.record.details.deploymentIds = sparse;
+    const old = priorOperationsIdentifierAuthority(s.state, [s.binding]);
+    s.record.details.deploymentIds = explicit;
+    assert.equal(priorOperationsIdentifierAuthority(s.state, [s.binding]), old);
+    s.record.details.deploymentIds = shape === "sparse" ? sparse : explicit;
+    rejectBeforeReceipt(s);
+    assert.notEqual(recognitionFingerprint(s.state, [s.binding]), old);
+  });
+}
+
+test("operations deployment ID authority: dense IDs preserve prior authority and the one-work unit", () => {
+  const s = scenario("deployment_work");
+  s.record.details.deploymentIds = ["private-deployment-one", "private-deployment-two"];
+  const expected = priorOperationsIdentifierAuthority(s.state, [s.binding]);
+  let calls = 0;
+  const output = run(s, {
+    applyReceipt: (...args) => {
+      calls++;
+      return applyRecognitionReceipt(...args);
+    },
+  });
+  assert.equal(calls, 1);
+  assert.equal(recognized(s, output).length, 1);
+  assert.equal(aggregate(s, output).rows[0].value, 1);
+  assert.equal(recognitionFingerprint(s.state, [s.binding]), expected);
+});
+
+test("operations deployment ID authority: stale or other request records keep the prior fingerprint", () => {
+  for (const mutate of [
+    (s) => {
+      s.record.requestId = "other-request";
+    },
+    (s) => {
+      s.record.requestVersion--;
+    },
+    (s) => {
+      s.record.decisionId = "older-decision";
+    },
+  ]) {
+    const s = scenario("deployment_work");
+    s.record.details.deploymentIds = [undefined];
+    mutate(s);
+    rejectBeforeReceipt(s);
+    assert.equal(
+      recognitionFingerprint(s.state, [s.binding]),
+      priorOperationsIdentifierAuthority(s.state, [s.binding]),
+    );
+  }
+  const s = scenario("deployment_work");
+  s.binding.domainEvidence.records.push({
+    ...structuredClone(s.record),
+    requestId: "unselected-deployment-request",
+    details: { ...structuredClone(s.record.details), deploymentIds: new Array(1) },
+  });
+  assert.equal(recognized(s).length, 1);
+  assert.equal(recognitionFingerprint(s.state, [s.binding]), priorOperationsIdentifierAuthority(s.state, [s.binding]));
+});
+
+test("operations deployment ID authority: inactive and unmatched bindings do not add a new marker", () => {
+  for (const mutate of [
+    (s) => {
+      s.request.status = "withdrawn";
+    },
+    (s) => {
+      s.state.profiles[s.request.owner] = { suppressed: true };
+    },
+    (s) => {
+      s.binding.scope = "repository:2:unselected";
+    },
+    (s) => {
+      s.state.requests = {};
+    },
+  ]) {
+    const s = scenario("deployment_work");
+    s.record.details.deploymentIds = [undefined];
+    mutate(s);
+    const output = run(s, { applyReceipt: () => assert.fail("unselected deployment IDs must not call the receipt") });
+    assert.deepEqual(output, s.input);
+    assert.equal(
+      recognitionFingerprint(s.state, [s.binding]),
+      priorOperationsIdentifierAuthority(s.state, [s.binding]),
+    );
+  }
+});
+
+// Literal runtime configuration encoding, independent of the recognition hash.
+// A hole and explicit undefined collide in both old encodings; null does not.
+const operationsCanonicalConfiguration = (value) =>
+  Array.isArray(value)
+    ? `[${value.map(operationsCanonicalConfiguration).join(",")}]`
+    : value !== null && typeof value === "object"
+      ? `{${Object.keys(value)
+          .sort()
+          .map((key) => `${JSON.stringify(key)}:${operationsCanonicalConfiguration(value[key])}`)
+          .join(",")}}`
+      : JSON.stringify(value);
+const operationsConfigurationHash = (value) =>
+  createHash("sha256").update(operationsCanonicalConfiguration(value)).digest("hex");
+
+test("operations deployment ID authority: retained SQL publication is withheld after reopen and undefined refresh", async (t) => {
+  const { harness, components, publicScope } = await import("./harness.mjs");
+  const { createPipeline } = await import("../src/runtime.mjs");
+  const s = scenario("deployment_work");
+  s.input = JSON.parse(
+    JSON.stringify(s.input)
+      .replace(/synthetic/gi, "fixture")
+      .replaceAll("fixture-owner/repository", "example-org/example-repo"),
+  );
+  s.candidate = s.input.facts.find((fact) => fact.metricId === "pr_merged");
+  s.evidence = s.input.evidence.find((entry) => entry.contribution.contributionId === s.candidate.id);
+  s.request.locator = s.evidence.artifact.publicUrl;
+  attachSyntheticEvidenceState(s.state);
+  s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl;
+  s.record.details.publicRecord.sourceRevisionUrl = `https://github.com/example-org/example-repo/blob/${after}/operations/public.json`;
+  // Produce valid accepted work first. Then retain that exact old output without
+  // its observed candidate, so seeding SQL cannot silently requalify the record.
+  const legacyOutput = run(s);
+  assert.equal(recognized(s, legacyOutput).length, 1);
+  legacyOutput.facts = legacyOutput.facts.filter((fact) => fact.id !== s.candidate.id);
+  let retained = legacyOutput;
+  let normalizationCalls = 0;
+  s.record.details.deploymentIds = new Array(1);
+  const payload = JSON.parse(JSON.stringify(fixture.pull_request).replace(/synthetic/gi, "fixture"));
+  payload.html_url = s.request.locator;
+  const h = await harness(t, {
+    markerFreeConfig: true,
+    dataMode: "public",
+    payloads: [payload],
+    defaultDeliveryNormalizationVersion,
+    normalizerFactory: () => async () => {
+      normalizationCalls++;
+      return structuredClone(retained);
+    },
+    configure(config) {
+      config.repositories[0].families = ["pull_requests"];
+      config.recognitionBindings = [s.binding];
+      const policy = {
+        ...config.policies[0].policy,
+        ...s.policies[0].policy,
+        roles: ["author"],
+        unit: components.metrics.getMetricDefinition("deployment_work").definition.unit,
+      };
+      config.policies = [
+        { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "fixture-approval" },
+      ];
+    },
+  });
+  h.controlsStore.transaction((state) => {
+    state.requests = s.state.requests;
+    state.audit = s.state.audit;
+  });
+  const publication = await h.runtime.runOnce({ cutoff });
+  assert.equal(publication.state, "published");
+  const snapshotId = publication.publications[0].snapshotId;
+  const read = (runtime, pin) => runtime.source.read(publicScope, pin, new AbortController().signal);
+  for (const pin of [null, snapshotId]) assert.equal((await read(h.runtime, pin)).selected.rows[0].result.value, 1);
+  const currentFingerprint = recognitionFingerprint(h.controlsStore.read(), h.options.config.recognitionBindings);
+  const oldFingerprint = priorOperationsIdentifierAuthority(
+    h.controlsStore.read(),
+    h.options.config.recognitionBindings,
+  );
+  const configuration = operationsConfigurationHash(h.options.config);
+  const confirmation = h.controlsStore.read().pipelinePublications[snapshotId];
+  assert.equal(confirmation.configurationHash, configuration);
+  assert.equal(confirmation.recognitionFingerprint, currentFingerprint);
+  const headKey = confirmation.scopeKey;
+  assert.equal(h.controlsStore.read().pipelineHeads[headKey].snapshotId, snapshotId);
+  assert.equal(h.controlsStore.read().pipelineHeads[headKey].recognitionFingerprint, currentFingerprint);
+  const savedRows = async () =>
+    (
+      await h.db.query(
+        "SELECT fact_key,policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature",
+      )
+    ).rows;
+  const originalSavedRows = await savedRows();
+  assert.equal(originalSavedRows.length, 1);
+  assert.equal(
+    originalSavedRows[0].document.facts.filter(
+      (fact) => fact.metricId === "deployment_work" && fact.state === "qualified",
+    ).length,
+    1,
+  );
+  assert.equal(
+    originalSavedRows[0].document.facts.some((fact) => fact.id === s.candidate.id),
+    false,
+  );
+  const savedNormalizationCalls = normalizationCalls;
+  h.controlsStore.transaction((state) => {
+    state.pipelinePublications[snapshotId].recognitionFingerprint = oldFingerprint;
+    state.pipelineHeads[headKey].recognitionFingerprint = oldFingerprint;
+  });
+  await h.runtime.stop();
+  await h.reopenDatabase();
+  const restarted = await createPipeline(h.options);
+  t.after(() => restarted.stop());
+  const denied = async (runtime, phase) => {
+    assert.equal(h.controlsStore.read().pipelinePublications[snapshotId].recognitionFingerprint, oldFingerprint);
+    assert.equal(h.controlsStore.read().pipelineHeads[headKey].recognitionFingerprint, oldFingerprint);
+    assert.equal(
+      h.controlsStore.read().pipelinePublications[snapshotId].configurationHash,
+      operationsConfigurationHash(h.options.config),
+    );
+    const current = await read(runtime, null);
+    const pinned = await read(runtime, snapshotId);
+    const response = await runtime.app.inject(`/api/v1/boards?metric=deployment_work&snapshot=${snapshotId}`);
+    t.diagnostic(
+      JSON.stringify({
+        phase,
+        currentWithheld: current === null,
+        pinnedWithheld: pinned === null,
+        currentValue: current?.selected.rows[0]?.result.value ?? null,
+        pinnedValue: pinned?.selected.rows[0]?.result.value ?? null,
+        httpStatus: response.statusCode,
+      }),
+    );
+    assert.deepEqual(await savedRows(), originalSavedRows);
+    assert.equal(normalizationCalls, savedNormalizationCalls);
+    assert.deepEqual(
+      [current === null, pinned === null],
+      [true, true],
+      "old sparse deployment authority must withhold both current and pinned saved SQL publications",
+    );
+    assert.equal(response.statusCode, 410, response.body);
+    assert.match(response.headers["cache-control"], /no-store/);
+  };
+  await denied(restarted, "reopened-sparse");
+  await restarted.stop();
+  const explicit = structuredClone(h.options.config);
+  explicit.recognitionBindings[0].domainEvidence.records[0].details.deploymentIds = [undefined];
+  assert.equal(operationsConfigurationHash(explicit), configuration);
+  assert.equal(
+    priorOperationsIdentifierAuthority(h.controlsStore.read(), explicit.recognitionBindings),
+    oldFingerprint,
+  );
+  h.options.config = explicit;
+  const refreshed = await createPipeline(h.options);
+  t.after(() => refreshed.stop());
+  await denied(refreshed, "explicit-undefined-refresh");
+  await refreshed.stop();
+  h.options.config.recognitionBindings[0].domainEvidence.records[0].details.deploymentIds = [
+    "private-deployment-repaired",
+  ];
+  h.options.config.version = "configuration-deployment-repaired-v2";
+  h.duplicate();
+  retained = s.input;
+  let receiptCalls = 0;
+  h.options.components = {
+    ...components,
+    github: {
+      ...components.github,
+      applyRecognitionReceipt(...args) {
+        receiptCalls++;
+        return components.github.applyRecognitionReceipt(...args);
+      },
+    },
+  };
+  const repaired = await createPipeline(h.options);
+  t.after(() => repaired.stop());
+  const result = await repaired.runOnce({ cutoff });
+  assert.equal(result.state, "published");
+  assert.equal(receiptCalls, 1);
+  assert.ok(normalizationCalls > savedNormalizationCalls);
+  const newId = result.publications[0].snapshotId;
+  assert.notEqual(newId, snapshotId);
+  assert.equal((await read(repaired, newId)).selected.rows[0].result.value, 1);
+  assert.equal(await read(repaired, snapshotId), null);
+});
