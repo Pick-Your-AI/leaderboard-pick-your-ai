@@ -32,8 +32,13 @@ values; participation does not recompute these or change any rank.
 
 The client checks the summary against the same selection and projected metric
 result. Earliest effective timestamps must fall within the selected half-open
-interval, and a measured zero summary requires a zero metric result. Missing
-legacy summaries and explicit unknown states remain supported.
+interval, and a measured zero summary requires a zero metric result. A measured
+summary, whether positive or zero, also requires that metric's complete coverage
+to enclose the selected interval, with a known-history start, reconciled source
+watermark and the same frozen snapshot cutoff reaching the exact bounds. The
+reader rejects a contradictory completeness claim; it does not promote partial
+or unknown evidence. Offset and sub-millisecond comparisons preserve the source
+clocks. Missing legacy summaries and explicit unknown states remain supported.
 
 **This extension keeps newcomer status unknown.** Complete coverage of one
 selected window is not reviewed organization-wide origin evidence. The separate
@@ -53,7 +58,8 @@ storage or share-card cache is introduced. Existing profile revalidation clears
 the entire summary on source failure, suppression, navigation or revoked pins;
 earliest-proof links retain the snapshot and filters and discard timeline cursors.
 
-Synthetic verification lives in `apps/service/test/participation.test.mjs` and
+Synthetic verification lives in `apps/service/test/participation.test.mjs`,
+`apps/service/test/participation-coverage-admission.test.mjs` and
 `apps/web/browser/participation.spec.ts`. It exercises real service handlers,
 timeline pagination, unknown/zero boundaries, exact clocks, current privacy and
 disabled metrics, legacy clients, narrow layout, accessible markup and pinned
