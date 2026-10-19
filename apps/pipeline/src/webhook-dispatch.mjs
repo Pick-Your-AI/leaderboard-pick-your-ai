@@ -11,6 +11,7 @@ export function createWebhookDispatcher({
   policyVersion,
   approved,
   configurationRevision,
+  publicationEligible = () => true,
   execute,
   confirm,
   assertAuthorized,
@@ -29,7 +30,7 @@ export function createWebhookDispatcher({
   return async function dispatchOnce() {
     if (dataMode !== "synthetic" || !(await approved())) return "blocked";
     const requested = binding();
-    const lease = await outbox.claim(requested);
+    const lease = await outbox.claim(requested, 60, ({ cutoff }) => publicationEligible(cutoff));
     if (!lease) return "idle";
     try {
       for (const key of [

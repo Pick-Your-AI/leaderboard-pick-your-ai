@@ -1125,10 +1125,31 @@ export interface Profile extends Metadata {
   categories: CategoryTotal[];
   evidenceCount: number;
 }
+function completeParticipationCoverage(result: MetricResult, scope: PublicScope, cutoff: string): boolean {
+  const coverage = result.coverage;
+  return (
+    scope.start !== null &&
+    scope.end !== null &&
+    coverage.state === "complete" &&
+    coverage.knownStart !== null &&
+    compareSourceInstants(coverage.knownStart, scope.start) <= 0 &&
+    coverage.windowStart !== null &&
+    compareSourceInstants(coverage.windowStart, scope.start) <= 0 &&
+    coverage.windowEnd !== null &&
+    compareSourceInstants(coverage.windowEnd, scope.end) >= 0 &&
+    coverage.sourceWatermark !== null &&
+    compareSourceInstants(coverage.sourceWatermark, scope.end) >= 0 &&
+    compareSourceInstants(cutoff, scope.end) >= 0 &&
+    coverage.missingPages === 0 &&
+    coverage.permissionsMissing.length === 0 &&
+    coverage.sourceErrors.length === 0
+  );
+}
 export function profile(value: unknown, selected: Selection): Profile {
   const data = object(value);
   if ((data.category ?? null) !== selected.category) throw new ReadFailure(502, "api_filter_mismatch");
   const results = array(data.results, 98).map((item) => metricResultSchema.parse(item));
+  const meta = metadata(value, selected);
   const participation =
     data.activitySummary === undefined ? null : publicParticipationSchema.safeParse(data.activitySummary);
   if (
@@ -1141,6 +1162,7 @@ export function profile(value: unknown, selected: Selection): Profile {
         return (
           result === undefined ||
           ["pr_accepted_rate", "review_wait"].includes(entry.metricId) ||
+          (entry.state === "measured" && !completeParticipationCoverage(result, meta.scope, meta.generatedAt)) ||
           (entry.state === "measured" && entry.activeWeeks === 0 && result.value !== 0) ||
           (earliest !== null &&
             ((selected.start !== null && compareSourceInstants(earliest.effectiveAt, selected.start) < 0) ||
@@ -1150,7 +1172,7 @@ export function profile(value: unknown, selected: Selection): Profile {
   )
     throw new ReadFailure(502, "invalid_participation_response");
   return {
-    ...metadata(value, selected),
+    ...meta,
     actorId: identity(data.actorId),
     actor: selectedActor(data.actor, selected),
     results,
