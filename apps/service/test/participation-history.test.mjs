@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createService } from "../dist/app.js";
+import { validateParticipationHistoryRead } from "../dist/participation-history.js";
 import {
   participationHistorySource,
   historyPath,
@@ -337,6 +338,89 @@ test("missing clocks, attribution, qualification and explicit unresolved records
   pair.history = structuredClone(original);
   pair.history.unresolved.push({ actorId: "102", reason: "unknown_time" });
   assert.equal((await read(app)).json().history.state, "known");
+});
+
+const unresolvedReasons = ["unknown_actor", "unknown_time", "unknown_qualification", "withheld", "conflicting"];
+
+test("malformed unresolved reasons reject on history and retained proof routes before actor scoping", async (t) => {
+  const { app, pair } = harness(t);
+  const original = (await read(app)).json().history;
+  for (const actorId of ["102", "101", null]) {
+    for (const reason of unresolvedReasons.flatMap((value) => [[value], [[value]]])) {
+      pair.history.unresolved = [{ actorId, reason }];
+      for (const url of [historyPath, proofPath(original)]) {
+        const response = await app.inject(url);
+        assert.equal(response.statusCode, 503, JSON.stringify({ actorId, reason, body: response.json() }));
+        assert.equal(response.json().error, "participation_history_invalid");
+        assert.equal(response.body.includes(original.firstProof.proof.contributionId), false);
+      }
+    }
+  }
+  pair.history.unresolved = [];
+  assert.deepEqual((await read(app)).json().history, original);
+  assert.deepEqual((await read(app, proofPath(original))).json().history, original);
+});
+
+test("literal unresolved reasons preserve unknown attribution and unrelated actor history", async (t) => {
+  const { app, pair } = harness(t);
+  const original = (await read(app)).json().history;
+  for (const actorId of ["102", "101", null]) {
+    for (const reason of unresolvedReasons) {
+      pair.history.unresolved = [{ actorId, reason }];
+      const response = await app.inject(historyPath);
+      if (reason === "unknown_actor" && actorId !== null) {
+        assert.equal(response.statusCode, 503, response.body);
+        assert.equal(response.json().error, "participation_history_invalid");
+        assert.equal((await app.inject(proofPath(original))).statusCode, 503);
+        continue;
+      }
+      assert.equal(response.statusCode, 200, response.body);
+      const history = response.json().history;
+      if (actorId === "102") {
+        assert.equal(history.state, "known");
+        assert.deepEqual(history.firstProof, original.firstProof);
+        assert.deepEqual((await read(app, proofPath(history))).json().history, history);
+      } else {
+        assert.equal(history.state, "unknown");
+        assert.equal(history.reason, "history_evidence_unavailable");
+        assert.equal(history.firstProof, null);
+        assert.equal(history.newcomer, null);
+        assert.equal((await app.inject(proofPath(original))).statusCode, 409);
+      }
+    }
+  }
+});
+
+test("unresolved reason validation rejects JSON aliases without modifying the supplied provider object", () => {
+  const pair = participationHistorySource().state.pair;
+  const invalidReasons = [
+    ...unresolvedReasons.flatMap((value) => [[value], [[value]]]),
+    null,
+    true,
+    false,
+    0,
+    {},
+    [],
+    ["unknown_actor", "unknown_time"],
+    " unknown_actor",
+    "unknown_actor\n",
+    "UNKNOWN_ACTOR",
+  ];
+  for (const actorId of ["102", "101", null]) {
+    for (const reason of invalidReasons) {
+      pair.history.unresolved = [{ actorId, reason }];
+      const original = structuredClone(pair);
+      assert.throws(() => validateParticipationHistoryRead(pair), {
+        status: 503,
+        code: "participation_history_invalid",
+      });
+      assert.deepEqual(pair, original);
+    }
+  }
+  pair.history.unresolved = [{ actorId: null, reason: "unknown_actor" }];
+  const original = structuredClone(pair);
+  assert.equal(validateParticipationHistoryRead(pair), pair);
+  assert.deepEqual(pair, original);
 });
 
 test("current opaque artifact retirement withholds the first proof instead of promoting later work", async (t) => {
