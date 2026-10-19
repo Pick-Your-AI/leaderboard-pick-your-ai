@@ -509,6 +509,7 @@ test("maintenance: obsolete authority withholds persisted public proofs and priv
     dataMode: "public",
     payloads: [s.payload],
     normalizerFactory: () => async () => structuredClone(s.input),
+    defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
     authorizePolicyPreview: async () => true,
     configure(config) {
       config.repositories[0].families = ["pull_requests"];
