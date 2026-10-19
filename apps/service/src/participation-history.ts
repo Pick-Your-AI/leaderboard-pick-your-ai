@@ -19,7 +19,13 @@ import {
   type MetricDefinition,
 } from "@pick-your-ai/contracts";
 import { stableJSON } from "@pick-your-ai/metrics";
-import { projectRead, PublicReadError, type PublicRead, type PortfolioEvidence } from "./public-source.js";
+import {
+  projectRead,
+  PublicReadError,
+  readSuppressedContributionIds,
+  type PublicRead,
+  type PortfolioEvidence,
+} from "./public-source.js";
 
 export interface ParticipationSelectedInput {
   snapshotId: string;
@@ -278,6 +284,7 @@ export function publicOrganizationHistory(
       [...read.controls.suppressedActorIds].sort(),
       [...read.controls.suppressedArtifactIds].sort(),
       [...read.controls.revokedSnapshotIds].sort(),
+      readSuppressedContributionIds(read.controls).sort(),
     ]);
   if (authority(paired.current) !== authority(publication))
     throw new PublicReadError(503, "participation_history_authority_changed");
