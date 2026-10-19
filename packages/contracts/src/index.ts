@@ -9,6 +9,11 @@ export {
   type VerifiedIdentityCorrectionDecision,
 } from "./identity-corrections.js";
 export {
+  verifiedIdentityCorrectionProposalEncodingVersion,
+  encodeVerifiedIdentityCorrectionProposal,
+  digestVerifiedIdentityCorrectionProposal,
+} from "./identity-correction-digest.js";
+export {
   canonicalPublicScope,
   publicScopeKey,
   publicScopeFilterKey,

@@ -20,6 +20,38 @@ test("controls fail closed on malformed identity, authority, CSRF or expired ses
     assert.throws(() => verifiedSession({ ...session, ...patch }));
 });
 
+for (const [description, actorId] of [
+  ["numeric", 1],
+  ["singleton array", ["1"]],
+  ["nested array", [["1"]]],
+  ["missing", undefined],
+  ["null", null],
+  ["object", { id: "1" }],
+  ["zero", "0"],
+  ["leading zero", "01"],
+  ["overlength", "1".repeat(21)],
+  ["terminal LF", "1\n"],
+  ["terminal CR", "1\r"],
+  ["terminal CRLF", "1\r\n"],
+  ["terminal line separator", "1\u2028"],
+  ["terminal paragraph separator", "1\u2029"],
+] as Array<[string, unknown]>) {
+  test(`protected session rejects ${description} actor identity before use`, () => {
+    const decoded = JSON.parse(JSON.stringify({ ...session, actorId })) as Session;
+    assert.throws(() => verifiedSession(decoded), /Invalid or expired controls session/);
+  });
+}
+
+test("protected session preserves canonical string ownership beyond numeric precision", () => {
+  for (const actorId of ["1", "9007199254740993", "99999999999999999999"]) {
+    const decoded = { ...session, actorId };
+    assert.equal(verifiedSession(decoded), decoded);
+    const own = { owner: actorId, kind: "evidence", status: "pending", collaborators: {} } as Receipt;
+    assert.equal(canReview(own, decoded), false);
+    assert.equal(canReview({ ...own, owner: "2" }, decoded), true);
+  }
+});
+
 const terms: EvidenceTerms = {
   schemaVersion: "evidence-terms/v1",
   version: "evidence-terms/2026-10-19",

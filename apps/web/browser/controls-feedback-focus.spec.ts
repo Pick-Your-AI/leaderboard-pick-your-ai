@@ -18,6 +18,7 @@ async function account(page: Page) {
       "/controls/requests": { requests: [] },
       "/controls/invitations": { invitations: [] },
       "/controls/spotlights/queue": { nominations: [] },
+      "/controls/spotlight-rotation/queue": { schemaVersion: "editorial-dimensions/v1", records: [] },
     };
     await route.fulfill({ json: responses[path] ?? {} });
   });
@@ -92,7 +93,7 @@ test("a delayed mutation receipt preserves navigation focus deliberately moved b
     const navigation = page.getByRole("link", { name: "Public leaderboard", exact: true });
     await navigation.focus();
     release();
-    await expect(page.getByRole("status")).toContainText(receipt);
+    await expect(page.getByRole("status").filter({ hasText: "Service confirmed" })).toContainText(receipt);
     await expect(navigation).toBeFocused();
   } finally {
     release();
