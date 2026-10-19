@@ -485,7 +485,7 @@ test("async normalizer preflights opposite receipts and collapses valid aliases 
   });
   assert.equal((await normalize(input)).facts.filter((f) => f.metricId === "issue_ordering").length, 1);
   // A same-plan duplicate still requires independent receipt authority. Its
-  // position must not let deduplication hide an invalid reviewer or proof set.
+  // position must not let deduplication hide an invalid reviewer, proof set or clock.
   for (const mutate of [
     (r) => {
       r.reviewerId = "UNAUTHORIZED";
@@ -501,6 +501,12 @@ test("async normalizer preflights opposite receipts and collapses valid aliases 
     },
     (r) => {
       r.verified = false;
+    },
+    (r) => {
+      r.acceptedAt = "2026-10-19T03:00:00.0001Z";
+    },
+    (r) => {
+      r.acceptedAt = "2026-10-19T03:00:00+00:00";
     },
   ]) {
     const invalid = structuredClone(s.receipt);

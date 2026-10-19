@@ -1419,6 +1419,7 @@ function verifiedOrderingReceipt(
   if (
     receipt.verified !== true ||
     !text(receipt.id) ||
+    !time(receipt.acceptedAt) ||
     !authorizedReviewerIds.includes(receipt.reviewerId) ||
     receipt.reviewerId === receipt.actorId ||
     receipt.evidenceIds.length !== 1 ||
