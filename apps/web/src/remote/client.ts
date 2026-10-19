@@ -41,10 +41,12 @@ import {
 export class ReadFailure extends Error {
   readonly status: number;
   readonly code: string;
-  constructor(status: number, code: string) {
+  readonly disabledMetric?: DisabledMetric;
+  constructor(status: number, code: string, disabledMetric?: DisabledMetric) {
     super(code);
     this.status = status;
     this.code = code;
+    if (disabledMetric !== undefined) this.disabledMetric = disabledMetric;
   }
 }
 const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
@@ -354,7 +356,26 @@ export async function request(
   path: string,
   params: URLSearchParams,
   signal: AbortSignal,
+  selectedForDisabledMetric?: Selection,
 ): Promise<unknown> {
+  // Only the board caller can opt in to structured disable details. Bind them
+  // to a copy of the exact request, not to a later navigation or arbitrary error.
+  const disabledSelection = selectedForDisabledMetric
+    ? {
+        ...selectedForDisabledMetric,
+        ...(selectedForDisabledMetric.projects === undefined
+          ? {}
+          : { projects: [...selectedForDisabledMetric.projects] }),
+        ...(selectedForDisabledMetric.roles === undefined ? {} : { roles: [...selectedForDisabledMetric.roles] }),
+      }
+    : null;
+  const expected = disabledSelection
+    ? parameters(disabledSelection, { board: true, cursor: disabledSelection.cursor })
+    : null;
+  const supplied = new URLSearchParams(params);
+  expected?.sort();
+  supplied.sort();
+  const acceptDisabled = path === "boards" && expected?.toString() === supplied.toString();
   const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(8000)]);
   requestSignal.throwIfAborted();
   const response = await fetch(publicRequestURL(base, path, params), {
@@ -389,6 +410,20 @@ export async function request(
   // Bound error bodies too, and show only controlled machine codes.
   if (!response.ok) {
     const code = (parsed as { error?: unknown } | null)?.error;
+    if (response.status === 503 && code === "metric_disabled" && acceptDisabled && disabledSelection) {
+      const meta = metadata(parsed, disabledSelection);
+      const detail = disabledMetric(object(parsed).metric);
+      const member = meta.disabledMetrics.find((item) => item.id === detail.id);
+      if (
+        detail.id !== disabledSelection.metric ||
+        !member ||
+        member.reason !== detail.reason ||
+        member.policyVersion !== detail.policyVersion ||
+        member.policyLink !== detail.policyLink
+      )
+        throw new ReadFailure(502, "invalid_disabled_metric_response");
+      throw new ReadFailure(response.status, code, detail);
+    }
     throw new ReadFailure(
       response.status,
       typeof code === "string" && /^[a-z0-9_:-]{1,100}$/.test(code) ? code : `http_${response.status}`,
@@ -789,6 +824,26 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
       throw new ReadFailure(502, "invalid_export_response");
   }
 }
+export interface DisabledMetric {
+  id: string;
+  /** Bounded machine code; never interpreted as public governance prose. */
+  reason: string;
+  policyVersion: string | null;
+  policyLink: string | null;
+}
+function disabledMetric(value: unknown): DisabledMetric {
+  const item = object(value);
+  if (typeof item.reason !== "string" || !/^[a-z0-9_:-]{1,100}$/.test(item.reason))
+    throw new ReadFailure(502, "invalid_disabled_metric_response");
+  if (item.policyLink != null && typeof item.policyLink !== "string")
+    throw new ReadFailure(502, "invalid_disabled_metric_response");
+  return {
+    id: identity(item.id),
+    reason: item.reason,
+    policyVersion: item.policyVersion == null ? null : identity(item.policyVersion),
+    policyLink: publicLink(item.policyLink as string | null | undefined),
+  };
+}
 export interface Metadata {
   scope: PublicScope;
   actorFilter?: ActorFilter;
@@ -801,7 +856,7 @@ export interface Metadata {
   head: { snapshotId: string; revision: number; publishedAt: string };
   coverage: Coverage[];
   methodology: { metricId: string; policyVersion: string; policySignature: string; policyLink: string | null }[];
-  disabledMetrics: { id: string; reason: string }[];
+  disabledMetrics: DisabledMetric[];
 }
 function validatedScope(value: unknown, selected: Selection): PublicScope {
   try {
@@ -823,6 +878,9 @@ export function metadata(value: unknown, selected: Selection): Metadata {
     throw new ReadFailure(502, "invalid_api_response");
   const snapshotId = identity(data.snapshotId);
   if (selected.snapshot && selected.snapshot !== snapshotId) throw new ReadFailure(502, "api_snapshot_mismatch");
+  const disabledMetrics = array(data.disabledMetrics ?? [], 98).map(disabledMetric);
+  if (new Set(disabledMetrics.map((item) => item.id)).size !== disabledMetrics.length)
+    throw new ReadFailure(502, "invalid_disabled_metric_response");
   return {
     scope,
     actorFilter: actorSelection(data, selected),
@@ -847,10 +905,7 @@ export function metadata(value: unknown, selected: Selection): Metadata {
         policyLink: publicLink(typeof item.policyLink === "string" ? item.policyLink : null),
       };
     }),
-    disabledMetrics: array(data.disabledMetrics ?? [], 98).map((value) => {
-      const item = object(value);
-      return { id: identity(item.id), reason: string(item.reason) };
-    }),
+    disabledMetrics,
   };
 }
 export interface Diagnostic {
@@ -1070,10 +1125,31 @@ export interface Profile extends Metadata {
   categories: CategoryTotal[];
   evidenceCount: number;
 }
+function completeParticipationCoverage(result: MetricResult, scope: PublicScope, cutoff: string): boolean {
+  const coverage = result.coverage;
+  return (
+    scope.start !== null &&
+    scope.end !== null &&
+    coverage.state === "complete" &&
+    coverage.knownStart !== null &&
+    compareSourceInstants(coverage.knownStart, scope.start) <= 0 &&
+    coverage.windowStart !== null &&
+    compareSourceInstants(coverage.windowStart, scope.start) <= 0 &&
+    coverage.windowEnd !== null &&
+    compareSourceInstants(coverage.windowEnd, scope.end) >= 0 &&
+    coverage.sourceWatermark !== null &&
+    compareSourceInstants(coverage.sourceWatermark, scope.end) >= 0 &&
+    compareSourceInstants(cutoff, scope.end) >= 0 &&
+    coverage.missingPages === 0 &&
+    coverage.permissionsMissing.length === 0 &&
+    coverage.sourceErrors.length === 0
+  );
+}
 export function profile(value: unknown, selected: Selection): Profile {
   const data = object(value);
   if ((data.category ?? null) !== selected.category) throw new ReadFailure(502, "api_filter_mismatch");
   const results = array(data.results, 98).map((item) => metricResultSchema.parse(item));
+  const meta = metadata(value, selected);
   const participation =
     data.activitySummary === undefined ? null : publicParticipationSchema.safeParse(data.activitySummary);
   if (
@@ -1086,6 +1162,7 @@ export function profile(value: unknown, selected: Selection): Profile {
         return (
           result === undefined ||
           ["pr_accepted_rate", "review_wait"].includes(entry.metricId) ||
+          (entry.state === "measured" && !completeParticipationCoverage(result, meta.scope, meta.generatedAt)) ||
           (entry.state === "measured" && entry.activeWeeks === 0 && result.value !== 0) ||
           (earliest !== null &&
             ((selected.start !== null && compareSourceInstants(earliest.effectiveAt, selected.start) < 0) ||
@@ -1094,8 +1171,8 @@ export function profile(value: unknown, selected: Selection): Profile {
       }))
   )
     throw new ReadFailure(502, "invalid_participation_response");
-  return {
-    ...metadata(value, selected),
+  const parsed = {
+    ...meta,
     actorId: identity(data.actorId),
     actor: selectedActor(data.actor, selected),
     results,
@@ -1111,6 +1188,16 @@ export function profile(value: unknown, selected: Selection): Profile {
     categories: categoryTotals(data.categories ?? []),
     evidenceCount: integer(data.evidenceCount),
   };
+  if (parsed.timeline.some((entry) => entry.contribution.actorId !== parsed.actorId))
+    throw new ReadFailure(502, "api_actor_mismatch");
+  const category = selected.category;
+  if (
+    category !== null &&
+    (parsed.results.some((result) => result.metricId !== category) ||
+      parsed.timeline.some((entry) => !entry.contribution.metricIds.includes(category)))
+  )
+    throw new ReadFailure(502, "api_filter_mismatch");
+  return parsed;
 }
 export interface Health extends Metadata {
   status: "recently_reconciled" | "stale_or_degraded";

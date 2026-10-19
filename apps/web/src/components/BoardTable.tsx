@@ -6,7 +6,8 @@ import { formatNumber, plural } from "../lib/format.ts";
 import { cutWithTies } from "../lib/ranking.ts";
 import type { Density } from "../lib/scope.ts";
 import { Link, ScopedLink } from "../lib/router.tsx";
-import { PersonName } from "./Receipt.tsx";
+import { CountLink } from "./CountLink.tsx";
+import { PersonName, publicPersonLabel } from "./Receipt.tsx";
 
 function ordinal(rank: number): string {
   const suffix =
@@ -38,6 +39,7 @@ export function BoardTable({
   limit,
   sortHref,
   proofHref,
+  countHref,
   moreHref,
 }: {
   board: Board;
@@ -46,6 +48,7 @@ export function BoardTable({
   limit: number;
   sortHref: (sort: BoardSort) => string;
   proofHref: (row: BoardRow) => string;
+  countHref: (row: BoardRow) => string;
   moreHref: string;
 }) {
   const unit = board.metric.definition.unit;
@@ -111,24 +114,58 @@ export function BoardTable({
                 <PersonName person={row.person} />
               </th>
               <td role="cell" className="numeric value" data-label={lines ? "Eligible lines" : "Ranked value"}>
-                {formatNumber(row.value)} <span className="unit">{unit}</span>
+                <CountLink
+                  to={countHref(row)}
+                  label={`${formatNumber(row.value)} ${unit}, ${publicPersonLabel(row.person)}, ${board.metric.name}`}
+                >
+                  {formatNumber(row.value)} <span className="unit">{unit}</span>
+                </CountLink>
               </td>
               <td role="cell" className="numeric" data-label="Pending, not ranked">
-                {row.pending > 0 ? formatNumber(row.pending) : <span className="muted">None</span>}
+                {row.pending > 0 ? (
+                  <CountLink
+                    to={countHref(row)}
+                    label={`${plural(row.pending, "pending contribution")}, ${publicPersonLabel(row.person)}`}
+                  >
+                    {formatNumber(row.pending)}
+                  </CountLink>
+                ) : (
+                  <span className="muted">None</span>
+                )}
               </td>
               {lines && row.lines && (
                 <>
                   <td role="cell" className="numeric" data-label="Source">
-                    {formatNumber(row.lines.source)}
+                    <CountLink
+                      to={countHref(row)}
+                      label={`${formatNumber(row.lines.source)} source lines, ${publicPersonLabel(row.person)}`}
+                    >
+                      {formatNumber(row.lines.source)}
+                    </CountLink>
                   </td>
                   <td role="cell" className="numeric" data-label="Docs">
-                    {formatNumber(row.lines.docs)}
+                    <CountLink
+                      to={countHref(row)}
+                      label={`${formatNumber(row.lines.docs)} docs lines, ${publicPersonLabel(row.person)}`}
+                    >
+                      {formatNumber(row.lines.docs)}
+                    </CountLink>
                   </td>
                   <td role="cell" className="numeric" data-label="Tests">
-                    {formatNumber(row.lines.tests)}
+                    <CountLink
+                      to={countHref(row)}
+                      label={`${formatNumber(row.lines.tests)} test lines, ${publicPersonLabel(row.person)}`}
+                    >
+                      {formatNumber(row.lines.tests)}
+                    </CountLink>
                   </td>
                   <td role="cell" className="numeric" data-label="Excluded lines">
-                    {formatNumber(row.lines.generated + row.lines.vendor + row.lines.lockfile)}
+                    <CountLink
+                      to={countHref(row)}
+                      label={`${formatNumber(row.lines.generated + row.lines.vendor + row.lines.lockfile)} excluded lines, ${publicPersonLabel(row.person)}`}
+                    >
+                      {formatNumber(row.lines.generated + row.lines.vendor + row.lines.lockfile)}
+                    </CountLink>
                   </td>
                 </>
               )}
@@ -137,7 +174,7 @@ export function BoardTable({
                   Proof
                   <span className="visually-hidden">
                     {" "}
-                    for {row.person.displayName}:{" "}
+                    for {publicPersonLabel(row.person)}:{" "}
                     {plural(row.ranked.length + row.pendingRecords.length, "contribution")}
                   </span>
                 </Link>

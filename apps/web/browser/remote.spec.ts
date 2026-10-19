@@ -114,10 +114,14 @@ function snapshot(id = "api-1", revision = 1) {
           policyLink: "https://github.com/synthetic-api/example/blob/main/policy.md",
         },
       ],
+      disabledMetrics: [] as Array<{ id: string; reason: string; policyVersion: string; policyLink: string | null }>,
     },
   };
 }
-async function service(page: Page, options: { holdUpdates?: boolean; resetUpdates?: boolean } = {}) {
+async function service(
+  page: Page,
+  options: { holdUpdates?: boolean; resetUpdates?: boolean; holdFirstBoard?: boolean } = {},
+) {
   // Dynamic path avoids coupling the web TypeScript project to server source.
   // CI builds all packages before browser tests. Requests use the actual Fastify
   // handler, contract projection, query checks and signed cursor implementation.
@@ -127,6 +131,8 @@ async function service(page: Page, options: { holdUpdates?: boolean; resetUpdate
   const snapshots = new Map([[current.head.snapshotId, current]]);
   let unavailable = false;
   let wrongHealthScope = false;
+  let wrongDisabledScope = false;
+  let disabledMetrics = snapshot().selected.disabledMetrics;
   const app = createService({
     now: () => Date.parse(at),
     cursorSecret: "synthetic-browser-cursor-secret-0001",
@@ -139,12 +145,26 @@ async function service(page: Page, options: { holdUpdates?: boolean; resetUpdate
         result.selected.scope = { ...scope };
         result.head = structuredClone(current.head);
         result.controls = structuredClone(current.controls);
+        result.selected.disabledMetrics = structuredClone(disabledMetrics);
         return result;
       },
     },
   });
   const calls: URL[] = [];
   const healthResponses: { status: number; conditional: string | null }[] = [];
+  let releaseBoard = () => {};
+  let boardRequested = () => {};
+  let boardSettled = () => {};
+  let heldBoard = false;
+  const firstBoard = new Promise<void>((resolve) => {
+    boardRequested = resolve;
+  });
+  const settledBoard = new Promise<void>((resolve) => {
+    boardSettled = resolve;
+  });
+  const boardGate = new Promise<void>((resolve) => {
+    releaseBoard = resolve;
+  });
   let releaseUpdates = () => {};
   const updateGate = options.holdUpdates
     ? new Promise<void>((resolve) => {
@@ -162,6 +182,11 @@ async function service(page: Page, options: { holdUpdates?: boolean; resetUpdate
     }
     const response = await app.inject({ method: "GET", url: url.pathname + url.search, headers });
     let body = response.body;
+    if (wrongDisabledScope && url.pathname.endsWith("/boards") && response.statusCode === 503) {
+      const invalid = JSON.parse(body);
+      invalid.scope.repository = "another-repository";
+      body = JSON.stringify(invalid);
+    }
     if (wrongHealthScope && url.pathname.endsWith("/health") && response.statusCode === 200) {
       const invalid = JSON.parse(body);
       invalid.scope.repository = "another-repository";
@@ -169,12 +194,31 @@ async function service(page: Page, options: { holdUpdates?: boolean; resetUpdate
     }
     if (url.pathname.endsWith("/health"))
       healthResponses.push({ status: response.statusCode, conditional: headers["if-none-match"] ?? null });
-    await route.fulfill({ status: response.statusCode, headers: response.headers, body });
+    const hold = options.holdFirstBoard && url.pathname.endsWith("/boards") && !heldBoard;
+    if (hold) {
+      heldBoard = true;
+      boardRequested();
+      await boardGate;
+    }
+    try {
+      await route.fulfill({ status: response.statusCode, headers: response.headers, body });
+    } finally {
+      if (hold) boardSettled();
+    }
   });
   return {
     calls,
     healthResponses,
     releaseUpdates: () => releaseUpdates(),
+    firstBoard,
+    settledBoard,
+    releaseBoard: () => releaseBoard(),
+    wrongDisabledScope() {
+      wrongDisabledScope = true;
+    },
+    disableMetric(policyLink: string | null = "https://github.com/synthetic-api/example/blob/main/policy.md") {
+      disabledMetrics = [{ id: "pr_merged", reason: "policy_withdrawn", policyVersion: "review-v1", policyLink }];
+    },
     mixedActors() {
       current.selected.actors[1]!.actor.executionMode = "automated";
       current.selected.actors[2]!.actor.kind = "bot";
@@ -228,6 +272,7 @@ async function service(page: Page, options: { holdUpdates?: boolean; resetUpdate
     },
     async close() {
       releaseUpdates();
+      releaseBoard();
       await page.unrouteAll({ behavior: "wait" });
       await app.close();
     },
@@ -259,6 +304,116 @@ async function service(page: Page, options: { holdUpdates?: boolean; resetUpdate
     },
   };
 }
+
+test("disabled API board retains the exact historical policy without presenting a measured zero", async ({
+  page,
+}, testInfo) => {
+  const api = await service(page);
+  api.disableMetric();
+  try {
+    await page.goto("/leaderboards/pr_merged?ui=api&repository=repo-1&snapshot=api-1");
+    const notice = page.getByRole("alert");
+    await expect(notice).toBeVisible();
+    await expect(notice.getByRole("link", { name: "Historical policy source", exact: true })).toHaveAttribute(
+      "href",
+      "https://github.com/synthetic-api/example/blob/main/policy.md",
+    );
+    await expect(notice).toContainText("review-v1");
+    await expect(notice).toContainText("This measure is currently disabled.");
+    await expect(page.getByRole("table")).toHaveCount(0);
+    expect(
+      api.calls.some(
+        (url) =>
+          url.pathname.endsWith("/boards") &&
+          url.searchParams.get("snapshot") === "api-1" &&
+          url.searchParams.get("repository") === "repo-1",
+      ),
+    ).toBe(true);
+    await testInfo.attach("disabled-board-policy", { body: await page.screenshot(), contentType: "image/png" });
+  } finally {
+    await api.close();
+  }
+});
+
+test("unaffected API board remains measured and discloses the other disabled metric policy", async ({
+  page,
+}, testInfo) => {
+  const api = await service(page);
+  api.disableMetric();
+  try {
+    await page.goto("/leaderboards/documentation?ui=api&repository=repo-1&snapshot=api-1");
+    await expect(page.getByRole("row", { name: /Synthetic API A/ }).locator("strong")).toHaveText("2");
+    const provenance = page.getByRole("region", { name: "Snapshot provenance" });
+    await expect(provenance.getByRole("link", { name: "Historical policy source", exact: true })).toHaveAttribute(
+      "href",
+      "https://github.com/synthetic-api/example/blob/main/policy.md",
+    );
+    await expect(provenance).toContainText("review-v1");
+    await expect(provenance).toContainText("This measure is currently disabled.");
+    await expect(page.getByRole("alert")).toHaveCount(0);
+    await testInfo.attach("unaffected-board-policy", { body: await page.screenshot(), contentType: "image/png" });
+  } finally {
+    await api.close();
+  }
+});
+
+for (const link of [null, "https://user:secret@github.com/synthetic-api/example/issues/1?private=value"]) {
+  test(`disabled API board makes ${link === null ? "absent" : "unsafe"} historical policy link explicitly unavailable`, async ({
+    page,
+  }) => {
+    const api = await service(page);
+    api.disableMetric(link);
+    try {
+      await page.goto("/leaderboards/pr_merged?ui=api&repository=repo-1&snapshot=api-1");
+      const notice = page.getByRole("alert");
+      await expect(notice).toContainText("Historical policy link unavailable.");
+      await expect(notice).toContainText("review-v1");
+      await expect(notice.getByRole("link", { name: "Historical policy source" })).toHaveCount(0);
+      await expect(page.locator("body")).not.toContainText("secret");
+      await expect(page.locator("body")).not.toContainText("private=value");
+    } finally {
+      await api.close();
+    }
+  });
+}
+
+test("disabled API board rejects a policy response belonging to another scope", async ({ page }) => {
+  const api = await service(page);
+  api.disableMetric();
+  api.wrongDisabledScope();
+  try {
+    await page.goto("/leaderboards/pr_merged?ui=api&repository=repo-1&snapshot=api-1");
+    const notice = page.getByRole("alert");
+    await expect(notice).toContainText("api_scope_mismatch");
+    await expect(notice.getByRole("link", { name: "Historical policy source" })).toHaveCount(0);
+    await expect(page.locator("body")).not.toContainText("review-v1");
+    await expect(page.getByRole("table")).toHaveCount(0);
+  } finally {
+    await api.close();
+  }
+});
+
+test("late disabled API board response cannot restore policy after navigating to measures", async ({ page }) => {
+  const api = await service(page, { holdFirstBoard: true });
+  api.disableMetric();
+  try {
+    await page.goto("/leaderboards/pr_merged?ui=api&repository=repo-1&snapshot=api-1");
+    await api.firstBoard;
+    await page
+      .getByRole("navigation", { name: "Primary", exact: true })
+      .getByRole("link", { name: "Measures", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/leaderboards\?/);
+    await expect(page.getByRole("heading", { level: 1, name: "Measures" })).toBeVisible();
+    api.releaseBoard();
+    await api.settledBoard;
+    await expect(page.getByRole("link", { name: "Historical policy source" })).toHaveCount(0);
+    await expect(page.locator("body")).not.toContainText("review-v1");
+    await expect(page.getByRole("alert")).toHaveCount(0);
+  } finally {
+    await api.close();
+  }
+});
 
 test("API polling fallback uses conditional health, holds new rankings and reports stale or failed checks truthfully", async ({
   page,
