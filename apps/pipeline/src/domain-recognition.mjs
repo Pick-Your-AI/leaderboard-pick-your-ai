@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { sourceEventSchema } from "@pick-your-ai/contracts";
+import { publicEvidenceMetadataSchema, sourceEventSchema } from "@pick-your-ai/contracts";
 
 // These are existing registry definitions, not new metrics or source permissions.
 const clocks = {
@@ -24,6 +24,9 @@ const clocks = {
   usability: "accepted_at",
   performance: "accepted_at",
   security: "published_at",
+  governance: "accepted_at",
+  deployment_work: "accepted_at",
+  incidents: "accepted_at",
 };
 export const domainMetricIds = Object.freeze(Object.keys(clocks));
 export const domainDateBasis = (metricId) =>
@@ -40,6 +43,9 @@ const authorMetrics = new Set([
   "reproductions",
   "documentation",
   "tests",
+  "governance",
+  "deployment_work",
+  "incidents",
 ]);
 
 const fail = () => {
@@ -124,6 +130,79 @@ const compareDecimals = (before, after) => {
   return left < right ? -1 : left > right ? 1 : 0;
 };
 const approvedOwner = (roster, reviewer) => require(ids(roster).includes(reviewer));
+
+const operationsMetrics = new Set(["governance", "deployment_work", "incidents"]);
+const operationId = (value) => {
+  id(value);
+  require(value.trim() === value);
+  return value;
+};
+
+// A protected narrative describes source work; it cannot create that work or
+// turn an execution, merge operator, prior qualification or unknown role into authorship.
+function requireOperationSource(input, binding, candidate, target, acceptedAt) {
+  require(
+    binding.sourceMetricId === "pr_merged" &&
+      candidate.metricId === "pr_merged" &&
+      candidate.role === "author" &&
+      candidate.state === "observed" &&
+      candidate.acceptedAt == null &&
+      candidate.acceptedBy == null &&
+      candidate.acceptanceReceipt == null &&
+      typeof candidate.rawState === "string" &&
+      candidate.rawState.startsWith("target:") &&
+      candidate.rawState.length > 7 &&
+      input.facts.filter((fact) => fact.id === candidate.id).length === 1 &&
+      input.actors.filter((actor) => actor.id === candidate.actorId).length === 1 &&
+      typeof candidate.canonicalKey === "string" &&
+      candidate.canonicalKey.trim().length > 0 &&
+      typeof candidate.artifactId === "string" &&
+      candidate.artifactId.trim().length > 0 &&
+      candidate.repoId === binding.repositoryId &&
+      target.artifact.source === "github" &&
+      target.artifact.kind === "pull_request" &&
+      target.artifact.stableId === candidate.artifactId &&
+      target.contribution.artifactId === candidate.artifactId &&
+      target.contribution.canonicalEventId === candidate.canonicalKey &&
+      target.contribution.qualification === "eligible" &&
+      Array.isArray(target.contribution.metricIds) &&
+      target.contribution.metricIds.length === 1 &&
+      target.contribution.metricIds[0] === "pr_merged" &&
+      Array.isArray(target.contribution.roles) &&
+      target.contribution.roles.length === 1 &&
+      target.contribution.roles[0] === "author",
+  );
+  require(instant(candidate.occurredAt) <= instant(acceptedAt));
+  require(instant(target.occurredAt) === instant(candidate.occurredAt));
+  const metadata = target.evidenceMetadata;
+  if (metadata !== undefined) {
+    require(
+      publicEvidenceMetadataSchema.safeParse(metadata).success &&
+        metadata.sourceAction === "pull_request_merged" &&
+        metadata.activityState === "observed" &&
+        metadata.acceptedAt === null,
+    );
+    require(instant(metadata.sourceOccurredAt) === instant(candidate.occurredAt));
+  }
+}
+
+// Only a pinned public file in the already collected repository/revision can
+// describe the reviewed work. Its contents/hash still require actual host review.
+function requireOperationRecord(value, record) {
+  const pin = object(value, ["revision", "sourceRevisionUrl", "contentHash"]);
+  require(typeof pin.revision === "string" && [40, 64].includes(pin.revision.length));
+  pinnedGithubUrl(pin.sourceRevisionUrl, pin.revision);
+  require(digest(pin.contentHash).length === 64);
+  const path = new URL(pin.sourceRevisionUrl).pathname.split("/");
+  const source = new URL(record.sourceRevisionUrl).pathname.split("/");
+  require(
+    pin.revision === record.sourceRevision &&
+      path[1] === source[1] &&
+      path[2] === source[2] &&
+      path[3] === "blob" &&
+      path.slice(1).every((part) => part.length > 0),
+  );
+}
 
 // Only list shapes newly rejected above need a saved-authority fence. Explicit
 // undefined shares both legacy recognition/configuration hashes with a hole.
@@ -262,11 +341,16 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
       "evidence_manifests",
       "data_quality",
       "reproductions",
+      "governance",
+      "deployment_work",
+      "incidents",
     ].includes(metric)
   )
     approvedOwner(domain.ownerIds, decision.actor);
   if (metric === "compatibility_proposals") approvedOwner(domain.contractReviewerIds, decision.actor);
   if (metric === "security") approvedOwner(domain.disclosureReviewerIds, decision.actor);
+
+  if (operationsMetrics.has(metric)) requireOperationSource(input, binding, candidate, target, acceptedAt);
 
   const detail = record.details;
   let unit,
@@ -512,6 +596,31 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
       }
       break;
     }
+    case "governance":
+      object(detail, ["decisionId", "decisionVersion", "kind", "disposition", "publicRecord"]);
+      choice(detail.kind, [
+        "governance_decision",
+        "repository_rules",
+        "public_repository_settings",
+        "repository_process",
+      ]);
+      require(detail.disposition === "accepted");
+      unit = [operationId(detail.decisionId), operationId(detail.decisionVersion)];
+      break;
+    case "deployment_work":
+      object(detail, ["workArtifactId", "workVersion", "workKind", "deploymentIds", "sourceUse", "publicRecord"]);
+      require(detail.workKind === "deployment_improvement" && detail.sourceUse === "approved_public");
+      ids(detail.deploymentIds).forEach(operationId);
+      operationId(detail.workVersion);
+      unit = [operationId(detail.workArtifactId)];
+      break;
+    case "incidents":
+      object(detail, ["contributionId", "contributionVersion", "workKind", "narrativeApproved", "publicRecord"]);
+      choice(detail.workKind, ["postmortem", "remediation"]);
+      require(detail.narrativeApproved === true);
+      operationId(detail.contributionVersion);
+      unit = [operationId(detail.contributionId)];
+      break;
     case "documentation":
     case "tests":
       object(detail, ["authorship", "category", "substantiveReview"]);
@@ -580,6 +689,7 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
     default:
       fail();
   }
+  if (operationsMetrics.has(metric)) requireOperationRecord(detail.publicRecord, record);
   if (clocks[metric] === "merged_at") {
     require(["pr_merged", "documentation", "tests"].includes(binding.sourceMetricId));
     require(
@@ -605,5 +715,13 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
   if (metric === "reproductions") publicReasonCodes.push("accepted_reproduction_scenario_not_bug_confirmation");
   for (const key of ["evidenceClass", "method", "outcome", "phase", "reviewMethod", "authorship", "disposition"])
     if (Object.hasOwn(detail, key)) publicReasonCodes.push(`domain_${key}:${detail[key]}`);
-  return { changesetId, occurredAt, dateBasis: domainDateBasis(metric), publicReasonCodes };
+  return {
+    changesetId,
+    occurredAt,
+    dateBasis: domainDateBasis(metric),
+    publicReasonCodes,
+    ...(operationsMetrics.has(metric)
+      ? { reviewedArtifact: { url: detail.publicRecord.sourceRevisionUrl, hash: detail.publicRecord.contentHash } }
+      : {}),
+  };
 }

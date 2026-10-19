@@ -10,7 +10,8 @@ A verified pipeline configuration may include `documentationPolicies`, each cont
 
 - `repositoryId` and immutable classification policy `version`;
 - explicit `documentationPaths` (nonempty), `researchPaths`, `generatedPaths` and `importedPaths` arrays;
-- exact relative paths or directory prefixes ending in `/`, with no glob, traversal, absolute path or inferred locale semantics.
+- exact relative paths or directory prefixes ending in `/`, with no glob, traversal, absolute path or inferred locale semantics;
+- optional `releaseNotesPaths`, a nonempty bounded subset of documentation paths that supplies only an authored-notes source candidate. The [separate current purpose review](authored-release-notes.md) is required before it becomes a public label.
 
 No policy or no trusted diff enrichment means no documentation fact. All configured policies are copied and validated when the normalizer is built. Duplicate repository policies are rejected. Changing classification requires a newly reviewed/versioned pipeline configuration; it must not silently reuse an old configuration or mutate a frozen publication.
 
