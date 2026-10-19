@@ -73,6 +73,7 @@ export function createControlsServer({
   approvedPolicyVersions = [],
   knownMetricIds = [],
   sourceVerifier,
+  configurationAuthorityCurrent,
   policyComparisons,
   now = Date.now,
   sessionSeconds = 900,
@@ -129,6 +130,7 @@ export function createControlsServer({
     knownMetricIds,
     now,
     rolesForActor: roleState,
+    configurationAuthorityCurrent,
   });
   const managePolicyComparison = policyComparisons ? createPolicyComparisonManager(policyComparisons) : null;
   async function authenticate(req, parsed) {
@@ -313,7 +315,7 @@ export function createControlsServer({
           session,
           refreshSession: () => authenticate(req, parsed),
         });
-        send(result.status, result.data);
+        send(result.status, result.data, result.beforeSend);
         return;
       }
       if (req.method === "GET" && path === "/controls/spotlights/queue") {

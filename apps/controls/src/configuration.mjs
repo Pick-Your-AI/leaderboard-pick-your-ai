@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { exactKeys, locator, requireThat, text } from "./store.mjs";
+import { types } from "node:util";
+import { ControlError, exactKeys, locator, requireThat, text } from "./store.mjs";
 export { configurationOverlay } from "./overlay.mjs";
 
 export function stableJSON(value) {
@@ -78,7 +79,7 @@ export function normalizeConfiguration(value) {
         id: identifier(metric.id),
         enabled: metric.enabled,
         reason: metric.enabled
-          ? metric.reason === undefined
+          ? metric.reason === undefined || metric.reason === ""
             ? ""
             : text(metric.reason, 500)
           : text(metric.reason, 500),
@@ -239,9 +240,36 @@ export function createConfigurationManager({
   knownMetricIds,
   now,
   rolesForActor,
+  configurationAuthorityCurrent,
 }) {
   const policyVersions = new Set(approvedPolicyVersions);
   const metricIds = new Set(knownMetricIds);
+  function drainUnexpectedPromise(value, seen = new WeakSet()) {
+    // Foreign thenables are invalid authority results. Do not inspect or invoke
+    // their properties, which could execute more provider code.
+    if (!types.isPromise(value) || seen.has(value)) return;
+    seen.add(value);
+    try {
+      // Native promises may shadow then/catch. Discard fulfilled payloads, and
+      // observe each native rejection once, including cycles of rejected reasons.
+      // Promise constructor/species behavior remains part of the trusted host.
+      void Promise.prototype.then.call(
+        value,
+        () => undefined,
+        (reason) => drainUnexpectedPromise(reason, seen),
+      );
+    } catch {}
+  }
+  function requireCurrentAuthority(binding) {
+    try {
+      const value = configurationAuthorityCurrent?.(binding);
+      if (value === true) return;
+      drainUnexpectedPromise(value);
+    } catch (error) {
+      drainUnexpectedPromise(error);
+    }
+    throw new ControlError(409, "Configuration authority changed or unavailable");
+  }
   async function verify(proposal, config, phase) {
     if (restrictionOnly(config.active?.document, proposal.document))
       return {
@@ -384,6 +412,7 @@ export function createConfigurationManager({
         "Current tested preview required",
       );
     }
+    let confirmActivation;
     if (action === "activate") {
       const authority = await rolesForActor(proposal.approval.actor);
       requireThat(
@@ -399,9 +428,35 @@ export function createConfigurationManager({
         409,
         "Source schema or permission changed; preview again",
       );
+      const binding = Object.freeze({
+        actorId: session.actorId,
+        roleVersion: session.roleVersion,
+        approverId: proposal.approval.actor,
+        approverRoleVersion: proposal.approval.roleVersion,
+      });
+      confirmActivation = () => {
+        // Both role bindings must remain authoritative in this synchronous turn.
+        // An asynchronous refresh or eventually consistent mirror cannot supply it.
+        requireCurrentAuthority(binding);
+        const active = store.read().sessions[session.sid];
+        const currentSession =
+          active &&
+          active.actorId === session.actorId &&
+          active.roleVersion === session.roleVersion &&
+          active.csrf === session.csrf &&
+          active.expires === session.expires &&
+          stableJSON(active.roles) === stableJSON(session.roles) &&
+          active.roles.includes("operator");
+        const timestamp = now();
+        requireThat(currentSession && active.expires > timestamp, 401, "Operator session revoked");
+        requireThat(source.validUntil > timestamp, 409, "Source receipt expired");
+        requireThat(proposal.preview.source.validUntil > timestamp, 409, "Preview expired");
+      };
     }
+    let activatedConfiguration;
     const result = store.transaction(
       (state) => {
+        confirmActivation?.();
         const { config, proposal } = proposalFor(state, id, input.version);
         // Authority/session rechecks await external providers after verification.
         // The source receipt must still be current at the synchronous commit boundary.
@@ -454,11 +509,26 @@ export function createConfigurationManager({
             approvalId: proposal.approval.id,
           });
           config.active = structuredClone(proposal);
+          activatedConfiguration = stableJSON(config);
         }
         return structuredClone(proposal);
       },
-      { publish: action === "activate" },
+      {
+        publish: action === "activate",
+        ...(confirmActivation
+          ? {
+              beforeCommit: () => {
+                requireThat(
+                  stableJSON(configurationState(store.read())) === activatedConfiguration,
+                  409,
+                  "Configuration changed during publication",
+                );
+                confirmActivation();
+              },
+            }
+          : {}),
+      },
     );
-    return { status: 200, data: result };
+    return { status: 200, data: result, ...(confirmActivation ? { beforeSend: confirmActivation } : {}) };
   };
 }
