@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { types } from "node:util";
 import { ControlError, exactKeys, locator, requireThat, text } from "./store.mjs";
 export { configurationOverlay } from "./overlay.mjs";
 
@@ -243,28 +244,21 @@ export function createConfigurationManager({
 }) {
   const policyVersions = new Set(approvedPolicyVersions);
   const metricIds = new Set(knownMetricIds);
-  function drainUnexpectedPromise(value) {
+  function drainUnexpectedPromise(value, seen = new WeakSet()) {
+    // Foreign thenables are invalid authority results. Do not inspect or invoke
+    // their properties, which could execute more provider code.
+    if (!types.isPromise(value) || seen.has(value)) return;
+    seen.add(value);
     try {
-      // Native promises may shadow then/catch; attach through the intrinsic first.
-      // Discard fulfilled values so a changed payload cannot reject the drained child.
+      // Native promises may shadow then/catch. Discard fulfilled payloads, and
+      // observe each native rejection once, including cycles of rejected reasons.
+      // Promise constructor/species behavior remains part of the trusted host.
       void Promise.prototype.then.call(
         value,
         () => undefined,
-        () => undefined,
+        (reason) => drainUnexpectedPromise(reason, seen),
       );
-      return;
-    } catch {
-      // Fall back to guarded thenable assimilation.
-    }
-    try {
-      if (value && typeof value.then === "function")
-        void Promise.resolve(value).then(
-          () => undefined,
-          () => undefined,
-        );
-    } catch {
-      // Provider details are private, including errors from a then getter.
-    }
+    } catch {}
   }
   function requireCurrentAuthority(binding) {
     try {

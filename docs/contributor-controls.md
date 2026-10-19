@@ -199,10 +199,13 @@ roster lookup cannot supply this guarantee. The callback must not perform
 publication, mutate the roster, start a nested transaction or acquire unrelated
 locks. It grants no role and does not infer approval from an earlier successful
 request. Missing, false, truthy non-boolean, throwing and thenable results deny
-activation with a fixed error; unexpected rejected promises are drained without
-being awaited or accepted. Other controls routes remain available under their
-existing permissions. Restrictive disables and rollback activation require the
-same current authority.
+activation with a fixed error. Unexpected native Promise rejections are observed
+without being awaited or accepted. Other objects and functions are rejected
+without reading or calling their `then` property. Promise cleanup assumes the
+trusted host retains native Promise constructor and species behavior; it does
+not isolate arbitrary host code. Other controls routes remain available under
+their existing permissions. Restrictive disables and rollback activation require
+the same current authority.
 
 After the existing asynchronous source, approver and session refreshes, the
 combined check runs inside the activation transaction before mutation and again
