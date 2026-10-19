@@ -272,6 +272,7 @@ test("issue_answers: its configuration fence preserves automatic-source authorit
         "deployment_work",
         "incidents",
         "release_changes",
+        "release_stewardship",
       ].includes(metric.id)
     )
       assert.notEqual(current, old);

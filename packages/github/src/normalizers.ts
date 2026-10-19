@@ -33,6 +33,7 @@ import {
   verifyGithubRestSnapshotRevision,
 } from "./rest-snapshot.js";
 import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
+import { validateReleaseStewardshipSource } from "./release-stewardship-source.js";
 import { documentationRecognitionUnit, validateDocumentationPurposeSource } from "./documentation-purpose.js";
 import {
   validateMaintenanceClassification,
@@ -1656,6 +1657,10 @@ export function applyRecognitionReceipt(
       : receipt.metricId === "automation"
         ? validateAutomationSource(input, target.id, receipt.acceptedAt)
         : null;
+  const stewardship =
+    receipt.metricId === "release_stewardship"
+      ? validateReleaseStewardshipSource(input, target.id, receipt.acceptedAt)
+      : null;
   if (
     receipt.maintenanceClassification !== undefined &&
     (receipt.metricId !== "maintenance" || receipt.decision !== "accepted")
@@ -1711,9 +1716,11 @@ export function applyRecognitionReceipt(
       ? documentationUnit
       : mergedChange
         ? mergedChange.unit
-        : receipt.metricId === "localization"
-          ? target.canonicalKey
-          : (receipt.changesetId ?? target.canonicalKey);
+        : stewardship
+          ? stewardship.unit
+          : receipt.metricId === "localization"
+            ? target.canonicalKey
+            : (receipt.changesetId ?? target.canonicalKey);
   if (receipt.metricId === "localization" && target.state !== "observed")
     throw new Error("Localization acceptance must target its original observed source fact");
   if (
@@ -1754,7 +1761,7 @@ export function applyRecognitionReceipt(
       ...structuredClone(evidence),
       occurredAt: release
         ? release.record.release.publishedAt
-        : receipt.metricId === "localization" || mergedChange || documentationPurpose
+        : receipt.metricId === "localization" || mergedChange || documentationPurpose || stewardship
           ? target.occurredAt
           : fact.acceptedAt,
       ...(release
