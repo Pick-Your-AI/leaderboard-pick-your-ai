@@ -1,0 +1,780 @@
+{
+  "fixtureNotice": "Fictional states only. Literal results executed on the unchanged accepted implementation; no reimplementation of the hash algorithm.",
+  "source": {
+    "commit": "f80d6c206d4528385e275991c4914303d25adfe1",
+    "path": "apps/pipeline/src/recognition-adapter.mjs",
+    "blob": "34d388dbcb1669e1914cffc193f23cd2e5aebe4f",
+    "sha256": "d9e32db1bcb28cf776c5b2b59d521ede5d286ee78a4a7c1d152924e3e40acf01"
+  },
+  "states": {
+    "empty": {
+      "requests": {},
+      "profiles": {},
+      "audit": []
+    },
+    "currentIntake": {
+      "requests": {
+        "private-stewardship-request": {
+          "id": "private-stewardship-request",
+          "kind": "evidence",
+          "status": "accepted",
+          "owner": "101",
+          "version": 2,
+          "category": "other",
+          "scope": "repository:2:release-stewardship",
+          "policyVersion": "stewardship-policy-v1",
+          "locator": "https://github.com/synthetic-owner/repository/releases/tag/v60",
+          "collaborators": {},
+          "history": [
+            {
+              "id": "private-stewardship-audit",
+              "action": "accepted",
+              "actor": "202",
+              "at": 1791540000000,
+              "version": 2,
+              "policyVersion": "stewardship-policy-v1",
+              "receipt": "private-stewardship-request",
+              "sourceReviewedPublic": true,
+              "conflict": false,
+              "sourceUseReview": {
+                "disposition": "permitted",
+                "rationale": "Synthetic independent review: the bounded example is permitted for this optional public claim.",
+                "references": [
+                  {
+                    "locator": "https://github.com/synthetic-org/synthetic-repo/blob/main/permission.md",
+                    "revision": "synthetic-reviewed-permission-v1"
+                  }
+                ],
+                "reviewerId": "202",
+                "roleVersion": "synthetic-reviewer-authority/v1",
+                "reviewedAt": 1791540000000,
+                "scope": "public-claim-attribution",
+                "claimRevision": 1,
+                "claimDigest": "9c5b52b9e920f16c77fe02ab656a380f62c5065460cc10357068572294d2757c",
+                "reviewedInputDigest": "f41b035eab6fca189e93d70b2dcf49cccc95f20cba43ae2abde11237ef8570b3",
+                "termsVersion": "evidence-terms/2026-10-19",
+                "termsDigest": "432cf9d0450f12d2b5967629f79c95adfa14b22e407b7b62e5f7ca7837ccd553",
+                "rightsPolicyVersion": "2026-10-18",
+                "policyVersion": "stewardship-policy-v1",
+                "sourceReviewedPublic": true,
+                "conflict": false
+              }
+            }
+          ],
+          "detail": "Fictional protected host reviewed this publisher participation. Checklist content is not a new typed interface.",
+          "intake": {
+            "schemaVersion": "evidence-intake/v1",
+            "termsVersion": "evidence-terms/2026-10-19",
+            "termsDigest": "432cf9d0450f12d2b5967629f79c95adfa14b22e407b7b62e5f7ca7837ccd553",
+            "sourceUseBasis": {
+              "state": "declared",
+              "statement": "Synthetic fixture: source-use permission supplied for this reviewed example only."
+            },
+            "roles": {
+              "submitter": null,
+              "collaborators": {}
+            },
+            "period": {
+              "kind": "unknown"
+            },
+            "rightsPolicyVersion": "2026-10-18",
+            "claimRevision": 1,
+            "participantConsents": {},
+            "claimDigest": "9c5b52b9e920f16c77fe02ab656a380f62c5065460cc10357068572294d2757c",
+            "submitterConsent": {
+              "actorId": "101",
+              "choice": "accepted",
+              "scope": "public-claim-attribution",
+              "claimRevision": 1,
+              "claimDigest": "9c5b52b9e920f16c77fe02ab656a380f62c5065460cc10357068572294d2757c",
+              "role": null,
+              "termsVersion": "evidence-terms/2026-10-19",
+              "termsDigest": "432cf9d0450f12d2b5967629f79c95adfa14b22e407b7b62e5f7ca7837ccd553",
+              "rightsPolicyVersion": "2026-10-18",
+              "at": 1791539999998
+            }
+          }
+        }
+      },
+      "profiles": {},
+      "audit": [
+        {
+          "id": "private-stewardship-audit",
+          "action": "accepted",
+          "actor": "202",
+          "at": 1791540000000,
+          "version": 2,
+          "policyVersion": "stewardship-policy-v1",
+          "receipt": "private-stewardship-request",
+          "sourceReviewedPublic": true,
+          "conflict": false,
+          "sourceUseReview": {
+            "disposition": "permitted",
+            "rationale": "Synthetic independent review: the bounded example is permitted for this optional public claim.",
+            "references": [
+              {
+                "locator": "https://github.com/synthetic-org/synthetic-repo/blob/main/permission.md",
+                "revision": "synthetic-reviewed-permission-v1"
+              }
+            ],
+            "reviewerId": "202",
+            "roleVersion": "synthetic-reviewer-authority/v1",
+            "reviewedAt": 1791540000000,
+            "scope": "public-claim-attribution",
+            "claimRevision": 1,
+            "claimDigest": "9c5b52b9e920f16c77fe02ab656a380f62c5065460cc10357068572294d2757c",
+            "reviewedInputDigest": "f41b035eab6fca189e93d70b2dcf49cccc95f20cba43ae2abde11237ef8570b3",
+            "termsVersion": "evidence-terms/2026-10-19",
+            "termsDigest": "432cf9d0450f12d2b5967629f79c95adfa14b22e407b7b62e5f7ca7837ccd553",
+            "rightsPolicyVersion": "2026-10-18",
+            "policyVersion": "stewardship-policy-v1",
+            "sourceReviewedPublic": true,
+            "conflict": false
+          }
+        }
+      ]
+    },
+    "publicPersisted": {
+      "requests": {
+        "private-stewardship-request": {
+          "id": "private-stewardship-request",
+          "kind": "evidence",
+          "status": "accepted",
+          "owner": "101",
+          "version": 2,
+          "category": "other",
+          "scope": "repository:2:release-stewardship",
+          "policyVersion": "stewardship-policy-v1",
+          "locator": "https://github.com/example-org/example-repo/releases/tag/v60",
+          "collaborators": {},
+          "history": [
+            {
+              "id": "private-stewardship-audit",
+              "action": "accepted",
+              "actor": "202",
+              "at": 1791540000000,
+              "version": 2,
+              "policyVersion": "stewardship-policy-v1",
+              "receipt": "private-stewardship-request",
+              "sourceReviewedPublic": true,
+              "conflict": false,
+              "sourceUseReview": {
+                "disposition": "permitted",
+                "rationale": "Synthetic independent review: the bounded example is permitted for this optional public claim.",
+                "references": [
+                  {
+                    "locator": "https://github.com/synthetic-org/synthetic-repo/blob/main/permission.md",
+                    "revision": "synthetic-reviewed-permission-v1"
+                  }
+                ],
+                "reviewerId": "202",
+                "roleVersion": "synthetic-reviewer-authority/v1",
+                "reviewedAt": 1791540000000,
+                "scope": "public-claim-attribution",
+                "claimRevision": 1,
+                "claimDigest": "338344a7bb3907038ec9d377c6e7017e60b980f6c1e65bbd84062238b0ee9d78",
+                "reviewedInputDigest": "0119aa05c00d77710d6c23f0e3ad27c637e5ce0e5942eb5318cea89c3e203a87",
+                "termsVersion": "evidence-terms/2026-10-19",
+                "termsDigest": "432cf9d0450f12d2b5967629f79c95adfa14b22e407b7b62e5f7ca7837ccd553",
+                "rightsPolicyVersion": "2026-10-18",
+                "policyVersion": "stewardship-policy-v1",
+                "sourceReviewedPublic": true,
+                "conflict": false
+              }
+            }
+          ],
+          "detail": "Fictional protected host reviewed this publisher participation. Checklist content is not a new typed interface.",
+          "intake": {
+            "schemaVersion": "evidence-intake/v1",
+            "termsVersion": "evidence-terms/2026-10-19",
+            "termsDigest": "432cf9d0450f12d2b5967629f79c95adfa14b22e407b7b62e5f7ca7837ccd553",
+            "sourceUseBasis": {
+              "state": "declared",
+              "statement": "Synthetic fixture: source-use permission supplied for this reviewed example only."
+            },
+            "roles": {
+              "submitter": null,
+              "collaborators": {}
+            },
+            "period": {
+              "kind": "unknown"
+            },
+            "rightsPolicyVersion": "2026-10-18",
+            "claimRevision": 1,
+            "participantConsents": {},
+            "claimDigest": "338344a7bb3907038ec9d377c6e7017e60b980f6c1e65bbd84062238b0ee9d78",
+            "submitterConsent": {
+              "actorId": "101",
+              "choice": "accepted",
+              "scope": "public-claim-attribution",
+              "claimRevision": 1,
+              "claimDigest": "338344a7bb3907038ec9d377c6e7017e60b980f6c1e65bbd84062238b0ee9d78",
+              "role": null,
+              "termsVersion": "evidence-terms/2026-10-19",
+              "termsDigest": "432cf9d0450f12d2b5967629f79c95adfa14b22e407b7b62e5f7ca7837ccd553",
+              "rightsPolicyVersion": "2026-10-18",
+              "at": 1791539999998
+            }
+          }
+        }
+      },
+      "profiles": {},
+      "audit": [
+        {
+          "id": "private-stewardship-audit",
+          "action": "accepted",
+          "actor": "202",
+          "at": 1791540000000,
+          "version": 2,
+          "policyVersion": "stewardship-policy-v1",
+          "receipt": "private-stewardship-request",
+          "sourceReviewedPublic": true,
+          "conflict": false,
+          "sourceUseReview": {
+            "disposition": "permitted",
+            "rationale": "Synthetic independent review: the bounded example is permitted for this optional public claim.",
+            "references": [
+              {
+                "locator": "https://github.com/synthetic-org/synthetic-repo/blob/main/permission.md",
+                "revision": "synthetic-reviewed-permission-v1"
+              }
+            ],
+            "reviewerId": "202",
+            "roleVersion": "synthetic-reviewer-authority/v1",
+            "reviewedAt": 1791540000000,
+            "scope": "public-claim-attribution",
+            "claimRevision": 1,
+            "claimDigest": "338344a7bb3907038ec9d377c6e7017e60b980f6c1e65bbd84062238b0ee9d78",
+            "reviewedInputDigest": "0119aa05c00d77710d6c23f0e3ad27c637e5ce0e5942eb5318cea89c3e203a87",
+            "termsVersion": "evidence-terms/2026-10-19",
+            "termsDigest": "432cf9d0450f12d2b5967629f79c95adfa14b22e407b7b62e5f7ca7837ccd553",
+            "rightsPolicyVersion": "2026-10-18",
+            "policyVersion": "stewardship-policy-v1",
+            "sourceReviewedPublic": true,
+            "conflict": false
+          }
+        }
+      ]
+    }
+  },
+  "binding": {
+    "category": "other",
+    "scope": "repository:2:release-stewardship",
+    "policyVersion": "stewardship-policy-v1",
+    "metricId": "release_stewardship",
+    "sourceMetricId": "release_stewardship",
+    "repositoryId": "2",
+    "reviewerIds": [
+      "202"
+    ]
+  },
+  "publicBinding": {
+    "category": "other",
+    "scope": "repository:2:release-stewardship",
+    "policyVersion": "stewardship-policy-v1",
+    "metricId": "release_stewardship",
+    "sourceMetricId": "release_stewardship",
+    "repositoryId": "2",
+    "reviewerIds": [
+      "202"
+    ]
+  },
+  "destinations": [
+    {
+      "metricId": "pr_opened",
+      "empty": "4a8d0aa2434e8646d9b41612cd6674f50282c3152bcc169b70d9f0645274d432",
+      "currentIntake": "d950edfbec768f2a7e39ddb760b2baa0372ff5f10eec7a8ff6288d9ccc36db04"
+    },
+    {
+      "metricId": "pr_ready",
+      "empty": "6a1e10705660330699f8eb94c60b4c4d9e7366c7a17d27ab252b2faafed88424",
+      "currentIntake": "709313dbb66bd15a3d90f7d61303ac351a7d7fbd9e0171a98d86d8ae74f845c6"
+    },
+    {
+      "metricId": "pr_merged",
+      "empty": "93c02aa8cca3b9761a37a5fd66f352d0ee0107b7bedc98cc8b62863dc3a877fa",
+      "currentIntake": "0a77239277c61dcc8e06bbc49dbb5d49dc85fa7eeba61d3ceecc518a63ca6eb0"
+    },
+    {
+      "metricId": "pr_coauthored",
+      "empty": "0173149d7ad64e1d7a80bfd5e9f139ed0e284d42be7ee3045c2c1b6562e85c87",
+      "currentIntake": "199fcd8e05b8059cd41acd9cd3b1e62f45b053d7c055173a996e1b9f5f0f2b37"
+    },
+    {
+      "metricId": "commits_integrated",
+      "empty": "bc3bd2a1336492881ec5e76fbcfb79a1a30515e2ebb71f955593b5c2e740204c",
+      "currentIntake": "8110f2fa166553d77e5fd935c814dd95a7a0b150550bb31da3dd67b93e46f94e"
+    },
+    {
+      "metricId": "maintainer_merges",
+      "empty": "5fa1f99ff8d84abfbb2894219c9713299537b1c39eb6fb1947936dee7fbf6c27",
+      "currentIntake": "7163e0b1410f0a0d827da47b6fd3a93c930aa2e340b5df6973e1fa87e8b992ce"
+    },
+    {
+      "metricId": "direct_changes",
+      "empty": "14f39eea3a0d918fa58034d7923d835302df51d7d05da1351c3c956845dd46d0",
+      "currentIntake": "01196c306ce101218dc1e4e36f6843e0e635de078b8adbc6f45cabb9da94dc3a"
+    },
+    {
+      "metricId": "reverted_delivery",
+      "empty": "1b0e503fc89ea9c5f72c46404eba601f13f86a679ada790e92e4317076d65b02",
+      "currentIntake": "6164dadddfb4be829769eaff56ccc3108dc7475b248baaf66b7d62ae9f66c2b9"
+    },
+    {
+      "metricId": "pr_accepted_rate",
+      "empty": "8cb3c2557ca470421e94fcd76f0731f3ef9dc2417932d9cb7c0fe83383f4308a",
+      "currentIntake": "9b2ed9e55e3da29ecec246d83c5563c56080b43c39e1e51be0675c21463bff6a"
+    },
+    {
+      "metricId": "release_changes",
+      "empty": "7c26f1516b2c96ef0f509efda181a8dab33f113cc75557a83e42075e2b58a1d7",
+      "currentIntake": "e43097163372acd50a45f44da3909b813c0924f874b6f24ddcdb8fc0ffb8a96e"
+    },
+    {
+      "metricId": "pr_lines_added",
+      "empty": "01c9704a03dcc3199fa9422b9acabbd91c44c64cc62cf80b3a6edbcbca7cca0b",
+      "currentIntake": "ee1aa2b4de73d372557b4b2a2ff64e7538e882c35f8014d3b3a250ac52a02c54"
+    },
+    {
+      "metricId": "pr_lines_removed",
+      "empty": "33b06645aa1f7cd1275fc6d86e0cf1e9d4277c19e332144b37949d3135395303",
+      "currentIntake": "8a4820c969bd197d7dcf3f55375b9868e10899a91d5227dc97cf711b39b35a78"
+    },
+    {
+      "metricId": "pr_lines_changed",
+      "empty": "b2d069e8a9d7f70295cc7294e22d9c7251b4e8972676b8706c769545cb7a33a1",
+      "currentIntake": "5fbd18d9405e9771a5552c33b68d22fd8b38bc509a2625b27518d5a8d75e5a65"
+    },
+    {
+      "metricId": "net_lines",
+      "empty": "70948690460838abf3176ce8edddfda6669aee95101c9cf27fef49bd9c3d59cb",
+      "currentIntake": "382eaa7d4b01649c7e6af8a353ac9193bab4c4676e1348eaf0181292b5b3c5a3"
+    },
+    {
+      "metricId": "commit_attributed_lines",
+      "empty": "d037fbdc8e5d68afc2217e3786b632dec6ae96d75670fe8d74c77812582aba56",
+      "currentIntake": "318d45130937b025c643e736aa9985a92d59e2c95e3caaf23fd31b3fd57fd62b"
+    },
+    {
+      "metricId": "files_changed",
+      "empty": "2151f933e8a37f92edeaf7471a637afd8b1eff217571e1ab30168c68ab07f94b",
+      "currentIntake": "5c42732c7e68197ff4153ae0dee48ef4e085e6b694c096de3dee2c608d9dc3db"
+    },
+    {
+      "metricId": "retained_lines",
+      "empty": "d14ecc9eda45ae2510b72e1b2e209213d52466d72e22f85267694210927497b9",
+      "currentIntake": "7bc1f3b229dd977d34e879c2b6d3b6151142f8b99ea86150386ae12a6ecaf5e2"
+    },
+    {
+      "metricId": "prs_reviewed",
+      "empty": "3355e2a62391998b5900c0b144010e1df8853a6626f0a94edced3f9e794f33fe",
+      "currentIntake": "3ac0dbab252c73d093ee7c6b8694958b78fc6f6a096c15497a1e6cdb6586f5ad"
+    },
+    {
+      "metricId": "review_rounds",
+      "empty": "865270e20ab9b57e86eb1fdc266231810fcd7dba9042fafdf5c8d16bcabe14f4",
+      "currentIntake": "ca261646e6691c339cbb2236f992023a8871403286d7a2754b3bdb25361882bb"
+    },
+    {
+      "metricId": "review_feedback",
+      "empty": "52dd8991855fee3aa6f81d23b6985d899b838594b28a39a6bc3e9c46c6f14724",
+      "currentIntake": "163ac5ce4f6579ef59773f176dec6d7459955fd53914724fb3a09d648b38562f"
+    },
+    {
+      "metricId": "review_threads_resolved",
+      "empty": "729c60828ffbdfcce38704fcc6d6f2c68cbb55776d6b512eea8ebc8d6d95ce20",
+      "currentIntake": "c9a29f694d6d5da3bb3e9c020862d8280e3028f0fcb96988cf2a834f6156078e"
+    },
+    {
+      "metricId": "accepted_suggestions",
+      "empty": "15189cc6da3e483412cac4550632168e35a6c534e5f5e1befe18b21fa3e58169",
+      "currentIntake": "5a35baff39b6c38ee61634e967161615c9a0d39041b35840ea2e99d6ad6d3b79"
+    },
+    {
+      "metricId": "first_reviews",
+      "empty": "6769f1bd0194c9bd66ee381ae191f78e9de5798fdc600d9a9c3a8d30947538c0",
+      "currentIntake": "8287354a35bf36a4b7b486d19993544e64866db266e346df879a79f756d40f9f"
+    },
+    {
+      "metricId": "cross_workstream_reviews",
+      "empty": "d8774af06dbf8a1a88ab81f2f3a82e186097935be3f6da2fda96e09aaf5c3a7d",
+      "currentIntake": "ab95ac0c363e24596aea4bfce64878be6c4826e9de7c6a3773ce8cc70ab2be8f"
+    },
+    {
+      "metricId": "evidence_reviews",
+      "empty": "2f0bedcbf3d30b58634591f73c0be78f691eb6b3164c7c97d0e297ba5ff7a402",
+      "currentIntake": "5f0772276ff009d54be16858d2c5508e72524bce887cd39f0d6863b2b210e86f"
+    },
+    {
+      "metricId": "review_wait",
+      "empty": "9b570291336618c739c83b606e35b7068701810e9885662076be86d9cf94fd5f",
+      "currentIntake": "4a455dd559cb7fa4d25f2e831b525d6d0c1af89eb1646799f04a414d398d3423"
+    },
+    {
+      "metricId": "issues_opened",
+      "empty": "b17bd266d3cf361621f826df3a772d82309487221532376be935d802508b0d28",
+      "currentIntake": "63a8d03d7ff0d6ce0e1671571de51c598b248f2da370583c720b7289f8809655"
+    },
+    {
+      "metricId": "accepted_findings",
+      "empty": "baa861ffa268cb408391690f0118c26d82b18cbc48fe5f16491afc03d97eacb3",
+      "currentIntake": "b21d0339165f804c3478c9fef8ed47387b9ae5f56a791766403bc39011168b7c"
+    },
+    {
+      "metricId": "confirmed_bugs",
+      "empty": "914ab40d7b574773d55039031eacaef6715c4e008c1084fa1bd9d1e27ae5b17a",
+      "currentIntake": "5b898ef38fb689d7d4951b50190d3684ae580357ff70c3148bdca7647db88b1d"
+    },
+    {
+      "metricId": "reproductions",
+      "empty": "0fa46f0ad0742d1460000de64c02f78ae657742a0008a4c4e5a221c009859887",
+      "currentIntake": "cf33ed1517ac77bba820c8dabbe697259ae3012236dd9c53b4c2c215f787d695"
+    },
+    {
+      "metricId": "issue_resolution",
+      "empty": "5515ed70b71b0dfd9ed6c6bfb66c6ba3096bae70b3a61af58cc0961927791e7a",
+      "currentIntake": "ea898db10cddc58795e9abde26feb04a755ebb03bbe6226c3eca37f55e9fcd81"
+    },
+    {
+      "metricId": "issue_closure_stewardship",
+      "empty": "9cf9c717b7389d6036aa5984eebbe7db0a19dcd3df5af7e06b4a163b60fd0d88",
+      "currentIntake": "e26d007776d70239135811f05e7873ee361fba700569e0722781d304b5f0cbf2"
+    },
+    {
+      "metricId": "issue_answers",
+      "empty": "e2b8d74656d3a78468812dd362645b80028fa6df98b1887ba19c70812a49adba",
+      "currentIntake": "592759ee1f5ad27b7a35a65fc4c24e7265f02c6619c3635957f58e6bb1fbcee6"
+    },
+    {
+      "metricId": "issue_clarifications",
+      "empty": "15a009e6457bd538bc77e09b377f4f89514895a62a9b450cd2c72b77da32fb8f",
+      "currentIntake": "f5109986348ab2d3d9a9ba3664f763d51ff1e031bf9a4332e0c94ed18c9948ed"
+    },
+    {
+      "metricId": "duplicate_resolution",
+      "empty": "717dee1b0c24ae7c9bb1357d71fadc46eb99d8ca8046ca0ced64004747cd040c",
+      "currentIntake": "a14b1a0efbb2bda76a95afb660805f8f03881bd38fc70ab8f849f03f2535946b"
+    },
+    {
+      "metricId": "items_triaged",
+      "empty": "8c3551e58604d55fb39b3028e4eea8eadf9fa6c39921214934e8c2ce0f49a2a5",
+      "currentIntake": "032cf543f2c145ff0b63f9f63dfa248d1df784f7d25848f59c29bc2cf3b257da"
+    },
+    {
+      "metricId": "labels_applied",
+      "empty": "44d49e0c4b2189195321204a66830162f44b53f3a85a85714a01b08ba703559c",
+      "currentIntake": "5caf51a55b3fb004e265799bac857c41fe9686290df07fa093fadd63063c92c0"
+    },
+    {
+      "metricId": "labels_corrected",
+      "empty": "be211c32f2d4c0684fef924a41b3163fb9b964bbbcc2371d4a7c17c9b0b11b06",
+      "currentIntake": "3de2cc592351950da276d46423d743129d7c91385ff3e65d39bc9601cb2655fa"
+    },
+    {
+      "metricId": "assignments_coordinated",
+      "empty": "d15586322d2f05b0ce6b78929a594ffed16a0a9068b90151c12f8c1f8ad31a8e",
+      "currentIntake": "e65f87761519860f52077405a7e1d3559a4229386f0a39e83c5935af9f577a23"
+    },
+    {
+      "metricId": "milestones_curated",
+      "empty": "a8684f9815b71f28f32e5d15e517cde783cc8b64067d301e3087c43bd42eb8bc",
+      "currentIntake": "010abe934cccf4fb415cf6576e76cf8fe5a3d5df7ae33ac4f672200ec3869137"
+    },
+    {
+      "metricId": "title_scope_edits",
+      "empty": "bf94f1dc26ad61245fec7444c633febd83771fe585013887a3e2384bb76a6ea2",
+      "currentIntake": "949f266ed0cfc14565dccb7dde9186a7f777dd9e816ad86a76b54f093fc6e61f"
+    },
+    {
+      "metricId": "reference_links",
+      "empty": "619b29aa54265128f8594b1a19a1153f94da8f068c1b475e66f545ad3572d098",
+      "currentIntake": "add92e97977dfa443c46542369aef78ef1555a565245e85ce979cf5a8e65a3af"
+    },
+    {
+      "metricId": "closing_links",
+      "empty": "67c22cf1ae6cfffca6a0a8cce02ce844e9fe3b79c2508c3a119985e254b390da",
+      "currentIntake": "05c9eeefbc1d4cd889787c14e3b14e1b83a79d93dd348567501978c3f48d6ab8"
+    },
+    {
+      "metricId": "parent_child_links",
+      "empty": "0b903476c867f1d04fa3d2589be36d809047777793f10af74d898624b4a4d74d",
+      "currentIntake": "541f9185dd86c62dff8a6a0b97ad57ef8752d4324454ae0a663faeccb29ea483"
+    },
+    {
+      "metricId": "blocker_links",
+      "empty": "94803a425130f059da6648605cecd5b2e0be94cb8640c1d44cedf33b30b1f8d4",
+      "currentIntake": "8f63ed3ffb4e035a53836f9842b6c0c7e06741404c630fb945c7ee3fe3980702"
+    },
+    {
+      "metricId": "related_links",
+      "empty": "c18057368b7d47f37641de0387a388f3ab6e13af5aa0aab9b687ad542bb88528",
+      "currentIntake": "016f9502aec944e4d59461fd617f4e9d687a84c77b852515513ba93d0778ebaf"
+    },
+    {
+      "metricId": "project_items_curated",
+      "empty": "6a0405dd6e2bc16b252a4029297d7aaf7b1da310a32b638993ef3ab0db59abd5",
+      "currentIntake": "cbdf2359ff2b843d0b61cd751c68c54069cc146f69ba0a1a509026e32119e96a"
+    },
+    {
+      "metricId": "project_status_updates",
+      "empty": "4c854f4e675ab1e08d06bacda89206d2168b54f798d8cb6b48bbe97bfe76eedd",
+      "currentIntake": "1421e488cfae900799af7ddeaa44fc6e657708eabbda448770329e2444e6d560"
+    },
+    {
+      "metricId": "project_field_updates",
+      "empty": "0d986215986b79b7d368ba260ce64a7032011e792af0cbbbd3667b00d2698075",
+      "currentIntake": "33a5be432e4b46c4e6c01719abb3c512ebbc7d849a90702c38b0f81a36d493a6"
+    },
+    {
+      "metricId": "issue_field_updates",
+      "empty": "8b47b5d9069982cac820214562bb1b227474209ec29eda7dc5a5f8e19d12c194",
+      "currentIntake": "2abdb717896ede2dbc5187951aec8c856f742f048dcac16a4adb184f73d9fa37"
+    },
+    {
+      "metricId": "project_updates",
+      "empty": "6896c4cc0b7d7ec8e78eb38e513db0b1843970340bb234bd282b2bf7408a48c4",
+      "currentIntake": "3c76ba3a8f9f915390551f3f144072554c5719bffe6a4716ff4149c3783ac6c9"
+    },
+    {
+      "metricId": "routing_handoffs",
+      "empty": "83a202a94267786e5da34f9b5175da2ed234f896e0756a4a341405f93060fce8",
+      "currentIntake": "f7122500310ceed2cfff3680a852084c771f9fff2f12a213b0b3535bb5fc8d98"
+    },
+    {
+      "metricId": "label_taxonomy",
+      "empty": "59b2c921e854e30bf28a1d023eacc7247c8d9c8eb106fd8adfb49e229f8776c4",
+      "currentIntake": "9c6c7434fe610b6832bd2fd4c648458c55937e7752234ed6ea02b031f07aa863"
+    },
+    {
+      "metricId": "milestone_definitions",
+      "empty": "c43ac652acbff5563712158f74d4ef87a29a4d05a9d3358f68898ac31dda157f",
+      "currentIntake": "e4bb73028d240ebd63198a5fa1eb9f8a51dd1d7d4838e15a66ea2830088175ae"
+    },
+    {
+      "metricId": "project_configuration",
+      "empty": "a515f61ecde90d28e44cb4e024923635917d62de16e9ef488a3f8f39e5bde130",
+      "currentIntake": "0808460b65a80f4f84c19b548d47e33af1720c0902691c5a991adf0f83572fa0"
+    },
+    {
+      "metricId": "issue_transfers",
+      "empty": "e83dcac21b7c0334cd449537f257c690fda8119a3d2d64c9da1c7fdd26b1f59d",
+      "currentIntake": "7ab93c11f152f56738b93f0d78dab0e68e214cc6ec53a965777f75b015feca0e"
+    },
+    {
+      "metricId": "issue_ordering",
+      "empty": "951bc4daefada114d8660763caef972c1561439fbae14557ea55edeaedcf2469",
+      "currentIntake": "93f3baab68804c68b05df2acb6477a5f0953fc326488f0de7e5847a0e2f98f69"
+    },
+    {
+      "metricId": "public_moderation",
+      "empty": "196a882ba7bc1c43e50b7052da6e0efb4360b75f025ab7dd7ba474e24a3714a4",
+      "currentIntake": "2134f9be8d485388b815f63a98cf66bc1658811741a6344c4fb0337b96e8a6ce"
+    },
+    {
+      "metricId": "decision_records",
+      "empty": "c3d8b5cc81cd704155d93fb87abfa67df68f8f68bda6c9b68b03dcba35150b86",
+      "currentIntake": "ad12ed8a225b2469f381a15ae9c7c288d85cf5c04d28a4143f1bd8a1d0da4d67"
+    },
+    {
+      "metricId": "catalog_proposals",
+      "empty": "a9fc630b68a2ec410a7d32bdb0639aaa940626fc36e970c787afb24d7fda14f8",
+      "currentIntake": "8793e55cf3734bf8004d7f5d706672a8abbe68443401d3ccd37d78562f19a289"
+    },
+    {
+      "metricId": "pricebook_proposals",
+      "empty": "9ed1da1e6acf242ffb4a1abe894c9215bca7dfbb6f23c8a6f8e0b5751672ec17",
+      "currentIntake": "23808f81b8d389c0455163cbaf09dd4c9cf56444dfe537bc10e3434a093978c4"
+    },
+    {
+      "metricId": "compatibility_proposals",
+      "empty": "e40808c9c708b133ffbab60847cda4349f38c51d7f85a7a1f393e413eebd4265",
+      "currentIntake": "7e7b83b6b3ce3510ec6b5fecd78caa8d40972b1435c9e6249badbcacac731e75"
+    },
+    {
+      "metricId": "primary_sources",
+      "empty": "a01ff46ee1df99bc36b8af495226439eb6a794071c3bd2133ca58974e0443b69",
+      "currentIntake": "01d2c1bdc5402445d1df179f0cc5414bda99614f37a59805ee9d4e008e1dc392"
+    },
+    {
+      "metricId": "freshness_checks",
+      "empty": "dabe9c5c80adb28573c97d82d404a6c390fdcec37458a90afd7f8a447aaadbac",
+      "currentIntake": "8ba8b76f62dbc25ee4b87c5cbf339de6272e96f289f6ef41de4ea9790449cca4"
+    },
+    {
+      "metricId": "reproduced_measurements",
+      "empty": "cdd939f02f46e8004e6c01924d33fc2106c9fd46317933dc997c31ad8589ca0f",
+      "currentIntake": "55d4037c4529f3db854068831e863c1625cf0aa04cd2abc5dc01c1114d25470b"
+    },
+    {
+      "metricId": "negative_findings",
+      "empty": "0da1f5428a6969530348c24034f1ad2a41a04b0d5e97641c782dddeda80b0778",
+      "currentIntake": "94541c87e454fb0180e9275809756a8aab925de46ffe015d8184cdaee21bc42e"
+    },
+    {
+      "metricId": "rights_reviews",
+      "empty": "9d7910ac0029a8d62a43d5063f28d65e976ccbb4c5e657b73074e92bdf3b82d8",
+      "currentIntake": "61e4e26ca5aa602153a0e03db377a372a4c50a0bd31e4f9177d8a104225a30c7"
+    },
+    {
+      "metricId": "assumptions_resolved",
+      "empty": "a64174e542eb5aba31504bdfdd834ed567bc9d7a52a985fb7748b143ddeef8c7",
+      "currentIntake": "d1c354264a777d37e968233c0ad4fc4d0333c445592b6882e1bb32dc2591dc38"
+    },
+    {
+      "metricId": "market_research",
+      "empty": "c6ba72e5e97ff564837a91228f342ac72e79873e2c6872fa4aa3b29952cdaf32",
+      "currentIntake": "f9f0cfd088002903890f11c43c1471aea6dfeb276eb12a706709c43d6bc2bbab"
+    },
+    {
+      "metricId": "evidence_manifests",
+      "empty": "7d4ed69750a8f5b534e1e4b1ca4f1c2f9d170afd7bb9f10caf5c742794126d87",
+      "currentIntake": "de35516b5f680bc9223ab15f8cb10d5604ca4ada13cb39723b04d07935051e94"
+    },
+    {
+      "metricId": "documentation",
+      "empty": "8b29776f753c5229995e3e5c7c6ce0fb83f2157cea6fc63800bb90cc555b1bd6",
+      "currentIntake": "37b0a25ad82abfc5b7989fd89fb59e87fd00bd08d632554c4debf6a7efcb0f2a"
+    },
+    {
+      "metricId": "tests",
+      "empty": "1301226c6e09bbde4e8fe0f0fcb5ae33538f15759bb4ec5b84879437d76a5d22",
+      "currentIntake": "c3b33128cee78b9f812d6acf76da063e8518728f0e8f01d1ebbb87bdd8d399d0"
+    },
+    {
+      "metricId": "regressions_prevented",
+      "empty": "3d81947fc3316818f8a43b9355d2c863c8363949740651a9127139f86c0e79be",
+      "currentIntake": "0f38bd184ecb76b7fdeb7ba2f52d4fe284fc2515ad0be10bdcaad282415cd714"
+    },
+    {
+      "metricId": "accessibility",
+      "empty": "53c8e6d2628ef298c917aaeca08c4ff42d4f2397e5efa392ec58f9035548ba6d",
+      "currentIntake": "4178692340fcf74278ed8c1748b95c921d90eb07e02f8df2b2dc8595e361982d"
+    },
+    {
+      "metricId": "design",
+      "empty": "c1481b5006e818bbdc8d0de894af8e898cd8295485f6810d5bcfbeed5071787d",
+      "currentIntake": "e4e24fc412b35ab2ff1173cf466b09f382e7a9fd83f4c3f3a8310479c113d054"
+    },
+    {
+      "metricId": "usability",
+      "empty": "f9751403fbbfe651103b88d49d5429c71e44cdd80a8108ebb97d071b4288f80e",
+      "currentIntake": "b747101e29f75258ff9477b8556534008eafa11aac702302b9c93264b69bcc3a"
+    },
+    {
+      "metricId": "localization",
+      "empty": "c68d5ec519986a9e4ef1d8569f61fe38439f03ad360d3e00011c25e0b89fa4da",
+      "currentIntake": "b1f1c325b70305895c608323d4f67eacef699d5e36138b51fd1961d30fa8b0cb"
+    },
+    {
+      "metricId": "performance",
+      "empty": "d6c241974a2252e7203549cb64e1dd24b0c9198d5f3520e20fea831193cbbf9e",
+      "currentIntake": "47afb41428fdc4405c0b6fe16b1d13cf019c61ed238d96ea2857073d1b105d39"
+    },
+    {
+      "metricId": "security",
+      "empty": "5b9ca2e1c215122cab06d7a234874b5685a1d71245049bc63af5e78e9156a025",
+      "currentIntake": "ebc0183c2aa5d13c78cda71072a98b45fbb75776946ab77c7592d584c7e43def"
+    },
+    {
+      "metricId": "automation",
+      "empty": "9230e7190bafc56964af76a289f0303bf02852bb5eeab5960fdaee6516da61f2",
+      "currentIntake": "3028a8a922787e2f30c7eb7a31d551aca4fe353f759d7df9a033d3644101beb0"
+    },
+    {
+      "metricId": "discussions_started",
+      "empty": "87eca3025ec9f6fac6e92eb684c0ee3293f8f7eaea1867d42a84af455981d6b5",
+      "currentIntake": "2adc5277efe714cddbddc1a1c811887f6b185d0d237af6c87f752767c1d78d75"
+    },
+    {
+      "metricId": "discussion_answers",
+      "empty": "b2aaf1bc34d9b420e0f616b68076020d64a0f8aa16f8de738adff31ef9b680b4",
+      "currentIntake": "c143a870e4c0c334b149d98985b40f195724a1754aa0c6d23b18a3b8d3ca6089"
+    },
+    {
+      "metricId": "helpful_feedback",
+      "empty": "0f7692a7a96f058fa7494c0d08a24876adb3652319d67e613bc664eddd607790",
+      "currentIntake": "d63203438194c0f8e7b776d580c2b6b915801a1ad1b9c7318fb86b4e544055ce"
+    },
+    {
+      "metricId": "mentorship",
+      "empty": "743f31975b3e0abc8758e56173662e905ca3ba2ba48da40a2a1a343338a1c107",
+      "currentIntake": "21d9af2417755fe6927bbc3bcb938c200e3b9ce0bb5bbd8c2adfd91c0225b344"
+    },
+    {
+      "metricId": "onboarding",
+      "empty": "de4f27caf97b083a76148c546cbe324e3a532733582cf86a8524c77aa5cfe0d3",
+      "currentIntake": "258f11f596ff5eb8691aa232849068e7a94789a1c5d134d0f113f1045e754f3b"
+    },
+    {
+      "metricId": "governance",
+      "empty": "e0e503b1a043cd5c29da3423583d61315f6acfa0a19c01cda0372f3197b68a8f",
+      "currentIntake": "b4d24f5970c7dbe891f697f54f2b92f9a7a84d6aa9d8c2d50295b656ab48fe92"
+    },
+    {
+      "metricId": "outreach",
+      "empty": "67333cc6aef5967faeba0558198a40c01675464b6ef3def9b6f4b61c9d9edf23",
+      "currentIntake": "2142c53e2471dbbf7e811004cef0787fe260da291f055daef5602557cf429d30"
+    },
+    {
+      "metricId": "appreciation",
+      "empty": "8984046c3a8594466a462d887f2657db2a02609f94e8c755a471635db3c8f8cd",
+      "currentIntake": "f514a446021bad1a98314a0f82b240eb6ae3776fe28121b1dfd884270cbbd112"
+    },
+    {
+      "metricId": "release_stewardship",
+      "empty": "a41ecc78fe4a7a6ce2c2002b3f35820b0eba948d54e2e1a0b639876a54d23977",
+      "currentIntake": "4671391d7233fa670015639c1e388da9b35925538a7cb2a62be998a05ed810c1"
+    },
+    {
+      "metricId": "deployment_work",
+      "empty": "5e907cacff69e779df0d9b18564590e48d7e0e5002500e74ee2e9bd0ec99219a",
+      "currentIntake": "c3fc896bb9d173f728dce47e7d1374586a68d4ee33cbb011ccdf21a9a3f21119"
+    },
+    {
+      "metricId": "incidents",
+      "empty": "57fdec6d6145295c4227685aaf5c0976075b86e0fb8d8080342bd5193bc63dfe",
+      "currentIntake": "878f88676e5634564e1350bf55cfde177a08ca01090c0037d73d1d5b7cd230ae"
+    },
+    {
+      "metricId": "maintenance",
+      "empty": "ffb0495315d4d1b49d806b461b4e22abf24858ad5094dca26463f198caca85e7",
+      "currentIntake": "8e07024a91092392325d1cfd82564e47ec5d2862559a11bda0bdee1e843a746c"
+    },
+    {
+      "metricId": "data_quality",
+      "empty": "3a3e9d65483df72c8f9fcbcb2cea1d5e7f07e83a7a1f8fe8d3a04254c7e95346",
+      "currentIntake": "f5d3d7ceeb7c44eec1364112720a7b164f96bd8b8c895ea3d1da3731a93daa96"
+    },
+    {
+      "metricId": "first_contribution",
+      "empty": "8cc20ec6cf7601416ddd94e7d6db01c9f7e1ed230ae09b7c853091fe44f0829a",
+      "currentIntake": "4c7e7fca7a1b28f7f3485333b976902980dcdacb0d81aa3e564b7ae754aaa706"
+    },
+    {
+      "metricId": "repositories",
+      "empty": "d20296c16b1d6350a0c40ebac65d20787ff2abf14cc2d4130fc68bd2c5c6878f",
+      "currentIntake": "79ae3c30a2715b2caa457ded8722f4c1d1a5baac678b091252a7715076a71ef4"
+    },
+    {
+      "metricId": "workstreams",
+      "empty": "78e0137e9e646ba65473c5d99ee4b4f057b77584f42603691ed902a82ea5d05d",
+      "currentIntake": "211b5ac9b19f6fef19887a551cb8403be125071342aacebb8eeace2249f30e4a"
+    },
+    {
+      "metricId": "collaborations",
+      "empty": "a0c9031d7d89fef287aaa7c86b44ea91e518a96a2cc1fa9164e584253b1173c5",
+      "currentIntake": "d9df01d71463c4e98522abdc858c0567ec2f7611c001e4acfa75d46e82ee202f"
+    },
+    {
+      "metricId": "active_periods",
+      "empty": "f3b4608830be5c26cd3ab28ce5cdbbcfd8c6f56a68d454241ffc4a9e23a1eb17",
+      "currentIntake": "2430735673f31a2a2ffbc5ac2733708bd7e44f6e60f8e8c34c7185e031e17091"
+    }
+  ],
+  "unselectedCurrentIntake": "219db7c9458aaa6f3bdcb78439559961d7230f7c5e4f35ab3a6d305a1d7e4604",
+  "publicPersisted": "583c790d8ed9c19d93810a6289cdd571bcf955420507dfe0b407d5c5c42efa09",
+  "recognizedDefault": {
+    "id": "gh:6106f0b11ea142262804a8c5b66a2da436301b23e7e4d75cca9e2cc91b9c7c61",
+    "canonicalKey": "gh:2fe0245c137808f1951d71928fc08aeef7d18c95306fe5b8c326ab89332b0828"
+  }
+}

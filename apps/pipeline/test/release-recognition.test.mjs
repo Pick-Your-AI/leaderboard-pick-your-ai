@@ -746,7 +746,7 @@ function previousAuthority(state, bindings = []) {
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
-test("release inclusion: only the affected automatic destination retires preceding authority while manual intake retires across all98 definitions", () => {
+test("release inclusion: affected release destinations retire preceding authority while manual intake retires across all98 definitions", () => {
   const s = scenario();
   const empty = { requests: {}, profiles: {}, audit: [] };
   for (const metric of metricRegistryV1.metrics) {
@@ -756,7 +756,7 @@ test("release inclusion: only the affected automatic destination retires precedi
     assert.notEqual(recognitionFingerprint(s.state, bindings), previousAuthority(s.state, bindings));
     const previous = previousAuthority(empty, bindings),
       current = recognitionFingerprint(empty, bindings);
-    if (metric.id === "release_changes") assert.notEqual(current, previous);
+    if (["release_changes", "release_stewardship"].includes(metric.id)) assert.notEqual(current, previous);
     else assert.equal(current, previous, metric.id);
   }
   assert.notEqual(recognitionFingerprint(s.state, []), previousAuthority(s.state, []));

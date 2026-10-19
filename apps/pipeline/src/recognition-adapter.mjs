@@ -9,6 +9,7 @@ import {
   validateAutomationSource,
   validateMaintenanceSource,
   validateReleaseChangesSource,
+  validateReleaseStewardshipSource,
 } from "@pick-your-ai/github";
 import {
   qualifyMaintenanceClassification,
@@ -93,6 +94,10 @@ export function recognitionFingerprint(state, bindings = []) {
   // Retire generic receipts and the earlier pre-collection release observation authority.
   if (bindings.some((binding) => binding.metricId === "release_changes"))
     authority.push("release-inclusion-recognition/v2");
+  // Earlier same-metric receipts lacked original publication/clock/unit admission.
+  // Retire only this destination; unrelated source and receipt authority stay exact.
+  if (bindings.some((binding) => binding.metricId === "release_stewardship"))
+    authority.push("release-stewardship-publication/v1");
   // Missing legacy intake cannot keep manual recognition current, even without collaborators.
   // No-manual-request automatic source authority keeps its existing exact format.
   if (requests.length) authority.push(evidenceIntakeAuthority());
@@ -134,6 +139,7 @@ export function materializeRecognition(
   const projectArtifacts = new Map();
   const mergedChangeUnits = new Set();
   const releaseMemberships = new Set();
+  const stewardshipUnits = new Set();
   const domainReasons = new Map();
   const reviewedOperationArtifacts = new Map();
   const decisionTime = (request) => {
@@ -191,7 +197,9 @@ export function materializeRecognition(
       });
       if (localeReasons.length !== 3) throw new Error("invalid_localization_binding");
     }
-    const requiredDateBasis = ["maintenance", "automation", "release_changes"].includes(binding.metricId)
+    const requiredDateBasis = ["maintenance", "automation", "release_changes", "release_stewardship"].includes(
+      binding.metricId,
+    )
       ? "occurredAt"
       : domainDateBasis(binding.metricId);
     if (
@@ -350,6 +358,10 @@ export function materializeRecognition(
         : binding.metricId === "automation"
           ? validateAutomationSource(input, candidates[0].id, acceptedAt)
           : null;
+    const stewardship =
+      binding.metricId === "release_stewardship"
+        ? validateReleaseStewardshipSource(input, candidates[0].id, acceptedAt)
+        : null;
     const maintenanceClassification = qualifyMaintenanceClassification({
       input,
       binding,
@@ -399,6 +411,12 @@ export function materializeRecognition(
       // Deterministic accepted-time ordering retains the earliest valid authority.
       if (mergedChangeUnits.has(mergedChange.unit)) continue;
       mergedChangeUnits.add(mergedChange.unit);
+    }
+    if (stewardship) {
+      // Each request has passed current intake, audit and original-source checks.
+      // Accepted-time ordering keeps the earliest valid receipt for this unit.
+      if (stewardshipUnits.has(stewardship.unit)) continue;
+      stewardshipUnits.add(stewardship.unit);
     }
     if (release) {
       // Validate each review and proof before selecting a repeated membership.
