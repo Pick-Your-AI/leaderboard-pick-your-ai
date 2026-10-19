@@ -24,6 +24,7 @@ const counts = async (h) =>
 async function calendarHarness(t, periods = ["month", "quarter", "year"], initial = opening) {
   let current = initial;
   const h = await harness(t, {
+    discoveryAuthority: true,
     now: () => current,
     webhookDispatch: true,
     probeRepository: async (repo) => ({
