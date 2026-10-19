@@ -2269,3 +2269,109 @@ test("performance qualification requires exact comparable real conditions and an
     assert.throws(() => run(s), /unverified/);
   }
 });
+
+// These are fixtures of the trusted normalized-input boundary, not additional
+// capabilities of the stock GitHub collector. Its coauthor/review facts do not
+// receive the immutable domain pin required by this specialist adapter.
+function trustedDesignRoleScenario(role) {
+  const s = scenario("design");
+  s.input.facts = [s.candidate];
+  s.input.evidence = [s.evidence];
+  s.input.participation = s.input.participation
+    .filter((entry) => entry.actorId === s.request.owner)
+    .map((entry) => ({ ...entry, role }));
+  s.candidate.role = role;
+  s.evidence.contribution.roles = [role];
+  s.record.details.role = role;
+  return s;
+}
+
+test("domain role boundary: trusted design roles retain their exact attribution and canonical unit", async (t) => {
+  let canonicalKey;
+  for (const role of ["author", "coauthor", "reviewer"]) {
+    await t.test(role, () => {
+      const s = trustedDesignRoleScenario(role),
+        original = structuredClone(s),
+        out = run(s),
+        facts = out.facts.filter((fact) => fact.metricId === "design" && fact.state === "qualified");
+      assert.equal(facts.length, 1);
+      assert.equal(facts[0].role, role);
+      assert.equal(facts[0].actorId, s.request.owner);
+      assert.equal(facts[0].acceptedBy, s.decision.actor);
+      assert.notEqual(facts[0].acceptedBy, facts[0].actorId);
+      const proof = out.evidence.find((entry) => entry.contribution.contributionId === facts[0].id);
+      assert.deepEqual(proof.contribution.roles, [role]);
+      assert.equal(proof.sourceRevision, s.record.sourceRevision);
+      assert.equal(proof.sourceRevisionUrl, s.record.sourceRevisionUrl);
+      canonicalKey ??= facts[0].canonicalKey;
+      assert.equal(facts[0].canonicalKey, canonicalKey, "A different role label cannot mint another design unit");
+      assert.deepEqual(s, original, "Recognition must not rewrite the source role or its protected review");
+    });
+  }
+});
+
+test("domain role boundary: a design declaration cannot substitute for the source role", async (t) => {
+  for (const sourceRole of ["author", "coauthor", "reviewer"]) {
+    for (const declaredRole of ["author", "coauthor", "reviewer"].filter((role) => role !== sourceRole)) {
+      await t.test(`${sourceRole} is not ${declaredRole}`, () => {
+        const s = trustedDesignRoleScenario(sourceRole);
+        s.record.details.role = declaredRole;
+        const original = structuredClone(s);
+        assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
+        assert.deepEqual(s, original);
+      });
+    }
+  }
+  for (const role of ["co-designer", "remediator", "resolver", "merger", "reporter", "unknown", "automation"]) {
+    await t.test(`unsupported design role ${role}`, () => {
+      const s = trustedDesignRoleScenario(role);
+      assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
+    });
+  }
+});
+
+function securityRoleDeclarationScenario() {
+  const s = scenario("security");
+  attachSyntheticEvidenceIntake(s.request, {
+    intake: { roles: { submitter: "PRIVATE_REMEDIATION_ROLE_SENTINEL", collaborators: {} } },
+  });
+  return s;
+}
+
+test("domain role boundary: a private remediation declaration cannot grant a role or waive security consent", async (t) => {
+  await t.test("the accepted source author stays the author", () => {
+    const s = securityRoleDeclarationScenario(),
+      original = structuredClone(s),
+      out = run(s),
+      facts = out.facts.filter((fact) => fact.metricId === "security" && fact.state === "qualified");
+    assert.equal(facts.length, 1);
+    assert.equal(facts[0].role, "author");
+    const proof = out.evidence.find((entry) => entry.contribution.contributionId === facts[0].id);
+    assert.deepEqual(proof.contribution.roles, ["author"]);
+    assert.doesNotMatch(JSON.stringify(out), /PRIVATE_REMEDIATION_ROLE_SENTINEL/);
+    assert.deepEqual(s, original);
+  });
+  for (const field of ["publicDisclosureApproved", "contributorConsent"]) {
+    await t.test(`${field} is still required`, () => {
+      const s = securityRoleDeclarationScenario();
+      s.record.details[field] = false;
+      let receiptCalls = 0;
+      assert.throws(
+        () =>
+          materializeRecognition(
+            s.input,
+            s.state,
+            [s.binding],
+            s.policies,
+            (...args) => {
+              receiptCalls++;
+              return applyRecognitionReceipt(...args);
+            },
+            cutoff,
+          ),
+        { message: "domain_recognition_evidence_unverified" },
+      );
+      assert.equal(receiptCalls, 0, "The specialist gate must fail before invoking even a host receipt adapter");
+    });
+  }
+});
