@@ -1131,7 +1131,13 @@ test("review hydration proves first participation only from a complete consisten
     submitted_at: at,
     html_url: `${fixture.pull_request.html_url}#pullrequestreview-51`,
   };
-  const earlier = { ...review, id: 50, state: "COMMENTED", submitted_at: "2026-10-02T10:00:00Z" };
+  const earlier = {
+    ...review,
+    id: 50,
+    state: "COMMENTED",
+    submitted_at: "2026-10-02T10:00:00Z",
+    html_url: `${fixture.pull_request.html_url}#pullrequestreview-50`,
+  };
   const input = {
     repository: { id: 2, slug: "synthetic-owner/repository" },
     family: "reviews",
@@ -1192,7 +1198,7 @@ test("Discussion authors and answer selectors remain distinct with explicit sele
     author: fixture.author,
     answerChosenAt: at,
     answerChosenBy: fixture.merger,
-    answer: { id: "DC_synthetic", isAnswer: true, author: fixture.reviewer },
+    answer: { id: "DC_synthetic", createdAt: at, isAnswer: true, author: fixture.reviewer },
   };
   const base = envelope({ family: "discussion", action: "snapshot", payload: discussion });
   const unselected = normalizeGithubObservation(base);
