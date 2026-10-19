@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Request } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 test.use({ storageState: { cookies: [], origins: [] } });
 const at = "2026-10-17T12:00:00.000Z";
@@ -124,6 +124,7 @@ async function service(page: Page, approved = true) {
   let corruptAchievementCoverage = false;
   let calls = 0;
   const categories: (string | null)[] = [];
+  const fulfilledAchievements = new WeakMap<Request, { status: number; body: string }>();
   const app = createService({
     approvedAchievementRuleVersion: approved ? "accepted-evidence/v1" : undefined,
     source: {
@@ -136,7 +137,8 @@ async function service(page: Page, approved = true) {
     },
   });
   await page.route("**/api/v1/**", async (route) => {
-    const url = new URL(route.request().url());
+    const request = route.request();
+    const url = new URL(request.url());
     if (url.pathname.endsWith("/achievements")) {
       calls++;
       categories.push(url.searchParams.get("category"));
@@ -151,6 +153,9 @@ async function service(page: Page, approved = true) {
       headers["content-length"] = String(Buffer.byteLength(body));
     }
     await route.fulfill({ status: response.statusCode, headers, body });
+    if (url.pathname.endsWith("/achievements")) {
+      fulfilledAchievements.set(request, { status: response.statusCode, body });
+    }
   });
   return {
     close: () => app.close(),
@@ -162,6 +167,7 @@ async function service(page: Page, approved = true) {
     },
     calls: () => calls,
     categories: () => [...categories],
+    fulfilledAchievement: (request: Request) => fulfilledAchievements.get(request),
     corruptAwardCoverage: () => {
       corruptAchievementCoverage = true;
     },
@@ -355,7 +361,9 @@ test("contradictory achievement coverage clears visible awards while keeping the
     await page.clock.fastForward(30_001);
     const response = await refreshed;
     expect(response.status()).toBe(200);
-    const supplied = await response.json();
+    const request = response.request();
+    await expect.poll(() => api.fulfilledAchievement(request)?.status).toBe(200);
+    const supplied = JSON.parse(api.fulfilledAchievement(request)!.body);
     expect(supplied.coverage).toEqual([]);
     expect(supplied.achievements).toHaveLength(1);
     await expect.poll(() => api.calls()).toBeGreaterThan(before);

@@ -1,9 +1,33 @@
 import React, { useState } from "react";
-import type { Coverage } from "@pick-your-ai/contracts";
+import { compareSourceInstants, type Coverage } from "@pick-your-ai/contracts";
 
 const pageSize = 20;
 function Instant({ value }: { value: string | null }) {
   return value === null ? <>Unknown</> : <time dateTime={value}>{value}</time>;
+}
+
+function compareBoundaries(coverage: Coverage[], fields: ("windowStart" | "windowEnd" | "knownStart")[]) {
+  let different = false;
+  let unknown = false;
+  for (const field of fields) {
+    let first: string | null = null;
+    for (const record of coverage) {
+      const value = record[field];
+      if (value === null) {
+        unknown = true;
+        continue;
+      }
+      const comparison = compareSourceInstants(value, first ?? value);
+      if (!Number.isFinite(comparison)) {
+        unknown = true;
+        continue;
+      }
+      if (first === null) first = value;
+      else if (comparison !== 0) different = true;
+    }
+  }
+  if (different) return unknown ? "Different known dates; some dates remain unknown." : "Different known dates.";
+  return unknown ? "Unknown; the available dates do not establish a matching baseline." : "Matching reported dates.";
 }
 
 /** Only the selected response's sanitized coverage is shown; no coverage is inferred. */
@@ -35,6 +59,29 @@ export function SnapshotCoverage({
         not supply a total expected source population. Zero known missing pages alone does not establish complete
         coverage or zero activity.
       </p>
+      <dl>
+        <dt>Observed since</dt>
+        <dd>
+          Unknown. These source records do not supply a first-observation date. The known history start below is a
+          separate boundary.
+        </dd>
+        <dt>Imported or pre-organization history</dt>
+        <dd>Unknown. These source records do not report import origin or when a repository joined the organization.</dd>
+      </dl>
+      {coverage.length > 1 && (
+        <div role="note" aria-label="Reported history baselines">
+          <dl>
+            <dt>Reported source windows</dt>
+            <dd>{compareBoundaries(coverage, ["windowStart", "windowEnd"])}</dd>
+            <dt>Known history baselines</dt>
+            <dd>{compareBoundaries(coverage, ["knownStart"])}</dd>
+          </dl>
+          <p>
+            This comparison includes every supplied source record, across all pages. Matching dates alone do not
+            establish complete coverage or a valid rank comparison.
+          </p>
+        </div>
+      )}
       {coverage.length === 0 ? (
         <p>No source coverage records were supplied for this snapshot. Coverage is unknown.</p>
       ) : (

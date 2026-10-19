@@ -107,10 +107,15 @@ test("coverage exposes frozen source gaps and exact windows on a narrow accessib
     await expect(coverage).toContainText("History known since: Unknown");
     await expect(coverage).toContainText("Known missing pages: 0");
     await expect(coverage).toContainText("Scope: Unknown");
+    await expect(page.getByText("Observed since", { exact: true })).toBeVisible();
+    await expect(page.getByText(/Unknown\. These source records do not supply a first-observation date/)).toBeVisible();
+    await expect(page.getByText("Imported or pre-organization history", { exact: true })).toBeVisible();
+    await expect(page.getByText(/Unknown\. These source records do not report import origin/)).toBeVisible();
     await expect(page.getByText(/A completeness percentage is unavailable/)).toBeVisible();
     await expect(page.getByText(/PRIVATE_PERMISSION_DETAIL|SENSITIVE_EXCEPTION_DETAIL|100%/)).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await page.screenshot({ path: test.info().outputPath("coverage-unknown-partial-320.png"), fullPage: true });
     const correction = page.getByRole("link", { name: "Corrections and privacy for this selection" });
     const href = new URL((await correction.getAttribute("href"))!, page.url());
     expect(href.searchParams.get("snapshot")).toBe(pin);
@@ -154,7 +159,77 @@ test("every source record remains reachable without refetching or resetting the 
     await page.getByRole("button", { name: "Recheck current publication controls" }).click();
     await expect(page.getByRole("alert")).toBeVisible();
     await expect(coverage).toHaveCount(0);
+    await expect(page.getByRole("note", { name: "Reported history baselines" })).toHaveCount(0);
     await expect(page.getByText(/served-scope-/)).toHaveCount(0);
+  } finally {
+    await api.close();
+  }
+});
+
+test("unequal and unknown coverage baselines remain visible before their source record page", async ({ page }) => {
+  const records: Coverage[] = Array.from({ length: 41 }, (_, index) => ({
+    ...record(index),
+    knownStart: "2026-10-01T00:00:00.125Z",
+  }));
+  records[20] = { ...record(20), windowEnd: null };
+  records[40] = {
+    ...record(40),
+    windowStart: "2026-10-01T00:00:00.125000001Z",
+    knownStart: "2026-10-01T00:00:00.125000001Z",
+  };
+  const api = await service(page, records);
+  try {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+    await page.goto(`/coverage?ui=api&repository=${scope.repository}&snapshot=${pin}`);
+    const baselines = page.getByRole("note", { name: "Reported history baselines" });
+    const coverage = page.getByRole("region", { name: "Snapshot source coverage records" });
+    await expect(baselines.getByText("Different known dates; some dates remain unknown.", { exact: true })).toHaveCount(
+      2,
+    );
+    await expect(coverage).not.toContainText("served-scope-40");
+    await expect(baselines).toContainText("across all pages");
+    await expect(baselines).toContainText(
+      "Matching dates alone do not establish complete coverage or a valid rank comparison",
+    );
+    const calls = api.calls.length;
+    await page.getByRole("button", { name: "Next source records" }).click();
+    await page.getByRole("button", { name: "Next source records" }).click();
+    await expect(coverage).toContainText("Scope: served-scope-40");
+    await expect(coverage).toContainText("Window start: 2026-10-01T00:00:00.125000001Z");
+    await expect(baselines.getByText("Different known dates; some dates remain unknown.", { exact: true })).toHaveCount(
+      2,
+    );
+    expect(api.calls.length).toBe(calls);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await page.screenshot({ path: test.info().outputPath("coverage-unequal-unknown-320-dark.png"), fullPage: true });
+  } finally {
+    await api.close();
+  }
+});
+
+test("equivalent served coverage instants match without certifying history or provenance", async ({ page }) => {
+  const api = await service(page, [
+    { ...record(), knownStart: "2026-10-01T00:00:00.125Z" },
+    {
+      ...record(1),
+      windowStart: "2026-09-30T19:00:00.125000000-05:00",
+      windowEnd: "2026-10-18T05:30:00.875000000+05:30",
+      knownStart: "2026-10-01T09:00:00.125000000+09:00",
+    },
+  ]);
+  try {
+    await page.goto(`/coverage?ui=api&repository=${scope.repository}&snapshot=${pin}`);
+    const baselines = page.getByRole("note", { name: "Reported history baselines" });
+    await expect(baselines.getByText("Matching reported dates.", { exact: true })).toHaveCount(2);
+    await expect(baselines).not.toContainText("Different known dates");
+    await expect(page.getByText(/Unknown\. These source records do not supply a first-observation date/)).toBeVisible();
+    await expect(page.getByText(/Unknown\. These source records do not report import origin/)).toBeVisible();
+    const coverage = page.getByRole("region", { name: "Snapshot source coverage records" });
+    await expect(coverage).toContainText("Reported state: unknown");
+    await expect(coverage.locator('time[datetime="2026-09-30T19:00:00.125000000-05:00"]')).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath("coverage-equivalent-dates.png"), fullPage: true });
   } finally {
     await api.close();
   }
