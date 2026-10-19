@@ -35,6 +35,33 @@ export function personFor(actorId: string | null): Person | null {
   return actorId ? (peopleById.get(actorId) ?? null) : null;
 }
 
+/**
+ * Select only evidence already included in the displayed scope and served
+ * snapshot. Deleted accounts use a retained contribution ID, never an identity.
+ * A removed upstream source link does not remove the neutral retained receipt.
+ */
+export function contributorProofSelector(person: Person | null, records: readonly ContributionRecord[]): string | null {
+  if (!person || person.publicState === "suppressed") return null;
+  const record = records.find((candidate) => candidate.actorId === person.actorId && candidate.evidence !== "excluded");
+  if (!record) return null;
+  return person.publicState === "visible" ? person.login : `record:${record.id}`;
+}
+
+/** Resolve against the displayed records only; old deleted-login aliases are not accepted. */
+export function matchesContributorProof(
+  selector: string | null | undefined,
+  person: Person | null,
+  records: readonly ContributionRecord[],
+): boolean {
+  if (!selector || !person || person.publicState === "suppressed") return false;
+  return records.some(
+    (record) =>
+      record.actorId === person.actorId &&
+      record.evidence !== "excluded" &&
+      selector === (person.publicState === "visible" ? person.login : `record:${record.id}`),
+  );
+}
+
 export function isAutomation(person: Person | null): boolean {
   return person !== null && person.actor.kind !== "user";
 }

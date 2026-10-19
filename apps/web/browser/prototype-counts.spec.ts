@@ -109,12 +109,24 @@ test("directory counts explain exact records while deleted and suppressed identi
   const count = entry.getByRole("link", { name: /\d+ contributions? in scope/ });
   await expect(count).toHaveCount(1);
   const expected = Number((await count.innerText()).match(/^\d+/)![0]);
+  expect(expected).toBe(1);
+  const href = new URL((await count.getAttribute("href"))!, page.url());
+  expect(href.searchParams.get("proof")).toBe("record:syn-c-032");
+  expect(href.href).not.toMatch(/synthetic-iris|Iris|syn-actor-9/);
+  await expect(entry.getByRole("link")).toHaveCount(1);
   await count.click();
   const dialog = await expectFixture(page);
   await expect(dialog.getByRole("heading", { name: "Contributions: Deleted account", exact: true })).toBeVisible();
   await expect(dialog.locator(".receipt-row")).toHaveCount(expected);
+  await expect(dialog.locator(".receipt-row-main a")).toHaveAttribute("href", /^\/contributions\/syn-c-032\?/);
+  await expect(dialog.getByRole("link", { name: "Open as a full page", exact: true })).toHaveCount(0);
   await expect(dialog).not.toContainText("Iris");
   await expect(page.locator("body")).not.toContainText("Hazel");
+  await dialog.locator(".receipt-row-main a").click();
+  await expect(page.getByRole("heading", { name: "Reported: stale banner never clears", exact: true })).toBeVisible();
+  await expect(page.getByText("Source no longer public; the link was removed.", { exact: true })).toBeVisible();
+  await expect(page.locator('a[href^="https://synthetic.example/"]')).toHaveCount(0);
+  expect(await page.locator("body").ariaSnapshot()).not.toMatch(/synthetic-iris|Iris \(synthetic\)|syn-actor-9/);
 });
 
 test("a wall count opens the displayed frozen board's fixture explanation", async ({ page }) => {
@@ -153,10 +165,23 @@ test("deleted-account board count explanations preserve their neutral public lab
   await expect(row.locator(".proof-link")).toHaveAccessibleName(/Deleted account/);
   const count = row.locator('td[data-label="Ranked value"] a');
   await expect(count).toHaveAccessibleName(/Deleted account/);
+  await expect(row.getByRole("link")).toHaveCount(2);
+  for (const link of await row.getByRole("link").all()) {
+    const href = new URL((await link.getAttribute("href"))!, page.url());
+    expect(href.searchParams.get("proof")).toBe("record:syn-c-032");
+    expect(href.href).not.toMatch(/synthetic-iris|Iris|syn-actor-9/);
+  }
   await count.click();
   const dialog = await expectFixture(page);
   await expect(dialog.getByRole("heading", { name: "Evidence: Deleted account", exact: true })).toBeVisible();
   await expect(dialog).not.toContainText("Iris");
+  await expect(dialog.getByRole("link", { name: "Open as a full page", exact: true })).toHaveCount(0);
+  await expect(dialog.locator(".receipt-row-main a")).toHaveAttribute("href", /^\/contributions\/syn-c-032\?/);
+  await page.keyboard.press("Escape");
+  await expect(count).toBeFocused();
+  await row.locator(".proof-link").click();
+  await expect(dialog.getByRole("heading", { name: "Evidence: Deleted account", exact: true })).toBeVisible();
+  await expect(dialog.getByRole("link", { name: "Open as a full page", exact: true })).toHaveCount(0);
 });
 
 test("directory count history keeps the exact repository records and excludes corrected source rows", async ({

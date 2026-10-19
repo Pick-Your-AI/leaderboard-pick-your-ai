@@ -5,7 +5,7 @@ import { PersonName, publicPersonLabel, ReceiptDrawer, ReceiptRow } from "../com
 import { ScopeBar } from "../components/ScopeBar.tsx";
 import { EmptyState, ErrorState, FreshnessIndicator, Loading, SnapshotNotices } from "../components/status.tsx";
 import { families, familyLabel } from "../data/registry.ts";
-import { buildProfile, listContributors } from "../data/source.ts";
+import { buildProfile, contributorProofSelector, listContributors, matchesContributorProof } from "../data/source.ts";
 import { formatDate, formatNumber, plural } from "../lib/format.ts";
 import { useLatestSnapshotId, useRead, useScope } from "../lib/hooks.ts";
 import { Link, useRouter, ScopedLink } from "../lib/router.tsx";
@@ -52,7 +52,9 @@ export function ContributorsPage() {
                 (entry.person.login.toLowerCase().includes(query) ||
                   entry.person.displayName.toLowerCase().includes(query))),
           );
-          const proof = state.data.entries.find((entry) => entry.person.login === params.proof);
+          const proof = state.data.entries.find((entry) =>
+            matchesContributorProof(params.proof, entry.person, entry.records),
+          );
           if (state.data.entries.length === 0) {
             return (
               <EmptyState title="No contributors in this scope">
@@ -81,7 +83,7 @@ export function ContributorsPage() {
                       <CountLink
                         to={hrefWith(
                           pathname,
-                          { ...params, proof: entry.person.login, ui: "prototype" },
+                          { ...params, proof: contributorProofSelector(entry.person, entry.records), ui: "prototype" },
                           { ...state.data.scope, snapshot: state.data.snapshot.served.id },
                         )}
                         label={`${plural(entry.observedCount, "contribution")} in scope for ${publicPersonLabel(entry.person)}`}
@@ -97,7 +99,7 @@ export function ContributorsPage() {
                 <ReceiptDrawer
                   title={proof ? `Contributions: ${publicPersonLabel(proof.person)}` : "Evidence not found"}
                   onClose={() => navigate(hrefWith(pathname, { ...params, proof: null }))}
-                  {...(proof && proof.person.publicState !== "deleted"
+                  {...(proof && proof.person.publicState === "visible"
                     ? {
                         fullPageHref: hrefWith(
                           `/contributors/${encodeURIComponent(proof.person.login)}`,

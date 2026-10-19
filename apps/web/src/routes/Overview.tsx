@@ -22,7 +22,14 @@ import {
   metricsInFamily,
   searchMetrics,
 } from "../data/registry.ts";
-import { buildBoard, combinedCoverageState, coverageFor, listActivity, listContributors } from "../data/source.ts";
+import {
+  buildBoard,
+  combinedCoverageState,
+  contributorProofSelector,
+  coverageFor,
+  listActivity,
+  listContributors,
+} from "../data/source.ts";
 import { fixtureMetrics } from "../data/synthetic.ts";
 import { formatDate, formatNumber } from "../lib/format.ts";
 import { useLatestSnapshotId, useRead, useScope } from "../lib/hooks.ts";
@@ -108,7 +115,13 @@ export function OverviewPage() {
                                   <CountLink
                                     to={hrefWith(
                                       `/leaderboards/${board.metric.id}`,
-                                      { proof: row.person.login, ui: "prototype" },
+                                      {
+                                        proof: contributorProofSelector(row.person, [
+                                          ...row.ranked,
+                                          ...row.pendingRecords,
+                                        ]),
+                                        ui: "prototype",
+                                      },
                                       { ...board.scope, snapshot: board.snapshot.served.id },
                                     )}
                                     label={`${formatNumber(row.value)} ${board.metric.definition.unit}, ${publicPersonLabel(row.person)}, ${board.metric.name}`}

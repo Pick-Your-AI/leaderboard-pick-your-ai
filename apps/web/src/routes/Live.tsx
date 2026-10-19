@@ -7,7 +7,7 @@ import { publicPersonLabel } from "../components/Receipt.tsx";
 import { ScopeIssues } from "../components/ScopeBar.tsx";
 import { ErrorState, FreshnessIndicator, SnapshotNotices } from "../components/status.tsx";
 import { getMetric } from "../data/registry.ts";
-import { listContributors, SourceError } from "../data/source.ts";
+import { contributorProofSelector, listContributors, SourceError } from "../data/source.ts";
 import { formatNumber } from "../lib/format.ts";
 import { useLatestSnapshotId, useScope } from "../lib/hooks.ts";
 import { prototypeNavigation } from "../lib/prototype-url.ts";
@@ -288,7 +288,7 @@ function WallPage({
                             </th>
                             <td className="numeric">
                               <CountLink
-                                to={`/leaderboards/${board.metric.id}${serializeScope({ ...wallScope, snapshot: board.snapshot.served.id }, { proof: row.person.login, ui: "prototype", state: params.state, date_basis: params.date_basis })}`}
+                                to={`/leaderboards/${board.metric.id}${serializeScope({ ...wallScope, snapshot: board.snapshot.served.id }, { proof: contributorProofSelector(row.person, [...row.ranked, ...row.pendingRecords]), ui: "prototype", state: params.state, date_basis: params.date_basis })}`}
                                 label={`${formatNumber(row.value)} ${board.metric.definition.unit}, ${publicPersonLabel(row.person)}, ${board.metric.name}`}
                               >
                                 {formatNumber(row.value)}
