@@ -41,6 +41,7 @@ async function controls(
       "/controls/invitations": { invitations: [] },
       "/controls/configuration": { revision: 0, proposals: {} },
       "/controls/spotlights/queue": { nominations: [] },
+      "/controls/spotlight-rotation/queue": { schemaVersion: "editorial-dimensions/v1", records: [] },
     };
     await route.fulfill({ json: responses[path] ?? {} });
   });
@@ -122,7 +123,7 @@ test("account loads persisted profile and submits confirmed writes with CSRF and
   await page.getByLabel("Bio (up to 500 characters)").fill("New bio");
   await page.getByLabel("Replace my optional profile with these values").check();
   await page.getByRole("button", { name: "Save profile" }).click();
-  await expect(page.getByRole("status")).toContainText("Service confirmed");
+  await expect(page.getByRole("status").filter({ hasText: "Service confirmed" })).toContainText("Service confirmed");
   expect(writes[0]).toMatchObject({
     path: "/controls/profile",
     body: { bio: "New bio", highlights: [], public: false },
@@ -142,7 +143,7 @@ test("admin denies unprivileged accounts and supports versioned independent revi
   await page.getByLabel("Decision reason").fill("Source does not support this outcome");
   await page.getByLabel(/I have no conflict/).check();
   await page.getByRole("button", { name: "Record review decision" }).click();
-  await expect(page.getByRole("status")).toContainText("Service confirmed");
+  await expect(page.getByRole("status").filter({ hasText: "Service confirmed" })).toContainText("Service confirmed");
   expect(writes).toHaveLength(0);
 });
 
@@ -170,7 +171,7 @@ test("locale acceptance submits the explicitly reviewed fact, language, policy a
   await page.getByLabel(/I have no conflict/).check();
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   await page.getByRole("button", { name: "Record review decision" }).click();
-  await expect(page.getByRole("status")).toContainText("Service confirmed");
+  await expect(page.getByRole("status").filter({ hasText: "Service confirmed" })).toContainText("Service confirmed");
   expect(writes).toHaveLength(1);
   expect(writes[0]).toMatchObject({
     path: `/controls/requests/${id}/review`,
@@ -218,7 +219,7 @@ test("privacy requests and suppression report actual service receipts without pu
   await page.getByLabel("Request kind").selectOption("privacy");
   await page.getByLabel("Details", { exact: true }).fill("Please review my account display.");
   await page.getByRole("button", { name: "Submit request", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText(id);
+  await expect(page.getByRole("status").filter({ hasText: "Service confirmed" })).toContainText(id);
   expect(writes[0]).toMatchObject({
     path: "/controls/requests",
     body: { kind: "privacy", detail: "Please review my account display." },
@@ -226,7 +227,7 @@ test("privacy requests and suppression report actual service receipts without pu
   await page.getByLabel("Display choice").selectOption("suppress");
   await page.getByLabel("Apply this choice to my account").check();
   await page.getByRole("button", { name: "Apply display preference" }).click();
-  await expect(page.getByRole("status")).toContainText(id);
+  await expect(page.getByRole("status").filter({ hasText: "Service confirmed" })).toContainText(id);
   expect(writes[1]).toMatchObject({ path: "/controls/profile/suppression", body: { suppressed: true } });
 });
 test("receipt conflict does not retry or claim success", async ({ page }) => {
@@ -300,7 +301,7 @@ test("editorial nomination decisions require explicit public explanation and cur
   await page.getByLabel("Public selection explanation").fill("Reviewed contribution helps new contributors.");
   await page.getByLabel("I independently reviewed this nomination and have no conflict of interest").check();
   await page.getByRole("button", { name: "Record nomination decision" }).click();
-  await expect(page.getByRole("status")).toContainText("Service confirmed");
+  await expect(page.getByRole("status").filter({ hasText: "Service confirmed" })).toContainText("Service confirmed");
   expect(writes[0]).toMatchObject({
     path: `/controls/spotlights/${id}`,
     body: {
@@ -399,7 +400,7 @@ test("operators preview approve and activate exact configuration bindings then p
   await page.getByLabel("Disable proposal version").fill("config-v2");
   await page.getByLabel(/Propose disabling pr_opened/).check();
   await page.getByRole("button", { name: "Propose metric disable" }).click();
-  await expect(page.getByRole("status")).toContainText("Service confirmed");
+  await expect(page.getByRole("status").filter({ hasText: "Service confirmed" })).toContainText("Service confirmed");
   expect(writes[3]).toMatchObject({
     path: "/controls/configuration/proposals",
     body: {
