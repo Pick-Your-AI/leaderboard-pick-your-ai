@@ -123,6 +123,14 @@ Editorial nomination, independent selection and every spotlight read require the
 
 An optional `transactionalPublisher({ database, snapshot })` hook can update dependent tables **through that same SQLite database transaction**. It must be synchronous and must not commit, perform network effects or publish to an external cache. Any error rolls back private state, receipt, local snapshot and dependent-table changes together. The external read API, rankings, exports, profiles, caches and metric recalculation must be connected through an independently reviewed publication boundary before #94 or #122 can claim end-to-end product completion. This package's `/controls/public` is the actual local output tested here; it is not the production leaderboard API.
 
+The proposed private state is written before the synchronous publisher runs, so
+its same-transaction session revocation cannot be overwritten by an older state
+copy. An optional `beforeCommit()` transaction guard runs after private/public
+serialization, database writes and publisher work, immediately before `COMMIT`.
+It must be synchronous; a thrown error or a returned thenable rolls back the
+transaction. Configuration activation uses that boundary for its final authority
+check and rejects publisher changes to its expected configuration/audit state.
+
 ## Validation and remaining acceptance
 
 Run `node --test apps/controls/test/controls.test.mjs` or the root test command. `npm run build --workspace @pick-your-ai/controls` checks JavaScript syntax; no TypeScript typecheck is claimed. Tests exercise actual loopback HTTP requests and SQLite files with fictional identities/provider responses: callback/state/PKCE/replay, fixation/expiry/revocation, direct role/CSRF bypass attempts, ownership and private receipt boundaries, collaborator declines, independent review/appeal/rollback/duplicate handling, withdrawal, suppression, reopened storage and transactional publisher failure. Provider tests assert exact endpoints, no requested scope, rejection of broader returned scopes, bounded responses, redirect policy and token revocation. Synthetic reviews do not establish real source rights or metric approval.
@@ -170,15 +178,56 @@ Remaining release evidence includes approved OAuth registration/credentials and 
 
 The configuration namespace implements the backend flow for [configuration #101](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/101). Only a current server-authorized `operator` can read or mutate it; CSRF, exact origin, session revocation and private storage rules also apply. Pass `knownMetricIds` from the canonical registry and the privileged `sourceVerifier` implementation into `createControlsServer`. Both the metric catalog and approved policy list default to empty. Without a source verifier, new source/permission/policy activation is denied.
 
-| Route | Behavior |
-| --- | --- |
-| `GET /controls/configuration` | Private active version, proposals and versioned audit. |
-| `POST /controls/configuration/proposals` | `{ baseRevision, version, document }` creates an immutable proposal with canonical SHA-256 digest, owner and receipt version. |
-| `GET /controls/configuration/proposals/:id` | Private proposal, actual source-test receipt, changed coverage preview and audit. |
-| `POST /controls/configuration/proposals/:id/preview` | `{ version }` runs server-controlled source verification and records before/after repository, Project-field and enabled-metric coverage, bound to digest and base revision. |
-| `POST /controls/configuration/proposals/:id/approve` | `{ version, previewDigest, conflict: false }` requires a different operator from the proposer. Server creates the approval receipt; browser-supplied approval identity is rejected. |
-| `POST /controls/configuration/proposals/:id/activate` | `{ version, approvalId }` rechecks source permissions/schema tests, preview lifetime, current base revision and approving operator authority, then atomically publishes the version. |
-| `POST /controls/configuration/rollback` | `{ baseRevision, version, targetDigest }` proposes an earlier activated document as a new version. It must complete preview, independent approval and activation; rollback cannot bypass current permissions. |
+| Route                                                 | Behavior                                                                                                                                                                                                      |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /controls/configuration`                         | Private active version, proposals and versioned audit.                                                                                                                                                        |
+| `POST /controls/configuration/proposals`              | `{ baseRevision, version, document }` creates an immutable proposal with canonical SHA-256 digest, owner and receipt version.                                                                                 |
+| `GET /controls/configuration/proposals/:id`           | Private proposal, actual source-test receipt, changed coverage preview and audit.                                                                                                                             |
+| `POST /controls/configuration/proposals/:id/preview`  | `{ version }` runs server-controlled source verification and records before/after repository, Project-field and enabled-metric coverage, bound to digest and base revision.                                   |
+| `POST /controls/configuration/proposals/:id/approve`  | `{ version, previewDigest, conflict: false }` requires a different operator from the proposer. Server creates the approval receipt; browser-supplied approval identity is rejected.                           |
+| `POST /controls/configuration/proposals/:id/activate` | `{ version, approvalId }` rechecks source permissions/schema tests, preview lifetime, current base revision and approving operator authority, then atomically publishes the version.                          |
+| `POST /controls/configuration/rollback`               | `{ baseRevision, version, targetDigest }` proposes an earlier activated document as a new version. It must complete preview, independent approval and activation; rollback cannot bypass current permissions. |
+
+### Current authority at activation and response
+
+Activation additionally requires
+`configurationAuthorityCurrent({ actorId, roleVersion, approverId, approverRoleVersion })`
+in `createControlsServer`. Pipeline hosts pass the same option through
+`controlsAuthentication`. The binding is frozen and names both the activating
+operator and the operator who approved the exact proposal. The callback must
+synchronously return exactly `true` only while both actor/role-version bindings
+still have authoritative operator access. The existing independent-proposer
+approval rule is unchanged; an approver may also perform activation.
+
+This is a read-only check over the actual host-owned authority in the same
+synchronous turn. Authoritative roster changes must be serialized with it and
+the SQLite commit. An eventually consistent mirror or an asynchronous remote
+roster lookup cannot supply this guarantee. The callback must not perform
+publication, mutate the roster, start a nested transaction or acquire unrelated
+locks. It grants no role and does not infer approval from an earlier successful
+request. Missing, false, truthy non-boolean, throwing and thenable results deny
+activation with a fixed error. Unexpected native Promise rejections are observed
+without being awaited or accepted. Other objects and functions are rejected
+without reading or calling their `then` property. Promise cleanup assumes the
+trusted host retains native Promise constructor and species behavior; it does
+not isolate arbitrary host code. Other controls routes remain available under
+their existing permissions. Restrictive disables and rollback activation require
+the same current authority.
+
+After the existing asynchronous source, approver and session refreshes, the
+combined check runs inside the activation transaction before mutation and again
+after synchronous publication work. The final check then reads the actual
+stored session, verifies its actor, role version/set, CSRF binding and expiry,
+and checks both source and preview deadlines. A revocation, changed approval,
+expired receipt or publication failure rolls back the activation, audit, local
+public projection and dependent SQLite writes together.
+
+The activation response repeats the synchronous authority/session/deadline check
+after JSON serialization and before HTTP headers are written. If authority
+changes after a valid commit, the private response is withheld; that does not
+undo the committed activation. An authorized operator can read the original
+proposal receipt to distinguish this outcome from a rejected transaction.
+Repeating the stale activation request cannot create another activation.
 
 Configuration `document` contains three bounded arrays:
 

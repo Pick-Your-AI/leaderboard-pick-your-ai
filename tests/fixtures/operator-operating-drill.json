@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "synthetic-operator-operating-drill/v1",
+  "qualification": "Synthetic source, principals and specialist approval only; no real GitHub grant or deployed identity claim.",
+  "origin": "https://controls.synthetic.invalid",
+  "repositoryId": 2,
+  "installationId": 1,
+  "principals": [
+    { "actorId": "101", "roles": [] },
+    { "actorId": "201", "roles": ["operator", "reviewer"] },
+    { "actorId": "303", "roles": [] }
+  ],
+  "roleVersion": "synthetic-operator-drill-roster-v1",
+  "grantRevision": "synthetic-operator-drill-grant-v1",
+  "policyVersion": "synthetic-operator-policy",
+  "correction": {
+    "owner": "101",
+    "operator": "201",
+    "locator": "https://github.com/synthetic-org/synthetic-repo/issues/1",
+    "metricId": "issues_opened",
+    "reason": "Synthetic exclusion decision for the exact collected issue; this is not a claim about real contribution evidence."
+  }
+}

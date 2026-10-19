@@ -125,22 +125,33 @@ export class ControlStore {
     });
     return snapshot;
   }
-  transaction(change, { publish = false } = {}) {
+  transaction(change, { publish = false, beforeCommit } = {}) {
+    requireThat(beforeCommit === undefined || typeof beforeCommit === "function", 500, "Invalid commit guard");
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const state = this.read();
       const result = change(state);
       requireThat(!result?.then, 500, "Transactions must be synchronous");
+      let snapshot;
       if (publish) {
         state.revision++;
-        const snapshot = projectPublic(state);
+        snapshot = projectPublic(state);
+      }
+      // Make the proposed state visible to same-transaction publication work.
+      // A publisher's session revocation must not be overwritten by an older copy.
+      this.db.prepare("UPDATE controls_state SET document=? WHERE id=1").run(JSON.stringify(state));
+      if (publish) {
         this.db.prepare("UPDATE controls_publication SET document=? WHERE id=1").run(JSON.stringify(snapshot));
         // Hook may write only through this SQLite transaction. Network/cache
         // side effects cannot be made atomic by calling them inside a callback.
         const output = this.publisher?.({ database: this.db, snapshot: structuredClone(snapshot) });
         requireThat(!output?.then, 500, "Publisher must use the same synchronous database transaction");
       }
-      this.db.prepare("UPDATE controls_state SET document=? WHERE id=1").run(JSON.stringify(state));
+      const guarded = beforeCommit?.();
+      if (guarded && typeof guarded.then === "function") {
+        void Promise.resolve(guarded).catch(() => undefined);
+        throw new ControlError(500, "Commit guard must be synchronous");
+      }
       this.db.exec("COMMIT");
       return result;
     } catch (error) {
