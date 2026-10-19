@@ -22,9 +22,9 @@ const deliveryMetrics = [
   "pr_lines_changed",
   "files_changed",
 ];
-const legacySignature = (config) =>
+const projectSignature = (config, version) =>
   comparisonHash([
-    "project-membership-context/v1",
+    version,
     comparisonHash([
       "verified-default-branch-merge-pins/v1",
       comparisonHash([
@@ -34,6 +34,8 @@ const legacySignature = (config) =>
     ]),
     [],
   ]);
+const legacySignature = (config) => projectSignature(config, "project-membership-context/v1");
+const currentSignature = (config) => projectSignature(config, "project-membership-context/v2");
 
 async function deliveryHarness(t, family, extra = {}) {
   const sourceFamily = { commit: "commits", pull_request: "pull_requests", issue: "issues" }[family];
@@ -360,6 +362,7 @@ export {
   paths,
   version,
   legacySignature,
+  currentSignature,
   deliveryMetrics,
   before,
   after,

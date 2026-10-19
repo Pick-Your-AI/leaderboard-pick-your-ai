@@ -6,7 +6,12 @@ import {
   type PublicWindows,
 } from "@pick-your-ai/contracts";
 import { resolveMetricWindow } from "@pick-your-ai/metrics";
-import { PublicReadError, type PublicRead, type PublicWindowsRead } from "./public-source.js";
+import {
+  PublicReadError,
+  readSuppressedContributionIds,
+  type PublicRead,
+  type PublicWindowsRead,
+} from "./public-source.js";
 
 /** Discovery uses the same complete projection validation as a current read.
  * Private provider objects, controls and ingestion clocks never enter the wire. */
@@ -42,6 +47,7 @@ export function projectPublicWindows(
       [...controls.suppressedActorIds].sort(),
       [...controls.suppressedArtifactIds].sort(),
       [...controls.revokedSnapshotIds].sort(),
+      readSuppressedContributionIds(controls).sort(),
     ]);
     if (authority !== undefined && signature !== authority)
       throw new PublicReadError(503, "public_windows_authority_changed");

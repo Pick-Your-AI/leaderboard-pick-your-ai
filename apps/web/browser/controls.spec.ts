@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { syntheticBrowserIntake, syntheticEvidenceTerms } from "./controls-intake-fixtures.ts";
 const id = "11111111-1111-1111-1111-111111111111";
 async function controls(page: Page, roles: string[] = [], expires = Date.now() + 600000) {
   const writes: Array<{ path: string; body: Record<string, unknown>; csrf: string | undefined }> = [];
@@ -13,6 +14,7 @@ async function controls(page: Page, roles: string[] = [], expires = Date.now() +
     }
     const responses: Record<string, unknown> = {
       "/controls/session": { actorId: "1", csrf: "a".repeat(43), roles, expires },
+      "/controls/evidence-terms": { terms: syntheticEvidenceTerms },
       "/controls/profile": { bio: "Saved bio", highlights: [], public: false, suppressed: false },
       "/controls/requests": {
         requests: [
@@ -25,6 +27,8 @@ async function controls(page: Page, roles: string[] = [], expires = Date.now() +
             detail: "Evidence for independent review",
             history: [],
             collaborators: {},
+            intake: syntheticBrowserIntake("2"),
+            intakeEligibility: { state: "awaiting_review" },
           },
         ],
       },
@@ -82,6 +86,12 @@ test("locale acceptance submits the explicitly reviewed fact, language, policy a
   const writes = await controls(page, ["reviewer"]);
   await page.goto("/admin");
   await page.getByLabel("Review decision").selectOption("accept");
+  await page.getByLabel("Source-use review rationale").fill("Synthetic independent review of the permitted source use");
+  await page
+    .getByLabel("Reviewed source reference 1", { exact: true })
+    .fill("https://github.com/synthetic/example/blob/reviewed/rights.md");
+  await page.getByLabel("Reviewed source revision 1", { exact: true }).fill("synthetic-rights-revision");
+  await page.getByLabel("My independent review establishes permitted source use for this exact claim").check();
   await page.getByLabel("Accept one reviewed language and source revision").check();
   await page.getByLabel("Contribution ID", { exact: true }).fill("synthetic-locale:fr");
   await page.getByLabel("Reviewed merge revision").fill("C".repeat(40));
@@ -103,6 +113,16 @@ test("locale acceptance submits the explicitly reviewed fact, language, policy a
       decision: "accept",
       policyVersion: "synthetic-metric-v1",
       sourceReviewedPublic: true,
+      sourceUseReview: {
+        disposition: "permitted",
+        rationale: "Synthetic independent review of the permitted source use",
+        references: [
+          {
+            locator: "https://github.com/synthetic/example/blob/reviewed/rights.md",
+            revision: "synthetic-rights-revision",
+          },
+        ],
+      },
       localization: {
         targetFactId: "synthetic-locale:fr",
         sourceRevision: "C".repeat(40),

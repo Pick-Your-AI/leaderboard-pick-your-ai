@@ -39,6 +39,7 @@ The protected configuration has this shape:
 
 - `version`, `organization`, `approvalReceipt`.
 - `repositories`: reviewed numeric `id`, numeric `installationId`, canonical `owner/repo` `slug`, approved `families`, and `approvalReceipt`.
+- Optional `reconciliation`: the exact approved `lookbackMs`, `overlapMs` and `fullAuditsPerCycle` policy described in [bounded reconciliation](reconciliation-windows.md). It is absent by default; it does not create a schedule or source grant.
 - `policies`: an actual `MetricPolicy`, its exact `metrics.stableJSON(policy)` signature, an independent `approvalReceipt`, and optional public `policyLink`.
 - `scopes`: exact public API scopes `{organization,repository,workstream,start,end}`. Repository IDs are numeric strings or null. Date bounds are both explicit UTC instants or both null. Null bounds mean the API's all-time lens; a last-30-day view must use explicit reviewed dates. Unknown/unmaterialized scopes are unavailable rather than reconstructed by summing overlapping aggregates.
 
@@ -62,7 +63,7 @@ SQLite controls and PostgreSQL commits are not one atomic transaction. Revocatio
 
 The default `createGithubCollectionSource` performs read-only requests through `GithubReadClient.rest` and resumable `scanRest`. It supports repository issues, pull requests, commits, issue comments and releases. It verifies current public repository identity and uses stable API object IDs, revision timestamps/SHAs and public source URLs. Repository issue lists exclude embedded PR objects. Scan cursors and expected counts are fixed to one bounded operation; completed scans remain durable. Each collection run persists accepted facts/pages and progress through the actual `CollectionStore`.
 
-Reviews, nested discussion/history, Project transitions and other advanced families require their separately reviewed read-only adapter; the default refuses them instead of manufacturing history. A host can provide the same `ReadOnlySource` interface for a supported reviewed adapter. `sourceFamilies` is a catalog, not proof that the default source adapter implements every family.
+The default source has guarded branches for `reviews`, `discussions`, `project_current`, `project_history` and `relationships`; using one requires current repository/family authorization and the required client capabilities, with explicit approved Project scope for either Project branch. Unsupported families fail closed instead of manufacturing history. A host can provide the same `ReadOnlySource` interface for a supported reviewed adapter. `sourceFamilies` is a catalog, not proof that the default source adapter implements every family.
 
 `createGithubEvidenceNormalizer` hydrates authoritative source details and verifies subject/revision/public repository identity. Lossy current snapshots cannot become a guessed actor, field editor, first readiness, transition or accepted outcome. Real author/actor numeric database IDs and source node IDs are retained separately. `ControlStore` authenticated actor IDs are numeric GitHub database IDs; the pipeline requires the normalizer's explicit authoritative numeric mapping before constructing public actor contracts. A webhook node ID is never guessed to equal a controls database ID. User accounts remain account classes, not a claim of manual execution.
 

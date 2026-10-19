@@ -1,3 +1,5 @@
+import { reconciliationHealthRows } from "./source-health.mjs";
+
 const numeric = (value) =>
   value !== null && value !== undefined && value !== "" && Number.isSafeInteger(Number(value)) && Number(value) >= 0
     ? Number(value)
@@ -59,7 +61,7 @@ function quotaProjection(raw, observed, timestamp) {
  * No request, token acquisition, source payload or inference from an empty queue. */
 export async function readOperatorHealth(
   tx,
-  { scope, repository, asOf, freshnessBudgetSeconds, protocol, readQuota, verifyPublications },
+  { scope, repository, asOf, freshnessBudgetSeconds, protocol, readQuota, verifyPublications, reconciliationProgress },
 ) {
   const timestamp = protocol.operationTime;
   if (timestamp(asOf) === null) throw new Error("invalid_operation_time");
@@ -69,9 +71,11 @@ export async function readOperatorHealth(
   };
   const fresh = (value) => value !== null && elapsed(value, asOf) <= freshnessBudgetSeconds;
   const families = [...new Set(repository.families)].sort();
-  const rows = (
-    await tx.query(
-      `SELECT wanted.family,latest.state,latest.reason,latest.attempted_at,latest.item_count,latest.expected_count,
+  const rows =
+    reconciliationProgress === undefined
+      ? (
+          await tx.query(
+            `SELECT wanted.family,latest.state,latest.reason,latest.attempted_at,latest.item_count,latest.expected_count,
        successful.last_success_at,successful.until_at
      FROM unnest($3::text[]) AS wanted(family)
      LEFT JOIN LATERAL (
@@ -85,9 +89,17 @@ export async function readOperatorHealth(
          AND last_success_at IS NOT NULL
        ORDER BY last_success_at DESC,until_at DESC,run_id DESC LIMIT 1
      ) AS successful ON true`,
-      [scope.repositoryId, scope.generation, families],
+            [scope.repositoryId, scope.generation, families],
+          )
+        ).rows
+      : reconciliationHealthRows(reconciliationProgress);
+  if (
+    reconciliationProgress !== undefined &&
+    rows.some(
+      (row) => String(row.repository_id) !== String(scope.repositoryId) || row.access_generation !== scope.generation,
     )
-  ).rows;
+  )
+    throw new Error("operation_health_unavailable");
   const collection = families.map((family) => {
     const row = rows.find((value) => value.family === family) ?? {};
     const lastAttemptAt = observed(row.attempted_at);
@@ -109,8 +121,15 @@ export async function readOperatorHealth(
       state = "collecting";
       reason = "partial_collection";
     } else if (lastAttemptAt !== null && row.state === "complete") {
-      if (lastSuccessAt === null || reconciledThrough === null) {
+      if (reconciliationProgress !== undefined && row.window_complete !== true) {
+        reason = "no_current_attempt";
+      } else if (lastSuccessAt === null || reconciledThrough === null) {
         reason = "completion_time_unknown";
+      } else if (
+        reconciliationProgress !== undefined &&
+        (observed(row.last_window_end) === null || reconciledThrough < observed(row.last_window_end))
+      ) {
+        reason = "reconciliation_gap";
       } else if (!fresh(lastSuccessAt) || !fresh(reconciledThrough)) {
         state = "overdue";
         reason = "reconciliation_overdue";

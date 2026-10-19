@@ -99,7 +99,7 @@ export async function publicScopeHarness(
         reasons: [],
         isSynthetic: true,
         projectContext: {
-          schemaVersion: "github-current-project-context/v1",
+          schemaVersion: "github-current-project-context/v2",
           repositoryId: "2",
           subjectId: snapshot.subjectId,
           subjectKind: snapshot.subjectKind,
