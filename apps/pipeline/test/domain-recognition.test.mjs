@@ -220,6 +220,40 @@ const details = {
     publicDisclosureApproved: true,
     contributorConsent: true,
   },
+  governance: {
+    decisionId: "decision:1",
+    decisionVersion: "v1",
+    kind: "governance_decision",
+    disposition: "accepted",
+    publicRecord: {
+      revision: after,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/blob/${after}/docs/governance.md`,
+      contentHash: hash,
+    },
+  },
+  deployment_work: {
+    workArtifactId: "deployment-work:1",
+    workVersion: "v1",
+    workKind: "deployment_improvement",
+    deploymentIds: ["deployment:1"],
+    sourceUse: "approved_public",
+    publicRecord: {
+      revision: after,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/blob/${after}/docs/deployment.md`,
+      contentHash: hash,
+    },
+  },
+  incidents: {
+    contributionId: "reliability-work:1",
+    contributionVersion: "v1",
+    workKind: "postmortem",
+    narrativeApproved: true,
+    publicRecord: {
+      revision: after,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/blob/${after}/docs/postmortem.md`,
+      contentHash: hash,
+    },
+  },
 };
 function scenario(metric = "catalog_proposals", requestOverrides = {}) {
   const input = source(),
@@ -606,8 +640,10 @@ test("reproductions: full 64-character source revisions bind all three reviewed 
     revision = "a".repeat(64);
   s.input = source((envelope) => {
     envelope.payload.pull_request.merge_commit_sha = revision;
+    envelope.integration.before = "b".repeat(64);
     envelope.integration.after = revision;
     envelope.integration.commitShas = [revision];
+    envelope.integration.diff.before = envelope.integration.before;
     envelope.integration.diff.after = revision;
   });
   s.candidate = s.input.facts.find((fact) => fact.metricId === "pr_merged");
@@ -971,7 +1007,8 @@ test("reproductions: its configuration fence preserves automatic-source authorit
     );
     const current = recognitionFingerprint(empty, [s.binding]),
       previous = emptyDomainAuthority([s.binding], true);
-    if (metric === "reproductions") assert.notEqual(current, previous);
+    if (["reproductions", "governance", "deployment_work", "incidents"].includes(metric))
+      assert.notEqual(current, previous);
     else assert.equal(current, previous, `${metric}: exact prior authority bytes survive`);
   }
   const s = scenario("documentation"),
@@ -994,7 +1031,8 @@ test("data_quality: qualifier authority preserves other automatic sources while 
     );
     const current = recognitionFingerprint(empty, [s.binding]),
       previous = emptyDomainAuthority([s.binding]);
-    if (["data_quality", "reproductions"].includes(metric)) assert.notEqual(current, previous);
+    if (["data_quality", "reproductions", "governance", "deployment_work", "incidents"].includes(metric))
+      assert.notEqual(current, previous);
     else assert.equal(current, previous, `${metric}: established automatic-source authority is retained`);
   }
   const mixed = scenario("documentation"),
@@ -1031,6 +1069,8 @@ const candidateDateBases = {
   usability: "acceptedAt",
   performance: "acceptedAt",
   security: "occurredAt",
+  governance: "acceptedAt",
+  deployment_work: "acceptedAt",
 };
 
 function aggregateDomain(s, normalized, scope = {}) {
@@ -1073,7 +1113,8 @@ function aggregateDomain(s, normalized, scope = {}) {
 
 for (const [metric, date_basis] of Object.entries(candidateDateBases)) {
   test(`${metric}: source-to-engine candidate counts one canonical unit through review and observation replay`, () => {
-    assert.deepEqual(Object.keys(candidateDateBases).sort(), [...domainMetricIds].sort());
+    // Reliability receipts remain spotlight-only, without a selectable board.
+    assert.deepEqual(Object.keys(candidateDateBases).sort(), domainMetricIds.filter((id) => id !== "incidents").sort());
     const s = scenario(metric);
     s.policies[0].policy.dateBasis = date_basis;
     const normalized = run(s),
@@ -1191,6 +1232,15 @@ const exclusions = {
   },
   security: (s) => {
     s.record.details.publicDisclosureApproved = false;
+  },
+  governance: (s) => {
+    s.record.details.disposition = "rejected";
+  },
+  deployment_work: (s) => {
+    s.record.details.workKind = "execution_only";
+  },
+  incidents: (s) => {
+    s.record.details.narrativeApproved = false;
   },
 };
 for (const metric of domainMetricIds) {

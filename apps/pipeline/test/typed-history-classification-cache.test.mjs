@@ -97,13 +97,21 @@ function historyFixture(family, createdAt) {
 
 // Literal accepted predecessor namespace, independent of the new family generation.
 function predecessorSignature(config) {
-  const policy = comparisonHash([
-    "current-state-selection-v1",
-    "synthetic",
-    config.policies.map((entry) => entry.signature),
-  ]);
+  const classification = {
+    documentation: config.documentationPolicies ?? [],
+    research: config.researchPolicies ?? [],
+  };
+  const signatures = config.policies.map((entry) => entry.signature);
+  const policy = comparisonHash(
+    classification.documentation.length || classification.research.length
+      ? ["current-state-selection-v2", "synthetic", signatures, classification]
+      : ["current-state-selection-v1", "synthetic", signatures],
+  );
   const attribution = comparisonHash([normalizationDocumentVersion, policy]);
-  const verifiedMerge = comparisonHash(["verified-default-branch-merge-pins/v1", attribution]);
+  const documentation = classification.documentation.length
+    ? comparisonHash(["documentation-locales/v2", attribution])
+    : attribution;
+  const verifiedMerge = comparisonHash(["verified-default-branch-merge-pins/v1", documentation]);
   return comparisonHash(["project-membership-context/v2", verifiedMerge, []]);
 }
 
@@ -114,12 +122,16 @@ const metrics = {
 };
 
 for (const family of Object.keys(metrics))
-  for (const [droppedFamily, legacyDelivery] of [
+  for (const [droppedFamily, legacyDelivery, completePolicy = false, typedPredecessor = false] of [
     [false, false],
     [true, false],
     [false, true],
+    [false, false, true, false],
+    [false, true, true, false],
+    [false, false, true, true],
+    [true, true, true, true],
   ])
-    test(`${family} classification preserves frozen predecessor caches across reopen; dropped=${droppedFamily}${legacyDelivery ? "; legacy-delivery" : ""}`, async (t) => {
+    test(`${family} classification preserves frozen predecessor caches across reopen; dropped=${droppedFamily}${legacyDelivery ? "; legacy-delivery" : ""}${completePolicy ? "; complete-policy" : ""}${typedPredecessor ? "; typed-predecessor" : ""}`, async (t) => {
       const fixture = historyFixture(family, ago(1));
       const { repository, subject, actor, client, sourceId } = fixture;
       const source = createGithubCollectionSource({ client, sourceId, repositories: [repository], isSynthetic: true });
@@ -186,6 +198,22 @@ for (const family of Object.keys(metrics))
         configure(config) {
           Object.assign(config.repositories[0], repository);
           config.repositories[0].families = droppedFamily ? ["issues"] : ["issues", family];
+          // These optional selections were already bound by the older policy,
+          // before their release and authored-purpose generation wrappers.
+          if (completePolicy) {
+            config.documentationPolicies = [
+              {
+                repositoryId: repository.id,
+                version: "synthetic-typed-notes-v1",
+                documentationPaths: ["docs/"],
+                releaseNotesPaths: ["docs/releases/"],
+                researchPaths: [],
+                generatedPaths: [],
+                importedPaths: [],
+              },
+            ];
+            config.releaseInclusionTargets = [{ repositoryId: repository.id, releaseId: 700, pullRequestNumber: 11 }];
+          }
           const metricId = metrics[family];
           const policy = {
             ...config.policies[0].policy,
@@ -250,7 +278,10 @@ for (const family of Object.keys(metrics))
       assert.equal(produced.length, 1);
       assert.equal(produced[0].document.actors[0].kind, "user");
       assert.equal(produced[0].document_hash, comparisonHash(produced[0].document));
-      const baseSignature = predecessorSignature(h.config);
+      const projectSignature = predecessorSignature(h.config);
+      const baseSignature = typedPredecessor
+        ? comparisonHash(["typed-history-actor-classification/v1", projectSignature])
+        : projectSignature;
       const oldSignature = legacyDelivery
         ? comparisonHash([components.github.defaultDeliveryNormalizationVersion, baseSignature])
         : baseSignature;
@@ -348,6 +379,8 @@ for (const family of Object.keys(metrics))
           family,
           droppedFamily,
           legacyDelivery,
+          completePolicy,
+          typedPredecessor,
           runError,
           previewError,
           classifiedHydrations: normalizeCalls.filter((entry) => entry.family === family && entry.classify).length,

@@ -7,6 +7,7 @@ import { proposeRotation, decideRotation, projectRotation, rotationQueue } from 
 import { createConfigurationManager } from "./configuration.mjs";
 import { createPolicyComparisonManager } from "./policy-comparison.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "./localization-review.mjs";
+import { releaseReviewRequest, parseReleaseReviewTarget } from "./release-review.mjs";
 import { hasRequiredParticipantConsent, hasReviewedParticipantConsent } from "./evidence-consent.mjs";
 import {
   createEvidenceIntake,
@@ -717,6 +718,7 @@ export function createControlsServer({
                 "sourceReviewedPublic",
                 "duplicateOf",
                 "localization",
+                "releaseInclusion",
                 "sourceUseReview",
               ]);
               requireThat(session.roles.includes(roleNeeded(request)), 403, "Reviewer role required");
@@ -727,8 +729,13 @@ export function createControlsServer({
               );
               requireThat(input.conflict === false, 403, "Declare conflicts and route to an independent reviewer");
               requireThat(["accept", "reject", "rollback", "merge"].includes(input.decision));
-              requireThat(input.decision === "accept" || input.localization === undefined);
-              requireThat(input.decision === "accept" || input.sourceUseReview === undefined);
+              requireThat(
+                input.decision === "accept" ||
+                  (input.localization === undefined &&
+                    input.releaseInclusion === undefined &&
+                    input.sourceUseReview === undefined),
+              );
+              requireThat(input.localization === undefined || input.releaseInclusion === undefined);
               requireThat(!["withdrawn", "merged", "applied"].includes(request.status), 409, "Request is terminal");
               if (request.status === "appealed" || input.decision === "rollback") {
                 requireThat(
@@ -788,6 +795,19 @@ export function createControlsServer({
                     throw new ControlError(400, "Invalid localization review target");
                   }
                 }
+                let releaseInclusion;
+                if (input.releaseInclusion !== undefined) {
+                  try {
+                    releaseInclusion = parseReleaseReviewTarget(input.releaseInclusion);
+                  } catch {
+                    throw new ControlError(400, "Invalid release review target");
+                  }
+                  requireThat(
+                    releaseInclusion.policyVersion === policyVersion,
+                    400,
+                    "Release review policy does not match acceptance",
+                  );
+                }
                 request.policyVersion = policyVersion;
                 request.status = "accepted";
                 record(s, request, session.actorId, "accepted", timestamp, {
@@ -802,6 +822,7 @@ export function createControlsServer({
                     policyVersion,
                   }),
                   ...(localization ? { localization, evidenceRequest: localizationReviewRequest(request) } : {}),
+                  ...(releaseInclusion ? { releaseInclusion, evidenceRequest: releaseReviewRequest(request) } : {}),
                 });
                 requireThat(
                   hasReviewedEvidenceIntake(request),
