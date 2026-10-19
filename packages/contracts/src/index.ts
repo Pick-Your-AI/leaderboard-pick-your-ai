@@ -29,6 +29,13 @@ export {
 export { compareSourceInstants } from "./v1/source-time.js";
 export { publicArtifactIdSchema } from "./artifact-identity.js";
 export {
+  publicProjectContextVersion,
+  publicProjectLimit,
+  publicProjectContextSchema,
+  publicProjectContextMatches,
+  type PublicProjectContext,
+} from "./public-project-context.js";
+export {
   achievementMilestoneVersion,
   achievementScopeMeaning,
   coContributionMeaning,
