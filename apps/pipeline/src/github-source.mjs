@@ -437,11 +437,20 @@ export function createGithubCollectionSource({
   return {
     probeRepository,
     async readPage(request) {
+      // A caller may reuse its request while a source read is awaiting I/O.
+      // Keep this invocation's scope, paging and checkpoint identity together.
+      const captured = {
+        repositoryId: request.repositoryId,
+        runId: request.runId,
+        family: request.family,
+        cursor: request.cursor,
+        limit: request.limit,
+      };
       try {
-        return await adapter.readPage(request);
+        return await adapter.readPage(captured);
       } catch (error) {
-        const repository = approved.get(request.repositoryId);
-        if (repository && isProjectSourceScopeFailure(error, request.family))
+        const repository = approved.get(captured.repositoryId);
+        if (repository && isProjectSourceScopeFailure(error, captured.family))
           await onUnavailable?.(repository, "project_scope_unavailable");
         throw error;
       }
