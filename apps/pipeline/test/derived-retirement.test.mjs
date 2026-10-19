@@ -1080,3 +1080,235 @@ test("orphan private publication and head confirmations remain unresolved rather
   assert.deepEqual(await pgRows(h, "snapshots"), snapshots);
   assert.equal((await pgRows(h, "derived_retirement_receipts")).length, 0);
 });
+
+async function persistLegacyInputManifest(h, input, batchId) {
+  // Reproduce only 6edb5c4's result-only SELECT while the actual manifest writer,
+  // authorization, source fences and transaction remain unchanged. Restore the
+  // current selector before resuming; never insert or rewrite a manifest by hand.
+  const db = h.controlsStore.db;
+  const prepare = db.prepare;
+  const transaction = h.db.transaction;
+  let legacyReads = 0;
+  let interrupted = false;
+  db.prepare = function (sql) {
+    if (sql.startsWith("SELECT preview.* FROM policy_previews AS preview")) {
+      legacyReads++;
+      return prepare.call(
+        this,
+        "SELECT * FROM policy_previews WHERE json_extract(document,'$.snapshot.snapshotId')=? ORDER BY id LIMIT ?",
+      );
+    }
+    return prepare.call(this, sql);
+  };
+  h.db.transaction = async (work) => {
+    let selected = false;
+    const result = await transaction((tx) =>
+      work({
+        query: (sql, params) => {
+          if (
+            sql.includes("INSERT INTO leaderboard_pipeline.derived_retirement_manifests") &&
+            params[1] === batchId &&
+            JSON.parse(params[3]).stage === "preview_inputs"
+          )
+            selected = true;
+          return tx.query(sql, params);
+        },
+      }),
+    );
+    // The real database transaction has committed. Stop before eraseBatch can
+    // enter its separately acknowledged SQLite application transaction.
+    if (selected && !interrupted) {
+      interrupted = true;
+      throw new Error("synthetic_legacy_input_manifest_committed");
+    }
+    return result;
+  };
+  try {
+    await assert.rejects(h.eraser.eraseBatch(input, batchId, 1, approved), /synthetic_legacy_input_manifest_committed/);
+  } finally {
+    db.prepare = prepare;
+    h.db.transaction = transaction;
+  }
+  assert.equal(legacyReads, 1);
+  assert.equal(interrupted, true);
+  const manifest = (await pgRows(h, "derived_retirement_manifests")).find((row) => row.batch_id === batchId);
+  assert.equal(manifest.document.stage, "preview_inputs");
+  assert.equal(manifest.document.records.length, 1);
+  assert.equal(manifest.document_hash, hash(manifest.document));
+  assert.equal(
+    db.prepare("SELECT 1 FROM pipeline_derived_retirement_batches WHERE batch_id=?").get(batchId),
+    undefined,
+  );
+  assert.equal(
+    (await pgRows(h, "derived_retirement_receipts")).some((row) => row.batch_id === batchId),
+    false,
+  );
+  return manifest;
+}
+
+for (const inputState of ["present", "already absent"]) {
+  test(`legacy pending input retirement refuses a fresh acknowledgement with a dependent result and an ${inputState} input`, async (t) => {
+    const h = await multipleRepositories(t);
+    await h.runtime.runOnce();
+    const snapshots = await pgRows(h, "snapshots");
+    const target = snapshots.find((row) => row.repository_ids.includes(2));
+    const foreign = snapshots.find((row) => !row.repository_ids.includes(2));
+    const preview = await privatePreview(h, target.snapshot_id);
+    await privatePreview(h, foreign.snapshot_id);
+    // This pre-existing contradictory result is skipped by the historical
+    // selector but still depends on the selected input's exact content ID.
+    const doc = { ...preview.document, snapshot: foreign.document.snapshot };
+    h.controlsStore.db
+      .prepare("UPDATE policy_previews SET document=?,digest=? WHERE id=?")
+      .run(stable(doc), hash(doc), doc.comparisonId);
+    const input = await retire(h);
+    assert.equal((await h.eraser.eraseBatch(input, "synthetic-register", 1, approved)).stage, "register_snapshot");
+    const batchId = "synthetic-legacy-pending-input";
+    const manifest = await persistLegacyInputManifest(h, input, batchId);
+    assert.deepEqual(manifest.document.records[0].keys, [preview.document.inputId]);
+    if (inputState === "already absent")
+      h.controlsStore.db.prepare("DELETE FROM policy_preview_inputs WHERE id=?").run(preview.document.inputId);
+    const before = Object.fromEntries(
+      ["policy_previews", "policy_preview_inputs", "pipeline_aggregate_explanations"].map((table) => [
+        table,
+        h.controlsStore.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(),
+      ]),
+    );
+    const resumed = new PipelineDerivedRetirementStore(h.db, h.controlsStore);
+    for (let attempt = 0; attempt < 2; attempt++)
+      await assert.rejects(resumed.eraseBatch(input, batchId, 1, approved), /derived_preview_reference_remaining/);
+    await assert.rejects(
+      resumed.eraseBatch(input, "synthetic-competing-input-batch", 1, approved),
+      /derived_batch_pending/,
+    );
+    for (const [table, rows] of Object.entries(before))
+      assert.deepEqual(h.controlsStore.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(), rows, table);
+    assert.deepEqual(await pgRows(h, "snapshots"), snapshots);
+    assert.deepEqual(
+      (await pgRows(h, "derived_retirement_manifests")).find((row) => row.batch_id === batchId),
+      manifest,
+    );
+    assert.equal(
+      h.controlsStore.db.prepare("SELECT 1 FROM pipeline_derived_retirement_batches WHERE batch_id=?").get(batchId),
+      undefined,
+    );
+    assert.equal(
+      (await pgRows(h, "derived_retirement_receipts")).some((row) => row.batch_id === batchId),
+      false,
+    );
+  });
+}
+
+for (const independentlyAbsent of [false, true]) {
+  test(`legacy pending input retirement preserves foreign data and exact retries when the unreferenced input is ${independentlyAbsent ? "already absent" : "present"}`, async (t) => {
+    const h = await multipleRepositories(t);
+    await h.runtime.runOnce();
+    const snapshots = await pgRows(h, "snapshots");
+    const target = snapshots.find((row) => row.repository_ids.includes(2));
+    const foreign = snapshots.find((row) => !row.repository_ids.includes(2));
+    await privatePreview(h, foreign.snapshot_id);
+    const inputsBefore = h.controlsStore.db.prepare("SELECT * FROM policy_preview_inputs ORDER BY rowid").all();
+    const targetInput = inputsBefore.find((row) => JSON.parse(row.document).snapshot.snapshotId === target.snapshot_id);
+    const previewsBefore = h.controlsStore.db.prepare("SELECT * FROM policy_previews ORDER BY rowid").all();
+    const input = await retire(h);
+    assert.equal((await h.eraser.eraseBatch(input, "synthetic-register", 1, approved)).stage, "register_snapshot");
+    const batchId = "synthetic-legacy-valid-input";
+    const manifest = await persistLegacyInputManifest(h, input, batchId);
+    assert.deepEqual(manifest.document.records[0].keys, [targetInput.id]);
+    if (independentlyAbsent)
+      h.controlsStore.db.prepare("DELETE FROM policy_preview_inputs WHERE id=?").run(targetInput.id);
+    const resumed = new PipelineDerivedRetirementStore(h.db, h.controlsStore);
+    const result = await resumed.eraseBatch(input, batchId, 1, approved);
+    assert.equal(result.status, "applied");
+    assert.equal(result.stage, "preview_inputs");
+    assert.equal(result.selected, 1);
+    assert.equal(result.removed, independentlyAbsent ? 0 : 1);
+    assert.equal(result.alreadyAbsent, independentlyAbsent ? 1 : 0);
+    assert.deepEqual(
+      h.controlsStore.db.prepare("SELECT * FROM policy_preview_inputs ORDER BY rowid").all(),
+      inputsBefore.filter((row) => row.id !== targetInput.id),
+    );
+    assert.deepEqual(h.controlsStore.db.prepare("SELECT * FROM policy_previews ORDER BY rowid").all(), previewsBefore);
+    const local = h.controlsStore.db
+      .prepare("SELECT * FROM pipeline_derived_retirement_batches WHERE batch_id=?")
+      .get(batchId);
+    assert.equal(local.manifest_hash, manifest.document_hash);
+    assert.deepEqual(await resumed.eraseBatch(input, batchId, 1, approved), result);
+    assert.deepEqual(
+      h.controlsStore.db.prepare("SELECT * FROM pipeline_derived_retirement_batches WHERE batch_id=?").get(batchId),
+      local,
+    );
+    assert.deepEqual(
+      (await pgRows(h, "derived_retirement_manifests")).find((row) => row.batch_id === batchId),
+      manifest,
+    );
+    assert.deepEqual(await pgRows(h, "snapshots"), snapshots);
+  });
+}
+
+test("a committed input acknowledgement survives pending-manifest recovery without rechecking or deleting payloads", async (t) => {
+  const h = await setup(t);
+  await h.runtime.runOnce();
+  const input = await retire(h);
+  await h.eraser.eraseBatch(input, "synthetic-register", 1, approved);
+  const batchId = "synthetic-legacy-acknowledged-input";
+  const manifest = await persistLegacyInputManifest(h, input, batchId);
+  let interrupted = false;
+  const restore = interceptTransactions(h, async (tx, sql, params) => {
+    if (
+      !interrupted &&
+      sql.includes("INSERT INTO leaderboard_pipeline.derived_retirement_receipts") &&
+      params[1] === batchId
+    ) {
+      interrupted = true;
+      throw new Error("synthetic_input_receipt_interrupted");
+    }
+    return tx.query(sql, params);
+  });
+  try {
+    await assert.rejects(h.eraser.eraseBatch(input, batchId, 1, approved), /synthetic_input_receipt_interrupted/);
+  } finally {
+    restore();
+  }
+  assert.equal(interrupted, true);
+  const local = h.controlsStore.db
+    .prepare("SELECT * FROM pipeline_derived_retirement_batches WHERE batch_id=?")
+    .get(batchId);
+  assert.equal(local.manifest_hash, manifest.document_hash);
+  assert.equal(JSON.parse(local.document).removed, 1);
+  assert.equal(
+    (await pgRows(h, "derived_retirement_receipts")).some((row) => row.batch_id === batchId),
+    false,
+  );
+  assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM policy_preview_inputs").get().n, 0);
+  const db = h.controlsStore.db;
+  const prepare = db.prepare;
+  let payloadQueries = 0;
+  db.prepare = function (sql) {
+    if (
+      sql === "SELECT 1 FROM policy_previews WHERE input_id=? LIMIT 1" ||
+      sql.startsWith("DELETE FROM policy_preview_inputs ")
+    )
+      payloadQueries++;
+    return prepare.call(this, sql);
+  };
+  let result;
+  try {
+    result = await new PipelineDerivedRetirementStore(h.db, h.controlsStore).eraseBatch(input, batchId, 1, approved);
+  } finally {
+    db.prepare = prepare;
+  }
+  assert.equal(payloadQueries, 0, "the original local acknowledgement is returned before new payload work");
+  assert.equal(result.removed, 1);
+  assert.equal(result.alreadyAbsent, 0);
+  assert.equal(result.manifestHash, manifest.document_hash);
+  assert.deepEqual(
+    db.prepare("SELECT * FROM pipeline_derived_retirement_batches WHERE batch_id=?").get(batchId),
+    local,
+  );
+  assert.deepEqual(
+    (await pgRows(h, "derived_retirement_manifests")).find((row) => row.batch_id === batchId),
+    manifest,
+  );
+  assert.deepEqual(await h.eraser.eraseBatch(input, batchId, 1, approved), result);
+});
