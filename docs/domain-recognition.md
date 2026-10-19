@@ -336,3 +336,34 @@ security disclosure approval or public launch is asserted by these fixtures.
 The separate [release-inclusion adapter](release-inclusion.md) binds reviewed
 accepted PR membership to a collected immutable release and its publication clock.
 It does not infer authorship of release notes or stewardship from a publisher.
+
+### Design and remediation role boundaries
+
+The design qualifier accepts `author`, `coauthor` or `reviewer` only when the
+reviewed detail matches the role in trusted normalized source input. It preserves
+that role in the recognized fact and proof. Role labels do not create additional
+flow/component/version units. The focused `domain role boundary` cases exercise
+this input contract, matching-role positives, mismatches and unsupported roles;
+they do not demonstrate a new stock collector or real contributor attribution.
+
+The stock merged-PR normalization used by these domain fixtures pins its
+delivered `pr_merged` author evidence. Its observed `pr_coauthored` and
+submitted-review facts retain their separate source roles but do not gain this
+immutable domain pin. Positive stock co-design/reviewer recognition therefore
+still needs an explicitly reviewed source adapter, exact revision/role evidence
+and the existing independent intake, consent, source-use and policy gates.
+
+Private intake role descriptions are review inputs, not aliases for normalized
+credit roles. A description of remediation neither creates a `remediator` role
+nor relabels an observed author, reporter or reviewer. Security recognition still
+requires public-disclosure approval, contributor consent and the enrolled
+independent disclosure reviewer.
+
+The existing [operations adapter](operations-recognition.md) can recognize an
+approved public postmortem or remediation contribution through `incidents`.
+That route credits the original merged-PR author and retains its affected-owner,
+immutable public-record and source/policy requirements; it does not grant a new
+remediation role or infer credit from private narrative. Additional role mappings
+need their own reviewed source contract. These tests do not close the remaining
+role task in #90 or its physical, source-rights, participant and website
+prerequisites.
