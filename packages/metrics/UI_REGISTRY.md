@@ -95,6 +95,17 @@ parameters on other routes are rejected, including explicit empty unsupported
 parameters. Cross-route links retain the selected scope/snapshot and drop these
 route-local discovery filters. A no-match search remains empty.
 
+Department selectors preserve the exact canonical IDs from the validated UI
+metadata, including spaces, Unicode and punctuation. They do not inherit the
+source identifier character or length restrictions. Empty or untrimmed
+selectors, duplicate parameters, unknown departments and queries beyond the
+existing complete navigation budget remain invalid; no selector is renamed or
+silently normalized to a different registry identity.
+Ill-formed UTF-16 department IDs fail registry admission and link generation
+before form or URL conversion can replace their characters. Department query
+values also reject malformed UTF-8 byte escapes. Valid paired Unicode, a literal
+replacement character (U+FFFD) and lossless percent punctuation remain supported.
+
 `/methodology/:metric` reads a definition without requiring a materialized board.
 This keeps all 98 methods discoverable, including deferred definitions, while
 making no claim that the selected scope has a snapshot, approved policy or
@@ -150,6 +161,24 @@ state, date and role for `items_triaged`. Registry validation also requires ever
 advertised triage pair to match that pinned policy. Other metric policies are untouched.
 
 ## Compatibility and verification
+
+### COV-12/COV-13 definition-day implementation
+
+`label_taxonomy` and `milestone_definitions` have their own
+`triage-definition-day/v1` grouping policies. Each groups one stable
+actor/repository/definition per fixed UTC calendar day, combining definition
+facets without counting attached item effects. Observed/source-day,
+qualified/source-day and qualified/acceptance-day are explicit separate pairs;
+receipt time never supplies a missing raw source date. The registry and engine
+pin the exact interval, grouping, role and supported pair.
+
+The [full policy](../../docs/triage-definition-grouping.md) records unknowns,
+reversals, clock limits, replay and distinct-artifact summaries. Both UI entries
+remain definition-only, with no selectable pair or default. Their canonical
+definitions and `candidate-0.1.1` remain unchanged; the new grouping has its own
+version and does not reinterpret `triage-raw-state/v1` or old snapshots.
+
+### Earlier raw-item definition correction
 
 This is an unreleased candidate registry update, not a migration of published
 production snapshots. The corrected definition uses `candidate-0.1.1` so the
