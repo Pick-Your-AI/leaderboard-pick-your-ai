@@ -1509,7 +1509,7 @@ export function applyRecognitionReceipt(
 }
 
 export interface NormalizedProjectContext {
-  schemaVersion: "github-current-project-context/v1";
+  schemaVersion: "github-current-project-context/v2";
   repositoryId: string;
   subjectId: string;
   subjectKind: "issue" | "pull_request";
@@ -1716,7 +1716,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           ...result(),
           isSynthetic: options.isSynthetic === true,
           projectContext: {
-            schemaVersion: "github-current-project-context/v1",
+            schemaVersion: "github-current-project-context/v2",
             repositoryId: String(snapshot.repositoryId),
             subjectId: snapshot.subjectId,
             subjectKind: snapshot.subjectKind,
