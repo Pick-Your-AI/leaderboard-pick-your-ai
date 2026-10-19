@@ -2,6 +2,8 @@
 
 `infra/recovery/backup.mjs` provides bounded AES-256-GCM backup envelopes containing a PostgreSQL dump, reviewed configuration, required policy versions and source watermarks. Every backup uses a new random nonce; metadata and database/payload digests are authenticated. Keys are supplied separately as 32-byte buffers and never appear in an envelope or receipt. Keep the encryption key outside the backup storage with approved rotation and recovery access.
 
+Encryption captures the validated key in a private crypto key object before invoking payload serializers. Mutating the supplied key buffer or its backing memory during serialization cannot select a different encryption key for that backup.
+
 Encryption copies the validated database bytes into a separate, unpooled allocation before serializing the other payload fields. The encoded dump and its authenticated digest both use that copy, so custom configuration, policy or watermark serializers cannot make them disagree by mutating the caller's buffer or its backing `ArrayBuffer`.
 
 Required-state checks apply to the actual serialized payload as well as the caller's input. Configuration retains its object requirement, policy versions must remain a nonempty array, and watermarks must remain an object rather than an array. Authenticated reads enforce those same shapes before any restore callback, including older envelopes whose serializers omitted a required field. Valid custom serializers run once and their serialized values are retained.
