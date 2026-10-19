@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Request } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 test.use({ storageState: { cookies: [], origins: [] } });
 const at = "2026-10-17T12:00:00.000Z";
@@ -124,6 +124,7 @@ async function service(page: Page, approved = true) {
   let corruptAchievementCoverage = false;
   let calls = 0;
   const categories: (string | null)[] = [];
+  let achievementDelivery: { request: Request; url: string; status: number; body: string } | null = null;
   const app = createService({
     approvedAchievementRuleVersion: approved ? "accepted-evidence/v1" : undefined,
     source: {
@@ -151,6 +152,8 @@ async function service(page: Page, approved = true) {
       headers["content-length"] = String(Buffer.byteLength(body));
     }
     await route.fulfill({ status: response.statusCode, headers, body });
+    if (url.pathname.endsWith("/achievements"))
+      achievementDelivery = { request: route.request(), url: url.href, status: response.statusCode, body };
   });
   return {
     close: () => app.close(),
@@ -162,6 +165,7 @@ async function service(page: Page, approved = true) {
     },
     calls: () => calls,
     categories: () => [...categories],
+    achievementDelivery: (request: Request) => (achievementDelivery?.request === request ? achievementDelivery : null),
     corruptAwardCoverage: () => {
       corruptAchievementCoverage = true;
     },
@@ -355,7 +359,11 @@ test("contradictory achievement coverage clears visible awards while keeping the
     await page.clock.fastForward(30_001);
     const response = await refreshed;
     expect(response.status()).toBe(200);
-    const supplied = await response.json();
+    await expect.poll(() => api.achievementDelivery(response.request())).not.toBeNull();
+    const delivered = api.achievementDelivery(response.request())!;
+    expect(delivered.url).toBe(response.url());
+    expect(delivered.status).toBe(response.status());
+    const supplied = JSON.parse(delivered.body);
     expect(supplied.coverage).toEqual([]);
     expect(supplied.achievements).toHaveLength(1);
     await expect.poll(() => api.calls()).toBeGreaterThan(before);
