@@ -790,7 +790,7 @@ test("operations: unaffected automatic metrics retain prior fingerprints while m
     if (metrics.includes(definition.id)) continue;
     const bindings = [{ ...s.binding, metricId: definition.id }];
     assert.notEqual(recognitionFingerprint(s.state, bindings), priorAuthority(s.state, bindings));
-    if (definition.id === "release_changes")
+    if (["release_changes", "release_stewardship"].includes(definition.id))
       assert.notEqual(recognitionFingerprint(empty, bindings), priorAuthority(empty, bindings));
     else assert.equal(recognitionFingerprint(empty, bindings), priorAuthority(empty, bindings), definition.id);
   }
