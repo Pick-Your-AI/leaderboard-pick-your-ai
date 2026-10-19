@@ -113,7 +113,10 @@ test("API overview keeps every served department discoverable without inventing 
     await expect(section.getByRole("table")).toHaveCount(0);
     await expect(section.getByText(/synthetic-aster|syn-r42|0 contributions|0 contributors/)).toHaveCount(0);
     await expect(section.getByRole("link", { name: "All contributors in this scope", exact: true })).toBeVisible();
-    expect(api.calls.some((url) => /\/(boards|contributors|activity)$/.test(url.pathname))).toBe(false);
+    await expect(page.getByRole("region", { name: "Recent accepted work", exact: true })).toContainText(
+      "No independently accepted groups appear in this first page.",
+    );
+    expect(api.calls.some((url) => /\/(boards|contributors)$/.test(url.pathname))).toBe(false);
   } finally {
     await api.close();
   }
@@ -280,6 +283,9 @@ test("keyboard pagination reaches every supplied department without changing sco
     await expect(section.getByRole("heading", { level: 3 })).toHaveCount(12);
     await expect(pager.getByRole("status")).toHaveText("Departments 1–12 of 40");
     await expect(previous).toBeDisabled();
+    await expect(page.getByRole("region", { name: "Recent accepted work", exact: true })).toContainText(
+      "No independently accepted groups appear in this first page.",
+    );
     const initialCalls = api.calls.length;
     await next.focus();
     await page.keyboard.press("Enter");

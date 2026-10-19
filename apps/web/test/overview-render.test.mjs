@@ -16,7 +16,9 @@ const compiled = transformed.code.replace(/from "([^"]+)"/g, (_match, specifier)
   const url = specifier.startsWith(".") ? new URL(specifier, source).href : import.meta.resolve(specifier);
   return `from ${JSON.stringify(url)}`;
 });
-const { OverviewNavigation } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const { OverviewNavigation, OverviewAcceptedWork } = await import(
+  `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`
+);
 const render = (registry, selected = selection("?snapshot=served-pin")) =>
   renderToStaticMarkup(React.createElement(OverviewNavigation, { registry: catalog(registry), selected }));
 const fixture = () => structuredClone(metricRegistryV1);
@@ -136,4 +138,119 @@ test("large department inventories have a bounded first page and explicit contin
   assert.match(html, /Departments 1–12 of 40/);
   assert.match(html, /Next departments/);
   assert.doesNotMatch(html, />Future 2<|>Future 29</);
+});
+
+const acceptedGroup = (index, activityState = "accepted", latestOccurredAt = "2026-10-18T12:00:00.000Z") => ({
+  groupId: String(index).padStart(64, "0"),
+  actorId: `served-actor-${index}`,
+  actor: { displayName: `Served contributor ${index}` },
+  repositoryId: "served-repository",
+  activityState,
+  latestOccurredAt,
+  categoryIds: ["pr_opened", "documentation"],
+});
+const renderAccepted = (state, selected = selection("?snapshot=served-pin")) =>
+  renderToStaticMarkup(React.createElement(OverviewAcceptedWork, { state, selected }));
+
+test("accepted-work preview preserves server order, caps accepted groups at three and leaves action clocks unknown", () => {
+  const groups = [
+    acceptedGroup(0, "observed"),
+    acceptedGroup(1),
+    acceptedGroup(2, "pending"),
+    acceptedGroup(3),
+    acceptedGroup(4, "unknown"),
+    acceptedGroup(5, "accepted", null),
+    acceptedGroup(6),
+  ];
+  const before = structuredClone(groups);
+  const html = renderAccepted({ status: "ready", value: { groups } });
+  assert.deepEqual(
+    links(html)
+      .filter(({ url }) => url.pathname.startsWith("/contributors/"))
+      .map(({ text }) => text),
+    ["Served contributor 1", "Served contributor 3", "Served contributor 5"],
+  );
+  assert.doesNotMatch(html, /Served contributor [0246]/);
+  assert.match(html, /Latest source action: Unknown; no action date is inferred/);
+  assert.equal((html.match(/<time /g) ?? []).length, 2);
+  assert.match(html, /first 20 public activity groups/);
+  assert.match(html, /not a complete accepted-work count/);
+  assert.match(html, /Categories and work states can overlap; do not add their counts/);
+  assert.deepEqual(groups, before);
+});
+
+test("accepted-work actor, proof and full-activity links retain the same public scope and pin without list filters", () => {
+  const selected = selection(
+    "?organization=Pick-Your-AI&repository=served-repository&workstream=T6&context=current&project=PVT_B%3D,PVT_A&role=reviewer,author&actors=user&start=2026-10-01T00:00:00.000Z&end=2026-10-19T00:00:00.000Z&snapshot=served-pin&tz=America%2FNew_York&limit=37&search=someone&category=review&q=old&department=delivery&cursor=AA.BB",
+  );
+  const html = renderAccepted({ status: "ready", value: { groups: [acceptedGroup(1)] } }, selected);
+  const destinations = links(html);
+  assert.deepEqual(
+    destinations.map(({ url }) => url.pathname),
+    ["/activity", "/contributors/served-actor-1", `/activity/${"1".padStart(64, "0")}`],
+  );
+  for (const { url } of destinations) {
+    assert.deepEqual(
+      Object.fromEntries(
+        [
+          "organization",
+          "repository",
+          "workstream",
+          "context",
+          "project",
+          "role",
+          "actors",
+          "start",
+          "end",
+          "snapshot",
+          "tz",
+          "limit",
+        ].map((key) => [key, url.searchParams.get(key)]),
+      ),
+      {
+        organization: "Pick-Your-AI",
+        repository: "served-repository",
+        workstream: "T6",
+        context: "current",
+        project: "PVT_A,PVT_B=",
+        role: "author,reviewer",
+        actors: "user",
+        start: "2026-10-01T00:00:00.000Z",
+        end: "2026-10-19T00:00:00.000Z",
+        snapshot: "served-pin",
+        tz: "America/New_York",
+        limit: "20",
+      },
+    );
+    for (const key of ["search", "category", "cursor", "q", "department", "proof"])
+      assert.equal(url.searchParams.has(key), false);
+  }
+});
+
+test("empty, checking and unavailable previews preserve uncertainty and the complete-activity entry", () => {
+  for (const groups of [[], [acceptedGroup(0, "observed"), acceptedGroup(1, "pending"), acceptedGroup(2, "unknown")]]) {
+    const html = renderAccepted({ status: "ready", value: { groups } });
+    assert.match(html, /No independently accepted groups appear in this first page/);
+    assert.match(html, /does not establish zero accepted work/);
+    assert.doesNotMatch(html, /<h3|<time/);
+  }
+  for (const status of ["loading", "unavailable"]) {
+    const html = renderAccepted({ status });
+    assert.match(html, /role="status"/);
+    assert.doesNotMatch(html, /<h3|<time|zero accepted work/);
+    assert.deepEqual(
+      links(html).map(({ url }) => url.pathname),
+      ["/activity"],
+    );
+  }
+});
+
+test("accepted-work names and repository identities are rendered as escaped text", () => {
+  const group = acceptedGroup(1);
+  group.actor.displayName = '<img src=x onerror="alert(1)">';
+  group.repositoryId = "<script>not code</script>";
+  const html = renderAccepted({ status: "ready", value: { groups: [group] } });
+  assert.match(html, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
+  assert.match(html, /&lt;script&gt;not code&lt;\/script&gt;/);
+  assert.doesNotMatch(html, /<img|<script/);
 });
