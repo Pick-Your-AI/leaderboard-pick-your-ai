@@ -259,6 +259,71 @@ test("workstream filters preserve verified positive OR matches and unknown outsi
   assert.ok(unknown.workstreams.audit.some((entry) => entry.reason === "unknown_membership_context"));
 });
 
+test("a workstream filter cannot turn unknown legacy membership into complete empty breadth", () => {
+  for (const workstreams of [[], ["research"]]) {
+    const eventContext = context(workstreams);
+    delete eventContext.workstreamsKnown;
+    const input = frozen([normalized({ eventContext })], { coverage: completeCoverage() });
+    const original = stableJSON(input);
+    assert.equal(calculate(input).workstreams.coverage, "incomplete");
+    // This strict interpretation belongs to the new breadth selector. Existing
+    // source-board handling of retained contexts remains compatible.
+    const legacy = aggregateMetric(input, sourcePolicy(), { ...scope, workstreams: ["engineering"] });
+    assert.deepEqual(legacy.rows, []);
+    assert.equal(legacy.coverage, "complete");
+    assert.ok(legacy.audit.some((entry) => entry.reason === "workstream_filter"));
+    const result = calculate(input, { scope: { ...scope, workstreams: ["engineering"] } });
+    for (const metric of ["repositories", "workstreams"]) {
+      assert.deepEqual(result[metric].rows, []);
+      assert.equal(result[metric].coverage, "incomplete");
+      assert.ok(result[metric].audit.some((entry) => entry.reason === "unknown_membership_context"));
+      assert.equal(
+        result[metric].audit.some((entry) => entry.reason === "workstream_filter"),
+        false,
+      );
+    }
+    assert.equal(stableJSON(input), original);
+  }
+});
+
+test("filtered breadth distinguishes explicit unknown membership from a known disjoint mapping", () => {
+  for (const workstreamsKnown of [false, true]) {
+    for (const workstreams of [[], ["research"]]) {
+      const input = frozen([normalized({ eventContext: context(workstreams, { workstreamsKnown }) })], {
+        coverage: completeCoverage(),
+      });
+      const result = calculate(input, { scope: { ...scope, workstreams: ["engineering"] } });
+      for (const metric of ["repositories", "workstreams"]) {
+        assert.deepEqual(result[metric].rows, []);
+        assert.equal(result[metric].coverage, workstreamsKnown ? "complete" : "incomplete");
+        assert.ok(
+          result[metric].audit.some(
+            (entry) => entry.reason === (workstreamsKnown ? "workstream_filter" : "unknown_membership_context"),
+          ),
+        );
+      }
+    }
+  }
+});
+
+test("legacy positive workstream OR matches remain useful without inventing complete mappings", () => {
+  const eventContext = context(["engineering"]);
+  delete eventContext.workstreamsKnown;
+  const input = frozen([normalized({ eventContext })], { coverage: completeCoverage() });
+  const result = calculate(input, { scope: { ...scope, workstreams: ["engineering", "outside"] } });
+  assert.deepEqual(values(result, "repositories"), [["101", 1, "measured"]]);
+  assert.equal(result.repositories.coverage, "complete");
+  assert.deepEqual(values(result, "workstreams"), [["101", 1, "partial"]]);
+  assert.equal(result.workstreams.coverage, "incomplete");
+  assert.deepEqual(result.workstreams.rows[0].unknownEvidenceIds, [
+    input.facts.find((fact) => fact.state === "qualified").id,
+  ]);
+  assert.equal(
+    result.repositories.audit.some((entry) => entry.reason === "unknown_membership_context"),
+    false,
+  );
+});
+
 test("verified mirror and import targets supply neither another repository nor another workstream", () => {
   const original = normalized();
   const copies = ["mirror_of", "imported_from"].map((relation, index) => {
