@@ -3,6 +3,7 @@ import type { AchievementProof } from "@pick-your-ai/contracts";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { request, ReadFailure, uiHref, type Selection } from "./client.ts";
 import { EditorialRotation } from "./OverviewDiscovery.tsx";
+import { EditorialDimensions } from "./EditorialDimensions.tsx";
 import {
   achievements,
   cardHref,
@@ -261,15 +262,19 @@ export function ContributorRecognition({
  * current, unfiltered organization overview, with configured organization scope. */
 export function EditorialSpotlights({
   controlsBase,
+  publicBase,
   organization,
   selected,
 }: {
   controlsBase: string;
+  publicBase: string;
   organization: string;
   selected: Selection;
 }) {
   const supported = supportsEditorialScope(selected, organization);
+  const [dimensions, setDimensions] = useState(false);
   const key = JSON.stringify([controlsBase, organization, selected]);
+  useEffect(() => setDimensions(false), [key]);
   const state = useCurrentRead(key, async (signal) => {
     if (!supported) throw new ReadFailure(400, "editorial_scope_unavailable");
     const base = new URL(controlsBase, window.location.origin);
@@ -288,8 +293,21 @@ export function EditorialSpotlights({
     <section aria-labelledby="editorial-title">
       <h2 id="editorial-title">Editorial spotlights</h2>
       <p>Current reviewed selections, separate from computed rankings and historical snapshots.</p>
+      {supported && (
+        <button onClick={() => setDimensions((value) => !value)}>
+          {dimensions ? "Return to category-only spotlights" : "Explore editorial dimensions"}
+        </button>
+      )}
       <div aria-live="polite">
-        {!supported || state.error ? (
+        {supported && dimensions ? (
+          <EditorialDimensions
+            key={key}
+            controlsBase={controlsBase}
+            publicBase={publicBase}
+            organization={organization}
+            selected={selected}
+          />
+        ) : !supported || state.error ? (
           <p>Editorial selections are unavailable for this view.</p>
         ) : !state.value ? (
           <p>Checking current selections…</p>

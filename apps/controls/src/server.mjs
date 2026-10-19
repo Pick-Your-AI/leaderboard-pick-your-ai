@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { actorId, ControlError, exactKeys, locator, record, requireThat, text } from "./store.mjs";
 import { nominateSpotlight, decideSpotlight, projectSpotlights } from "./editorial.mjs";
+import { proposeRotation, decideRotation, projectRotation, rotationQueue } from "./editorial-rotation.mjs";
 import { createConfigurationManager } from "./configuration.mjs";
 import { createPolicyComparisonManager } from "./policy-comparison.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "./localization-review.mjs";
@@ -206,6 +207,11 @@ export function createControlsServer({
         send(200, projectSpotlights(store.read(), spotlightEligibility));
         return;
       }
+      if (req.method === "GET" && path === "/controls/spotlight-rotation") {
+        requireThat([...url.searchParams].length === 0, 400, "Unexpected editorial query");
+        send(200, projectRotation(store.read(), spotlightEligibility));
+        return;
+      }
       if (req.method === "GET" && path === "/controls/public") {
         send(200, store.publicSnapshot());
         return;
@@ -332,6 +338,32 @@ export function createControlsServer({
           refreshSession: () => authenticate(req, parsed),
         });
         send(result.status, result.data, result.beforeSend);
+        return;
+      }
+      if (path.startsWith("/controls/spotlight-rotation")) {
+        requireThat([...url.searchParams].length === 0, 400, "Unexpected editorial query");
+        const requireCurrentSession = () =>
+          requireThat(store.read().sessions[session.sid]?.expires > now(), 401, "Session revoked");
+        if (req.method === "GET" && path === "/controls/spotlight-rotation/queue") {
+          send(200, rotationQueue(store.read(), session, spotlightEligibility), requireCurrentSession);
+          return;
+        }
+        const action = path.match(/^\/controls\/spotlight-rotation\/([a-f0-9-]{36})$/);
+        requireThat(req.method === "POST" && (path === "/controls/spotlight-rotation" || action), 404, "Not found");
+        const input = await inputBody();
+        const result = store.transaction(
+          (state) => {
+            const record = action
+              ? decideRotation(state, session, action[1], input, now(), spotlightEligibility)
+              : proposeRotation(state, session, input, now(), spotlightEligibility);
+            // Check persisted authority before ControlStore writes this cloned
+            // state, which could otherwise restore a callback-revoked session.
+            requireCurrentSession();
+            return record;
+          },
+          { beforeCommit: requireCurrentSession },
+        );
+        send(action ? 200 : 201, { record: result });
         return;
       }
       if (req.method === "GET" && path === "/controls/spotlights/queue") {
