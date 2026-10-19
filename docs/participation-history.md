@@ -118,7 +118,9 @@ cannot silently reduce the definition of first contribution.
 
 Providers must retain unresolved attribution, time, qualification, conflicts and
 withheld-history gaps in the bounded private `unresolved` array, even when they
-cannot publish the original payload. A gap for the requested actor, or a gap with
+cannot publish the original payload. Each reason must be a literal supported
+string; malformed reason values invalidate the complete provider response before
+actor scoping on both history and first-proof reads. A gap for the requested actor, or a gap with
 unknown actor attribution, withholds a known first event. An unrelated actor's
 known-attribution gap does not establish a gap for everyone. Supplied relevant
 raw proofs also retain this uncertainty before public filtering. Missing clocks,
