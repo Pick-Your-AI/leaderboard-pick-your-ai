@@ -1290,10 +1290,21 @@ export async function createPipeline(options) {
         repos.map((repo) => repo.id),
       )),
     ]);
+    // Reconcile every original source identity before recognition admission.
+    // Repeated observations contribute one actor; their original source bindings
+    // still govern alias, classification and execution-evidence conflicts.
+    const identity = sourceActorEvidence();
+    const actors = identity.actors;
+    for (const output of outputs) {
+      for (const actor of output.actors) {
+        if (!retainSourceActor(identity, actor, actorSources.get(output), c.metrics.stableJSON, c.contracts))
+          fail("conflicting_actor_metadata");
+      }
+    }
     if (recognitionBindings.length) {
       const combined = {
         facts: outputs.flatMap((o) => o.facts),
-        actors: outputs.flatMap((o) => o.actors),
+        actors: [...actors.values()],
         evidence: outputs.flatMap((o) => o.evidence),
         syntheticFactIds: outputs.filter((o) => o.isSynthetic === true).flatMap((o) => o.facts.map((fact) => fact.id)),
         reasons: [],
@@ -1336,14 +1347,8 @@ export async function createPipeline(options) {
       [...uniqueFacts.values()].sort((a, b) => a.id.localeCompare(b.id)),
       outputs,
     );
-    const identity = sourceActorEvidence();
-    const actors = identity.actors,
-      evidence = new Map();
+    const evidence = new Map();
     for (const output of outputs) {
-      for (const actor of output.actors) {
-        if (!retainSourceActor(identity, actor, actorSources.get(output), c.metrics.stableJSON, c.contracts))
-          fail("conflicting_actor_metadata");
-      }
       for (const entry of output.evidence) {
         const id = entry.contribution.contributionId,
           previous = evidence.get(id);
