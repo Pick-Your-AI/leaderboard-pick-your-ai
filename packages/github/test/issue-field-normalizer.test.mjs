@@ -74,6 +74,64 @@ test("nullable actors remain unknown and bot identity does not infer execution",
   assert.equal(bot.output.actors[0].executionMode, "unknown");
 });
 
+const reviewedNativeAccount = {
+  schemaVersion: "leaderboard-service-account/v1",
+  classificationId: "synthetic-native-account-review",
+  githubDatabaseId: nativeActor.databaseId,
+  githubNodeId: nativeActor.id,
+  source: "reviewed_configuration",
+  evidenceIds: ["synthetic-native-account-evidence"],
+  reviewerActorId: "202",
+  reviewedAt: "2026-10-01T00:00:00Z",
+};
+const nativeClassificationOptions = {
+  reviewedServiceAccounts: [reviewedNativeAccount],
+  authorizedClassifierIds: ["202"],
+};
+
+test("native issue fields preserve protected service-account classification without changing source facts", async () => {
+  const { h, record, output: unclassified } = await profile("TEXT");
+  const classified = await normalizeFor(h, nativeClassificationOptions)(inputFor(record));
+  assert.equal(classified.actors[0].kind, "service_account");
+  assert.equal(classified.actors[0].executionMode, "unknown");
+  assert.deepEqual(classified.actors[0].serviceAccountClassification, reviewedNativeAccount);
+  const { actors: unclassifiedActors, ...originalFacts } = unclassified;
+  const { actors: classifiedActors, ...classifiedFacts } = classified;
+  assert.deepEqual(classifiedFacts, originalFacts);
+  assert.deepEqual(classifiedActors, [
+    { ...unclassifiedActors[0], kind: "service_account", serviceAccountClassification: reviewedNativeAccount },
+  ]);
+});
+
+test("native issue-field classification retains reviewer, exact-time and stable-identity guards", async (t) => {
+  const { h, record } = await profile("TEXT");
+  for (const [label, options] of [
+    ["unauthorized reviewer", { authorizedClassifierIds: [] }],
+    [
+      "one-nanosecond future review",
+      {
+        reviewedServiceAccounts: [{ ...reviewedNativeAccount, reviewedAt: "2026-10-02T00:00:00.000000001Z" }],
+      },
+    ],
+    ["mismatched node identity", { reviewedServiceAccounts: [{ ...reviewedNativeAccount, githubNodeId: "U_OTHER" }] }],
+  ])
+    await t.test(label, async () => {
+      await assert.rejects(
+        normalizeFor(h, { ...nativeClassificationOptions, ...options })(inputFor(record)),
+        /service-account classification/i,
+      );
+    });
+});
+
+test("an unrelated reviewed account cannot classify a native editor by login", async () => {
+  const { h, record, output } = await profile("TEXT");
+  const unrelated = await normalizeFor(h, {
+    ...nativeClassificationOptions,
+    reviewedServiceAccounts: [{ ...reviewedNativeAccount, githubDatabaseId: 303, githubNodeId: "U_OTHER" }],
+  })(inputFor(record));
+  assert.deepEqual(unrelated, output);
+});
+
 test("PR subjects, snapshots and absent collected native identities cannot become field history", async (t) => {
   const h = issueFieldFixture();
   const [record] = await readIssueFieldHistory(h.options);

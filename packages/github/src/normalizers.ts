@@ -1669,6 +1669,12 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         action: "issue_field_changed",
         observedAt: input.observedAt,
         occurredAt: record.event.createdAt,
+        ...(options.reviewedServiceAccounts === undefined
+          ? {}
+          : { reviewedServiceAccounts: options.reviewedServiceAccounts }),
+        ...(options.authorizedClassifierIds === undefined
+          ? {}
+          : { authorizedClassifierIds: options.authorizedClassifierIds }),
         payload: {
           issue: { id: record.subject.id, url: record.subject.url },
           sender: record.event.actor,
