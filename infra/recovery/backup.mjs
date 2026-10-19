@@ -104,11 +104,15 @@ export function decryptBackup(envelope, { key, now, expectedDumpSha256, allowExp
 }
 
 export async function writeBackup(path, envelope) {
+  // Capture once before yielding: the receipt must describe the exact bytes written,
+  // including envelopes with custom JSON serialization.
+  const serialized = JSON.stringify(envelope);
+  const { dumpSha256, createdAt, expiresAt } = JSON.parse(serialized);
   const temporary = `${path}.${randomBytes(8).toString("hex")}.tmp`;
   try {
     const file = await open(temporary, "wx", 0o600);
     try {
-      await file.writeFile(JSON.stringify(envelope));
+      await file.writeFile(serialized);
       await file.sync();
     } finally {
       await file.close();
@@ -129,9 +133,9 @@ export async function writeBackup(path, envelope) {
   return {
     format: "backup-write-receipt/v1",
     file: basename(path),
-    dumpSha256: envelope.dumpSha256,
-    createdAt: envelope.createdAt,
-    expiresAt: envelope.expiresAt,
+    dumpSha256,
+    createdAt,
+    expiresAt,
   };
 }
 
