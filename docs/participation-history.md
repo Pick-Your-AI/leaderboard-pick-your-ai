@@ -177,9 +177,11 @@ rechecks source authority before returning 304.
 The private read has a conservative 8,000,000-byte JSON budget, maximum depth 32,
 250,000 visited values and 20,000 entries per array. Non-JSON values, cycles,
 accessors, inherited object prototypes and hidden/symbol fields are rejected
-before hashing or projection. Arrays must use the ordinary `Array.prototype`;
-dense frozen arrays remain valid. Inherited traversal hooks cannot hide supplied
-unresolved records from the later history checks. Existing publication actor,
+before hashing or projection. Proxy objects and arrays, including revoked proxies,
+are rejected before reflection can invoke their traps. Arrays must use the ordinary
+`Array.prototype`; dense frozen arrays remain valid. Inherited traversal hooks or
+proxy-supplied methods cannot hide supplied unresolved records from the later
+history checks. Existing publication actor,
 proof and metric limits still apply. The basis has at most 500 unique source pairs and 98 policies,
 with bounded unique role/source sets. The final complete public response,
 including ordinary metadata, is limited to 1,500,000 UTF-8 bytes; the strict client

@@ -960,3 +960,85 @@ test("reversion contribution authority preserves legacy absence, explicit emptin
     assert.deepEqual(pair, unchanged);
   }
 });
+
+test("Proxy history arrays cannot conceal retained uncertainty from history and pinned proof reads", async (t) => {
+  const supplied = participationHistorySource().state.pair;
+  supplied.history.publication.selected.portfolioEvidence[0].occurredAt = historyStart;
+  const app = createService({ source: { read: async () => null, readParticipationHistory: async () => supplied } });
+  t.after(() => app.close());
+  const original = (await app.inject(historyPath)).json().history;
+  assert.equal(original.state, "known");
+  assert.equal(original.newcomer, true);
+  const proofPath = `/api/v1/contributors/101/participation-history/${original.historyKey}/evidence/${original.firstProof.proof.contributionId}?${historyQuery}`;
+
+  const unresolved = supplied.history.unresolved;
+  unresolved.push({ actorId: "101", reason: "withheld" });
+  const withheld = (await app.inject(historyPath)).json().history;
+  assert.equal(withheld.state, "unknown");
+  assert.equal(withheld.newcomer, null);
+  assert.equal(withheld.reason, "history_evidence_unavailable");
+
+  let hookCalls = 0;
+  supplied.history.unresolved = new Proxy(unresolved, {
+    get(target, key, receiver) {
+      if (key === "some" || key === "map") {
+        hookCalls++;
+        return key === "some" ? () => false : () => [];
+      }
+      return Reflect.get(target, key, receiver);
+    },
+  });
+  assert.equal(Object.getPrototypeOf(supplied.history.unresolved), Array.prototype);
+  const responses = [];
+  for (const path of [historyPath, proofPath]) {
+    const response = await app.inject(path);
+    responses.push({ status: response.statusCode, body: response.json() });
+  }
+  t.diagnostic(
+    JSON.stringify({
+      observations: responses.map(({ status, body }) => ({
+        status,
+        state: body.history?.state,
+        newcomer: body.history?.newcomer,
+        error: body.error,
+      })),
+      hookCalls,
+    }),
+  );
+  assert.deepEqual(
+    responses.map(({ status, body }) => ({ status, error: body.error })),
+    [
+      { status: 503, error: "participation_history_invalid" },
+      { status: 503, error: "participation_history_invalid" },
+    ],
+  );
+  assert.equal(hookCalls, 0);
+  assert.deepEqual(unresolved, [{ actorId: "101", reason: "withheld" }]);
+});
+
+test("Proxy records and revoked arrays fail as invalid history without invoking reflection traps", () => {
+  for (const kind of ["record", "array", "revoked-array"]) {
+    const pair = participationHistorySource().state.pair;
+    let trapCalls = 0;
+    const target = kind === "record" ? pair.history : pair.history.unresolved;
+    const { proxy, revoke } = Proxy.revocable(target, {
+      ownKeys(value) {
+        trapCalls++;
+        return Reflect.ownKeys(value);
+      },
+      getPrototypeOf(value) {
+        trapCalls++;
+        return Reflect.getPrototypeOf(value);
+      },
+    });
+    if (kind === "record") pair.history = proxy;
+    else pair.history.unresolved = proxy;
+    if (kind === "revoked-array") revoke();
+    assert.throws(
+      () => validateParticipationHistoryRead(pair),
+      { status: 503, code: "participation_history_invalid" },
+      kind,
+    );
+    assert.equal(trapCalls, 0, kind);
+  }
+});

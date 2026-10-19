@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isProxy } from "node:util/types";
 import {
   actorSchema,
   artifactSchema,
@@ -109,7 +110,8 @@ function boundedJSON(value: unknown) {
     } else if (item === null || typeof item === "boolean") bytes += 5;
     else if (typeof item === "number" && Number.isFinite(item)) bytes += 32;
     else if (item && typeof item === "object") {
-      if (seen.has(item)) invalid();
+      // Reject proxy traps before reflection or later history traversal.
+      if (isProxy(item) || seen.has(item)) invalid();
       seen.add(item);
       if (Object.getOwnPropertySymbols(item).length) invalid();
       if (Array.isArray(item)) {
