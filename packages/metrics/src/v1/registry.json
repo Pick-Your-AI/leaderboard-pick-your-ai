@@ -6919,20 +6919,14 @@
       "group_by": "actor_artifact_interval",
       "grouping_seconds": 86400,
       "interval_origin": "1970-01-01T00:00:00Z",
-      "raw_state_rule": "public_facets_share_item_unit",
+      "raw_state_rule": "facets_share_stewardship_unit",
       "repeated_state_rule": "one_actor_item_per_utc_day",
       "missing_state_or_time": "exclude_unknown",
       "semantic_classifier": "none",
       "public_enabled": false,
       "receipt_lenses": [
-        {
-          "state": "qualified",
-          "date_basis": "occurredAt"
-        },
-        {
-          "state": "qualified",
-          "date_basis": "acceptedAt"
-        }
+        { "state": "qualified", "date_basis": "occurredAt" },
+        { "state": "qualified", "date_basis": "acceptedAt" }
       ]
     }
   ]
