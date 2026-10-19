@@ -62,6 +62,11 @@ Both breadth definitions use the source event clock. Selection therefore uses
 acceptance must still be known by the frozen cutoff. The supplied scope must use
 event context: a current Project association is not historical attribution.
 Explicit repository, Project, workstream, actor and role filters remain in force.
+For this accepted-activity selector, a workstream filter with no positive match
+requires `workstreamsKnown: true` before treating membership as a known negative.
+An omitted legacy marker leaves both filtered breadth results incomplete, just
+as an explicit unknown marker does. A verified positive OR match remains useful.
+Existing source-board and portfolio filter compatibility is unchanged.
 Overlapping selected Projects use the existing OR lens without multiplying units.
 
 ## Distinct units and unknown mappings
