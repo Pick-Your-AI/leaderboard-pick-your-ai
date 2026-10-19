@@ -56,6 +56,17 @@ export interface MetricFact {
   firstReviewAt?: string | null;
   /** Exact observed locale fact whose accepted representation replaces current portfolio display. */
   recognitionSourceFactId?: string;
+  /** Private inclusion identity; the public projection exposes only selected evidence. */
+  releaseInclusion?: {
+    version: "release-inclusion-units/v1";
+    releaseId: number;
+    releaseNodeId: string;
+    pullRequestNodeId: string;
+    mergeCommitSha: string;
+    releaseCommitSha: string;
+    publishedAt: string;
+    proofHash: string;
+  };
 }
 export interface EngineActor {
   id: string;
@@ -240,6 +251,18 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
       "Localization accepted units require independent acceptance, canonical language/category grouping and the source merge clock",
     );
   if (
+    policy.metricId === "release_changes" &&
+    (policy.dateBasis !== "occurredAt" ||
+      policy.groupBy !== "canonical" ||
+      policy.rankedStates[0] !== "qualified" ||
+      policy.roles.length !== 1 ||
+      policy.roles[0] !== "author" ||
+      policy.groupingPolicyVersion !== "release-inclusion-units/v1")
+  )
+    throw new Error(
+      "Release inclusion requires its publication clock, qualified authors and versioned canonical units",
+    );
+  if (
     !policy.roles.length ||
     policy.roles.some((role) => !knownRoles.includes(role) || role === "unknown") ||
     !policy.sources.length ||
@@ -381,6 +404,7 @@ const uncertaintyReasons = new Set([
   "unknown_actor",
   "unknown_membership_context",
   "missing_independent_acceptance",
+  "release_inclusion_unverified",
   "unknown_acceptance_time",
   "unknown_effective_time",
   "unknown_artifact_identity",
@@ -393,6 +417,7 @@ function prepare(
   input: FrozenInput,
   policy: MetricPolicy,
   scope: MetricScope,
+  conserveReleaseWork = true,
   requireKnownWorkstreams = false,
 ): Prepared {
   const cutoff = instant(input.cutoff);
@@ -506,6 +531,39 @@ function prepare(
   }
   const canonical = new Map<string, MetricFact[]>();
   for (const fact of current) {
+    // Select the current correction before admission. An unproved latest
+    // membership must never restore a lower revision that previously counted.
+    if (policy.metricId === "release_changes") {
+      const inclusion = fact.releaseInclusion;
+      const sha = (value: unknown) => typeof value === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value);
+      if (
+        !inclusion ||
+        typeof inclusion !== "object" ||
+        Array.isArray(inclusion) ||
+        Object.keys(inclusion).sort().join(",") !==
+          "mergeCommitSha,proofHash,publishedAt,pullRequestNodeId,releaseCommitSha,releaseId,releaseNodeId,version" ||
+        inclusion.version !== "release-inclusion-units/v1" ||
+        !Number.isSafeInteger(inclusion.releaseId) ||
+        inclusion.releaseId < 1 ||
+        typeof inclusion.releaseNodeId !== "string" ||
+        !/^[A-Za-z0-9_+=/\-]{1,256}$/.test(inclusion.releaseNodeId) ||
+        inclusion.pullRequestNodeId !== fact.artifactId ||
+        !fact.artifactId ||
+        fact.role !== "author" ||
+        !sha(inclusion.mergeCommitSha) ||
+        !sha(inclusion.releaseCommitSha) ||
+        inclusion.mergeCommitSha.length !== inclusion.releaseCommitSha.length ||
+        typeof inclusion.proofHash !== "string" ||
+        !/^[a-f0-9]{64}$/.test(inclusion.proofHash) ||
+        inclusion.publishedAt !== fact.occurredAt ||
+        !fact.occurredAt ||
+        !fact.acceptedAt ||
+        instant(fact.occurredAt) > instant(fact.acceptedAt)
+      ) {
+        reject([fact], "release_inclusion_unverified");
+        continue;
+      }
+    }
     const bucket = canonical.get(fact.canonicalKey!) ?? [];
     bucket.push(fact);
     canonical.set(fact.canonicalKey!, bucket);
@@ -601,6 +659,20 @@ function prepare(
   const grouped = new Map<string, MetricFact[]>();
   for (const fact of facts) {
     let group = fact.canonicalKey!;
+    if (policy.metricId === "release_changes") {
+      // Filter and correction selection above must precede lifetime conservation.
+      // A prior release outside this window or context cannot hide current work.
+      group =
+        conserveReleaseWork && scope.from === null
+          ? key("release-inclusion-units/v1", fact.repoId, fact.artifactId, fact.actorId)
+          : key(
+              "release-inclusion-units/v1",
+              fact.repoId,
+              fact.releaseInclusion!.releaseNodeId,
+              fact.artifactId,
+              fact.actorId,
+            );
+    }
     if (policy.groupBy !== "canonical") {
       if (!fact.artifactId) {
         reject([fact], "unknown_artifact_identity");
@@ -697,6 +769,7 @@ export function selectPortfolioFacts(
       rank: false,
     },
     scope,
+    false,
   ).facts.filter((fact) => fact.role !== "unknown" && fact.occurredAt !== null);
   const observed = new Map(selected.filter((fact) => fact.state === "observed").map((fact) => [fact.id, fact]));
   const acceptedSources = new Set<string>();
@@ -749,9 +822,11 @@ export function selectAcceptedActivityFacts(
     throw new Error("Accepted activity requires an explicit qualified or reviewed canonical source policy");
   const scope = canonicalScope(requestedScope);
   if (scope.context !== "event") throw new Error("Activity breadth requires event-time context");
+  // Breadth retains each release-time source unit and its historical mapping.
+  // Lifetime PR-work conservation belongs to the release total, not this selector.
   // Breadth treats omitted historical mapping markers as unknown, including
   // negative filter matches. Existing board/portfolio compatibility is unchanged.
-  const prepared = prepare(input, { ...policy, dateBasis: "occurredAt" }, scope, true);
+  const prepared = prepare(input, { ...policy, dateBasis: "occurredAt" }, scope, false, true);
   const facts: MetricFact[] = [];
   for (const fact of prepared.facts) {
     const reason = !policy.rankedStates.includes(fact.state as never)

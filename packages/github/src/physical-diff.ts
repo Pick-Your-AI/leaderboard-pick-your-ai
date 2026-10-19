@@ -68,8 +68,10 @@ export function classifyFile(file: PhysicalFile): FileClass {
 }
 /** Physical text changes only; neither effort, authorship percentage nor quality. */
 export function classifyPhysicalDiff(diff: PinnedPhysicalDiff): ClassifiedPhysicalDiff {
-  if (!pinnedSha(diff.before) || !pinnedSha(diff.after) || diff.before === diff.after)
+  if (!pinnedSha(diff.before) || !pinnedSha(diff.after) || diff.before.toLowerCase() === diff.after.toLowerCase())
     throw new Error("Distinct pinned before/after SHAs are required");
+  if (diff.before.length !== diff.after.length)
+    throw new Error("Pinned before/after SHAs must use the same object format");
   const complete = diff.complete;
   if (typeof complete !== "boolean") throw new Error("Boolean diff completeness proof is required");
   if (diff.files.length > 10_000) throw new Error("Diff exceeds file bound");
@@ -152,19 +154,22 @@ export async function readPinnedGitDiff(options: {
   importedPaths?: readonly string[];
   generatedPaths?: readonly string[];
 }): Promise<PinnedPhysicalDiff> {
-  // Bind both subprocesses and the returned evidence to this invocation, even
+  // Bind all Git subprocesses and the returned evidence to this invocation, even
   // when a caller reuses its options object or path arrays while we await Git.
   const { repositoryPath, before, after } = options;
   const importedPaths = options.importedPaths?.slice(),
     generatedPaths = options.generatedPaths?.slice();
   if (!pinnedSha(before) || !pinnedSha(after)) throw new Error("Pinned SHAs required for Git fallback");
+  if (before.toLowerCase() === after.toLowerCase())
+    throw new Error("Distinct pinned before/after SHAs are required for Git fallback");
+  if (before.length !== after.length) throw new Error("Pinned before/after SHAs must use the same object format");
   const maxFiles = options.maxFiles ?? 3000,
     maxBytes = options.maxBytes ?? 8 * 1024 * 1024,
     timeout = options.timeoutMs ?? 30_000;
   if (![maxFiles, maxBytes, timeout].every((value) => Number.isSafeInteger(value) && value > 0))
     throw new Error("Invalid Git resource bounds");
   const exec = promisify(execFile);
-  const argumentsFor = (ignoreWhitespace: boolean) => [
+  const gitArguments = [
     "--no-replace-objects",
     "--no-lazy-fetch",
     "--no-optional-locks",
@@ -172,6 +177,20 @@ export async function readPinnedGitDiff(options: {
     repositoryPath,
     "-c",
     "core.hooksPath=",
+  ];
+  // A 40-digit prefix is not a full object ID in a SHA-256 repository.
+  const repositoryFormat = await exec("git", [...gitArguments, "rev-parse", "--show-object-format=storage"], {
+    timeout,
+    maxBuffer: Math.min(maxBytes, 64),
+    encoding: "buffer",
+    windowsHide: true,
+  });
+  const format = new TextDecoder("utf-8", { fatal: true }).decode(repositoryFormat.stdout);
+  const pinLength = /^sha1\r?\n$/.test(format) ? 40 : /^sha256\r?\n$/.test(format) ? 64 : null;
+  if (pinLength === null || before.length !== pinLength)
+    throw new Error("Full pinned SHAs matching the repository object format are required for Git fallback");
+  const argumentsFor = (ignoreWhitespace: boolean) => [
+    ...gitArguments,
     "diff",
     "--no-ext-diff",
     "--no-textconv",

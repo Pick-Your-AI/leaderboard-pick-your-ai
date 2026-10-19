@@ -69,6 +69,14 @@ as an explicit unknown marker does. A verified positive OR match remains useful.
 Existing source-board and portfolio filter compatibility is unchanged.
 Overlapping selected Projects use the existing OR lens without multiplying units.
 
+Each independently accepted release membership remains a separate event-time
+source unit, including multiple releases containing the same pull request. Their
+historical workstream mappings and unknown mapping evidence remain available to
+breadth. The release count's lifetime conservation of one PR/author work unit is
+applied by `aggregateMetric`, not by this descriptive selector. Release ancestry,
+canonical membership, correction, independent acceptance and window admission
+still apply before breadth; a missing or invalid release proof cannot count.
+
 ## Distinct units and unknown mappings
 
 For each admitted actor, repository breadth counts distinct stable `repoId`
@@ -147,11 +155,19 @@ malformed engine fixtures exercise receipt, identity and missing or invalid sum
 quantity admission; they are not
 claimed as provider observations.
 
+[The release integration cases](../packages/metrics/test/breadth-release-events.test.js)
+use the actual release collector and recognition adapter with synthetic HTTP
+responses, followed by explicitly supplied protected historical mapping fixtures.
+They distinguish lifetime breadth from the conserved release total, retain later
+unknown mappings, apply publication-time windows and reject invalid membership
+or self-acceptance. They do not claim a live provider authorization or a new
+historical mapping collector.
+
 Build the required workspaces before running the focused suite:
 
 ```sh
 npm run build --workspace @pick-your-ai/contracts --workspace @pick-your-ai/github --workspace @pick-your-ai/metrics
-node --test --test-isolation=none --test-reporter=tap packages/metrics/test/breadth-source.test.js
+node --test --test-isolation=none --test-reporter=tap packages/metrics/test/breadth-source.test.js packages/metrics/test/breadth-release-events.test.js
 ```
 
 The repository's plan, generated-document, Python, formatting and type gates

@@ -53,6 +53,13 @@ function policy(metric) {
     sources: ["github_rest"],
     minimumSamples: 1,
     rank: false,
+    ...(metric.id === "release_changes"
+      ? {
+          dateBasis: "occurredAt",
+          groupBy: "canonical",
+          groupingPolicyVersion: "release-inclusion-units/v1",
+        }
+      : {}),
     ...(grouping
       ? {
           dateBasis: grouping.date_basis,
@@ -97,6 +104,20 @@ function fact(metric, id, patch = {}) {
           acceptanceReceipt: null,
           acceptedBy: null,
           rawState: "labeled:synthetic-bug",
+        }
+      : {}),
+    ...(metric.id === "release_changes"
+      ? {
+          releaseInclusion: {
+            version: "release-inclusion-units/v1",
+            releaseId: 1,
+            releaseNodeId: "RE_synthetic",
+            pullRequestNodeId: `synthetic:${id}`,
+            mergeCommitSha: "a".repeat(40),
+            releaseCommitSha: "b".repeat(40),
+            publishedAt: patch.occurredAt ?? at,
+            proofHash: "c".repeat(64),
+          },
         }
       : {}),
     ...patch,
