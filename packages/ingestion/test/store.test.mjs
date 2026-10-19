@@ -1192,15 +1192,18 @@ test("missing evidence, changed source revision and exhausted attempts never bec
 
 test("enrichment completion rejects lost lease or access suppression and never overwrites a completed classification", async () => {
   const { enrich, collect } = await enrichment();
+  let leased;
   assert.equal(
     await enrich.processOne({
       async readMetadata() {
+        leased = (await db.query("SELECT * FROM leaderboard_ingestion.enrichment_jobs")).rows[0];
         await collect.suppress(id(88), "a".repeat(64), 1, [2], "private");
         return sourceMetadata();
       },
     }),
-    "failed",
+    "lease_lost",
   );
+  assert.deepEqual((await db.query("SELECT * FROM leaderboard_ingestion.enrichment_jobs")).rows[0], leased);
   assert.equal((await db.query("SELECT metadata FROM leaderboard_ingestion.enrichment_jobs")).rows[0].metadata, null);
   assert.equal(
     await enrich.processOne({

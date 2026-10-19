@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { webhookDispatchVersion } from "./webhook-dispatch.mjs";
 
+const normalizationVersionFields = [
+  "reviewSourceNormalizationVersion",
+  "discussionSourceNormalizationVersion",
+  "defaultDeliveryNormalizationVersion",
+];
+
 const unavailable = () => {
   throw new Error("operator_publication_unavailable");
 };
@@ -118,11 +124,18 @@ export function createOperatorPublicationVerifier({
         digest(row.document) !== row.document_hash
       )
         return null;
-      // The persisted public document omits the event cutoff used to derive
-      // its content ID. Reconstruct that ID with this operation's cutoff;
-      // an authentic snapshot from another window cannot prove this replay.
+      const confirmation = controlsStore.read().pipelinePublications?.[expected.snapshotId];
+      if (!confirmationMatches(confirmation, scopes.get(expected.scopeKey), expected.snapshotId, expected.revision))
+        return null;
+      const normalizationVersions = {};
+      for (const field of normalizationVersionFields)
+        if (confirmation[field] !== undefined) normalizationVersions[field] = confirmation[field];
+      // Public documents omit the event cutoff and optional normalization
+      // versions used to derive their content ID. Reconstruct every hashed field;
+      // the private source guard below still checks actual retained evidence.
       const document = row.document;
       const content = {
+        ...normalizationVersions,
         approvedPublic: true,
         scope: document.scope,
         actors: document.actors,
@@ -141,6 +154,10 @@ export function createOperatorPublicationVerifier({
         repositoryIds: config.repositories
           .filter((repo) => document.scope.repository === null || String(repo.id) === document.scope.repository)
           .map((repo) => repo.id),
+        ...(Object.hasOwn(document, "reversionAuthority") ? { reversionAuthority: document.reversionAuthority } : {}),
+        ...(Object.hasOwn(document, "reversionRecordsHash")
+          ? { reversionRecordsHash: document.reversionRecordsHash }
+          : {}),
       };
       if (digest(content) !== expected.snapshotId) return null;
       const proof = aggregateExplanations.read(expected.snapshotId);
@@ -156,7 +173,7 @@ export function createOperatorPublicationVerifier({
         return null;
       bytes += Buffer.byteLength(JSON.stringify(proof));
       if (bytes > operatorPublicationProofBytes) return null;
-      proofs.push({ expected, proof });
+      proofs.push({ expected, proof, normalizationVersions });
     }
     const authorizations = [
       ...new Map(
@@ -179,7 +196,7 @@ export function createOperatorPublicationVerifier({
             const state = controlsStore.read();
             const overlay = restrictConfiguration(state);
             if (overlay.revision !== operation.configurationRevision) return false;
-            for (const { expected, proof } of proofs) {
+            for (const { expected, proof, normalizationVersions } of proofs) {
               const confirmation = state.pipelinePublications?.[expected.snapshotId];
               if (
                 !confirmationMatches(
@@ -189,6 +206,7 @@ export function createOperatorPublicationVerifier({
                   expected.revision,
                 ) ||
                 confirmation.controlsConfigurationRevision !== operation.configurationRevision ||
+                normalizationVersionFields.some((field) => confirmation[field] !== normalizationVersions[field]) ||
                 confirmation.aggregateExplanationHash !== proof.digest ||
                 !recognitionCurrent(state, confirmation) ||
                 proof.document.authorization.controlsConfigurationRevision !== overlay.revision

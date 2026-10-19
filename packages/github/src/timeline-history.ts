@@ -57,9 +57,22 @@ export async function readTypedIssueHistory(options: {
   subjectId?: string;
   family: "relationships" | "project_history";
   scanId: string;
+  /** Native event lower bound only; callers still retain their exact requested interval. */
+  since?: string;
   maxPages?: number;
   assertAuthorized?: () => void;
 }): Promise<TypedHistoryRecord[]> {
+  if (options.since !== undefined) {
+    const value = options.since;
+    const date = new Date(value);
+    if (
+      typeof value !== "string" ||
+      !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?Z$/.test(value) ||
+      !Number.isFinite(date.getTime()) ||
+      date.toISOString().slice(0, 19) !== value.slice(0, 19)
+    )
+      throw new Error("invalid_typed_history_window");
+  }
   const subjectType = options.subjectType ?? "issue";
   if (
     !["issue", "pull_request"].includes(subjectType) ||
@@ -114,15 +127,20 @@ export async function readTypedIssueHistory(options: {
   const records = await options.client.scanGraphql<TypedHistoryRecord>({
     source: options.source,
     // Legacy completed scans did not bind stable subject identity. Revalidate them with a new checkpoint key.
-    key: `typed-history:subject-v2:${options.repository.id}:${options.family}:${subjectKey}:${options.scanId}`,
-    query: `query($owner:String!, $name:String!, $number:Int!, $first:Int!, $after:String) {
+    key: `typed-history:subject-v2:${options.repository.id}:${options.family}:${subjectKey}:${options.scanId}${options.since === undefined ? "" : ":since:" + options.since}`,
+    query: `query($owner:String!, $name:String!, $number:Int!, $first:Int!, $after:String${options.since === undefined ? "" : ", $since:DateTime!"}) {
       repository(owner:$owner,name:$name) { databaseId isPrivate ${subjectField}(number:$number) {
-        id url timelineItems(first:$first,after:$after,itemTypes:[${types}]) {
+        id url timelineItems(first:$first,after:$after,itemTypes:[${types}]${options.since === undefined ? "" : ",since:$since"}) {
           nodes { __typename ${fragments} } pageInfo { hasNextPage endCursor }
         }
       } }
     }`,
-    variables: { owner, name, number: options.number },
+    variables: {
+      owner,
+      name,
+      number: options.number,
+      ...(options.since === undefined ? {} : { since: options.since }),
+    },
     maxPages: options.maxPages ?? 100,
     ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
     select(data) {

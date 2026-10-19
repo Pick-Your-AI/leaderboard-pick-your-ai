@@ -31,6 +31,7 @@ const test = base.extend<{}, { configuredApp: string }>({
 test.use({ storageState: { cookies: [], origins: [] } });
 const at = "2026-10-18T12:00:00.000Z";
 const pin = "synthetic-history-selected";
+const owners = { "research-new": "101", community: "102", "research-old": "103" } as const;
 
 async function fixture(page: Page, directory: string) {
   await page.route("**/*", async (route) => {
@@ -77,27 +78,37 @@ async function fixture(page: Page, directory: string) {
     await route.fulfill({ status: response.statusCode, headers: response.headers, body: response.body });
   });
   const { projectSpotlights } = await import(new URL("../../controls/src/editorial.mjs", import.meta.url).href);
-  // Synthetic independently accepted/opted-in records pass through the actual
-  // controls projection. Direct projection is not a controls HTTP acceptance test.
+  const { attachSyntheticEvidenceIntake } = await import(
+    new URL("../../../tests/fixtures/evidence-intake.mjs", import.meta.url).href
+  );
+  // Synthetic independently accepted/opted-in records bind current intake and
+  // source-use review before the actual controls projection. This direct
+  // projection is not a controls HTTP acceptance test.
   const state: any = { requests: {}, profiles: {}, spotlights: {} };
+  const policyVersion = "synthetic-discovery-v1";
   for (const [id, category, offset] of [
     ["research-new", "Research", 2],
     ["community", "Community", 1],
     ["research-old", "Research", 0],
   ] as const) {
-    state.requests[id] = {
+    const owner = owners[id];
+    state.requests[id] = attachSyntheticEvidenceIntake({
       id,
-      owner: id,
+      owner,
       kind: "evidence",
       status: "accepted",
       version: 1,
       locator: `https://github.com/synthetic-discovery/example/issues/${offset + 1}`,
       category,
-    };
-    state.profiles[id] = { public: true, suppressed: false, bio: `Consented synthetic bio ${id}` };
+      scope: `Synthetic independently reviewed ${id} claim.`,
+      collaborators: {},
+      policyVersion,
+      history: [{ actor: "104", action: "accepted", at: Date.parse(at) + offset, version: 1, policyVersion }],
+    });
+    state.profiles[owner] = { public: true, suppressed: false, bio: `Consented synthetic bio ${id}` };
     state.spotlights[id] = {
       id,
-      owner: id,
+      owner,
       claimId: id,
       claimVersion: 1,
       status: "accepted",
@@ -195,7 +206,7 @@ test("same-item refresh preserves proof focus and a removed approved item moves 
     await page.clock.fastForward(30_001);
     await expect.poll(api.controlsCalls).toBeGreaterThan(before);
     await expect(source).toBeFocused();
-    api.state.profiles.community.suppressed = true;
+    api.state.profiles[owners.community].suppressed = true;
     await page.clock.fastForward(30_001);
     await expect(section.getByText("Reviewed explanation community", { exact: true })).toHaveCount(0);
     await expect(section.getByRole("heading", { name: "Research", exact: true })).toBeFocused();
@@ -216,15 +227,15 @@ test("single and empty current projections keep explicit availability and disabl
 }) => {
   const api = await fixture(page, configuredApp);
   try {
-    api.state.profiles["research-old"].suppressed = true;
-    api.state.profiles["research-new"].suppressed = true;
+    api.state.profiles[owners["research-old"]].suppressed = true;
+    api.state.profiles[owners["research-new"]].suppressed = true;
     await page.clock.install();
     await page.goto("/?ui=api");
     const section = spotlights(page);
     await expect(section).toContainText("Spotlight 1 of 1");
     await expect(section.getByRole("button", { name: "Next spotlight", exact: true })).toBeDisabled();
     await expect(section.getByRole("button", { name: "Previous spotlight", exact: true })).toBeDisabled();
-    api.state.profiles.community.suppressed = true;
+    api.state.profiles[owners.community].suppressed = true;
     await page.clock.fastForward(30_001);
     await expect(section).toContainText("No currently approved, opted-in spotlights are available.");
     await expect(section.getByRole("article")).toHaveCount(0);
@@ -348,7 +359,7 @@ test("homepage discovery remains keyboard-operable and readable at 320px with re
   try {
     await page.setViewportSize({ width: 320, height: 900 });
     await page.emulateMedia({ reducedMotion: "reduce" });
-    api.state.profiles.community.bio = "Synthetic long biography ".repeat(15);
+    api.state.profiles[owners.community].bio = "Synthetic long biography ".repeat(15);
     await page.goto("/?ui=api");
     const next = spotlights(page).getByRole("button", { name: "Next spotlight", exact: true });
     await next.focus();

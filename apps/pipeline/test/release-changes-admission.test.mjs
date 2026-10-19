@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { applyRecognitionReceipt, normalizeGithubObservation } from "../../../packages/github/dist/index.js";
 import { materializeRecognition } from "../src/recognition-adapter.mjs";
+import { attachSyntheticEvidenceIntake } from "../../../tests/fixtures/evidence-intake.mjs";
 
 const fixture = JSON.parse(
   readFileSync(new URL("../../../packages/github/test/fixtures/engineering.json", import.meta.url), "utf8"),
@@ -130,6 +131,9 @@ function materialize(input, sourceMetricId, metricId, apply = applyRecognitionRe
     repositoryId: "2",
     reviewerIds,
   };
+  // Supply current independent intake prerequisites so the original release
+  // source-admission assertions still reach their own boundary.
+  attachSyntheticEvidenceIntake(request);
   // acceptedAt is the existing generic route that admitted the false positives.
   // Rejection must not rely on an unknown future collector or receipt property.
   const dateBasis = metricId === "maintenance" || metricId === "automation" ? "occurredAt" : "acceptedAt";

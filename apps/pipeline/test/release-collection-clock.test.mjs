@@ -8,6 +8,7 @@ import { configurationOverlay } from "../../controls/src/overlay.mjs";
 import { components, harness, publicScope } from "./harness.mjs";
 import { createPipeline } from "../src/runtime.mjs";
 import { releaseReviewRequest } from "../../controls/src/release-review.mjs";
+import { attachSyntheticEvidenceIntake } from "../../../tests/fixtures/evidence-intake.mjs";
 import { syntheticCheckpointStore } from "../../../packages/github/test/synthetic-client.mjs";
 
 const slug = "example-org/example-repo";
@@ -253,6 +254,7 @@ async function persistedBeforeRelease(t) {
     collaborators: {},
     history: [decision],
   };
+  attachSyntheticEvidenceIntake(request);
   decision.evidenceRequest = releaseReviewRequest(request);
   const binding = {
     category: request.category,

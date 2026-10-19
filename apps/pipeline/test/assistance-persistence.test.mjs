@@ -182,6 +182,11 @@ for (const legacyKind of ["without_private_fields", "without_documentation_polic
     );
     const frozen = (await h.db.query("SELECT document FROM leaderboard_pipeline.frozen_inputs")).rows[0].document;
     frozen.identityAuthorization.identityEvidence.normalizationHashes = [legacyHash];
+    // The fixture changes the retained document itself; keep its exact source binding consistent.
+    if (frozen.identityAuthorization.identityEvidence.normalizationSources)
+      frozen.identityAuthorization.identityEvidence.normalizationSources = [
+        { factKey: saved.fact_key, documentHash: legacyHash },
+      ];
     await h.db.query("UPDATE leaderboard_pipeline.frozen_inputs SET document=$1::jsonb,document_hash=$2", [
       JSON.stringify(frozen),
       comparisonHash(frozen),

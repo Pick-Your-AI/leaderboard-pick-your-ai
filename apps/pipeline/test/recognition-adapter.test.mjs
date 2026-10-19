@@ -4,6 +4,7 @@ import { materializeRecognition, recognitionFingerprint } from "../src/recogniti
 import { publicDocumentationReasons } from "../../../packages/contracts/dist/index.js";
 import { record } from "../../controls/src/store.mjs";
 import { localizationReviewRequest } from "../../controls/src/localization-review.mjs";
+import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-intake.mjs";
 
 const decision = {
   id: "receipt",
@@ -11,11 +12,13 @@ const decision = {
   actor: "202",
   at: Date.parse("2026-10-01T00:00:00.000Z"),
   policyVersion: "v1",
+  version: 2,
 };
 const request = {
   id: "claim",
   kind: "evidence",
   status: "accepted",
+  version: 2,
   owner: "101",
   category: "finding",
   scope: "repo",
@@ -24,11 +27,12 @@ const request = {
   collaborators: {},
   history: [decision],
 };
-const state = () => ({
-  requests: { claim: structuredClone(request) },
-  profiles: {},
-  audit: [structuredClone(decision)],
-});
+const state = (overrides = {}) =>
+  attachSyntheticEvidenceState({
+    requests: { claim: { ...structuredClone(request), ...overrides } },
+    profiles: {},
+    audit: [structuredClone(decision)],
+  });
 const binding = {
   category: "finding",
   scope: "repo",
@@ -55,15 +59,31 @@ const apply = (s) =>
     (raw, receipt) => ({ ...raw, receipt }),
     "2026-10-18T00:00:00.000Z",
   );
+
+test("legacy consent cannot qualify owner credit or change raw facts before the current revision is reviewed", () => {
+  for (const disposition of ["pending", "declined", "late-consent", "unknown-version", "missing", "array"]) {
+    const s = state({ collaborators: { 303: "accepted" } });
+    if (disposition === "late-consent") s.requests.claim.version++;
+    else if (disposition === "unknown-version") delete s.requests.claim.version;
+    else if (disposition === "missing") delete s.requests.claim.collaborators;
+    else if (disposition === "array") s.requests.claim.collaborators = [];
+    else s.requests.claim.collaborators["303"] = disposition;
+    const before = structuredClone(input);
+    assert.deepEqual(apply(s), input, disposition);
+    assert.deepEqual(input, before);
+  }
+  const reviewed = state({ collaborators: { 303: "accepted", 404: "accepted" } });
+  assert.equal(apply(reviewed).receipt.targetFactId, "fact");
+  assert.equal(apply(state()).receipt.targetFactId, "fact");
+});
 test("private audited decision binds exact owner, source metric, scope and approved policy", () => {
   assert.equal(apply(state()).receipt.targetFactId, "fact");
   assert.equal(apply(state()).receipt.acceptedAt, "2026-10-01T00:00:00.000Z");
   const invalid = state();
   invalid.audit = [];
   assert.throws(() => apply(invalid), /unverified/);
-  invalid.audit = [decision];
-  invalid.requests.claim.collaborators["202"] = "accepted";
-  assert.throws(() => apply(invalid), /unverified/);
+  const conflict = state({ collaborators: { 202: "accepted" } });
+  assert.throws(() => apply(conflict), /unverified/);
 });
 test("withdrawal, appeal, suppression and policy mismatch remove receipt without changing raw facts", () => {
   for (const status of ["withdrawn", "appealed", "pending", "rejected"]) {
@@ -144,6 +164,7 @@ function reviewedLocaleFixture(sourceRevision = "c".repeat(40)) {
     localization: { ...configured.localization, targetFactId: "fr", sourceRevision },
     evidenceRequest: localizationReviewRequest(claim),
   });
+  attachSyntheticEvidenceState(reviewed);
   const run = (patch = {}) =>
     materializeRecognition(
       raw,
@@ -238,6 +259,18 @@ test("locale audit authority requires current request identity/version and one u
       reviewed.requests.claim.locator = "https://github.com/org/repo/pull/2";
     },
     ({ reviewed }) => {
+      reviewed.requests.claim.history[0].receipt = "another-request";
+      reviewed.audit = structuredClone(reviewed.requests.claim.history);
+    },
+  ]) {
+    const fixture = reviewedLocaleFixture();
+    change(fixture);
+    // Current intake binds the exact claim and reviewed request revision. A
+    // stale claim is ineligible before specialist locale admission is attempted.
+    assert.deepEqual(fixture.run(), fixture.raw);
+  }
+  for (const change of [
+    ({ reviewed }) => {
       reviewed.audit = [];
     },
     ({ reviewed }) => {
@@ -247,15 +280,13 @@ test("locale audit authority requires current request identity/version and one u
       reviewed.audit[0] = { ...reviewed.audit[0], localization: { ...reviewed.audit[0].localization, locale: "de" } };
     },
     ({ reviewed }) => {
-      reviewed.requests.claim.history[0].receipt = "another-request";
+      reviewed.requests.claim.history[0].evidenceRequest.locator = "https://github.com/org/repo/pull/2";
       reviewed.audit = structuredClone(reviewed.requests.claim.history);
     },
   ]) {
     const fixture = reviewedLocaleFixture();
     change(fixture);
-    if (fixture.reviewed.requests.claim.scope !== fixture.configured.scope)
-      assert.equal(fixture.run().receipt, undefined);
-    else assert.throws(() => fixture.run(), /recognition_decision_unverified/);
+    assert.throws(() => fixture.run(), /recognition_decision_unverified/);
   }
   const fixture = reviewedLocaleFixture();
   const before = recognitionFingerprint(fixture.reviewed, [fixture.configured]);
@@ -292,6 +323,7 @@ function unboundLocaleReview({ mergedAt = "2026-09-30T00:00:00.000Z", locale = "
   }));
   const submitted = state();
   submitted.requests.claim.scope = "repository:2:locale:fr:documentation";
+  attachSyntheticEvidenceState(submitted);
   const configured = {
     ...binding,
     scope: submitted.requests.claim.scope,

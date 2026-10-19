@@ -42,6 +42,7 @@ const collectorReasons: Record<string, string> = {
   attempt_overdue: "The latest attempt is older than the configured freshness budget.",
   partial_collection: "A recent collection attempt is incomplete.",
   completion_time_unknown: "The completion or reconciliation time is unknown.",
+  reconciliation_gap: "A recent completed window leaves a gap after the retained reconciliation watermark.",
   reconciliation_overdue: "The last complete reconciliation is older than the configured freshness budget.",
   completed_empty_window: "A fresh complete source window reported zero items and expected zero items.",
   source_count_unknown: "The complete source count is unknown or does not match the retained item count.",

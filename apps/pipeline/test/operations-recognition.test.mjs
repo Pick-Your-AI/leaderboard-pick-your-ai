@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { normalizeGithubObservation, applyRecognitionReceipt } from "@pick-your-ai/github";
 import { aggregateMetric, getMetricDefinition, getMetricUi, metricRegistryV1 } from "@pick-your-ai/metrics";
 import { materializeRecognition, recognitionFingerprint } from "../src/recognition-adapter.mjs";
+import { attachSyntheticEvidenceIntake } from "../../../tests/fixtures/evidence-intake.mjs";
 
 const fixture = JSON.parse(
   readFileSync(new URL("../../../packages/github/test/fixtures/engineering.json", import.meta.url), "utf8"),
@@ -154,6 +155,7 @@ function scenario(metric, { kind = "merged", revision = after, author = fixture.
     history: [decision],
     detail: "private-request-detail-must-stay-private",
   };
+  attachSyntheticEvidenceIntake(request);
   const record = {
     requestId: request.id,
     requestVersion: request.version,
@@ -279,6 +281,8 @@ function alias(s, suffix = "later") {
   copy.request.scope += `:${suffix}`;
   copy.decision.id += `-${suffix}`;
   copy.decision.at += 3600000;
+  copy.decision.receipt = copy.request.id;
+  attachSyntheticEvidenceIntake(copy.request);
   copy.record.requestId = copy.request.id;
   copy.record.decisionId = copy.decision.id;
   copy.binding.scope = copy.request.scope;
@@ -467,6 +471,7 @@ const invalidCommon = [
       s.request.version++;
       s.record.requestVersion = s.request.version;
     },
+    "withheld_by_current_intake",
   ],
   [
     "missing independent audit entry",
@@ -573,6 +578,9 @@ const invalidCommon = [
     "known source occurrence after acceptance",
     (s) => {
       s.decision.at = Date.parse("2026-10-06T10:00:00.000Z");
+      // Keep the fictional independent intake valid at this earlier review so
+      // the unchanged negative assertion reaches the source occurrence bound.
+      attachSyntheticEvidenceIntake(s.request);
     },
   ],
   [
@@ -589,11 +597,25 @@ const invalidCommon = [
   ],
 ];
 for (const metric of metrics) {
-  for (const [name, mutate] of invalidCommon) {
+  for (const [name, mutate, earlierIntakeBoundary] of invalidCommon) {
     test(`operations ${metric}: ${name} fails before any receipt callback and permits a repaired retry`, () => {
       const s = scenario(metric);
       mutate(s);
-      rejectBeforeReceipt(s);
+      if (earlierIntakeBoundary) {
+        // A changed request version now loses current intake authority before
+        // the destination-specific qualifier; it must retain no new credit.
+        let calls = 0;
+        const original = structuredClone(s.input);
+        const output = run(s, {
+          applyReceipt: (input) => {
+            calls += 1;
+            return input;
+          },
+        });
+        assert.equal(calls, 0);
+        assert.deepEqual(output, original);
+        assert.deepEqual(s.input, original);
+      } else rejectBeforeReceipt(s);
       assert.equal(recognized(scenario(metric)).length, 1);
     });
   }
@@ -759,14 +781,16 @@ for (const metric of metrics) {
     assert.notEqual(recognitionFingerprint(s.state, [other, s.binding]), priorAuthority(s.state, [other, s.binding]));
   });
 }
-test("operations: every unaffected registry metric and the established mixed markers retain their exact prior fingerprint", () => {
+test("operations: unaffected automatic metrics retain prior fingerprints while manual intake retires old authority", () => {
   const s = scenario("governance");
+  const empty = { requests: {}, profiles: {}, audit: [] };
   for (const definition of metricRegistryV1.metrics) {
     if (metrics.includes(definition.id)) continue;
     const bindings = [{ ...s.binding, metricId: definition.id }];
+    assert.notEqual(recognitionFingerprint(s.state, bindings), priorAuthority(s.state, bindings));
     if (definition.id === "release_changes")
-      assert.notEqual(recognitionFingerprint(s.state, bindings), priorAuthority(s.state, bindings));
-    else assert.equal(recognitionFingerprint(s.state, bindings), priorAuthority(s.state, bindings), definition.id);
+      assert.notEqual(recognitionFingerprint(empty, bindings), priorAuthority(empty, bindings));
+    else assert.equal(recognitionFingerprint(empty, bindings), priorAuthority(empty, bindings), definition.id);
   }
   const bindings = [
     "data_quality",
@@ -776,6 +800,8 @@ test("operations: every unaffected registry metric and the established mixed mar
     "maintenance",
     "automation",
   ].map((metricId) => ({ ...s.binding, metricId }));
-  assert.equal(recognitionFingerprint(s.state, bindings), priorAuthority(s.state, bindings));
-  assert.equal(recognitionFingerprint(s.state, []), priorAuthority(s.state, []));
+  assert.notEqual(recognitionFingerprint(s.state, bindings), priorAuthority(s.state, bindings));
+  assert.notEqual(recognitionFingerprint(s.state, []), priorAuthority(s.state, []));
+  assert.equal(recognitionFingerprint(empty, bindings), priorAuthority(empty, bindings));
+  assert.equal(recognitionFingerprint(empty, []), priorAuthority(empty, []));
 });

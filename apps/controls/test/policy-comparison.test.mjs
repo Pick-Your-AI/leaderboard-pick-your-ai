@@ -737,6 +737,21 @@ async function runtimePreviewHarness(t, { verifyConfiguration, fence, correction
       ...patch,
     });
   update();
+  const input = capture();
+  // These tests exercise the real runtime's final authority fence. Retain
+  // verifiable source evidence so they reach that fence with a valid capture.
+  const document = {
+    isSynthetic: true,
+    actors: structuredClone(input.input.actors),
+    facts: structuredClone(input.input.facts),
+  };
+  const documentHash = comparisonHash(document);
+  const factKey = comparisonHash(["synthetic-runtime-source", "2", "issues"]);
+  input.authorization.identityEvidence = {
+    schemaVersion: "pipeline-identity-evidence/v1",
+    normalizationHashes: [documentHash],
+    normalizationSources: [{ factKey, documentHash }],
+  };
   const storage = await runtimeStorageFixture();
   let starting = true;
   const db = {
@@ -746,9 +761,26 @@ async function runtimePreviewHarness(t, { verifyConfiguration, fence, correction
     },
     transaction: async (work) =>
       work({
-        query: async (sql) => {
+        query: async (sql, params) => {
           if (sql.includes("repository_access"))
             return { rows: [{ repository_id: 2, state: "public", generation: 0 }] };
+          if (sql.includes("FROM leaderboard_pipeline.normalizations AS n")) {
+            assert.deepEqual(params[0], [documentHash]);
+            assert.deepEqual(params[2], ["2"]);
+            assert.deepEqual(JSON.parse(params[3]), [{ fact_key: factKey, document_hash: documentHash }]);
+            return {
+              rows: [
+                {
+                  document,
+                  document_hash: documentHash,
+                  fact_key: factKey,
+                  observed_at: cutoff,
+                  first_run_id: "synthetic-runtime-run",
+                  family: "issues",
+                },
+              ],
+            };
+          }
           if (sql.includes("leaderboard_pipeline.corrections") && correction)
             return { rows: [{ artifact_id: correction.artifactId, document: { fact: correction } }] };
           return { rows: [] };
@@ -774,7 +806,6 @@ async function runtimePreviewHarness(t, { verifyConfiguration, fence, correction
   });
   starting = false;
   t.after(() => runtime.stop());
-  const input = capture();
   input.authorization.configurationHash = comparisonHash(config);
   if (correction) {
     input.input.facts.push(correction);

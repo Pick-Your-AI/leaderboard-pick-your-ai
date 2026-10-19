@@ -2,9 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canReview,
+  canAcceptEvidence,
   control,
   ControlsFailure,
   verifiedSession,
+  verifiedEvidenceTerms,
+  evidenceSubmissionInput,
+  sourceUseReviewInput,
+  type EvidenceTerms,
   type Receipt,
   type Session,
 } from "../src/controls/client.ts";
@@ -13,6 +18,153 @@ test("controls fail closed on malformed identity, authority, CSRF or expired ses
   assert.equal(verifiedSession(session), session);
   for (const patch of [{ actorId: "alice" }, { roles: ["admin"] }, { csrf: "bad" }, { expires: 0 }])
     assert.throws(() => verifiedSession({ ...session, ...patch }));
+});
+
+const terms: EvidenceTerms = {
+  schemaVersion: "evidence-terms/v1",
+  version: "evidence-terms/2026-10-19",
+  rightsPolicyVersion: "2026-10-18",
+  paragraphs: ["Synthetic displayed terms; no real participant agreement."],
+  digest: "b".repeat(64),
+};
+function evidenceForm(patch: Record<string, string> = {}) {
+  const data = new FormData();
+  for (const [name, value] of Object.entries({
+    locator: "https://github.com/synthetic/example/issues/55",
+    category: "mentorship",
+    scope: "Synthetic public claim",
+    detail: "Synthetic private review detail",
+    collaborators: "9007199254740993",
+    submitterRoleChoice: "unknown",
+    "participantRole-9007199254740993Choice": "unknown",
+    periodKind: "unknown",
+    sourceUseState: "unresolved",
+    consent: "on",
+    ...patch,
+  }))
+    data.set(name, value);
+  return data;
+}
+test("evidence terms require the actual displayed paragraphs and a complete version binding", () => {
+  assert.equal(verifiedEvidenceTerms(terms), terms);
+  for (const value of [
+    null,
+    {},
+    { ...terms, digest: "short" },
+    { ...terms, paragraphs: [] },
+    { ...terms, paragraphs: [null] },
+    { ...terms, rightsPolicyVersion: "" },
+  ])
+    assert.throws(() => verifiedEvidenceTerms(value), /terms are unavailable/);
+});
+test("evidence intake preserves unknowns and numeric identity without granting another person's consent", () => {
+  const result = evidenceSubmissionInput(evidenceForm(), terms, "1", ["mentorship"]);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(result.value.collaborators, ["9007199254740993"]);
+  assert.deepEqual(result.value.intake, {
+    schemaVersion: "evidence-intake/v1",
+    termsVersion: terms.version,
+    termsDigest: terms.digest,
+    sourceUseBasis: { state: "unresolved" },
+    roles: { submitter: null, collaborators: { "9007199254740993": null } },
+    period: { kind: "unknown" },
+  });
+  assert.equal(Object.hasOwn(result.value.intake, "participantConsents"), false);
+  assert.equal(Object.hasOwn(result.value.intake, "claimDigest"), false);
+});
+test("evidence intake validates actual dates, participant scope and declared basis before any request", () => {
+  const known = evidenceSubmissionInput(
+    evidenceForm({
+      submitterRoleChoice: "described",
+      submitterRole: "Mentor",
+      "participantRole-9007199254740993Choice": "described",
+      "participantRole-9007199254740993": "Learner",
+      periodKind: "date",
+      periodDate: "2024-02-29",
+      sourceUseState: "declared",
+      sourceUseStatement: "Synthetic declared basis",
+    }),
+    terms,
+    "1",
+    ["mentorship"],
+  );
+  assert.equal(known.ok, true);
+  if (known.ok) {
+    assert.deepEqual(known.value.intake.period, { kind: "date", date: "2024-02-29" });
+    assert.equal(known.value.intake.roles.submitter, "Mentor");
+    assert.deepEqual(known.value.intake.sourceUseBasis, { state: "declared", statement: "Synthetic declared basis" });
+  }
+  for (const [patch, field] of [
+    [{ locator: "https://private.invalid/evidence" }, "locator"],
+    [{ locator: "https://user:secret@github.com/synthetic/example/issues/1" }, "locator"],
+    [{ collaborators: "1" }, "collaborators"],
+    [{ collaborators: "2, 2" }, "collaborators"],
+    [{ periodKind: "date", periodDate: "2025-02-29" }, "periodDate"],
+    [{ periodKind: "interval", periodStart: "2026-10-19", periodEnd: "2026-10-18" }, "periodEnd"],
+    [{ sourceUseState: "declared", sourceUseStatement: " " }, "sourceUseStatement"],
+    [{ consent: "" }, "consent"],
+  ] as Array<[Record<string, string>, string]>) {
+    const result = evidenceSubmissionInput(evidenceForm(patch), terms, "1", ["mentorship"]);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.ok(result.errors[field], field);
+  }
+  assert.equal(evidenceSubmissionInput(evidenceForm(), null, "1", ["mentorship"]).ok, false);
+});
+test("source-use acceptance needs its own bounded review and actual reference revision", () => {
+  const data = new FormData();
+  data.set("source", "on");
+  assert.equal(sourceUseReviewInput(data).ok, false);
+  data.set("sourceUseRationale", "Synthetic independent source-use review");
+  data.set("reviewLocator-0", "https://github.com/synthetic/example/blob/revision/rights.md");
+  data.set("reviewRevision-0", "synthetic-reviewed-revision");
+  data.set("sourceUsePermitted", "on");
+  assert.deepEqual(sourceUseReviewInput(data), {
+    ok: true,
+    value: {
+      disposition: "permitted",
+      rationale: "Synthetic independent source-use review",
+      references: [
+        {
+          locator: "https://github.com/synthetic/example/blob/revision/rights.md",
+          revision: "synthetic-reviewed-revision",
+        },
+      ],
+    },
+  });
+  data.set("reviewRevision-1", "unpaired revision");
+  assert.equal(sourceUseReviewInput(data).ok, false);
+  data.set("reviewLocator-1", "https://internal.invalid/proof");
+  assert.equal(sourceUseReviewInput(data).ok, false);
+});
+test("fresh evidence acceptance requires a pending or appealed receipt with current intake and consent", () => {
+  const receipt = {
+    kind: "evidence",
+    status: "pending",
+    collaborators: {},
+    intake: {
+      schemaVersion: "evidence-intake/v1",
+      claimRevision: 1,
+      claimDigest: "c".repeat(64),
+    },
+    intakeEligibility: { state: "awaiting_review" },
+  } as Receipt;
+  assert.equal(canAcceptEvidence(receipt), true);
+  assert.equal(canAcceptEvidence({ ...receipt, status: "appealed" }), true);
+  for (const patch of [
+    { status: "accepted", intakeEligibility: { state: "source_use_review_required" } },
+    { status: "accepted", intakeEligibility: { state: "eligible" } },
+    { status: "rejected" },
+    { status: "withdrawn" },
+    { status: "merged" },
+    { status: "applied" },
+    { status: undefined },
+    { intake: null },
+    { intakeEligibility: undefined },
+    { intakeEligibility: { state: "updated_intake_required" } },
+    { intakeEligibility: { state: "participant_consent_required" } },
+  ])
+    assert.equal(canAcceptEvidence({ ...receipt, ...patch } as Receipt), false);
 });
 test("review affordances exclude self, collaborators, wrong roles and terminal receipts", () => {
   const receipt = { owner: "2", kind: "evidence", status: "pending", collaborators: {} } as Receipt;

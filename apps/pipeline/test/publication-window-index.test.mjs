@@ -1,4 +1,9 @@
 import test from "node:test";
+import {
+  defaultDeliveryNormalizationVersion,
+  discussionSourceNormalizationVersion,
+  reviewSourceNormalizationVersion,
+} from "@pick-your-ai/github";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -385,5 +390,103 @@ test("confirmation, private head and discovery pointer commit or roll back in on
   } finally {
     store.close();
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+const normalizationVersions = {
+  reviewSourceNormalizationVersion,
+  discussionSourceNormalizationVersion,
+  defaultDeliveryNormalizationVersion,
+};
+for (const [label, markers] of [
+  ...Object.entries(normalizationVersions).map(([key, value]) => [key, { [key]: value }]),
+  ["all normalization generations", normalizationVersions],
+]) {
+  test(`versioned window confirmations survive atomic storage and reopening: ${label}`, async () => {
+    const directory = await mkdtemp(join(tmpdir(), "publication-window-versions-"));
+    const filename = join(directory, "controls.sqlite");
+    let store = new ControlStore(filename);
+    try {
+      const index = createPublicationWindowIndex(options(["quarter", "year"]));
+      const scope = scopeAt("year", "2026-02-15T00:00:00.000Z");
+      const value = confirmation(scope, "versioned", 1, markers);
+      store.transaction((state) => {
+        state.pipelinePublications = {};
+        state.pipelineHeads = {};
+        acknowledge(state, value);
+        assert.equal(index.record(state, scope, ["quarter", "year"], value), true);
+      });
+      const original = store.read();
+      store.close();
+      store = new ControlStore(filename);
+      const choices = index.read(store.read(), filter).windows;
+      assert.deepEqual(
+        choices.map((entry) => entry.period),
+        ["quarter", "year"],
+      );
+      for (const choice of choices) {
+        assert.deepEqual(choice.confirmation, value);
+        for (const key of Object.keys(normalizationVersions))
+          assert.equal(Object.hasOwn(choice.confirmation, key), Object.hasOwn(markers, key));
+      }
+      const reversed = Object.fromEntries(Object.entries(value).reverse());
+      store.transaction((state) => {
+        acknowledge(state, reversed);
+        assert.equal(index.record(state, scope, ["quarter", "year"], reversed), false);
+      });
+      assert.deepEqual(store.read().pipelineWindowIndex, original.pipelineWindowIndex);
+      assert.deepEqual(index.read(store.read(), filter).windows, choices);
+      assert.doesNotMatch(JSON.stringify(store.publicSnapshot()), /NormalizationVersion|pipelineWindowIndex/);
+    } finally {
+      store.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+}
+for (const key of Object.keys(normalizationVersions)) {
+  test(`window discovery withholds a removed or changed normalization marker: ${key}`, () => {
+    const index = createPublicationWindowIndex(options());
+    const state = fresh();
+    const scope = scopeAt("30d", "2026-02-15T00:00:00.000Z");
+    const value = confirmed(index, state, scope, ["30d"], "versioned", 1, normalizationVersions);
+    for (const location of ["index", "head", "publication"]) {
+      for (const mutation of ["remove", "null", "unsupported"]) {
+        const changed = structuredClone(state);
+        const target =
+          location === "index"
+            ? Object.values(indexEntries(changed))[0].confirmation
+            : location === "head"
+              ? changed.pipelineHeads[value.scopeKey]
+              : changed.pipelinePublications[value.snapshotId];
+        if (mutation === "remove") delete target[key];
+        else target[key] = mutation === "null" ? null : "unsupported-normalization-generation";
+        const before = structuredClone(changed);
+        if (location === "index" && mutation !== "remove")
+          assert.throws(() => index.read(changed, filter), /publication_window_index_integrity_error/);
+        else assert.equal(index.read(changed, filter), null);
+        assert.deepEqual(changed, before);
+      }
+    }
+  });
+}
+test("unknown or malformed normalization declarations cannot partially mutate window authority", () => {
+  const index = createPublicationWindowIndex(options());
+  const state = fresh();
+  const scope = scopeAt("30d", "2026-02-15T00:00:00.000Z");
+  const original = confirmed(index, state, scope, ["30d"], "legacy");
+  for (const key of Object.keys(normalizationVersions))
+    assert.equal(Object.hasOwn(index.read(state, filter).windows[0].confirmation, key), false);
+  for (const fields of [
+    { unknownNormalizationVersion: "invented/v1" },
+    ...Object.keys(normalizationVersions).flatMap((key) =>
+      [undefined, null, "", 1, {}, "unsupported-normalization-generation"].map((value) => ({ [key]: value })),
+    ),
+  ]) {
+    const before = structuredClone(state);
+    assert.throws(
+      () => index.record(state, scope, ["30d"], { ...original, ...fields }),
+      /publication_window_index_integrity_error/,
+    );
+    assert.deepEqual(state, before);
   }
 });

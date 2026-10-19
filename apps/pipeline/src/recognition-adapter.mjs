@@ -8,6 +8,12 @@ import {
 import { domainDateBasis, qualifyDomainRecognition } from "./domain-recognition.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
 import { releaseReviewRequest, parseReleaseReviewTarget } from "../../controls/src/release-review.mjs";
+import { hasRequiredParticipantConsent, hasReviewedParticipantConsent } from "../../controls/src/evidence-consent.mjs";
+import {
+  evidenceIntakeAuthority,
+  hasConsentedEvidenceIntake,
+  hasReviewedEvidenceIntake,
+} from "../../controls/src/evidence-intake.mjs";
 
 // Private controls only. Never accept a public claim projection as authentication.
 export function recognitionFingerprint(state, bindings = []) {
@@ -30,6 +36,10 @@ export function recognitionFingerprint(state, bindings = []) {
   // Version the target/clock authority and include exact current bindings. An old
   // unbound locale publication cannot remain authorized after this correction.
   const authority = ["localization-review-target/v1", requests, suppressed, audit, bindings];
+  // Retire old authority for participant-bearing or malformed consent records.
+  // An explicit empty collaborator set keeps its unchanged prior semantics.
+  if (requests.some((request) => !hasRequiredParticipantConsent(request) || Object.keys(request.collaborators).length))
+    authority.push("required-participant-consent/v1");
   // Earlier generic data-quality receipts did not qualify correction provenance.
   // Retire their publication authority without changing unaffected bindings.
   if (bindings.some((binding) => binding.metricId === "data_quality")) authority.push("data-quality-recognition/v1");
@@ -53,6 +63,9 @@ export function recognitionFingerprint(state, bindings = []) {
   // Retire generic receipts and the earlier pre-collection release observation authority.
   if (bindings.some((binding) => binding.metricId === "release_changes"))
     authority.push("release-inclusion-recognition/v2");
+  // Missing legacy intake cannot keep manual recognition current, even without collaborators.
+  // No-manual-request automatic source authority keeps its existing exact format.
+  if (requests.length) authority.push(evidenceIntakeAuthority());
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
@@ -82,7 +95,10 @@ export function materializeRecognition(
   const requests = Object.values(state.requests ?? {})
     .filter(
       (request) =>
-        request.kind === "evidence" && request.status === "accepted" && !state.profiles?.[request.owner]?.suppressed,
+        request.status === "accepted" &&
+        hasReviewedParticipantConsent(request) &&
+        hasConsentedEvidenceIntake(request) &&
+        !state.profiles?.[request.owner]?.suppressed,
     )
     .sort((a, b) => {
       const at = decisionTime(a),
@@ -176,6 +192,7 @@ export function materializeRecognition(
     )
       throw new Error("recognition_decision_time_invalid");
     if (acceptedAt > cutoff) continue;
+    if (!hasReviewedEvidenceIntake(request)) continue;
     let localeTarget = null;
     if (localeReasons !== null) {
       // Earlier generic receipts did not record the reviewed locale/revision.

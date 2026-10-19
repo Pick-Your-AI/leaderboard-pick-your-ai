@@ -259,7 +259,8 @@ test("a configured verifier receives exact multi-scope binding and is fenced aft
     },
   );
   assert.equal(calls, 1);
-  assert.equal(currentChecks, 1);
+  // Recheck after reauthentication and again after the transaction completes.
+  assert.equal(currentChecks, 2);
   assert.equal(result.status, "published");
   assert.equal(result.replayPolicyVersion, "synthetic-replay-policy");
   assert.equal(result.publicationPolicyVersion, "synthetic-publication-policy");

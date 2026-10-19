@@ -22,6 +22,7 @@ import {
 } from "@pick-your-ai/metrics";
 import { materializeRecognition, recognitionFingerprint } from "../src/recognition-adapter.mjs";
 import { releaseReviewRequest } from "../../controls/src/release-review.mjs";
+import { attachSyntheticEvidenceIntake } from "../../../tests/fixtures/evidence-intake.mjs";
 
 const fixture = JSON.parse(
   readFileSync(new URL("../../../packages/github/test/fixtures/engineering.json", import.meta.url), "utf8"),
@@ -137,6 +138,7 @@ function scenario({ bot = false, number = 10, releaseId = 700, publication = pub
     collaborators: {},
     history: [decision],
   };
+  attachSyntheticEvidenceIntake(request);
   decision.evidenceRequest = releaseReviewRequest(request);
   const state = { requests: { [request.id]: request }, profiles: {}, audit: [structuredClone(decision)] };
   const binding = {
@@ -411,7 +413,7 @@ for (const [name, mutate] of [
     });
 }
 
-for (const [name, mutate] of [
+for (const [name, mutate, earlierIntakeBoundary] of [
   [
     "generic old acceptance",
     (s) => {
@@ -444,6 +446,7 @@ for (const [name, mutate] of [
     (s) => {
       s.request.version += 1;
     },
+    "withheld_by_current_intake",
   ],
   [
     "different accepted request snapshot",
@@ -458,6 +461,7 @@ for (const [name, mutate] of [
       s.decision.receipt = "private-other";
       auditDecision(s);
     },
+    "withheld_by_current_intake",
   ],
   [
     "extra private target property",
@@ -470,14 +474,19 @@ for (const [name, mutate] of [
     const s = scenario();
     mutate(s);
     let calls = 0;
-    assert.throws(
-      () =>
-        s.run((input) => {
-          calls += 1;
-          return input;
-        }),
-      /release_inclusion_review_unverified/,
-    );
+    const callback = (input) => {
+      calls += 1;
+      return input;
+    };
+    if (earlierIntakeBoundary) {
+      // Accepted current-intake authority withholds these stale request IDs or
+      // versions before destination-specific review validation is reached.
+      const original = structuredClone(s.input);
+      const output = s.run(callback);
+      assert.equal(qualified(output).length, 0);
+      assert.deepEqual(output, original);
+      assert.deepEqual(s.input, original);
+    } else assert.throws(() => s.run(callback), /release_inclusion_review_unverified/);
     assert.equal(calls, 0);
   });
 
@@ -511,6 +520,9 @@ for (const [name, mutate] of [
 test("release inclusion: a review before publication fails in both adapter and direct paths", () => {
   const s = scenario();
   s.decision.at = Date.parse(mergedAt);
+  // Keep the independent synthetic intake review current at this earlier clock
+  // so both source APIs still reject publication after the review itself.
+  attachSyntheticEvidenceIntake(s.request);
   auditDecision(s);
   s.receipt.acceptedAt = mergedAt;
   assert.throws(() => s.run(), /release_inclusion_source_unverified/);
@@ -554,6 +566,7 @@ test("release inclusion: receipt aliases and bulk changesets cannot multiply one
   duplicate.id = "private-alias-request";
   duplicate.history[0].id = "private-alias-review";
   duplicate.history[0].receipt = duplicate.id;
+  attachSyntheticEvidenceIntake(duplicate);
   s.state.requests[duplicate.id] = duplicate;
   s.state.audit.push(structuredClone(duplicate.history[0]));
   assert.equal(qualified(s.run()).length, 1);
@@ -733,16 +746,21 @@ function previousAuthority(state, bindings = []) {
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
-test("release inclusion: only the affected destination retires the exact preceding authority across all98 definitions", () => {
+test("release inclusion: only the affected automatic destination retires preceding authority while manual intake retires across all98 definitions", () => {
   const s = scenario();
+  const empty = { requests: {}, profiles: {}, audit: [] };
   for (const metric of metricRegistryV1.metrics) {
     const bindings = [{ ...s.binding, metricId: metric.id }];
-    const previous = previousAuthority(s.state, bindings),
-      current = recognitionFingerprint(s.state, bindings);
+    // The literal historical function above remains unchanged. Current manual
+    // claims also require the independently accepted intake authority marker.
+    assert.notEqual(recognitionFingerprint(s.state, bindings), previousAuthority(s.state, bindings));
+    const previous = previousAuthority(empty, bindings),
+      current = recognitionFingerprint(empty, bindings);
     if (metric.id === "release_changes") assert.notEqual(current, previous);
     else assert.equal(current, previous, metric.id);
   }
-  assert.equal(recognitionFingerprint(s.state, []), previousAuthority(s.state, []));
+  assert.notEqual(recognitionFingerprint(s.state, []), previousAuthority(s.state, []));
+  assert.equal(recognitionFingerprint(empty, []), previousAuthority(empty, []));
   assert.equal(getMetricUi("release_changes").maturity, "definition_only");
   assert.throws(() => selectMetricView("release_changes"), /No supported selectable view/);
 });
@@ -767,6 +785,7 @@ test("release inclusion: private normalization survives publication and obsolete
     dataMode: "public",
     payloads: [s.payload],
     normalizerFactory: () => async () => structuredClone(s.input),
+    defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
     authorizePolicyPreview: async () => true,
     configure(config) {
       config.repositories[0].families = ["pull_requests"];
