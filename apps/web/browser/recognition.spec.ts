@@ -124,7 +124,7 @@ async function service(page: Page, approved = true) {
   let corruptAchievementCoverage = false;
   let calls = 0;
   const categories: (string | null)[] = [];
-  let achievementDelivery: { request: Request; url: string; status: number; body: string } | null = null;
+  const fulfilledAchievements = new WeakMap<Request, { url: string; status: number; body: string }>();
   const app = createService({
     approvedAchievementRuleVersion: approved ? "accepted-evidence/v1" : undefined,
     source: {
@@ -137,7 +137,8 @@ async function service(page: Page, approved = true) {
     },
   });
   await page.route("**/api/v1/**", async (route) => {
-    const url = new URL(route.request().url());
+    const request = route.request();
+    const url = new URL(request.url());
     if (url.pathname.endsWith("/achievements")) {
       calls++;
       categories.push(url.searchParams.get("category"));
@@ -152,8 +153,9 @@ async function service(page: Page, approved = true) {
       headers["content-length"] = String(Buffer.byteLength(body));
     }
     await route.fulfill({ status: response.statusCode, headers, body });
-    if (url.pathname.endsWith("/achievements"))
-      achievementDelivery = { request: route.request(), url: url.href, status: response.statusCode, body };
+    if (url.pathname.endsWith("/achievements")) {
+      fulfilledAchievements.set(request, { url: url.href, status: response.statusCode, body });
+    }
   });
   return {
     close: () => app.close(),
@@ -165,7 +167,7 @@ async function service(page: Page, approved = true) {
     },
     calls: () => calls,
     categories: () => [...categories],
-    achievementDelivery: (request: Request) => (achievementDelivery?.request === request ? achievementDelivery : null),
+    fulfilledAchievement: (request: Request) => fulfilledAchievements.get(request),
     corruptAwardCoverage: () => {
       corruptAchievementCoverage = true;
     },
@@ -370,8 +372,9 @@ test("contradictory achievement coverage clears visible awards while keeping the
     await page.clock.fastForward(30_001);
     const response = await refreshed;
     expect(response.status()).toBe(200);
-    await expect.poll(() => api.achievementDelivery(response.request())).not.toBeNull();
-    const delivered = api.achievementDelivery(response.request())!;
+    const request = response.request();
+    await expect.poll(() => api.fulfilledAchievement(request)?.status).toBe(200);
+    const delivered = api.fulfilledAchievement(request)!;
     expect(delivered.url).toBe(response.url());
     expect(delivered.status).toBe(response.status());
     const supplied = JSON.parse(delivered.body);

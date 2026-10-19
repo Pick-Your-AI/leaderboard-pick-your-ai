@@ -1,5 +1,6 @@
 import { Receipt } from "./Evidence.tsx";
 import React from "react";
+import { compareSourceInstants } from "@pick-your-ai/contracts";
 import {
   publicLink,
   uiHref,
@@ -56,7 +57,7 @@ function GroupSummary({ group, selected }: { group: ActivityGroup; selected: Sel
         .
         {group.lastCollectedAt !== null &&
           group.latestOccurredAt !== null &&
-          Date.parse(group.lastCollectedAt) > Date.parse(group.latestOccurredAt) && (
+          compareSourceInstants(group.lastCollectedAt, group.latestOccurredAt) > 0 && (
             <> Collection occurred after the action; this may be a delayed import.</>
           )}
       </p>

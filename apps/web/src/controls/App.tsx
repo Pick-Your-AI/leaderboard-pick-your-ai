@@ -1,6 +1,6 @@
 import { Operations } from "./Operations.tsx";
 import { PolicyComparison } from "./PolicyComparison.tsx";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   canAcceptEvidence,
   canReview,
@@ -345,8 +345,25 @@ export function ControlsApp() {
   const [configuration, setConfiguration] = useState<unknown>(null);
   const [nominations, setNominations] = useState<Nomination[]>([]);
   const generation = useRef(0);
+  const noticeElement = useRef<HTMLParagraphElement>(null);
+  const pendingFocus = useRef<{ generation: number; origin: HTMLElement; kind: "notice" | "origin" } | null>(null);
+  useLayoutEffect(() => {
+    const pending = pendingFocus.current;
+    pendingFocus.current = null;
+    if (
+      !pending ||
+      pending.generation !== generation.current ||
+      document.hidden ||
+      document.activeElement !== document.body
+    )
+      return;
+    if (pending.kind === "notice") {
+      if (!pending.origin.isConnected) noticeElement.current?.focus();
+    } else if (pending.origin.isConnected) pending.origin.focus();
+  });
   const [profile, setProfile] = useState<ProfileData | null>(null);
   function clear() {
+    pendingFocus.current = null;
     setSession(null);
     setReceipts([]);
     setInvitations([]);
@@ -445,6 +462,8 @@ export function ControlsApp() {
   const run: Run = async (path, input) => {
     if (busy || !session || document.hidden) return false;
     let current = generation.current;
+    const focusOrigin = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    pendingFocus.current = null;
     setBusy(true);
     setError("");
     setNotice("");
@@ -453,17 +472,23 @@ export function ControlsApp() {
       if (current !== generation.current || document.hidden) return false;
       if (path === "/controls/logout" || path === "/controls/sessions/revoke") {
         clear();
+        if (focusOrigin && focusOrigin !== document.body)
+          pendingFocus.current = { generation: current, origin: focusOrigin, kind: "notice" };
         setNotice("Session revoked.");
       } else {
         current += 1;
         const fresh = await reload();
         if (!fresh || current !== generation.current || document.hidden) return false;
+        if (focusOrigin && focusOrigin !== document.body)
+          pendingFocus.current = { generation: current, origin: focusOrigin, kind: "notice" };
         setNotice(`Service confirmed: ${JSON.stringify(result)}`);
       }
       return true;
     } catch (e) {
       if (current !== generation.current || document.hidden) return false;
       if (e instanceof ControlsFailure && [401, 403].includes(e.status)) clear();
+      if (focusOrigin && focusOrigin !== document.body)
+        pendingFocus.current = { generation: current, origin: focusOrigin, kind: "origin" };
       setError(e instanceof Error ? e.message : "Request failed.");
       return false;
     } finally {
@@ -479,7 +504,11 @@ export function ControlsApp() {
       <h1>{admin ? "Protected administration" : "Your account"}</h1>
       {loading && <p role="status">Checking your controls session…</p>}
       {error && <p role="alert">{error}</p>}
-      {notice && <p role="status">{notice}</p>}
+      {notice && (
+        <p role="status" tabIndex={-1} ref={noticeElement}>
+          {notice}
+        </p>
+      )}
       {!loading && !session && (
         <section>
           <h2>Sign in required</h2>
