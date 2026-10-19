@@ -3,6 +3,7 @@ import type { MetricDefinition, MetricRegistry } from "@pick-your-ai/contracts";
 import { getMetricGroupingPolicy, getMetricUi, getRegistryDepartments } from "@pick-your-ai/metrics";
 import { uiHref, type Selection } from "./client.ts";
 import { discoverMetrics } from "./registry.ts";
+import { MetricCategoryNavigation } from "./MetricCategoryNavigation.tsx";
 
 const maturityLabels = {
   definition_only: "Definition only",
@@ -90,6 +91,7 @@ export function RegistryCatalog({
           : "; UI metadata unavailable"}
         . Board availability and current coverage are checked separately.
       </p>
+      <MetricCategoryNavigation departments={departments} selected={selected} path={path} />
       <form
         className="remote-filters"
         role="search"

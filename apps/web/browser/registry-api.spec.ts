@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import { readFile } from "node:fs/promises";
 import type { MetricRegistry } from "@pick-your-ai/contracts";
 
@@ -137,6 +138,141 @@ test("API rejects unsupported state/date filters and malformed registry metadata
     await page.goto("/leaderboards?ui=api");
     await expect(page.getByRole("alert")).toContainText("invalid_metric_registry");
     await expect(page.getByRole("search", { name: "Search metric definitions" })).toHaveCount(0);
+    await expect(page.getByRole("navigation", { name: "Metric categories", includeHidden: true })).toHaveCount(0);
+    expect(service.reads).toBe(0);
+  } finally {
+    await service.close();
+  }
+});
+
+test("keyboard category navigation retains search and exact scope across copied URLs without a source read", async ({
+  page,
+}) => {
+  const service = await catalogService(page);
+  const query = new URLSearchParams({
+    ui: "api",
+    organization: "Pick-Your-AI",
+    repository: "repo-1",
+    workstream: "docs",
+    context: "event",
+    project: "PVT_native",
+    role: "author",
+    actors: "user",
+    start: "2026-10-01T00:00:00.000Z",
+    end: "2026-10-18T00:00:00.000Z",
+    snapshot: "immutable-pin",
+    limit: "25",
+    q: "serverexclusivealias",
+    tz: "Asia/Kathmandu",
+  });
+  try {
+    await page.goto(`/leaderboards?${query}`);
+    const categories = page.getByRole("navigation", { name: "Metric categories", exact: true });
+    const delivery = categories.getByRole("link", { name: "Served delivery label", exact: true });
+    await delivery.focus();
+    await page.keyboard.press("Enter");
+    await expect(categories.getByRole("link", { name: "Served delivery label", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await expect(page.getByRole("status").filter({ hasText: "1 of 98" })).toBeVisible();
+    const copied = page.url();
+    const selected = new URL(copied);
+    for (const [key, value] of query) expect(selected.searchParams.get(key), key).toBe(value);
+    expect(selected.searchParams.get("department")).toBe("delivery");
+    await page.goto(copied);
+    await expect(categories.getByRole("link", { name: "Served delivery label", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await expect(page.getByRole("searchbox", { name: "Search definitions" })).toHaveValue("serverexclusivealias");
+    await categories.getByRole("link", { name: "Research", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "0 of 98" })).toBeVisible();
+    await expect(
+      page.getByText("No metric definitions match these filters. No alternative measure was substituted."),
+    ).toBeVisible();
+    await categories.getByRole("link", { name: "All departments", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "1 of 98" })).toBeVisible();
+    const reset = new URL(page.url());
+    expect(reset.searchParams.has("department")).toBe(false);
+    for (const [key, value] of query) expect(reset.searchParams.get(key), key).toBe(value);
+    expect(service.calls.every((url) => url.pathname === "/api/v1/metrics")).toBe(true);
+    expect(service.reads).toBe(0);
+  } finally {
+    await service.close();
+  }
+});
+
+test("category pages stay bounded at narrow width, announce keyboard paging and restore the selected page", async ({
+  page,
+}) => {
+  let count = 0;
+  const service = await catalogService(page, false, (registry) => {
+    if (registry.ui_metadata.decision_state !== "candidate") throw new Error("Expected synthetic candidate metadata");
+    const departments = registry.ui_metadata.departments;
+    const lastOrder = Math.max(...departments.map((entry) => entry.order));
+    for (let index = 0; index < 26; index++)
+      departments.push({
+        id: `additional-${index}`,
+        label: `Served additional category ${index}`,
+        order: lastOrder + index + 1,
+      });
+    departments.at(-1)!.label = "Served-long-category-" + "x".repeat(80);
+    count = departments.length;
+  });
+  try {
+    await page.setViewportSize({ width: 320, height: 700 });
+    const href = "/leaderboards?ui=api&department=additional-25&snapshot=immutable-pin";
+    await page.goto(href);
+    const categories = page.getByRole("navigation", { name: "Metric categories", exact: true });
+    const lastPage = Math.ceil(count / 12);
+    const announcement = categories.getByRole("status");
+    await expect(announcement).toContainText(`Category page ${lastPage} of ${lastPage}`);
+    await expect(categories.locator('a[aria-current="page"]')).toContainText("Served-long-category-");
+    expect(await categories.getByRole("link").count()).toBeLessThanOrEqual(13);
+    await expect(page.getByRole("status").filter({ hasText: "0 of 98" })).toBeVisible();
+    const selected = page.url();
+    const calls = service.calls.length;
+    await categories.getByRole("button", { name: "Previous categories", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(announcement).toContainText(`Category page ${lastPage - 1} of ${lastPage}`);
+    await expect(announcement).toBeFocused();
+    expect(await categories.getByRole("link").count()).toBe(13);
+    expect(page.url()).toBe(selected);
+    expect(service.calls.length).toBe(calls);
+    await categories.getByRole("button", { name: "Next categories", exact: true }).click();
+    await expect(announcement).toContainText(`Category page ${lastPage} of ${lastPage}`);
+    await expect(announcement).toBeFocused();
+    await page.goto(selected);
+    await expect(announcement).toContainText(`Category page ${lastPage} of ${lastPage}`);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(
+      (await new AxeBuilder({ page }).include('nav[aria-label="Metric categories"]').analyze()).violations,
+    ).toEqual([]);
+    expect(service.calls.every((url) => url.pathname === "/api/v1/metrics")).toBe(true);
+    expect(service.reads).toBe(0);
+  } finally {
+    await service.close();
+  }
+});
+
+test("unresolved category metadata retains the full catalog without invented category controls", async ({ page }) => {
+  const service = await catalogService(page, false, (registry) => {
+    registry.ui_metadata = {
+      decision_state: "unresolved",
+      fields: ["department"],
+      note: "Synthetic unresolved metadata",
+    };
+  });
+  try {
+    await page.goto("/leaderboards?ui=api&snapshot=immutable-pin");
+    await expect(page.getByRole("status").filter({ hasText: "98 of 98" })).toBeVisible();
+    await expect(
+      page.getByText("Category navigation is unavailable in this registry. The complete metric catalog remains below."),
+    ).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Metric categories", includeHidden: true })).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "Department", exact: true })).toBeDisabled();
+    expect(service.calls.every((url) => url.pathname === "/api/v1/metrics")).toBe(true);
     expect(service.reads).toBe(0);
   } finally {
     await service.close();
