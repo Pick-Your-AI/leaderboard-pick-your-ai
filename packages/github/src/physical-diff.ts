@@ -57,7 +57,7 @@ export function classifyFile(file: PhysicalFile): FileClass {
     return "generated";
   if (/(?:^|\/)(?:vendor|node_modules|third_party|third-party)(?:\/|$)/.test(name)) return "vendor";
   if (
-    /(?:^|\/)(?:package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|cargo\.lock|poetry\.lock|gemfile\.lock|composer\.lock)$/.test(
+    /(?:^|\/)(?:package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|cargo\.lock|poetry\.lock|gemfile\.lock|composer\.lock|gradle\.lockfile)$/.test(
       name,
     )
   )
