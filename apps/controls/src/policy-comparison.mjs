@@ -116,9 +116,23 @@ function changeCauses(comparison, input, beforePolicy, afterPolicy) {
       continue;
     if (!latest.has(fact.id) || latest.get(fact.id).revision < fact.revision) latest.set(fact.id, fact);
   }
-  const explain = (factId, aggregate, policy) => {
+  // Index the retained audit once per side. A changed fact must not rescan
+  // every audit entry; membership and reason order do not change the receipt.
+  const indexReasons = (audit) => {
+    const indexed = new Map();
+    for (const entry of audit)
+      for (const factId of entry.factIds) {
+        const reasons = indexed.get(factId) ?? new Set();
+        reasons.add(entry.reason);
+        indexed.set(factId, reasons);
+      }
+    return indexed;
+  };
+  const beforeReasons = indexReasons(comparison.before.audit);
+  const afterReasons = indexReasons(comparison.after.audit);
+  const explain = (factId, reasonsByFact, policy) => {
     const fact = latest.get(factId);
-    const reasons = aggregate.audit.filter((entry) => entry.factIds.includes(factId)).map((entry) => entry.reason);
+    const reasons = [...(reasonsByFact.get(factId) ?? [])];
     if (fact && !policy.rankedStates.includes(fact.state) && !reasons.length) reasons.push("evidence_class_not_ranked");
     if (fact?.revision > 0 && fact.correctionReceipt) reasons.push("reviewed_correction");
     return {
@@ -131,8 +145,8 @@ function changeCauses(comparison, input, beforePolicy, afterPolicy) {
     ...change,
     causes: {
       changedPolicyFields: changedFields,
-      included: change.included.map((id) => explain(id, comparison.before, beforePolicy)),
-      excluded: change.excluded.map((id) => explain(id, comparison.after, afterPolicy)),
+      included: change.included.map((id) => explain(id, beforeReasons, beforePolicy)),
+      excluded: change.excluded.map((id) => explain(id, afterReasons, afterPolicy)),
       value: change.beforeValue !== change.afterValue ? "recalculated_on_identical_frozen_input" : null,
       rank: change.beforeRank !== change.afterRank ? "reordered_by_candidate_policy" : null,
     },
