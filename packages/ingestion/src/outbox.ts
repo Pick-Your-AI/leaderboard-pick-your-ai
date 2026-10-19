@@ -87,7 +87,11 @@ export class OutboxStore {
       throw new Error("invalid_dispatch_budget");
   }
 
-  async claim(requested: DispatchBinding, leaseSeconds = 60): Promise<OutboxLease | null> {
+  async claim(
+    requested: DispatchBinding,
+    leaseSeconds = 60,
+    canStart: (binding: DispatchBinding) => boolean = () => true,
+  ): Promise<OutboxLease | null> {
     const requestedBinding = binding(requested);
     if (!Number.isInteger(leaseSeconds) || leaseSeconds < 1 || leaseSeconds > 3600)
       throw new Error("invalid_dispatch_lease");
@@ -111,6 +115,13 @@ export class OutboxStore {
         )
       ).rows[0];
       if (!prior) return null;
+      // Only a new operation can defer before choosing an immutable cutoff.
+      // Existing retries retain their operation even when today's window is empty.
+      if (prior.operation === null) {
+        const eligible = canStart(requestedBinding);
+        if (eligible !== true && eligible !== false) throw new Error("invalid_dispatch_eligibility");
+        if (!eligible) return null;
+      }
       if (prior.lease_token) await this.expire(tx, String(prior.lease_token));
       const token = randomUUID();
       const operation = prior.operation ?? {
