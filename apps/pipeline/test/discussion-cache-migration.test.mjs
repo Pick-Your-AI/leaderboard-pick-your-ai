@@ -132,6 +132,8 @@ async function discussionHarness(t, extra = {}) {
         { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-policy" },
       ];
       if (extra.includeIssue) config.policies.push(issuePolicy);
+      if (extra.selectRelease)
+        config.releaseInclusionTargets = [{ repositoryId: 2, releaseId: 700, pullRequestNumber: 10 }];
     },
     ...extra,
   });
@@ -277,6 +279,128 @@ async function retainLegacyDiscussion(h, publication, bindingMode) {
     inputId,
     authorization: input.authorization,
   };
+}
+
+for (const defaultWrapper of [false, true]) {
+  test(`selected release Discussion migration reads its ${defaultWrapper ? "empty default" : "plain"} Projectv2 predecessor before hydration`, async (t) => {
+    const h = await discussionHarness(t, { selectRelease: true });
+    const cutoff = clock();
+    await h.runtime.runOnce({ cutoff });
+    const currentBase = comparisonHash([
+      version,
+      comparisonHash(["github-release-inclusion/v1", currentSignature(h.config), h.config.releaseInclusionTargets]),
+    ]);
+    const predecessorBase = comparisonHash([version, projectSignature(h.config, "project-membership-context/v2")]);
+    const deliveryVersion = "default-delivery-scope/v1";
+    assert.equal(components.github.defaultDeliveryNormalizationVersion, deliveryVersion);
+    const predecessorSignature = defaultWrapper ? comparisonHash([deliveryVersion, predecessorBase]) : predecessorBase;
+    const expectedSignature = defaultWrapper ? comparisonHash([deliveryVersion, currentBase]) : currentBase;
+    const row = (
+      await h.db.query(
+        `SELECT n.* FROM leaderboard_pipeline.normalizations n
+         JOIN leaderboard_ingestion.source_facts f USING(fact_key) WHERE f.family='discussions'`,
+      )
+    ).rows[0];
+    assert.equal(row.policy_signature, currentBase);
+    const document = structuredClone(row.document);
+    if (defaultWrapper) {
+      // The old key, not a positive fact, must retain the delivery-generation hint.
+      document.facts = [];
+      document.actors = [];
+      document.evidence = [];
+      document.defaultDeliveryNormalizationVersion = deliveryVersion;
+    }
+    const documentHash = comparisonHash(document);
+    const sourceBefore = (
+      await h.db.query(
+        "SELECT fact_key,source_revision,document FROM leaderboard_ingestion.source_facts ORDER BY fact_key",
+      )
+    ).rows;
+    await h.db.query(
+      `UPDATE leaderboard_pipeline.normalizations
+       SET policy_signature=$2,document=$3::jsonb,document_hash=$4
+       WHERE fact_key=$1 AND policy_signature=$5`,
+      [row.fact_key, predecessorSignature, JSON.stringify(document), "0".repeat(64), row.policy_signature],
+    );
+    const hydrations = h.state.hydrations;
+    await restart(h, async (runtime) => {
+      const query = h.db.query;
+      const lookups = [];
+      h.db.query = async (sql, values) => {
+        const result = await query.call(h.db, sql, values);
+        if (
+          sql.includes("FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=ANY") &&
+          values[0] === row.fact_key
+        )
+          lookups.push({
+            selected: [...values[1]],
+            returned: result.rows.map((entry) => entry.policy_signature),
+            hydrations: h.state.hydrations,
+          });
+        return result;
+      };
+      try {
+        await assert.rejects(runtime.runOnce({ cutoff }), /normalization_integrity_error/);
+        assert.equal(h.state.hydrations, hydrations, "corrupt predecessor must fail before native source hydration");
+        assert.ok(
+          lookups.some(
+            (entry) => entry.selected.includes(predecessorSignature) && entry.returned.includes(predecessorSignature),
+          ),
+          "the actual SQL candidate query must read the persisted predecessor",
+        );
+        await h.db.query(
+          "UPDATE leaderboard_pipeline.normalizations SET document_hash=$3 WHERE fact_key=$1 AND policy_signature=$2",
+          [row.fact_key, predecessorSignature, documentHash],
+        );
+        lookups.length = 0;
+        assert.equal((await runtime.runOnce({ cutoff })).state, "published");
+        assert.equal(h.state.hydrations, hydrations + 1, "predecessor supplies identity and hints, never fresh facts");
+        assert.ok(
+          lookups.some(
+            (entry) =>
+              entry.selected.includes(predecessorSignature) &&
+              entry.returned.includes(predecessorSignature) &&
+              entry.hydrations === hydrations,
+          ),
+          "restored predecessor must be read before fresh native hydration",
+        );
+        const rows = (
+          await h.db.query(
+            "SELECT policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations WHERE fact_key=$1",
+            [row.fact_key],
+          )
+        ).rows;
+        assert.equal(rows.length, 2);
+        assert.deepEqual(
+          rows.find((entry) => entry.policy_signature === predecessorSignature),
+          {
+            policy_signature: predecessorSignature,
+            document,
+            document_hash: documentHash,
+          },
+        );
+        const current = rows.find((entry) => entry.policy_signature === expectedSignature);
+        assert.ok(current, "current release-wrapped generation must preserve any retained default hint");
+        assert.equal(current.document.discussionSourceNormalizationVersion, version);
+        assert.equal(
+          current.document.defaultDeliveryNormalizationVersion,
+          defaultWrapper ? deliveryVersion : undefined,
+        );
+        assert.equal(current.document_hash, comparisonHash(current.document));
+        await assertAnswer(runtime, 1);
+        assert.deepEqual(
+          (
+            await h.db.query(
+              "SELECT fact_key,source_revision,document FROM leaderboard_ingestion.source_facts ORDER BY fact_key",
+            )
+          ).rows,
+          sourceBefore,
+        );
+      } finally {
+        h.db.query = query;
+      }
+    });
+  });
 }
 
 async function restart(h, work) {

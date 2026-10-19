@@ -504,3 +504,133 @@ for (const [generation, wrappers] of [
     );
     await assert.rejects(restarted.previewPolicy(request), /Frozen identity evidence integrity failure/);
   });
+
+// The preceding host allowed these Project v2 family keys while an optional
+// release selection was present but not yet wrapped. As above, this fixture
+// rekeys a current fictional document only to isolate frozen identity lookup;
+// it does not claim an old stock producer emitted this release-proof document.
+for (const [generation, wrappers] of [
+  ["review", [components.github.reviewSourceNormalizationVersion]],
+  ["Discussion", [components.github.discussionSourceNormalizationVersion]],
+  [
+    "review delivery",
+    [components.github.reviewSourceNormalizationVersion, components.github.defaultDeliveryNormalizationVersion],
+  ],
+  [
+    "Discussion delivery",
+    [components.github.discussionSourceNormalizationVersion, components.github.defaultDeliveryNormalizationVersion],
+  ],
+])
+  test(`retained public Project v2 ${generation} identity survives selected release generation without new HTTP`, async (t) => {
+    const provider = transport();
+    provider.state.publishedAt = elapsed(provider.pull.merged_at, 1_000);
+    const h = await harness(t, {
+      markerFreeConfig: true,
+      dataMode: "public",
+      payloads: [provider.pull],
+      githubClient: provider.client,
+      now: provider.now,
+      authorizePolicyPreview: async () => true,
+      policyComparisonAuthorityCurrent: () => true,
+      probeRepository: async () => ({
+        repositoryId: 2,
+        installationId: 1,
+        visibility: "public",
+        checkedAt: provider.now(),
+      }),
+      configure(config) {
+        const policy = {
+          metricId: "pr_merged",
+          version: "pr-merged-retained-project-v2",
+          definitionVersion: components.metrics.metricRegistryV1.policy_version,
+          unit: components.metrics.getMetricDefinition("pr_merged").definition.unit,
+          aggregation: "count",
+          dateBasis: "occurredAt",
+          rankedStates: ["observed"],
+          roles: ["author"],
+          groupBy: "actor_artifact",
+          sources: ["github_rest"],
+          minimumSamples: 1,
+          rank: true,
+        };
+        config.repositories[0].families = ["pull_requests"];
+        config.policies = [
+          { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "fixture-policy-approval" },
+        ];
+        config.recognitionBindings = [];
+        config.releaseInclusionTargets = [{ repositoryId: 2, releaseId: 700, pullRequestNumber: 10 }];
+      },
+    });
+    assert.equal(h.options.normalizer, undefined);
+    assert.equal(h.options.githubEnrich, undefined);
+    const publication = await h.runtime.runOnce();
+    await assertAutomaticPublication(h.runtime, publication);
+    const request = {
+      snapshotId: publication.publications[0].snapshotId,
+      policy: { ...h.config.policies[0].policy, version: "retained-project-v2-release-preview", rank: false },
+      operatorId: "201",
+    };
+    const before = await h.runtime.previewPolicy(request);
+    const originals = await sourceRows(h.db);
+    const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
+    assert.equal(rows.length, 1);
+    const row = rows[0];
+    assert.equal(
+      row.policy_signature,
+      digest([components.github.defaultDeliveryNormalizationVersion, currentProjectReleaseSignature(h.config)]),
+    );
+    assert.equal(row.document_hash, digest(row.document));
+    components.github.validateGithubReleaseInclusion(row.document.releaseInclusions[0]);
+    // Literal pre-release Project v2 key, independent of the receiving runtime.
+    const projectSignature = digest([
+      "project-membership-context/v2",
+      digest([
+        "verified-default-branch-merge-pins/v1",
+        digest([
+          "pipeline-private-attribution/v1",
+          digest(["current-state-selection-v1", "public", h.config.policies.map((entry) => entry.signature)]),
+        ]),
+      ]),
+      [],
+    ]);
+    const signature = wrappers.reduce((value, version) => digest([version, value]), projectSignature);
+    assert.notEqual(signature, row.policy_signature);
+    await h.db.query(
+      "UPDATE leaderboard_pipeline.normalizations SET policy_signature=$2 WHERE fact_key=$1 AND policy_signature=$3",
+      [row.fact_key, signature, row.policy_signature],
+    );
+    const retained = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY fact_key")).rows;
+    assert.deepEqual(retained, [{ ...row, policy_signature: signature }]);
+    const frozen = (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id")).rows;
+    const snapshots = (await h.db.query("SELECT * FROM leaderboard_pipeline.snapshots ORDER BY snapshot_id")).rows;
+    const calls = [...provider.state.calls];
+    await h.runtime.stop();
+    await h.reopenDatabase();
+    const restarted = await createPipeline(h.options);
+    t.after(() => restarted.stop());
+    assert.deepEqual(await restarted.previewPolicy(request), before);
+    assert.deepEqual(provider.state.calls, calls);
+    assert.deepEqual(await sourceRows(h.db), originals);
+    assert.deepEqual(
+      (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY fact_key")).rows,
+      retained,
+    );
+    assert.deepEqual(
+      (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id")).rows,
+      frozen,
+    );
+    assert.deepEqual(
+      (await h.db.query("SELECT * FROM leaderboard_pipeline.snapshots ORDER BY snapshot_id")).rows,
+      snapshots,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(before),
+      /releaseInclusions|proofHash|normalizationSources|factKey|documentHash/,
+    );
+    await h.db.query(
+      `UPDATE leaderboard_pipeline.normalizations SET document=jsonb_set(document,'{actors,0,githubNodeId}','"U_TAMPERED"'::jsonb) WHERE fact_key=$1 AND policy_signature=$2`,
+      [row.fact_key, signature],
+    );
+    await assert.rejects(restarted.previewPolicy(request), /Frozen identity evidence integrity failure/);
+    assert.deepEqual(provider.state.calls, calls);
+  });

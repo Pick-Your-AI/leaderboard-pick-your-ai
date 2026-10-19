@@ -52,6 +52,11 @@ import {
   isIssueFieldSourceScopeFailure,
 } from "./github-source.mjs";
 import { githubCommentsContext, expandedGithubCommentsRun, startGithubCommentsRun } from "./comments-inventory.mjs";
+import {
+  githubContentEditsContext,
+  createGithubContentEditAdmission,
+  startGithubContentEditRun,
+} from "./content-edit-inventory.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
 import {
   defaultDeliveryNormalizationVersion,
@@ -373,11 +378,32 @@ export async function createPipeline(options) {
       purposeNormalizationSignature(releaseNormalizationSignature(projectNormalizationSignature)),
     ]),
   ].filter((signature) => signature !== normalizationSignature);
+  // Corrected typed-history actor admission must not reuse an old User cache
+  // or overwrite the document hash bound by an earlier frozen comparison.
+  // Wrap the complete source generation; unrelated families keep their keys.
+  const typedHistorySignature = (signature) => digest(["typed-history-actor-classification/v1", signature]);
+  const typedHistoryNormalizationSignature = typedHistorySignature(normalizationSignature);
+  // Retain both actual preceding typed-history formats: the original Project
+  // wrapper and the complete release/purpose wrapper before transfer admission.
+  const previousTypedHistoryNormalizationSignatures = [
+    ...new Set(
+      [
+        projectNormalizationSignature,
+        purposeNormalizationSignature(releaseNormalizationSignature(projectNormalizationSignature)),
+      ].map(typedHistorySignature),
+    ),
+  ].filter((signature) => signature !== typedHistoryNormalizationSignature);
   // Family-specific source rules have separate immutable cache generations.
   const reviewNormalizationSignature = digest([reviewSourceNormalizationVersion, normalizationSignature]);
   const discussionNormalizationSignature = digest([discussionSourceNormalizationVersion, normalizationSignature]);
   const defaultDeliverySignature = (signature) => digest([defaultDeliveryNormalizationVersion, signature]);
   const frozenNormalizationSignatures = [
+    defaultDeliverySignature(typedHistoryNormalizationSignature),
+    typedHistoryNormalizationSignature,
+    ...previousTypedHistoryNormalizationSignatures.flatMap((signature) => [
+      signature,
+      defaultDeliverySignature(signature),
+    ]),
     defaultDeliverySignature(normalizationSignature),
     defaultDeliverySignature(reviewNormalizationSignature),
     defaultDeliverySignature(discussionNormalizationSignature),
@@ -866,6 +892,7 @@ export async function createPipeline(options) {
     };
     return transaction ? read(transaction) : db.transaction(read);
   }
+  const contentEditAdmission = createGithubContentEditAdmission();
   const defaultSource = options.githubClient
     ? createGithubCollectionSource({
         client: options.githubClient,
@@ -875,6 +902,7 @@ export async function createPipeline(options) {
         assertAuthorized: () => assertRunConfiguration(),
         onUnavailable: (repo, reason) => denyRepository(repo, reason, utc(now())),
         includePullRequestReviewComments: ({ runId }) => expandedGithubCommentsRun(runId),
+        includeContentEditMetadata: (request) => contentEditAdmission.allows(request),
         async useRestSnapshotRevisions({ repositoryId, family }) {
           if (reconciliationPolicy) return true;
           // Keep immutable observation identities after an approved policy change
@@ -895,6 +923,10 @@ export async function createPipeline(options) {
     defaultSource !== null &&
     collectionSource === defaultSource &&
     config.repositories.some((repository) => repository.families.includes("comments"));
+  const defaultContentEditInventory =
+    defaultSource !== null &&
+    collectionSource === defaultSource &&
+    config.repositories.some((repository) => repository.families.includes("content_edits"));
   const probeSource = options.probeRepository ?? defaultSource?.probeRepository;
   const collection = new c.ingestion.CollectionStore(db);
   const scanContinuations = new ScanContinuationStore(db);
@@ -1003,18 +1035,21 @@ export async function createPipeline(options) {
   const scanContext = (mode, sources, revision, fingerprint) => ({
     key: digest(["bounded-scan/v1", config, dataMode, mode]),
     contextHash: digest(
-      githubCommentsContext(
-        [
-          revision,
-          recognitionBindings.length ? fingerprint : null,
-          sources,
-          // Selected release proofs use the PR delivery generation. Retire an older
-          // frozen scan before collecting a newly required normalization generation.
-          ...(dataMode === "public" && (config.releaseInclusionTargets?.length || selectedDocumentationPurpose)
-            ? [defaultDeliverySignature(normalizationSignature)]
-            : []),
-        ],
-        defaultCommentsInventory,
+      githubContentEditsContext(
+        githubCommentsContext(
+          [
+            revision,
+            recognitionBindings.length ? fingerprint : null,
+            sources,
+            // Selected release proofs use the PR delivery generation. Retire an older
+            // frozen scan before collecting a newly required normalization generation.
+            ...(dataMode === "public" && (config.releaseInclusionTargets?.length || selectedDocumentationPurpose)
+              ? [defaultDeliverySignature(normalizationSignature)]
+              : []),
+          ],
+          defaultCommentsInventory,
+        ),
+        defaultContentEditInventory,
       ),
     ),
   });
@@ -1458,22 +1493,32 @@ export async function createPipeline(options) {
     const issueFieldHistoryBatch = Object.freeze({});
     const outputs = [];
     for (const row of sourceRows) {
+      const typedHistory = ["relationships", "project_history", "issue_field_history"].includes(row.family);
       const baseSignature =
         row.family === "reviews"
           ? reviewNormalizationSignature
           : row.family === "discussions"
             ? discussionNormalizationSignature
-            : normalizationSignature;
+            : typedHistory
+              ? typedHistoryNormalizationSignature
+              : normalizationSignature;
       const deliverySignature = defaultDeliverySignature(baseSignature);
-      const previousGenerations = previousNormalizationSignatures.map((signature) => {
-        const baseSignature =
-          row.family === "reviews"
-            ? digest([reviewSourceNormalizationVersion, signature])
-            : row.family === "discussions"
-              ? digest([discussionSourceNormalizationVersion, signature])
-              : signature;
-        return { baseSignature, deliverySignature: defaultDeliverySignature(baseSignature) };
-      });
+      const previousBaseSignatures = [
+        ...new Set([
+          ...(typedHistory ? [normalizationSignature, ...previousTypedHistoryNormalizationSignatures] : []),
+          ...previousNormalizationSignatures.map((signature) =>
+            row.family === "reviews"
+              ? digest([reviewSourceNormalizationVersion, signature])
+              : row.family === "discussions"
+                ? digest([discussionSourceNormalizationVersion, signature])
+                : signature,
+          ),
+        ]),
+      ].filter((signature) => signature !== baseSignature);
+      const previousGenerations = previousBaseSignatures.map((signature) => ({
+        baseSignature: signature,
+        deliverySignature: defaultDeliverySignature(signature),
+      }));
       if (
         row.family === "reviews" &&
         (options.normalizer || options.githubEnrich
@@ -1522,8 +1567,17 @@ export async function createPipeline(options) {
       });
       // Validate each selected predecessor even when another generation already
       // supplies delivery classification or a current cache can otherwise be used.
-      for (const { cached: previousCached } of previousCaches) {
-        if (!previousCached) continue;
+      // Typed histories retain both plain and delivery documents independently.
+      const retainedPredecessors = typedHistory
+        ? candidates.filter((entry) =>
+            previousGenerations.some(
+              (generation) =>
+                entry.policy_signature === generation.baseSignature ||
+                entry.policy_signature === generation.deliverySignature,
+            ),
+          )
+        : previousCaches.map(({ cached }) => cached).filter(Boolean);
+      for (const previousCached of retainedPredecessors) {
         if (digest(previousCached.document) !== previousCached.document_hash) fail("normalization_integrity_error");
         if (previousCached.document.isSynthetic !== (dataMode === "synthetic"))
           fail("normalization_data_mode_mismatch");
@@ -3236,7 +3290,15 @@ export async function createPipeline(options) {
     cursorSecret: options.cursorSecret,
     now: () => Date.parse(now()),
   });
-  async function runOnceInternal({ cutoff, mode = "reconcile", maxPages = 100, dispatch = null } = {}) {
+  async function runOnceInternal(options) {
+    contentEditAdmission.clear();
+    try {
+      return await runOnceSelected(options);
+    } finally {
+      contentEditAdmission.clear();
+    }
+  }
+  async function runOnceSelected({ cutoff, mode = "reconcile", maxPages = 100, dispatch = null } = {}) {
     const implicitCutoff = cutoff === undefined;
     cutoff = utc(implicitCutoff ? now() : cutoff);
     if (stopped) fail("pipeline_stopped");
@@ -3286,6 +3348,7 @@ export async function createPipeline(options) {
           : null,
       );
       cutoff = scan.cutoff;
+      if (defaultContentEditInventory && scan.plan) contentEditAdmission.setPlanned(scan, scan.plan);
     }
     const publicationWindows = resolveDiscoverablePublicationWindows(
       config.scopes,
@@ -3319,10 +3382,14 @@ export async function createPipeline(options) {
         // For explicit/dispatch runs, retain an existing old operation literally;
         // otherwise atomically materialize and pin the expanded inventory ID.
         const selectedRequest =
-          !scan?.plan && defaultCommentsInventory && request.family === "comments"
-            ? await startGithubCommentsRun(db, collection, request, assertRunConfiguration)
-            : request;
+          !scan?.plan && defaultContentEditInventory && request.family === "content_edits"
+            ? await startGithubContentEditRun(db, collection, request, assertRunConfiguration)
+            : !scan?.plan && defaultCommentsInventory && request.family === "comments"
+              ? await startGithubCommentsRun(db, collection, request, assertRunConfiguration)
+              : request;
         const { runId, family } = selectedRequest;
+        if (!scan?.plan && defaultContentEditInventory && family === "content_edits")
+          contentEditAdmission.recordSelected(selectedRequest);
         if (!scan?.plan && selectedRequest === request) await collection.start(request);
         const collectionStarted = performance.now();
         let status = "progress";

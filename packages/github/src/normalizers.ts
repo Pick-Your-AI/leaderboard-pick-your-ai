@@ -30,7 +30,7 @@ import {
   verifyGithubRestSnapshotRevision,
 } from "./rest-snapshot.js";
 import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
-import { validateDocumentationPurposeSource } from "./documentation-purpose.js";
+import { documentationRecognitionUnit, validateDocumentationPurposeSource } from "./documentation-purpose.js";
 import {
   validateMaintenanceClassification,
   type MaintenanceClassificationRecord,
@@ -47,6 +47,12 @@ import {
 } from "./release-recognition.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
 import { readIssueFieldEvent, issueFieldHistoryRevision } from "./issue-field-history.js";
+import {
+  parseGithubContentEditMetadata,
+  readGithubContentEditMetadata,
+  verifyGithubContentEditRevision,
+  type ContentEditMetadata,
+} from "./content-edit-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
   readPublicSubjectProjectSnapshot,
@@ -1648,12 +1654,31 @@ export function applyRecognitionReceipt(
       receipt.evidenceIds[0] !== target.id)
   )
     throw new Error("documentation_purpose_source_unverified");
-  const documentationPurpose =
-    receipt.documentationPurpose === undefined
-      ? null
-      : validateDocumentationPurposeSource(input, target.id, receipt.acceptedAt);
+  // A candidate's generic review must use the same unit as its purpose review.
+  // Source validation supplies identity; it does not grant a purpose claim.
+  const documentationSource =
+    receipt.metricId === "documentation" &&
+    (receipt.documentationPurpose !== undefined ||
+      targetEvidence?.contribution.reasonCodes.some((reason) => reason.startsWith("documentation_purpose_candidate:")))
+      ? validateDocumentationPurposeSource(input, target.id, receipt.acceptedAt)
+      : null;
+  const documentationPurpose = receipt.documentationPurpose === undefined ? null : documentationSource;
   if (documentationPurpose && receipt.sourceRevision !== documentationPurpose.evidence.sourceRevision)
     throw new Error("documentation_purpose_source_unverified");
+  const documentationUnit = documentationSource
+    ? documentationRecognitionUnit(documentationSource, documentationPurpose ? undefined : receipt.changesetId)
+    : null;
+  if (
+    documentationSource &&
+    documentationUnit === documentationSource.unit &&
+    documentationUnit !== target.canonicalKey
+  ) {
+    // Do not split a retained pre-canonical generic approval during an upgrade.
+    // Rebuild that overlay from source; distinct domain categories stay separate.
+    const legacyId = stable("recognized", "documentation", target.canonicalKey, receipt.actorId);
+    if (input.facts.some((fact) => fact.metricId === "documentation" && fact.id === legacyId))
+      throw new Error("documentation_recognition_requires_renormalization");
+  }
   const release =
     receipt.metricId === "release_changes"
       ? validateReleaseChangesSource(input, target.id, receipt.acceptedAt, receipt.releaseInclusion)
@@ -1662,8 +1687,8 @@ export function applyRecognitionReceipt(
     throw new Error("release_inclusion_source_unverified");
   const unit = release
     ? release.membershipUnit
-    : documentationPurpose
-      ? documentationPurpose.unit
+    : documentationUnit
+      ? documentationUnit
       : mergedChange
         ? mergedChange.unit
         : receipt.metricId === "localization"
@@ -1790,6 +1815,7 @@ export interface CollectionNormalizerInput {
     historySubjectId?: string;
     issueFieldId?: string;
     projectSubjectId?: string;
+    contentEditMetadata?: ContentEditMetadata;
     sourceRevision: string;
     sourceUrl: string;
     evidence: "current_state" | "observed_transition";
@@ -1890,6 +1916,49 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       return none("hydrated_source_revision_unverified");
     let repositoryClient: GithubReadClient | undefined;
     const client = () => (repositoryClient ??= options.client.forRepository(input.repository.id));
+    if (
+      input.fact.contentEditMetadata !== undefined ||
+      (typeof input.fact.sourceRevision === "string" && input.fact.sourceRevision.startsWith("gh-content-edit-"))
+    ) {
+      // The reserved metadata path precedes event enrichment. It cannot borrow
+      // body-edit credit, native field history, parent authors or relationship data.
+      if (
+        input.family !== "content_edits" ||
+        Object.keys(input.fact).sort().join(",") !==
+          "actorId,contentEditMetadata,evidence,occurredAt,sourceRevision,sourceUrl,state,subjectId" ||
+        input.fact.evidence !== "current_state" ||
+        input.fact.actorId !== null ||
+        input.fact.occurredAt !== null ||
+        input.fact.state !== "present"
+      )
+        return none("content_edit_collected_binding_unverified");
+      let metadata: ContentEditMetadata;
+      try {
+        metadata = parseGithubContentEditMetadata(input.fact.contentEditMetadata);
+      } catch {
+        return none("content_edit_collected_binding_unverified");
+      }
+      const repository = { id: input.repository.id, slug: input.repository.slug };
+      const route = metadata.parent.kind === "issue" ? "issues" : "pull";
+      if (
+        metadata.parent.id !== input.fact.subjectId ||
+        metadata.parent.url !== input.fact.sourceUrl ||
+        metadata.parent.url !== "https://github.com/" + repository.slug + "/" + route + "/" + metadata.parent.number
+      )
+        return none("content_edit_collected_binding_unverified");
+      const revision = input.fact.sourceRevision;
+      if (!verifyGithubContentEditRevision(metadata, revision)) return none("content_edit_revision_unverified");
+      const hydrated = await readGithubContentEditMetadata({
+        client: options.client,
+        source: options.source,
+        repository,
+        parent: metadata.parent,
+        scanId: input.factKey,
+        ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
+      });
+      if (!verifyGithubContentEditRevision(hydrated, revision)) return none("content_edit_revision_unverified");
+      return none("content_edit_metadata_only");
+    }
     if (input.family === "issue_field_history") {
       const match = input.fact.sourceUrl.match(
         new RegExp("^https://github\\.com/" + input.repository.slug.replaceAll(".", "\\.") + "/issues/([1-9]\\d*)$"),
@@ -1933,6 +2002,12 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         action: "issue_field_changed",
         observedAt: input.observedAt,
         occurredAt: record.event.createdAt,
+        ...(options.reviewedServiceAccounts === undefined
+          ? {}
+          : { reviewedServiceAccounts: options.reviewedServiceAccounts }),
+        ...(options.authorizedClassifierIds === undefined
+          ? {}
+          : { authorizedClassifierIds: options.authorizedClassifierIds }),
         payload: {
           issue: { id: record.subject.id, url: record.subject.url },
           sender: record.event.actor,
@@ -1979,6 +2054,12 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         },
         family: isProject ? "field_change" : "relationship",
         observedAt: input.observedAt,
+        ...(options.reviewedServiceAccounts === undefined
+          ? {}
+          : { reviewedServiceAccounts: options.reviewedServiceAccounts }),
+        ...(options.authorizedClassifierIds === undefined
+          ? {}
+          : { authorizedClassifierIds: options.authorizedClassifierIds }),
         occurredAt: time(event.createdAt),
         action: isProject
           ? "project_status_changed"

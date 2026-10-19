@@ -18,6 +18,32 @@ export interface VerifiedDocumentationPurposeSource {
   unit: string;
 }
 
+function documentationCategoryUnit(
+  target: NormalizedGithubFact,
+  category: "documentation" | "example" | "guide",
+): string {
+  return (
+    "domain:" +
+    createHash("sha256")
+      .update(JSON.stringify(["domain-evidence/v1", "documentation", target.repoId, [target.artifactId, category]]))
+      .digest("hex")
+  );
+}
+
+/** Generic and purpose reviews share the existing documentation category unit.
+ * Preserve separately qualified example/guide categories, but not caller aliases.
+ */
+export function documentationRecognitionUnit(
+  source: VerifiedDocumentationPurposeSource,
+  changesetId: string | undefined,
+): string {
+  for (const category of ["example", "guide"] as const) {
+    const unit = documentationCategoryUnit(source.target, category);
+    if (changesetId === unit) return unit;
+  }
+  return source.unit;
+}
+
 /** A private purpose review can qualify only the original pinned documentation author.
  * A source path is a candidate; neither that path nor a publisher is an authorship review.
  */
@@ -100,12 +126,6 @@ export function validateDocumentationPurposeSource(
     return invalid();
   // Exactly the established domain-evidence documentation unit. Receipt IDs,
   // files and caller-supplied bulk changesets cannot create a second unit.
-  const unit =
-    "domain:" +
-    createHash("sha256")
-      .update(
-        JSON.stringify(["domain-evidence/v1", "documentation", target.repoId, [target.artifactId, "documentation"]]),
-      )
-      .digest("hex");
+  const unit = documentationCategoryUnit(target, "documentation");
   return { target, evidence, pathPolicyVersion: policies[0]!.slice("documentation_path_policy:".length), unit };
 }
