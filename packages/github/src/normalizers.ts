@@ -8,6 +8,7 @@ import {
 import { createHash } from "node:crypto";
 import {
   compareSourceInstants,
+  sourceEventSchema,
   publicDocumentationReasons,
   serviceAccountClassificationSchema,
   type ServiceAccountClassification,
@@ -36,6 +37,9 @@ import {
   type PinnedPhysicalDiff,
   type ClassifiedPhysicalDiff,
 } from "./physical-diff.js";
+
+/** Cache generation for separately observed repository default-branch admission. */
+export const defaultDeliveryNormalizationVersion = "default-delivery-scope/v1";
 
 /** Hash only explicit source fields; text contributes to revision identity but is never retained. */
 export function githubReviewRevision(value: Record<string, unknown>): string {
@@ -866,6 +870,8 @@ export function normalizeGithubObservation(
       !sha ||
       !pinnedSha(sha) ||
       !integration ||
+      !text(repository.defaultBranch) ||
+      integration.defaultBranch !== repository.defaultBranch ||
       integration.targetBranch !== integration.defaultBranch ||
       !integration.commitShas.includes(sha)
     ) {
@@ -1074,6 +1080,8 @@ export function normalizeGithubObservation(
   const integration = envelope.integration;
   if (integration?.diff) {
     if (
+      !text(repository.defaultBranch) ||
+      integration.defaultBranch !== repository.defaultBranch ||
       integration.targetBranch !== integration.defaultBranch ||
       integration.diff.before !== integration.before ||
       integration.diff.after !== integration.after ||
@@ -1330,6 +1338,17 @@ export function applyRecognitionReceipt(
   ) {
     throw new Error("Independent verified recognition receipt is required");
   }
+  // An accepted answer cannot precede its known source occurrence. Preserve
+  // unknown clocks and the separate accepted-at ranking rule; a collection or
+  // revision time is not a substitute for the original source event.
+  if (
+    receipt.metricId === "issue_answers" &&
+    receipt.decision === "accepted" &&
+    typeof target.occurredAt === "string" &&
+    sourceEventSchema.shape.occurredAt.safeParse(target.occurredAt).success &&
+    compareSourceInstants(target.occurredAt, receipt.acceptedAt) > 0
+  )
+    throw new Error("Answer acceptance cannot predate its known source occurrence");
   // A generic receipt cannot turn a PR, closing action or synthetic fixture into
   // a confirmed report. The issue proof must identify this exact source fact.
   if (

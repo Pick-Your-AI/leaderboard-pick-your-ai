@@ -2,6 +2,37 @@
 
 Refs #68, #69, #70, #123, #124, #128. These engineering implementations do not close evidence review, accessible journey, production source or launch gates.
 
+## Accepted issue-answer source time (#96)
+
+An accepted `issue_answers` receipt cannot predate its selected source fact's
+known occurrence. Both the direct normalizer receipt boundary and the pipeline
+enforce that lower bound using contract-valid source timestamps, including
+equivalent offsets and fractional precision. The pipeline checks the already
+unique target before invoking host receipt authority; it never resolves an
+ambiguous claim by removing future candidates. An unknown source occurrence
+remains unknown. Collection time, fetched revision time and a different decision
+clock do not replace it. The original occurrence and the accepted-at ranking
+clock retain their separate meanings and bytes.
+
+The `issue-answer-source-time/v1` authority marker applies only when a configured
+destination is `issue_answers`. A source-only answer binding to another metric
+keeps its earlier authority and source-specific rules. A mixed configuration
+containing an answer destination retires the whole earlier publication, even
+without a currently accepted answer request. Current and pinned public reads,
+exports and proofs, private previews and aggregate explanations withhold old
+authority across database reopen. Reads and startup preserve existing source
+facts, snapshot content and recognition fingerprints. Only authorized
+recomputation can renew a publication confirmation: unchanged, still-valid
+content can retain its content-addressed snapshot ID while receiving the current
+fingerprint. Changed valid content can produce a new snapshot. Contributor
+withdrawal continues to remove current authorization.
+
+These synthetic chronology and persistence checks do not establish answer
+quality, voluntary support recognition, response-time samples, complete source
+history or production rollout. The metric definition and maturity remain
+unchanged. Native prerequisites and the other evidence-review criteria of #96
+retain their existing scope.
+
 ## Confirmed bug source admission (#68)
 
 The generic private receipt path for `confirmed_bugs` requires an
@@ -49,11 +80,11 @@ Remaining acceptance: reviewer adoption of selection rules; a real verified evid
 
 ## Reproducible candidate achievements (#70, #124)
 
-`GET /api/v1/contributors/:actorId/achievements` requires the explicit service setting `approvedAchievementRuleVersion: "accepted-evidence/v1"`. Without that reviewed activation it fails closed. Two rules return the earliest accepted eligible contribution and earliest accepted review in the selected snapshot/scope. Dates are proven source occurrence dates, never manufactured acceptance timestamps. Each result includes rule version, qualifying artifact/contribution IDs, source URLs and coauthor status. Observed, pending, unknown, automated, ineligible and undated activity cannot receive awards.
+`GET /api/v1/contributors/:actorId/achievements` requires an explicit reviewed `approvedAchievementRuleVersion`. The existing `"accepted-evidence/v1"` setting retains its two rules and response: earliest accepted eligible contribution and earliest accepted review in the selected snapshot/scope. The [version 2 decision](accepted-achievement-milestones.md) adds `"accepted-evidence/v2"`, with earliest accepted evidence per registered category, exact optional category selection, original qualifying proof and bounded shared-artifact participant pages. An absent or unsupported setting fails closed; neither version is automatically activated. Dates are proven source occurrence dates, never manufactured acceptance timestamps. Observed, pending, unknown, automated, ineligible and undated activity cannot receive awards.
 
-Incomplete history withholds both candidate awards: every coverage partition must be complete, permission/error/page gaps absent, and its window and watermark must cover the selected period through its end (or the snapshot date). All-history queries additionally require a known history start covered by each partition. All-history queries still mean available evidence history, not a complete lifetime or a first-ever claim. Filtered periods retain exact scope and coverage metadata. The public UI withholds achievements on category-filtered portfolios because the achievements API does not support category filtering; it does not silently request broader achievements. Clear the category filter to inspect achievements for the full selected scope. Current suppression, artifact correction and policy disabling are reapplied even when a snapshot is pinned; awards are recomputed from the visible accepted evidence. There are no streaks, scores, notifications or implied personal merit from automation.
+Incomplete history withholds candidate first-event awards: every coverage partition must be complete, permission/error/page gaps absent, and its window and watermark must cover the selected period through its end (or the snapshot date). All-history queries additionally require a known history start covered by each partition. Version 2 additionally requires the snapshot cutoff to reach a bounded period's end. All-history queries still mean available evidence history, not a complete lifetime or a first-ever claim. The public UI requests the exact selected category; a v1-only service returns unavailable for that filter and no broader achievements are substituted. Current suppression, artifact correction and policy disabling are reapplied even when a snapshot is pinned; awards and v2 peer links are recomputed from the visible accepted evidence. Shared-artifact links describe their recorded subset and can remain available under partial history. There are no streaks, scores, notifications or implied personal merit from automation.
 
-Remaining acceptance: approved rule policy; cross-workstream mapping/conditions and shared-credit display policy; real independently reviewed examples; real contributor acceptance of the implemented source-linked achievement display, including assistive-technology testing. Registry metric semantics and all 98 planned definitions remain unchanged.
+The versioned decision specifies the category and shared-credit engineering policy, including original author/coauthor/reviewer roles, exact artifact identity, deduplication, correction behavior and accessible pagination. Remaining acceptance: actual source/policy activation; a separately sourced cross-workstream mapping and conditions; the separate newcomer protocol; real independently reviewed examples; real contributor acceptance of the source-linked achievement display, including assistive-technology testing. Registry metric semantics and all 98 planned definitions remain unchanged.
 
 Coverage bounds, earliest-evidence ordering and the browser's selected-period check compare instants, not timestamp text. Equivalent ISO offsets and second/millisecond encodings therefore have the same meaning. Coverage and evidence ordering also retain the source contract's sub-millisecond precision, which JavaScript's date parser alone discards; equal instants use stable contribution identity as the ordering tie-breaker. The browser validates timestamps against the shared source-event contract and retains the source representation. Periods remain half-open, including the start and excluding the end. The API-to-client regressions in `apps/service/test/achievement-timestamps.test.mjs` cover equivalent coverage, insufficient coverage hidden by offsets or fractional precision, ordering, and date-window rejection with synthetic evidence.
 
