@@ -172,10 +172,7 @@ for (const changed of ["withdrawal", "audit"])
             if (sql.includes("SELECT selected.document")) reads++;
             if (sql.startsWith("SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access"))
               finalFence = true;
-            if (
-              finalFence &&
-              sql.includes("UNION SELECT artifact_id AS subject_id FROM leaderboard_pipeline.corrections")
-            ) {
+            if (finalFence && sql.startsWith("SELECT subject_id\n  FROM leaderboard_ingestion.object_suppressions")) {
               finalChecks++;
               assert.equal(reads, 2, "recognition edit must follow both individually authorized snapshot reads");
               h.controlsStore.transaction((state) => {

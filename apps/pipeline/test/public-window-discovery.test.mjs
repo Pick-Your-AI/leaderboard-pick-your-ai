@@ -369,7 +369,7 @@ function finalReadFault(h, change) {
         query: async (sql, params) => {
           const result = await tx.query(sql, params);
           if (sql.includes("SELECT selected.document")) observed.reads++;
-          if (sql.includes("UNION SELECT artifact_id AS subject_id FROM leaderboard_pipeline.corrections")) {
+          if (sql.includes("SELECT subject_id") && sql.includes("UNION SELECT dependency.artifact_id")) {
             observed.authorityQueries++;
             if (observed.authorityQueries === 3) {
               assert.equal(observed.reads, 2, "the edit must follow both complete individually authorized reads");

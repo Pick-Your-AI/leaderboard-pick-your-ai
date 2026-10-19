@@ -210,14 +210,27 @@ test("authorized corrections change lineage once and correction row order cannot
   );
   const second = await frozen(h);
   assert.notEqual(second.backfillRevision, first.backfillRevision);
-  const query = h.db.query.bind(h.db);
-  h.db.query = async (sql, params) => {
-    const result = await query(sql, params);
-    if (sql === "SELECT document FROM leaderboard_pipeline.corrections WHERE repository_id=ANY($1::bigint[])")
+  const query = h.db.query.bind(h.db),
+    transaction = h.db.transaction.bind(h.db),
+    reorderedReads = { materialization: 0, publication: 0 };
+  const reverseCorrections = (sql, result, phase) => {
+    if (sql.startsWith("SELECT c.request_id,c.fact_id,c.artifact_id,c.repository_id,c.document,")) {
+      reorderedReads[phase]++;
       result.rows.reverse();
+    }
     return result;
   };
+  h.db.query = async (sql, params) => reverseCorrections(sql, await query(sql, params), "materialization");
+  // Apply the same permutation to the final locked state recheck: this tests
+  // row-order invariance, not a correction-state change during publication.
+  h.db.transaction = (work) =>
+    transaction((tx) =>
+      work({
+        query: async (sql, params) => reverseCorrections(sql, await tx.query(sql, params), "publication"),
+      }),
+    );
   const reordered = await frozen(h);
+  assert.deepEqual(reorderedReads, { materialization: 1, publication: 1 });
   assert.equal(reordered.backfillRevision, second.backfillRevision);
   assert.deepEqual(
     reordered.facts.filter((item) => item.correctionReceipt).map((item) => item.id),

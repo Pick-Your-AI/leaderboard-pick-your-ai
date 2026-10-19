@@ -54,7 +54,7 @@ export class ScanContinuationStore {
       fail("pipeline_scan_source_changed");
   }
 
-  async claim(requested, assertAuthorized, currentCutoff, scopeKeysAt) {
+  async claim(requested, assertAuthorized, currentCutoff, scopeKeysAt, preparePlan = null) {
     return this.db.transaction(async (tx) => {
       assertAuthorized();
       const token = randomUUID();
@@ -70,7 +70,8 @@ export class ScanContinuationStore {
         ])
       ).rows[0];
       await this.assertSources(tx, requested);
-      if (inserted.rows.length || row.context_hash !== requested.contextHash) {
+      const fresh = Boolean(inserted.rows.length || row.context_hash !== requested.contextHash);
+      if (fresh) {
         // Select and validate a new window while holding this context's row.
         // Retried cycles use their saved cutoff without resolving today's window.
         const cutoff = currentCutoff();
@@ -93,8 +94,12 @@ export class ScanContinuationStore {
           )
         ).rows[0];
       }
+      const scan = savedScan(row, requested);
+      // Plan rows and the selected cycle commit together, before any source read.
+      // A resumed token must reload its original plan; it cannot choose new work.
+      if (preparePlan) scan.plan = await preparePlan(tx, scan, { fresh });
       assertAuthorized();
-      return savedScan(row, requested);
+      return scan;
     });
   }
 
