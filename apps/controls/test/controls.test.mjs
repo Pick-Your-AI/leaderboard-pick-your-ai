@@ -1480,6 +1480,16 @@ for (const revoked of ["7", "8"])
     assert.deepEqual(h.store.publicSnapshot(), publicBefore);
   });
 
+function rejectedPromiseWithShadowedMethod(method) {
+  const rejected = Promise.reject(Error("synthetic-private-shadowed-rejection"));
+  Object.defineProperty(rejected, method, {
+    get() {
+      throw Error("synthetic-private-shadowed-method");
+    },
+  });
+  return rejected;
+}
+
 for (const [name, callback] of [
   ["missing", undefined],
   ["false", () => false],
@@ -1504,6 +1514,46 @@ for (const [name, callback] of [
     () => ({
       get then() {
         throw Error("synthetic-private-then-error");
+      },
+    }),
+  ],
+  ["rejected promise with throwing then getter", () => rejectedPromiseWithShadowedMethod("then")],
+  [
+    "thrown rejected promise with throwing then getter",
+    () => {
+      throw rejectedPromiseWithShadowedMethod("then");
+    },
+  ],
+  ["rejected promise with throwing catch getter", () => rejectedPromiseWithShadowedMethod("catch")],
+  [
+    "fulfilled promise with changed payload",
+    () => {
+      const payload = {};
+      const fulfilled = Promise.resolve(payload);
+      Object.defineProperty(payload, "then", {
+        get() {
+          throw Error("synthetic-private-changed-payload");
+        },
+      });
+      Object.defineProperty(fulfilled, "then", {
+        get() {
+          throw Error("synthetic-private-shadowed-method");
+        },
+      });
+      return fulfilled;
+    },
+  ],
+  [
+    "fulfilled thenable with changed payload",
+    () => ({
+      then(resolve) {
+        const payload = {};
+        resolve(payload);
+        Object.defineProperty(payload, "then", {
+          get() {
+            throw Error("synthetic-private-changed-thenable-payload");
+          },
+        });
       },
     }),
   ],

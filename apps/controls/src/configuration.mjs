@@ -245,7 +245,23 @@ export function createConfigurationManager({
   const metricIds = new Set(knownMetricIds);
   function drainUnexpectedPromise(value) {
     try {
-      if (value && typeof value.then === "function") void Promise.resolve(value).catch(() => undefined);
+      // Native promises may shadow then/catch; attach through the intrinsic first.
+      // Discard fulfilled values so a changed payload cannot reject the drained child.
+      void Promise.prototype.then.call(
+        value,
+        () => undefined,
+        () => undefined,
+      );
+      return;
+    } catch {
+      // Fall back to guarded thenable assimilation.
+    }
+    try {
+      if (value && typeof value.then === "function")
+        void Promise.resolve(value).then(
+          () => undefined,
+          () => undefined,
+        );
     } catch {
       // Provider details are private, including errors from a then getter.
     }
