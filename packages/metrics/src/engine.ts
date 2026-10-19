@@ -413,6 +413,16 @@ const uncertaintyReasons = new Set([
   "conflicting_policy_unit",
 ]);
 const hasUncertainty = (prepared: Prepared) => prepared.audit.some((entry) => uncertaintyReasons.has(entry.reason));
+function validMembershipIdentifiers(ids: readonly unknown[]): boolean {
+  const seen = new Set<string>();
+  for (let index = 0; index < ids.length; index++) {
+    if (!Object.hasOwn(ids, index)) return false;
+    const id = ids[index];
+    if (typeof id !== "string" || !id.trim() || seen.has(id)) return false;
+    seen.add(id);
+  }
+  return true;
+}
 function prepare(
   input: FrozenInput,
   policy: MetricPolicy,
@@ -474,7 +484,7 @@ function prepare(
         (context.projectScope !== undefined && !Array.isArray(context.projectScope)) ||
         (context.workstreamScope !== undefined && !Array.isArray(context.workstreamScope)) ||
         [context.projects, context.workstreams, context.projectScope ?? [], context.workstreamScope ?? []].some(
-          (ids) => ids.some((id) => typeof id !== "string" || !id.trim()) || new Set(ids).size !== ids.length,
+          (ids) => !validMembershipIdentifiers(ids),
         ) ||
         (context.projectScope !== undefined && context.projects.some((id) => !context.projectScope!.includes(id))) ||
         (context.workstreamScope !== undefined &&
@@ -825,7 +835,7 @@ export function selectAcceptedActivityFacts(
   // Breadth retains each release-time source unit and its historical mapping.
   // Lifetime PR-work conservation belongs to the release total, not this selector.
   // Breadth treats omitted historical mapping markers as unknown, including
-  // negative filter matches. Existing board/portfolio compatibility is unchanged.
+  // negative filter matches. Existing board/portfolio legacy-marker handling is unchanged.
   const prepared = prepare(input, { ...policy, dateBasis: "occurredAt" }, scope, false, true);
   const facts: MetricFact[] = [];
   for (const fact of prepared.facts) {

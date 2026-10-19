@@ -144,6 +144,52 @@ const completeCoverage = (repositoryIds = ["9001", "9002", "9003"]) =>
   }));
 const lineageFrom = (output) => output.lineage.map((link) => ({ ...link, verified: true, observedAt }));
 
+for (const [field, id] of [
+  ["projects", "PVT_synthetic_one"],
+  ["workstreams", "engineering"],
+  ["projectScope", "PVT_synthetic_one"],
+  ["workstreamScope", "engineering"],
+]) {
+  for (const [shape, createIds] of [
+    ["single hole", () => new Array(1)],
+    ["leading hole", () => [, id]],
+    ["trailing hole", () => Object.assign(new Array(2), { 0: id })],
+    [
+      "inherited identifier",
+      () => Object.setPrototypeOf(new Array(1), Object.assign(Object.create(Array.prototype), { 0: id })),
+    ],
+    ["explicit undefined", () => [undefined]],
+  ]) {
+    test(`breadth membership rejects ${field} with ${shape}`, () => {
+      const out = normalized();
+      const ids = createIds();
+      // Deliberately malformed frozen-engine inputs, after real normalization
+      // and recognition. An absent slot cannot assert a known membership.
+      for (const fact of out.facts) {
+        fact.eventContext = {
+          ...fact.eventContext,
+          ...(field === "projectScope" ? { projects: [] } : {}),
+          ...(field === "workstreamScope" ? { workstreams: [] } : {}),
+          [field]: ids,
+        };
+      }
+      const input = frozen([out], { coverage: completeCoverage() });
+      const before = stableJSON(input);
+      assert.throws(() => calculate(input), { message: "Invalid membership context" });
+      assert.equal(stableJSON(input), before);
+      assert.equal(input.facts[0].eventContext[field], ids);
+    });
+  }
+  test(`breadth membership preserves dense frozen ${field}`, () => {
+    const input = frozen([normalized()], { coverage: completeCoverage() });
+    const expected = calculate(input);
+    for (const fact of input.facts) Object.freeze(fact.eventContext[field]);
+    const before = stableJSON(input);
+    assert.deepEqual(calculate(input), expected);
+    assert.equal(stableJSON(input), before);
+  });
+}
+
 test("repositories: accepted source activities count distinct stable repositories and retain all proofs", () => {
   const outputs = [normalized(), normalized({ number: 2 }), normalized({ repo: 9002, number: 3 })];
   const result = calculate(frozen(outputs));

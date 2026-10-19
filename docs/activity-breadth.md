@@ -92,6 +92,11 @@ never becomes an invented workstream ID or an assertion that the actor supported
 no workstream. Current context cannot fill that gap. Existing bounded mapping
 validation and filtered unknown-versus-known-negative behavior are reused.
 
+Each Project, workstream and mapping-scope array must contain distinct, non-empty
+strings in every own array slot. Sparse holes, inherited identifiers and explicit
+missing values are invalid membership contexts, rather than evidence of a known
+mapping. Valid dense frozen arrays remain supported without changing the input.
+
 | Admitted workstream evidence | Value and state |
 | --- | --- |
 | Two known IDs with complete source coverage and complete mappings | `2`, measured |
@@ -151,9 +156,9 @@ the breadth engine. They cover accepted versus raw activity, repository identity
 overlapping Projects, historical versus current context, unknown/empty mappings,
 verified copies, frozen lineage, event-time boundaries, reviewed corrections,
 suppression, automation, source-policy separation and immutable replay. Explicit
-malformed engine fixtures exercise receipt, identity and missing or invalid sum
-quantity admission; they are not
-claimed as provider observations.
+malformed engine fixtures exercise receipt, identity, membership-array ownership
+and missing or invalid sum quantity admission; they are not claimed as provider
+observations.
 
 [The release integration cases](../packages/metrics/test/breadth-release-events.test.js)
 use the actual release collector and recognition adapter with synthetic HTTP
