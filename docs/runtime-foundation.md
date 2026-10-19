@@ -36,6 +36,8 @@ Prototype route links, the guide's displayed example URLs, and the live-wall con
 
 The sample database credentials are for loopback development only. These local database commands reject non-local hosts and names that do not end in `_dev` or `_test`; they do not accept production connection strings.
 
+The commands also reject NUL characters in normalized connection fields before constructing a PostgreSQL client: a decoded NUL can add a startup parameter that selects a different database. Query parameters are decoded once, so double-escaped text such as `%2500` remains literal `%00`; ignored URL fragments remain allowed. Raw TAB/LF/CR escape forms whose normalized URL view contains NUL are rejected as ambiguous input, even when the current driver re-encodes those forms as literal text.
+
 ## Synthetic fixture and migration workflow
 
 Fixtures live under `tests/fixtures/` and are fictional, explicitly marked, cross-project samples. They contain no real people, emails, repositories, or contributor evidence. Importing them requires `ALLOW_SYNTHETIC_FIXTURES=1` and a loopback database whose name ends in `_dev` or `_test`:
