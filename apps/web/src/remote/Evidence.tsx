@@ -1,4 +1,4 @@
-import { publicMaintenanceClassificationReasons } from "@pick-your-ai/contracts";
+import { publicMaintenanceClassificationReasons, publicDocumentationRecognitionReasons } from "@pick-your-ai/contracts";
 import React, { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { publicLink, ReadFailure, uiHref, type Evidence, type Selection } from "./client.ts";
@@ -38,8 +38,20 @@ export function Receipt({ value, selected }: { value: Evidence; selected: Select
   } catch {
     maintenanceKinds = null;
   }
+  const documentation = value.contribution.metricIds.includes("documentation");
+  let authoredNotes: boolean | null = false;
+  try {
+    authoredNotes = publicDocumentationRecognitionReasons(value.contribution).includes(
+      "documentation_purpose:release_notes",
+    );
+  } catch {
+    authoredNotes = null;
+  }
   const visibleReasons = value.contribution.reasonCodes.filter(
-    (reason) => !reason.startsWith("maintenance_kind:") && !reason.startsWith("maintenance_classification_policy:"),
+    (reason) =>
+      !reason.startsWith("maintenance_kind:") &&
+      !reason.startsWith("maintenance_classification_policy:") &&
+      !reason.startsWith("documentation_purpose:"),
   );
   return (
     <dl className="receipt" data-evidence-body>
@@ -130,6 +142,18 @@ export function Receipt({ value, selected }: { value: Evidence; selected: Select
             ) : (
               "Not established; omitted kinds remain unknown."
             )}
+          </dd>
+        </>
+      )}
+      {documentation && (
+        <>
+          <dt>Reviewed documentation purpose</dt>
+          <dd>
+            {authoredNotes === null
+              ? "Purpose unavailable: inconsistent public proof."
+              : authoredNotes
+                ? "Authored release notes. This describes the same documentation contribution; it does not establish release publication or coordination."
+                : "Purpose not established; omission remains unknown."}
           </dd>
         </>
       )}

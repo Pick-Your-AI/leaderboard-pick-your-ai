@@ -1,4 +1,4 @@
-import { publicMaintenanceClassificationReasons } from "@pick-your-ai/contracts";
+import { publicMaintenanceClassificationReasons, documentationPurposeVersion } from "@pick-your-ai/contracts";
 import { validatePublicationPeriods, publicScopeFromTemplate } from "./publication-windows.mjs";
 import {
   resolveDiscoverablePublicationWindows,
@@ -309,13 +309,29 @@ export async function createPipeline(options) {
   ]);
   // A newly selected release must collect its own proof even when the PR's
   // ordinary source revision and metric arithmetic remain unchanged.
-  const normalizationSignature = config.releaseInclusionTargets?.length
+  const previousPurposeNormalizationSignature = config.releaseInclusionTargets?.length
     ? digest([
         dataMode === "public" ? "github-release-inclusion/v2" : "github-release-inclusion/v1",
         projectNormalizationSignature,
         config.releaseInclusionTargets,
       ])
     : projectNormalizationSignature;
+  // Older hosts could retain this complete policy while ignoring its optional
+  // notes paths. Reclassify selected sources without overwriting frozen rows.
+  const selectedDocumentationPurpose = classificationPolicies.documentation.some(
+    (policy) => policy.releaseNotesPaths !== undefined,
+  );
+  const normalizationSignature = selectedDocumentationPurpose
+    ? digest([documentationPurposeVersion, previousPurposeNormalizationSignature])
+    : previousPurposeNormalizationSignature;
+  const previousPurposeReviewNormalizationSignature = digest([
+    reviewSourceNormalizationVersion,
+    previousPurposeNormalizationSignature,
+  ]);
+  const previousPurposeDiscussionNormalizationSignature = digest([
+    discussionSourceNormalizationVersion,
+    previousPurposeNormalizationSignature,
+  ]);
   // Family-specific source rules have separate immutable cache generations.
   const reviewNormalizationSignature = digest([reviewSourceNormalizationVersion, normalizationSignature]);
   const discussionNormalizationSignature = digest([discussionSourceNormalizationVersion, normalizationSignature]);
@@ -373,6 +389,15 @@ export async function createPipeline(options) {
     attributionNormalizationSignature,
     normalizationPolicySignature,
   ];
+  if (selectedDocumentationPurpose)
+    frozenNormalizationSignatures.push(
+      previousPurposeNormalizationSignature,
+      previousPurposeReviewNormalizationSignature,
+      previousPurposeDiscussionNormalizationSignature,
+      defaultDeliverySignature(previousPurposeNormalizationSignature),
+      defaultDeliverySignature(previousPurposeReviewNormalizationSignature),
+      defaultDeliverySignature(previousPurposeDiscussionNormalizationSignature),
+    );
   if (classificationPolicies.documentation.length) {
     const previousDocumentationSignature = digest(["documentation-locales/v1", attributionNormalizationSignature]);
     // Both historical locale formats bind the complete active classification.
@@ -911,7 +936,7 @@ export async function createPipeline(options) {
           sources,
           // Selected release proofs use the PR delivery generation. Retire an older
           // frozen scan before collecting a newly required normalization generation.
-          ...(dataMode === "public" && config.releaseInclusionTargets?.length
+          ...(dataMode === "public" && (config.releaseInclusionTargets?.length || selectedDocumentationPurpose)
             ? [defaultDeliverySignature(normalizationSignature)]
             : []),
         ],
@@ -1368,6 +1393,15 @@ export async function createPipeline(options) {
       const deliverySignature = defaultDeliverySignature(baseSignature);
       const previousBaseSignatures = [
         ...new Set([
+          ...(selectedDocumentationPurpose
+            ? [
+                row.family === "reviews"
+                  ? previousPurposeReviewNormalizationSignature
+                  : row.family === "discussions"
+                    ? previousPurposeDiscussionNormalizationSignature
+                    : previousPurposeNormalizationSignature,
+              ]
+            : []),
           row.family === "reviews"
             ? previousReviewNormalizationSignature
             : row.family === "discussions"

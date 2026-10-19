@@ -263,6 +263,11 @@ export {
 } from "./comment-identity.js";
 
 export {
+  validateDocumentationPurposeSource,
+  type VerifiedDocumentationPurposeSource,
+} from "./documentation-purpose.js";
+
+export {
   parseMaintenanceClassification,
   validateMaintenanceClassification,
   type MaintenanceClassificationRecord,

@@ -30,6 +30,7 @@ import {
   verifyGithubRestSnapshotRevision,
 } from "./rest-snapshot.js";
 import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
+import { validateDocumentationPurposeSource } from "./documentation-purpose.js";
 import {
   validateMaintenanceClassification,
   type MaintenanceClassificationRecord,
@@ -1280,6 +1281,8 @@ export function normalizeGithubObservation(
         evidence.sourceRevision = integration.after;
         evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
         evidence.contribution.reasonCodes.push(`documentation_path_policy:${documentationPolicy.version}`);
+        if (classification.releaseNotes)
+          evidence.contribution.reasonCodes.push("documentation_purpose_candidate:release_notes");
       }
       for (const { locale, category } of classification.localizations) {
         const fact = emit(
@@ -1381,6 +1384,8 @@ export interface VerifiedRecognitionReceipt {
   releaseInclusion?: GithubReleaseReviewTarget;
   /** Optional private, source-bound positive facets; never additional counted units. */
   maintenanceClassification?: MaintenanceClassificationRecord;
+  /** Reviewed authored notes on this original pinned documentation PR; no new unit. */
+  documentationPurpose?: "release_notes";
 }
 const receiptMetrics = new Set([
   "catalog_proposals",
@@ -1492,6 +1497,21 @@ export function applyRecognitionReceipt(
     receipt.maintenanceClassification === undefined
       ? null
       : validateMaintenanceClassification(input, target.id, receipt.acceptedAt, receipt.maintenanceClassification);
+  if (
+    receipt.documentationPurpose !== undefined &&
+    (receipt.documentationPurpose !== "release_notes" ||
+      receipt.metricId !== "documentation" ||
+      receipt.decision !== "accepted" ||
+      receipt.evidenceIds.length !== 1 ||
+      receipt.evidenceIds[0] !== target.id)
+  )
+    throw new Error("documentation_purpose_source_unverified");
+  const documentationPurpose =
+    receipt.documentationPurpose === undefined
+      ? null
+      : validateDocumentationPurposeSource(input, target.id, receipt.acceptedAt);
+  if (documentationPurpose && receipt.sourceRevision !== documentationPurpose.evidence.sourceRevision)
+    throw new Error("documentation_purpose_source_unverified");
   const release =
     receipt.metricId === "release_changes"
       ? validateReleaseChangesSource(input, target.id, receipt.acceptedAt, receipt.releaseInclusion)
@@ -1500,11 +1520,13 @@ export function applyRecognitionReceipt(
     throw new Error("release_inclusion_source_unverified");
   const unit = release
     ? release.membershipUnit
-    : mergedChange
-      ? mergedChange.unit
-      : receipt.metricId === "localization"
-        ? target.canonicalKey
-        : (receipt.changesetId ?? target.canonicalKey);
+    : documentationPurpose
+      ? documentationPurpose.unit
+      : mergedChange
+        ? mergedChange.unit
+        : receipt.metricId === "localization"
+          ? target.canonicalKey
+          : (receipt.changesetId ?? target.canonicalKey);
   if (receipt.metricId === "localization" && target.state !== "observed")
     throw new Error("Localization acceptance must target its original observed source fact");
   if (
@@ -1545,7 +1567,7 @@ export function applyRecognitionReceipt(
       ...structuredClone(evidence),
       occurredAt: release
         ? release.record.release.publishedAt
-        : receipt.metricId === "localization" || mergedChange
+        : receipt.metricId === "localization" || mergedChange || documentationPurpose
           ? target.occurredAt
           : fact.acceptedAt,
       ...(release
@@ -1575,6 +1597,14 @@ export function applyRecognitionReceipt(
         qualification: receipt.decision === "accepted" ? "eligible" : "ineligible",
         reasonCodes: [
           "independent_recognition_receipt",
+          ...(documentationPurpose
+            ? [
+                "domain_metric:documentation",
+                "domain_clock:merged_at",
+                "domain_authorship:authored",
+                "documentation_purpose:release_notes",
+              ]
+            : []),
           ...(maintenanceClassification
             ? [
                 `maintenance_classification_policy:${maintenanceClassificationVersion}`,

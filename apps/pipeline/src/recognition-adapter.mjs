@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import { compareSourceInstants, sourceEventSchema, maintenanceClassificationVersion } from "@pick-your-ai/contracts";
+import {
+  compareSourceInstants,
+  sourceEventSchema,
+  maintenanceClassificationVersion,
+  documentationPurposeVersion,
+} from "@pick-your-ai/contracts";
 import {
   validateAutomationSource,
   validateMaintenanceSource,
@@ -9,6 +14,7 @@ import {
   qualifyMaintenanceClassification,
   validateMaintenanceClassificationBinding,
 } from "./maintenance-classification.mjs";
+import { qualifyDocumentationPurpose, validateDocumentationPurposeBinding } from "./documentation-purpose.mjs";
 import { domainDateBasis, qualifyDomainRecognition } from "./domain-recognition.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
 import { releaseReviewRequest, parseReleaseReviewTarget } from "../../controls/src/release-review.mjs";
@@ -22,7 +28,10 @@ import {
 // Private controls only. Never accept a public claim projection as authentication.
 export function recognitionFingerprint(state, bindings = []) {
   // An unsupported opt-in cannot keep an old saved hash current without rematerialization.
-  for (const binding of bindings) validateMaintenanceClassificationBinding(binding);
+  for (const binding of bindings) {
+    validateMaintenanceClassificationBinding(binding);
+    validateDocumentationPurposeBinding(binding);
+  }
   const requests = Object.values(state.requests ?? {})
     .filter((r) => r.kind === "evidence")
     .sort((a, b) => a.id.localeCompare(b.id));
@@ -64,6 +73,8 @@ export function recognitionFingerprint(state, bindings = []) {
   // and every unrelated binding keep their exact established fingerprint format.
   if (bindings.some((binding) => binding.metricId === "maintenance" && binding.maintenanceClassification !== undefined))
     authority.push(maintenanceClassificationVersion);
+  if (bindings.some((binding) => binding.documentationPurpose !== undefined))
+    authority.push(documentationPurposeVersion);
   // Tooling receipts independently require verified merged participation as well.
   if (bindings.some((binding) => binding.metricId === "automation")) authority.push("automation-merged-participant/v1");
   // Older generic operations receipts lack the current source, public artifact
@@ -88,6 +99,7 @@ export function materializeRecognition(
   cutoff,
   publicReasons = () => [],
 ) {
+  for (const binding of bindings) validateDocumentationPurposeBinding(binding);
   let output = structuredClone(input);
   const domainUnits = new Set();
   const mergedChangeUnits = new Set();
@@ -330,6 +342,16 @@ export function materializeRecognition(
       acceptedAt,
       cutoff,
     });
+    const documentationPurpose = qualifyDocumentationPurpose({
+      input,
+      binding,
+      request,
+      decision,
+      candidate: candidates[0],
+      acceptedAt,
+      domain,
+    });
+    if (documentationPurpose) domain.publicReasonCodes.push("documentation_purpose:release_notes");
     if (domain?.reviewedArtifact) {
       const { url, hash } = domain.reviewedArtifact;
       const previous = reviewedOperationArtifacts.get(url);
@@ -370,6 +392,9 @@ export function materializeRecognition(
         ...(localeTarget ? { sourceRevision: localeTarget.sourceRevision } : {}),
         ...(releaseTarget ? { releaseInclusion: releaseTarget } : {}),
         ...(maintenanceClassification ? { maintenanceClassification } : {}),
+        ...(documentationPurpose
+          ? { documentationPurpose: documentationPurpose.purpose, sourceRevision: documentationPurpose.sourceRevision }
+          : {}),
       },
       binding.reviewerIds,
     );

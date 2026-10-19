@@ -272,6 +272,10 @@ timelines. This projection requires the complete existing explanation and an
 accepted-work marker; it never invents missing labels or copies private values.
 It is separate from the explicit path-policy and locale classification contract,
 so preserving documentation explanations cannot qualify or retarget a locale.
+The optional [authored release-notes purpose](authored-release-notes.md) requires
+its separately selected source path and exact current private review. It retains
+the same documentation unit and merge clock, with one fixed public purpose code;
+it does not establish publication or release coordination.
 
 Accepted reproduction proof retains a complete fixed metric/acceptance-clock
 explanation, the explicit observed outcome and

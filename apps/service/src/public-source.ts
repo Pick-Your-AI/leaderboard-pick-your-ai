@@ -443,6 +443,8 @@ export function projectRead(
         checkVisibility(visibilityByArtifact, parsed.artifactId, artifact.visibility);
         const classification = publicDocumentationReasons(parsed);
         const maintenance = publicMaintenanceClassificationReasons(parsed);
+        const documentation = publicDocumentationRecognitionReasons(parsed);
+        const documentationPurpose = documentation.filter((reason) => reason.startsWith("documentation_purpose:"));
         const activityState = (entry as Partial<PortfolioEvidence>).activityState;
         if (
           parsed.metricIds.includes("reproductions") &&
@@ -490,7 +492,7 @@ export function projectRead(
                     ].includes(reason),
                   ),
                   ...classification,
-                  ...publicDocumentationRecognitionReasons(parsed),
+                  ...documentation,
                   ...reproduction,
                   ...maintenance,
                 ],
@@ -531,6 +533,31 @@ export function projectRead(
         if (!date(entry.occurredAt) || (entry.sourceRevision !== null && !id(entry.sourceRevision))) return reject();
         const metadata =
           entry.evidenceMetadata === undefined ? undefined : publicEvidenceMetadataSchema.parse(entry.evidenceMetadata);
+        if (documentationPurpose.length) {
+          const repository = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/pull\/[1-9][0-9]*$/.exec(
+            artifact.publicUrl ?? "",
+          )?.[1];
+          if (
+            parsed.qualification !== "eligible" ||
+            parsed.roles.length !== 1 ||
+            parsed.roles[0] !== "author" ||
+            artifact.source !== "github" ||
+            artifact.kind !== "pull_request" ||
+            (activityState !== undefined && activityState !== "accepted") ||
+            typeof entry.sourceRevision !== "string" ||
+            !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(entry.sourceRevision) ||
+            !repository ||
+            entry.sourceRevisionUrl !== "https://github.com/" + repository + "/commit/" + entry.sourceRevision ||
+            entry.occurredAt === null ||
+            (metadata &&
+              (metadata.activityState !== "accepted" ||
+                metadata.sourceOccurredAt === null ||
+                compareSourceInstants(metadata.sourceOccurredAt, entry.occurredAt) !== 0 ||
+                metadata.acceptedAt === null ||
+                compareSourceInstants(metadata.acceptedAt, entry.occurredAt) < 0))
+          )
+            return reject();
+        }
         if ((reproduction.length > 0 || maintenance.length > 0) && metadata && metadata.activityState !== "accepted")
           return reject();
         // Absence is part of the metadata projection too: route preference must
@@ -543,6 +570,19 @@ export function projectRead(
           classification: parsed.metricIds.includes("localization") ? classification : null,
           reproduction: parsed.metricIds.includes("reproductions") ? reproduction : null,
           maintenance: parsed.metricIds.includes("maintenance") ? maintenance : null,
+          documentationPurpose: parsed.metricIds.includes("documentation")
+            ? {
+                reasons: documentationPurpose,
+                ...(documentationPurpose.length
+                  ? {
+                      classification,
+                      sourceRevision: entry.sourceRevision,
+                      sourceRevisionUrl: entry.sourceRevisionUrl,
+                      occurredAt: entry.occurredAt,
+                    }
+                  : {}),
+              }
+            : null,
         });
         if (
           metadataByContribution.has(contribution.contributionId) &&

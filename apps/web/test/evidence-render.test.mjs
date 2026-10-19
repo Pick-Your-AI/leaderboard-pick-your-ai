@@ -151,3 +151,48 @@ test("shared Receipt explains reviewed maintenance facets without schema codes o
   assert.match(invalid, /Classification unavailable: inconsistent public proof/);
   assert.doesNotMatch(invalid, /Dependency maintenance|Build fix|Accepted bug fix/);
 });
+
+test("shared Receipt explains authored release notes as the same documentation participation and keeps missing purpose unknown", () => {
+  const value = {
+    ...base,
+    activityState: "accepted",
+    artifact: { ...base.artifact, kind: "pull_request", publicUrl: "https://github.com/synthetic/example/pull/1" },
+    sourceRevision: "c".repeat(40),
+    sourceRevisionUrl: "https://github.com/synthetic/example/commit/" + "c".repeat(40),
+    contribution: {
+      ...base.contribution,
+      roles: ["author"],
+      metricIds: ["documentation"],
+      reasonCodes: [
+        "independent_recognition_receipt",
+        "domain_metric:documentation",
+        "domain_clock:merged_at",
+        "domain_authorship:authored",
+        "documentation_path_policy:notes-v1",
+        "documentation_purpose:release_notes",
+      ],
+    },
+  };
+  const html = render(value);
+  assert.match(html, /Authored release notes/);
+  assert.match(html, /same documentation contribution/);
+  assert.match(html, /does not establish release publication or coordination/);
+  assert.doesNotMatch(html, /documentation_purpose:/);
+  const generic = render({
+    ...value,
+    contribution: {
+      ...value.contribution,
+      reasonCodes: value.contribution.reasonCodes.filter((reason) => !reason.startsWith("documentation_purpose:")),
+    },
+  });
+  assert.match(generic, /Purpose not established; omission remains unknown/);
+  const invalid = render({
+    ...value,
+    contribution: {
+      ...value.contribution,
+      reasonCodes: [...value.contribution.reasonCodes, "documentation_purpose:publication"],
+    },
+  });
+  assert.match(invalid, /Purpose unavailable: inconsistent public proof/);
+  assert.doesNotMatch(invalid, /Authored release notes/);
+});
