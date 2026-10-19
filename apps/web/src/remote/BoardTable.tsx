@@ -2,6 +2,8 @@ import React, { useId, useMemo, useState } from "react";
 import { uiHref, type Board, type Selection } from "./client.ts";
 import { proofHref } from "./proof.ts";
 import { RankMovementValue } from "./RankComparison.tsx";
+import { RankingPresentation } from "./RankingPresentation.tsx";
+import { PhysicalContext, isPhysicalContextMetric } from "./PhysicalContext.tsx";
 import {
   boardColumnOrder,
   boardContributorName,
@@ -25,8 +27,10 @@ export function BoardTable({
   const tableId = useId(),
     helpId = useId();
   const rows = useMemo(() => orderBoardPage(board.rows, order), [board.rows, order]);
+  const physical = isPhysicalContextMetric(board.metric.id);
   return (
     <>
+      <RankingPresentation board={board} />
       <div className="remote-filters">
         <label>
           Sort current page
@@ -79,7 +83,7 @@ export function BoardTable({
                 Value and state
               </th>
               <th scope="col" role="columnheader">
-                Evidence
+                {physical ? "Evidence and change size" : "Evidence"}
               </th>
             </tr>
           </thead>
@@ -102,7 +106,7 @@ export function BoardTable({
                 <td role="cell" data-label="Value">
                   {renderValue(row)}
                 </td>
-                <td role="cell" data-label="Evidence">
+                <td role="cell" data-label={physical ? "Evidence and change size" : "Evidence"}>
                   {row.evidenceIds.length
                     ? row.evidenceIds.map((id) => (
                         <p key={id}>
@@ -112,6 +116,7 @@ export function BoardTable({
                         </p>
                       ))
                     : "No evidence IDs supplied"}
+                  {physical && <PhysicalContext context={row.physicalContext} metricId={board.metric.id} />}
                 </td>
               </tr>
             ))}

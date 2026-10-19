@@ -16,6 +16,7 @@ import {
 } from "@pick-your-ai/contracts";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { comparePublishedRanks, type ComparedRanks } from "./rank-comparison.js";
+import { rankingPresentation } from "./ranking-presentation.js";
 import { acceptedAchievements, ACHIEVEMENT_RULE_VERSION } from "./achievements.js";
 import { acceptedMilestones } from "./achievement-milestones.js";
 import { renderContributorCard, renderContributorCardImage } from "./cards.js";
@@ -425,6 +426,8 @@ export function createService(options: ServiceOptions = {}) {
   function ranked(read: PublicRead, metric: string) {
     const actors = new Map(read.selected.actors.map((actor) => [actor.actorId, actor.actor]));
     const policy = read.selected.ranking.find((entry) => entry.metricId === metric);
+    const presentation = rankingPresentation(read, metric);
+    const showRanks = presentation === null ? policy?.rank !== false : presentation.state === "ranked";
     const direction = policy?.direction;
     const ordered = read.selected.rows
       .filter((row) => row.result.metricId === metric)
@@ -441,17 +444,18 @@ export function createService(options: ServiceOptions = {}) {
               : direction === "ascending"
                 ? av - bv
                 : bv - av;
-        return (policy?.rank === false ? 0 : delta) || (a.actorId < b.actorId ? -1 : a.actorId > b.actorId ? 1 : 0);
+        return (showRanks ? delta : 0) || (a.actorId < b.actorId ? -1 : a.actorId > b.actorId ? 1 : 0);
       });
     let rank = 0;
     return ordered.map((row, index) => {
       if (index === 0 || row.result.value !== ordered[index - 1]?.result.value) rank++;
       return {
-        rank: policy?.rank === false || row.result.value === undefined ? null : rank,
+        rank: !showRanks || row.result.value === undefined ? null : rank,
         actorId: row.actorId,
         actor: actors.get(row.actorId),
         result: row.result,
         evidenceIds: row.evidenceIds,
+        ...(row.physicalContext === undefined ? {} : { physicalContext: row.physicalContext }),
         ...(row.pending === undefined ? {} : { pending: row.pending }),
       };
     });
@@ -579,6 +583,9 @@ export function createService(options: ServiceOptions = {}) {
       ...(compared ? { comparison: compared.comparison } : {}),
       metric: definition(q.metric),
       ranking: read.selected.ranking.find((entry) => entry.metricId === q.metric) ?? null,
+      ...(read.selected.rankingPresentationPolicy === undefined
+        ? {}
+        : { rankingPresentation: rankingPresentation(read, q.metric) }),
       diagnostics:
         read.selected.diagnostics?.filter(
           (entry) => entry.metricId === q.metric && page.some((row) => row.actorId === entry.actorId),

@@ -9,6 +9,7 @@ import {
   stableJSON,
 } from "../../../packages/metrics/dist/index.js";
 import { createService } from "../dist/app.js";
+import { currentRankingPresentationPolicy } from "@pick-your-ai/contracts";
 import { comparePublishedRanks } from "../dist/rank-comparison.js";
 const beforeAt = "2026-10-17T00:00:00.000Z",
   afterAt = "2026-10-18T00:00:00.000Z";
@@ -41,7 +42,12 @@ const coverage = {
   permissionsMissing: [],
   sourceErrors: [],
 };
-const actors = ["a", "b", "c"].map((id) => ({ id, login: `synthetic-${id}`, kind: "user", publicState: "visible" }));
+const actors = ["a", "b", "c", "d", "e", "f", "g"].map((id) => ({
+  id,
+  login: `synthetic-${id}`,
+  kind: "user",
+  publicState: "visible",
+}));
 const fact = (id, actorId, at = "2026-10-10T00:00:00.000Z", patch = {}) => ({
   id,
   canonicalKey: `synthetic-action-${id}`,
@@ -63,7 +69,17 @@ const fact = (id, actorId, at = "2026-10-10T00:00:00.000Z", patch = {}) => ({
   currentContext: null,
   ...patch,
 });
-const oldFacts = [fact("a1", "a"), fact("a2", "a"), fact("b1", "b")];
+// The display-policy cohort stays large enough that these tests still exercise
+// each original history/coverage/privacy guard instead of an earlier size denial.
+const oldFacts = [
+  fact("a1", "a"),
+  fact("a2", "a"),
+  fact("b1", "b"),
+  fact("d1", "d"),
+  fact("e1", "e"),
+  fact("f1", "f"),
+  fact("g1", "g"),
+];
 const fresh = [
   fact("b2", "b", "2026-10-17T12:00:00.000Z"),
   fact("b3", "b", "2026-10-17T12:00:00.000Z"),
@@ -170,6 +186,7 @@ function published(id, revision, cutoff, facts) {
         })),
       ),
       ranking: [{ metricId: "pr_merged", direction: "descending", rank: true }],
+      rankingPresentationPolicy: structuredClone(currentRankingPresentationPolicy),
       methodology: [
         {
           metricId: "pr_merged",
@@ -264,7 +281,7 @@ test("a descriptive baseline violation withholds comparison while preserving val
     assert.deepEqual(body.comparison, { snapshotId: null, scope: null, generatedAt: null });
     assert.deepEqual(
       body.rows.map((row) => row.result.value).sort((a, b) => a - b),
-      [1, 2, 3],
+      [1, 1, 1, 1, 1, 2, 3],
     );
     for (const row of body.rows) {
       assert.equal(row.rank, null);
@@ -302,6 +319,10 @@ test("actual retained engine rolling scopes yield public movement and new entran
       ["b", 1, "comparable", 1],
       ["a", 2, "comparable", -1],
       ["c", 3, "new_entrant", null],
+      ["d", 3, "comparable", -1],
+      ["e", 3, "comparable", -1],
+      ["f", 3, "comparable", -1],
+      ["g", 3, "comparable", -1],
     ],
   );
   assert.deepEqual(h.calls, ["pair"]);
@@ -331,7 +352,7 @@ test("an existing provider without atomic comparison support keeps its current b
   assert.equal(response.statusCode, 200, response.body);
   assert.deepEqual(
     response.json().rows.map((row) => row.result.value),
-    [3, 2, 1],
+    [3, 2, 1, 1, 1, 1, 1],
   );
   assert.ok(
     response
@@ -575,6 +596,10 @@ for (const side of ["current", "previous"]) {
             ["b", 3],
             ["a", 2],
             ["c", 1],
+            ["d", 1],
+            ["e", 1],
+            ["f", 1],
+            ["g", 1],
           ],
         );
         if (boundary === "exact end")
@@ -584,6 +609,10 @@ for (const side of ["current", "previous"]) {
               ["b", "comparable", 1],
               ["a", "comparable", -1],
               ["c", "new_entrant", null],
+              ["d", "comparable", -1],
+              ["e", "comparable", -1],
+              ["f", "comparable", -1],
+              ["g", "comparable", -1],
             ],
           );
         else
@@ -614,7 +643,7 @@ for (const side of ["current", "previous"]) {
       const rows = response.json().rows;
       assert.deepEqual(
         rows.map((row) => row.result.value),
-        [3, 2, 1],
+        [3, 2, 1, 1, 1, 1, 1],
       );
       if (boundary === "exact end") assert.equal(rows[0].movement.delta, 1);
       else

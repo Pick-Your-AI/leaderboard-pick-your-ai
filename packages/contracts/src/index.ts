@@ -114,6 +114,36 @@ export {
 export type { PublicEvidenceAction, PublicEvidenceHistory, PublicEvidenceMetadata } from "./v1/evidence-metadata.js";
 export { publicDocumentationReasons, publicDocumentationRecognitionReasons } from "./documentation-reasons.js";
 export { publicReproductionRecognitionReasons } from "./reproduction-reasons.js";
+export {
+  physicalContextVersion,
+  physicalClassifierVersion,
+  physicalMetricIds,
+  physicalFileClasses,
+  physicalSummarySchema,
+  githubPhysicalContextReceiptSchema,
+  type PhysicalSummary,
+  type GithubPhysicalContextReceipt,
+} from "./physical-context.js";
+export {
+  rankingPresentationVersion,
+  rankingPresentationPolicySchema,
+  currentRankingPresentationPolicy,
+  rankingPresentationSchema,
+  type RankingPresentationPolicy,
+  type RankingPresentation,
+} from "./ranking-presentation.js";
+export {
+  publicPhysicalContextVersion,
+  physicalContextLimits,
+  physicalContextUnknownReasonSchema,
+  physicalSnapshotContextSchema,
+  publicPhysicalContextSchema,
+  physicalMetricTotal,
+  bindPublicPhysicalContext,
+  type PhysicalSnapshotContext,
+  type PublicPhysicalContext,
+  type PhysicalContextUnknownReason,
+} from "./physical-presentation.js";
 
 export {
   publicWindowsSchemaVersion,

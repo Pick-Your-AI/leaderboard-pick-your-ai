@@ -18,7 +18,10 @@ import {
   type PublicEvidenceMetadata,
   type PublicEvidenceHistory,
   type PublicEvidenceAction,
+  physicalMetricIds,
+  type GithubPhysicalContextReceipt,
 } from "@pick-your-ai/contracts";
+import { physicalContextReceipt } from "./physical-context.js";
 import { GithubReadClient } from "./client.js";
 import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
@@ -232,6 +235,8 @@ export interface NormalizedGithubResult {
   lineage: GithubLineage[];
   suppressArtifactIds: string[];
   physicalDiff?: ClassifiedPhysicalDiff;
+  /** Private immutable integration context; absent legacy evidence stays unknown. */
+  physicalContext?: GithubPhysicalContextReceipt;
   /** Private current association; it never creates an action or historical attribution. */
   projectContext?: NormalizedProjectContext;
   participation: Array<{
@@ -1172,6 +1177,21 @@ export function normalizeGithubObservation(
     for (const evidence of out.evidence.filter((entry) => entry.contribution.metricIds.includes("pr_merged"))) {
       evidence.sourceRevision = integration.after;
       evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
+    }
+    if (author && at === mergedRevisionTime) {
+      const receipt = physicalContextReceipt({
+        repositoryId: String(repository.id),
+        artifactId: id,
+        actorId: author.id,
+        canonicalIntegrationId: integration.canonicalChangeId,
+        before: integration.before,
+        after: integration.after,
+        targetBranch: integration.targetBranch,
+        integratedAt: mergedRevisionTime,
+        diff: out.physicalDiff,
+        facts: out.facts.filter((fact) => (physicalMetricIds as readonly string[]).includes(fact.metricId)),
+      });
+      if (receipt) out.physicalContext = receipt;
     }
   }
   if (documentationPolicy && envelope.family === "pull_request") {

@@ -15,11 +15,13 @@ import { recognitionFingerprint, materializeRecognition } from "./recognition-ad
 import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
 import { AggregateExplanationStore } from "./aggregate-explanations.mjs";
 import { assertPipelineSourcesNotRetired } from "./derived-retirement.mjs";
-import { requireThat } from "../../controls/src/store.mjs";
+import { ControlError, requireThat } from "../../controls/src/store.mjs";
 import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-metadata.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
+import { retainPhysicalContext } from "./physical-context.mjs";
+import { capturePhysicalSources, selectPhysicalContexts } from "./physical-selection.mjs";
 import {
   canonicalProjectWorkstreamMappings,
   normalizedProjectContext,
@@ -965,6 +967,7 @@ export async function createPipeline(options) {
           hasDispatchEvidence(cached.document, dispatch, row)
         ) {
           normalizedProjectContext(cached.document, row, repository, projectWorkstreamMappings);
+          retainPhysicalContext(cached.document, row, repository, c.contracts, dataMode);
           await retainSourceArtifacts(db, row.fact_key, cached.document);
           outputs.push({ document: cached.document, source: sourceBinding(row) });
           continue;
@@ -1098,6 +1101,7 @@ export async function createPipeline(options) {
         actors: output.actors,
         evidence: output.evidence,
         ...privateAttribution(output, row),
+        ...retainPhysicalContext(output, row, repository, c.contracts, dataMode),
         ...normalizedProjectContext(output, row, repository, projectWorkstreamMappings),
         reasons: Array.isArray(output.reasons)
           ? output.reasons.map((reason) =>
@@ -1305,6 +1309,9 @@ export async function createPipeline(options) {
       .map((entry) => ({ factKey: entry.source.factKey, documentHash: digest(entry.document) }))
       .sort((left, right) => left.factKey.localeCompare(right.factKey));
     const normalizationHashes = [...new Set(normalizationSources.map((entry) => entry.documentHash))].sort();
+    const physicalSources = config.policies.some((item) => c.contracts.physicalMetricIds.includes(item.policy.metricId))
+      ? capturePhysicalSources(normalized, normalizationSources, digest, dataMode)
+      : [];
     const suppressedArtifactIds = new Set([
       ...outputs.flatMap((output) => output.suppressArtifactIds ?? []),
       ...(await sourceSuppressions(
@@ -1466,6 +1473,14 @@ export async function createPipeline(options) {
       }
     }
     const aggregates = config.policies.map((item) => c.metrics.aggregateMetric(frozen, item.policy, engineScope));
+    const physical = selectPhysicalContexts({
+      sources: physicalSources,
+      aggregates,
+      policies: config.policies,
+      contracts: c.contracts,
+      serialize: c.metrics.stableJSON,
+      policyDigest,
+    });
     const pendingFor = (aggregate, row) => ({
       schemaVersion: "leaderboard-pending/v1",
       state: aggregate.coverage === "complete" ? "measured" : row.pending > 0 ? "partial" : "unknown",
@@ -1586,11 +1601,13 @@ export async function createPipeline(options) {
       evidence: publicEvidence,
       portfolioEvidence,
       pendingEvidence,
+      ...physical,
       ranking: config.policies.map((item) => ({
         metricId: item.policy.metricId,
         direction: "descending",
         rank: item.policy.rank,
       })),
+      rankingPresentationPolicy: copy(c.contracts.currentRankingPresentationPolicy),
       diagnostics,
       methodology: config.policies.map((item) => ({
         metricId: item.policy.metricId,
@@ -1620,9 +1637,9 @@ export async function createPipeline(options) {
         identityEvidence: {
           schemaVersion: "pipeline-identity-evidence/v1",
           normalizationHashes,
-          // Identical-label captures keep their existing authorization bytes.
-          // Source ordering is required only when this input reconciles aliases.
-          ...(identity.hasRenames ? { normalizationSources } : {}),
+          // Preserve exact original source/hash pairs for retained physical context.
+          // Legacy, non-physical identical-label captures keep their prior bytes.
+          ...(identity.hasRenames || physical.physicalContexts !== undefined ? { normalizationSources } : {}),
         },
         sources: generations.map((row) => ({
           repositoryId: String(row.repository_id),
@@ -1716,7 +1733,9 @@ export async function createPipeline(options) {
           evidence: publicEvidence,
           portfolioEvidence,
           pendingEvidence,
+          ...physical,
           ranking: content.ranking,
+          rankingPresentationPolicy: content.rankingPresentationPolicy,
           dataMode,
           diagnostics,
           methodology: content.methodology,
@@ -2066,11 +2085,44 @@ export async function createPipeline(options) {
                 utc(now()),
               )
             : undefined;
+          let physicalInputsCurrent = true;
+          let physicalExplanationHash = null;
+          if (selected.document.physicalContexts?.some((entry) => entry.state === "available")) {
+            const confirmation = controlsStore.read().pipelinePublications?.[selected.selected_id];
+            if (!confirmationMatches(confirmation, scope, selected.selected_id, Number(selected.selected_revision)))
+              return null;
+            const saved = aggregateExplanations.verify(selected.selected_id, {
+              ...explanationBinding(scope, { revision: Number(selected.selected_revision) }),
+              digest: confirmation.aggregateExplanationHash,
+            });
+            physicalExplanationHash = saved.digest;
+            try {
+              // The optional context needs the original selected normalization
+              // copies, not a new hash over a replacement or a later cache entry.
+              requireThat(
+                Array.isArray(saved.document.authorization.identityEvidence?.normalizationSources),
+                409,
+                "Frozen physical source binding unavailable",
+              );
+              await withAuthorizedComparisonInputs([saved.document.authorization], () => true, tx);
+            } catch (error) {
+              // A missing/conflicting retained dependency removes the whole
+              // optional context. Unexpected database/authority failures retain
+              // their existing error path; metric quantities never change here.
+              if (!(error instanceof ControlError) || error.status !== 409) throw error;
+              physicalInputsCurrent = false;
+            }
+          }
           if (!(await approved(tx)) || signal.aborted) return null;
           // Read current private controls after all awaited I/O, even for pinned historical snapshots.
           const controls = controlsStore.read();
           const overlay = restrictConfiguration(controls);
           if (canonical(controls.pipelineHeads?.[scopeKey(scope)]) !== canonical(head)) return retry;
+          if (
+            physicalExplanationHash !== null &&
+            controls.pipelinePublications?.[selected.selected_id]?.aggregateExplanationHash !== physicalExplanationHash
+          )
+            return retry;
           if (
             !confirmationMatches(
               controls.pipelinePublications?.[selected.selected_id],
@@ -2106,6 +2158,18 @@ export async function createPipeline(options) {
             });
           }
           const document = copy(selected.document);
+          if (!physicalInputsCurrent) {
+            document.physicalContexts = document.physicalContexts.map((entry) => ({
+              schemaVersion: entry.schemaVersion,
+              actorId: entry.actorId,
+              metricId: entry.metricId,
+              policyVersion: entry.policyVersion,
+              policySignature: entry.policySignature,
+              state: "unknown",
+              reason: "current_context_unavailable",
+            }));
+            document.physicalEvidence = [];
+          }
           document.disabledMetrics = overlay.disabledMetrics.map((entry) => ({
             ...entry,
             reason: /^[a-z0-9_:-]{1,100}$/.test(entry.reason)

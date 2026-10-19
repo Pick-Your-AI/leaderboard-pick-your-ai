@@ -28,6 +28,10 @@ import {
   sourceEventSchema,
   snapshotSchema,
   pendingCountSchema,
+  rankingPresentationSchema,
+  bindPublicPhysicalContext,
+  type PublicPhysicalContext,
+  type RankingPresentation,
   type Actor,
   type Artifact,
   type Contribution,
@@ -499,6 +503,7 @@ function descriptiveMetric(metric: MetricDefinition): boolean {
   );
 }
 export interface RankComparison {
+  rankingPresentation?: RankingPresentation;
   snapshotId: string | null;
   scope: PublicScope | null;
   generatedAt: string | null;
@@ -520,15 +525,22 @@ function comparisonObject(value: unknown, keys: readonly string[]): Record<strin
   if (Object.keys(data).some((key) => !keys.includes(key))) invalidComparison();
   return data;
 }
-function rankComparison(value: unknown, selected: Selection, generatedAt: unknown): RankComparison | undefined {
+function rankComparison(
+  value: unknown,
+  selected: Selection,
+  generatedAt: unknown,
+  currentPresentation: RankingPresentation | null,
+): RankComparison | undefined {
   if (!selected.compare) {
     if (value !== undefined) invalidComparison();
     return undefined;
   }
   comparisonTime(generatedAt);
-  const data = comparisonObject(value, ["snapshotId", "scope", "generatedAt"]);
-  if (data.snapshotId === null && data.scope === null && data.generatedAt === null)
+  const data = comparisonObject(value, ["snapshotId", "scope", "generatedAt", "rankingPresentation"]);
+  if (data.snapshotId === null && data.scope === null && data.generatedAt === null) {
+    if (data.rankingPresentation !== undefined) invalidComparison();
     return { snapshotId: null, scope: null, generatedAt: null };
+  }
   if (data.snapshotId !== selected.compare || data.scope === null || data.generatedAt === null) invalidComparison();
   let scope: PublicScope;
   try {
@@ -543,7 +555,26 @@ function rankComparison(value: unknown, selected: Selection, generatedAt: unknow
   } catch {
     invalidComparison();
   }
-  return { snapshotId: selected.compare, scope, generatedAt: comparisonTime(data.generatedAt) };
+  const previous = rankingPresentationSchema.safeParse(data.rankingPresentation);
+  if (
+    !currentPresentation ||
+    !previous.success ||
+    currentPresentation.state !== "ranked" ||
+    previous.data.state !== "ranked" ||
+    previous.data.snapshotId !== selected.compare ||
+    previous.data.metricId !== selected.metric ||
+    previous.data.version !== currentPresentation.version ||
+    previous.data.minimumComparableContributors !== currentPresentation.minimumComparableContributors ||
+    previous.data.cohort !== currentPresentation.cohort ||
+    previous.data.purpose !== currentPresentation.purpose
+  )
+    invalidComparison();
+  return {
+    snapshotId: selected.compare,
+    scope,
+    generatedAt: comparisonTime(data.generatedAt),
+    rankingPresentation: previous.data,
+  };
 }
 function rankMovement(
   value: unknown,
@@ -580,10 +611,63 @@ function rankMovement(
     typeof data.delta !== "number" ||
     !Number.isSafeInteger(data.delta) ||
     !Number.isSafeInteger(rank + data.delta) ||
-    rank + data.delta < 1
+    rank + data.delta < 1 ||
+    rank + data.delta > (comparison.rankingPresentation?.comparableContributors ?? 0)
   )
     invalidComparison();
   return { actorId, state: "comparable", delta: data.delta, reason: null };
+}
+
+/** Successful policy receipts bind the complete current cohort, never just this page. */
+function presentedRanking(
+  value: unknown,
+  snapshotId: string,
+  metricId: string,
+  totalRows: number,
+  ranking: Record<string, unknown> | null,
+): RankingPresentation | null {
+  if (value === undefined) return null;
+  const parsed = rankingPresentationSchema.safeParse(value);
+  if (!parsed.success) throw new ReadFailure(502, "invalid_ranking_presentation");
+  const receipt = parsed.data;
+  if (
+    receipt.snapshotId !== snapshotId ||
+    receipt.metricId !== metricId ||
+    receipt.totalContributors !== totalRows ||
+    (ranking?.rank === true) !== (receipt.state !== "not_ranked") ||
+    (ranking !== null && ranking.metricId !== metricId)
+  )
+    throw new ReadFailure(502, "invalid_ranking_presentation");
+  return receipt;
+}
+function presentedRow(receipt: RankingPresentation | null, result: MetricResult, rank: number | null): void {
+  if (receipt === null) return;
+  const ranked = receipt.state === "ranked" && result.value !== undefined;
+  if ((rank !== null) !== ranked || (rank !== null && rank > receipt.comparableContributors))
+    throw new ReadFailure(502, "invalid_ranking_presentation");
+}
+
+/** A page is a subset, never a replacement for complete cohort enumeration. */
+function presentedPage(receipt: RankingPresentation | null, results: readonly MetricResult[]): void {
+  if (receipt === null) return;
+  const comparable = receipt.state === "not_ranked" ? 0 : results.filter((result) => result.value !== undefined).length;
+  if (
+    results.length > receipt.totalContributors ||
+    comparable > receipt.comparableContributors ||
+    results.length - comparable > receipt.unrankableContributors
+  )
+    throw new ReadFailure(502, "invalid_ranking_presentation");
+}
+
+function physicalPresentation(
+  value: unknown,
+  binding: Parameters<typeof bindPublicPhysicalContext>[1],
+): PublicPhysicalContext {
+  try {
+    return bindPublicPhysicalContext(value, binding);
+  } catch {
+    throw new ReadFailure(502, "invalid_physical_context");
+  }
 }
 
 /** Validate the minimized export contract, which intentionally has no actor profile or live head. */
@@ -603,6 +687,7 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
     "actorFilter",
     "metric",
     "ranking",
+    "rankingPresentation",
     "coverage",
     "methodology",
     "totalRows",
@@ -614,7 +699,12 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
     "pendingEvidence",
     "comparison",
   ]);
-  if (data.exportSchemaVersion !== scopeExportVersion(scope) || data.schemaVersion !== "leaderboard/v1")
+  const presented = data.exportSchemaVersion === "public-export/v4";
+  if (
+    (!presented && data.exportSchemaVersion !== scopeExportVersion(scope)) ||
+    data.schemaVersion !== "leaderboard/v1" ||
+    presented !== Object.hasOwn(data, "rankingPresentation")
+  )
     throw new ReadFailure(502, "invalid_export_response");
   const filter = actorSelection(data, selected);
   if (!selected.snapshot || identity(data.snapshotId) !== selected.snapshot)
@@ -644,6 +734,22 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
   if (integer(data.pageRows) !== rows.length || integer(data.totalRows) < rows.length)
     throw new ReadFailure(502, "invalid_export_response");
   if (data.nextCursor !== null) string(data.nextCursor);
+  const presentation = presentedRanking(
+    data.rankingPresentation,
+    selected.snapshot,
+    metric.id,
+    integer(data.totalRows),
+    ranking,
+  );
+  const physicalMethodology = array(data.methodology, 98).map((value) => {
+    const entry = object(value);
+    return {
+      metricId: identity(entry.metricId),
+      policyVersion: identity(entry.policyVersion),
+      policySignature: string(entry.policySignature),
+    };
+  });
+  const exportEvidence = new Map<string, Record<string, unknown>>();
   const evidenceBindings = new Map<string, string>();
   const bindEvidence = (id: string, entry: Record<string, unknown>) => {
     const binding = stableJSON(entry),
@@ -651,7 +757,7 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
     if (previous !== undefined && previous !== binding) throw new ReadFailure(502, "invalid_export_response");
     evidenceBindings.set(id, binding);
   };
-  const comparison = rankComparison(data.comparison, selected, data.generatedAt);
+  const comparison = rankComparison(data.comparison, selected, data.generatedAt, presentation);
   const evidenceIds = new Set<string>();
   for (const value of array(data.evidence, 2000)) {
     const entry = object(value),
@@ -668,6 +774,7 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
     if (evidenceIds.has(id) || publicLink(string(entry.sourceUrl)) === null)
       throw new ReadFailure(502, "invalid_export_response");
     evidenceIds.add(id);
+    exportEvidence.set(id, entry);
     if (entry.repositoryId !== null) identity(entry.repositoryId);
     if (entry.occurredAt !== null) string(entry.occurredAt);
     if (entry.sourceRevision !== null) string(entry.sourceRevision);
@@ -700,9 +807,11 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
   const pageActors = new Set<string>(),
     referencedEvidence = new Set<string>();
   const rowPending = new Map<string, PendingCount | undefined>();
+  const observedResults: MetricResult[] = [];
   for (const value of rows) {
     const row = object(value),
       result = metricResultSchema.parse(row.result);
+    observedResults.push(result);
     onlyExportKeys(row, [
       "actorId",
       "login",
@@ -713,8 +822,36 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
       "evidenceIds",
       "pending",
       "movement",
+      ...(presented ? ["physicalContext"] : []),
     ]);
+    if (presented !== Object.hasOwn(row, "physicalContext")) throw new ReadFailure(502, "invalid_export_response");
     const actorId = identity(row.actorId);
+    if (presented && row.physicalContext !== null) {
+      const context = physicalPresentation(row.physicalContext, {
+        snapshotId: selected.snapshot,
+        actorId,
+        metricId: metric.id,
+        evidenceIds: array(row.evidenceIds).map(identity),
+        value: result.value,
+        generatedAt: string(data.generatedAt),
+        start: scope.start,
+        end: scope.end,
+        methodology: physicalMethodology,
+      });
+      if (context.state === "available")
+        for (const sample of context.samples)
+          for (const id of sample.evidenceIds) {
+            const proof = exportEvidence.get(id);
+            if (
+              !proof ||
+              proof.repositoryId !== sample.repositoryId ||
+              proof.sourceUrl !== sample.sourceUrl ||
+              proof.occurredAt === null ||
+              compareSourceInstants(string(proof.occurredAt), sample.integratedAt) !== 0
+            )
+              throw new ReadFailure(502, "invalid_physical_context");
+          }
+    }
     if (pageActors.has(actorId)) throw new ReadFailure(502, "invalid_export_response");
     pageActors.add(actorId);
     if (row.login !== null) string(row.login);
@@ -732,11 +869,12 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
       (row.rank !== null && (integer(row.rank) < 1 || ranking?.rank === false || descriptiveMetric(metric)))
     )
       throw new ReadFailure(502, "invalid_export_response");
+    presentedRow(presentation, result, row.rank === null ? null : integer(row.rank));
     rankMovement(
       row.movement,
       actorId,
       row.rank === null ? null : integer(row.rank),
-      ranking?.rank === true && result.value !== undefined,
+      presentation?.state === "ranked" && ranking?.rank === true && result.value !== undefined,
       comparison,
       selected,
     );
@@ -753,6 +891,7 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
       referencedEvidence.add(evidenceId);
     }
   }
+  presentedPage(presentation, observedResults);
   if (referencedPending.size !== pendingIds.size) throw new ReadFailure(502, "invalid_export_response");
   if (referencedEvidence.size !== evidenceIds.size) throw new ReadFailure(502, "invalid_export_response");
   for (const value of array(data.diagnostics ?? []))
@@ -889,6 +1028,7 @@ export interface Board extends Metadata {
   comparison?: RankComparison;
   metric: MetricDefinition;
   ranking: { direction: string; rank: boolean } | null;
+  rankingPresentation?: RankingPresentation | null;
   rows: {
     rank: number | null;
     actorId: string;
@@ -897,6 +1037,7 @@ export interface Board extends Metadata {
     evidenceIds: string[];
     pending?: PendingCount;
     movement?: RankMovement;
+    physicalContext?: PublicPhysicalContext;
   }[];
   diagnostics: Diagnostic[];
   totalRows: number;
@@ -916,15 +1057,23 @@ export function board(value: unknown, selected: Selection): Board {
   )
     throw new ReadFailure(502, "api_metric_mismatch");
   const meta = metadata(value, selected);
-  const comparison = rankComparison(data.comparison, selected, meta.generatedAt);
+  const presentation = presentedRanking(
+    data.rankingPresentation,
+    meta.snapshotId,
+    metric.id,
+    integer(data.totalRows),
+    method,
+  );
+  const comparison = rankComparison(data.comparison, selected, meta.generatedAt, presentation);
   if (comparison && method && method.metricId !== metric.id) invalidComparison();
   if (comparison && meta.disabledMetrics.some((entry) => entry.id === metric.id)) invalidComparison();
   const seen = new Set<string>();
-  return {
+  const parsed: Board = {
     ...meta,
     ...(comparison === undefined ? {} : { comparison }),
     metric,
     ranking: method ? { direction: String(method.direction), rank: method.rank as boolean } : null,
+    rankingPresentation: presentation,
     rows: array(data.rows, selected.compare ? Number(selected.limit) : 100).map((value) => {
       const row = object(value),
         result = metricResultSchema.parse(row.result);
@@ -935,23 +1084,43 @@ export function board(value: unknown, selected: Selection): Board {
         throw new ReadFailure(502, "invalid_api_response");
       const actorId = identity(row.actorId);
       const rank = row.rank === null ? null : integer(row.rank);
+      presentedRow(presentation, result, rank);
       if (comparison && seen.has(actorId)) invalidComparison();
+      if (presentation !== null && seen.has(actorId)) throw new ReadFailure(502, "invalid_ranking_presentation");
       seen.add(actorId);
       const movement = rankMovement(
         row.movement,
         actorId,
         rank,
-        method?.rank === true && result.value !== undefined,
+        presentation?.state === "ranked" && method?.rank === true && result.value !== undefined,
         comparison,
         selected,
       );
+      const evidenceIds = array(row.evidenceIds).map(identity);
+      const physicalContext =
+        row.physicalContext === undefined
+          ? undefined
+          : physicalPresentation(row.physicalContext, {
+              snapshotId: meta.snapshotId,
+              actorId,
+              metricId: metric.id,
+              evidenceIds,
+              value: result.value,
+              generatedAt: meta.generatedAt,
+              start: meta.scope.start,
+              end: meta.scope.end,
+              methodology: meta.methodology,
+            });
+      if (physicalContext !== undefined && presentation === null)
+        throw new ReadFailure(502, "invalid_physical_context");
       return {
         rank,
         actorId,
         ...(movement === undefined ? {} : { movement }),
+        ...(physicalContext === undefined ? {} : { physicalContext }),
         actor: selectedActor(row.actor, selected),
         result,
-        evidenceIds: array(row.evidenceIds).map(identity),
+        evidenceIds,
         ...(row.pending === undefined ? {} : { pending: pendingCountSchema.parse(row.pending) }),
       };
     }),
@@ -959,6 +1128,11 @@ export function board(value: unknown, selected: Selection): Board {
     totalRows: integer(data.totalRows),
     nextCursor: data.nextCursor === null ? null : string(data.nextCursor),
   };
+  presentedPage(
+    presentation,
+    parsed.rows.map((row) => row.result),
+  );
+  return parsed;
 }
 export interface Evidence {
   evidenceMetadata?: PublicEvidenceMetadata;
