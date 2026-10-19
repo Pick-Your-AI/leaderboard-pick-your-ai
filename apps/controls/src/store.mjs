@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, chmodSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 import { configurationOverlay } from "./overlay.mjs";
+import { hasReviewedParticipantConsent } from "./evidence-consent.mjs";
 
 export class ControlError extends Error {
   constructor(status, message) {
@@ -54,7 +55,7 @@ export function projectPublic(state) {
     .filter(([id, profile]) => visible(id) && profile.public)
     .map(([id, profile]) => ({ actorId: id, bio: profile.bio, highlights: profile.highlights }));
   const claims = Object.values(state.requests)
-    .filter((r) => r.kind === "evidence" && r.status === "accepted" && visible(r.owner))
+    .filter((r) => r.status === "accepted" && hasReviewedParticipantConsent(r) && visible(r.owner))
     .map((r) => ({
       id: r.id,
       actorId: r.owner,
@@ -99,7 +100,25 @@ export class ControlStore {
     return JSON.parse(this.db.prepare("SELECT document FROM controls_state WHERE id=1").get().document);
   }
   publicSnapshot() {
-    return JSON.parse(this.db.prepare("SELECT document FROM controls_publication WHERE id=1").get().document);
+    // Read the persisted projection and current authority in one SQLite
+    // snapshot. Older accepted claims may predate required-consent checks;
+    // reopening a database must not serve them before its next mutation.
+    const row = this.db
+      .prepare(
+        "SELECT p.document AS publication, s.document AS state FROM controls_publication p JOIN controls_state s ON s.id=p.id WHERE p.id=1",
+      )
+      .get();
+    const snapshot = JSON.parse(row.publication);
+    const state = JSON.parse(row.state);
+    snapshot.claims = snapshot.claims.filter((claim) => {
+      const request = state.requests[claim.id];
+      return (
+        request?.status === "accepted" &&
+        hasReviewedParticipantConsent(request) &&
+        !state.profiles[request.owner]?.suppressed
+      );
+    });
+    return snapshot;
   }
   transaction(change, { publish = false } = {}) {
     this.db.exec("BEGIN IMMEDIATE");

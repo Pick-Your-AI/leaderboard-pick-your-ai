@@ -1239,14 +1239,13 @@ export async function createPipeline(options) {
           // it; a delayed historical operation cannot choose an older baseline.
           if (latest?.snapshot_id !== prior.snapshot_id) fail("confirmed_head_recovery_requires_latest_publication");
         }
-        if (
-          confirmationMatches(
-            controlsStore.read().pipelinePublications?.[prior.snapshot_id],
-            scope,
-            prior.snapshot_id,
-            Number(prior.revision),
-          )
-        ) {
+        const priorConfirmation = controlsStore.read().pipelinePublications?.[prior.snapshot_id];
+        if (confirmationMatches(priorConfirmation, scope, prior.snapshot_id, Number(prior.revision))) {
+          // A prior confirmation authorizes its original recognition inputs.
+          // Never relabel immutable accepted content with later consent or a
+          // changed recognition rule when recovering an unacknowledged dispatch.
+          if (recognitionBindings.length && priorConfirmation.recognitionFingerprint !== runRecognitionFingerprint)
+            fail("dispatch_recognition_changed");
           confirmPublication(scope, priorPublication);
           return priorPublication;
         }

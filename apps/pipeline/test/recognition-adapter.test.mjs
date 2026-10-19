@@ -11,11 +11,13 @@ const decision = {
   actor: "202",
   at: Date.parse("2026-10-01T00:00:00.000Z"),
   policyVersion: "v1",
+  version: 2,
 };
 const request = {
   id: "claim",
   kind: "evidence",
   status: "accepted",
+  version: 2,
   owner: "101",
   category: "finding",
   scope: "repo",
@@ -55,6 +57,25 @@ const apply = (s) =>
     (raw, receipt) => ({ ...raw, receipt }),
     "2026-10-18T00:00:00.000Z",
   );
+
+test("legacy consent cannot qualify owner credit or change raw facts before the current revision is reviewed", () => {
+  for (const disposition of ["pending", "declined", "late-consent", "unknown-version", "missing", "array"]) {
+    const s = state();
+    s.requests.claim.collaborators = { 303: "accepted" };
+    if (disposition === "late-consent") s.requests.claim.version++;
+    else if (disposition === "unknown-version") delete s.requests.claim.version;
+    else if (disposition === "missing") delete s.requests.claim.collaborators;
+    else if (disposition === "array") s.requests.claim.collaborators = [];
+    else s.requests.claim.collaborators["303"] = disposition;
+    const before = structuredClone(input);
+    assert.deepEqual(apply(s), input, disposition);
+    assert.deepEqual(input, before);
+  }
+  const reviewed = state();
+  reviewed.requests.claim.collaborators = { 303: "accepted", 404: "accepted" };
+  assert.equal(apply(reviewed).receipt.targetFactId, "fact");
+  assert.equal(apply(state()).receipt.targetFactId, "fact");
+});
 test("private audited decision binds exact owner, source metric, scope and approved policy", () => {
   assert.equal(apply(state()).receipt.targetFactId, "fact");
   assert.equal(apply(state()).receipt.acceptedAt, "2026-10-01T00:00:00.000Z");

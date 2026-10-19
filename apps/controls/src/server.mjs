@@ -6,6 +6,7 @@ import { nominateSpotlight, decideSpotlight, projectSpotlights } from "./editori
 import { createConfigurationManager } from "./configuration.mjs";
 import { createPolicyComparisonManager } from "./policy-comparison.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "./localization-review.mjs";
+import { hasRequiredParticipantConsent, hasReviewedParticipantConsent } from "./evidence-consent.mjs";
 
 const random = () => randomBytes(32).toString("base64url");
 const hash = (value) => createHash("sha256").update(value).digest("base64url");
@@ -566,16 +567,16 @@ export function createControlsServer({
               );
               requireThat(typeof input.consent === "boolean" && !["withdrawn", "merged"].includes(request.status));
               const nextConsent = input.consent ? "accepted" : "declined";
-              const localeReviewRequired =
-                request.status === "accepted" &&
-                request.history.findLast((entry) => entry.action === "accepted")?.localization !== undefined;
-              // Exact locale acceptance binds the reviewed request version. A
-              // changed attribution must become reviewable, not remain accepted
-              // with a stale decision that blocks every subsequent publication.
-              if (localeReviewRequired && request.collaborators[session.actorId] === nextConsent)
+              const consentChanged = request.collaborators[session.actorId] !== nextConsent;
+              const reviewRequired =
+                request.status === "accepted" && (consentChanged || !hasReviewedParticipantConsent(request));
+              // Changed consent suspends the whole reviewed claim. An old
+              // acceptance cannot authorize a newly consenting participant or
+              // survive a required participant's withdrawal.
+              if (!consentChanged && !reviewRequired)
                 return { id: request.id, status: request.status, version: request.version };
               request.collaborators[session.actorId] = nextConsent;
-              if (localeReviewRequired) {
+              if (reviewRequired) {
                 request.status = "pending";
                 delete request.policyVersion;
               }
@@ -585,7 +586,7 @@ export function createControlsServer({
                 session.actorId,
                 input.consent ? "attribution-accepted" : "attribution-declined",
                 timestamp,
-                ...(localeReviewRequired ? [{ reviewRequired: true, previousStatus: "accepted" }] : []),
+                ...(reviewRequired ? [{ reviewRequired: true, previousStatus: "accepted" }] : []),
               );
             } else if (action === "withdraw") {
               exactKeys(input, ["version"]);
@@ -641,11 +642,17 @@ export function createControlsServer({
                 );
                 requireThat(input.sourceReviewedPublic === true, 400, "Public source review required");
                 requireThat(
+                  hasRequiredParticipantConsent(request),
+                  409,
+                  "Every listed collaborator must consent before independent acceptance",
+                );
+                requireThat(
                   !Object.values(s.requests).some(
                     (other) =>
                       other.id !== id &&
                       other.kind === "evidence" &&
                       other.status === "accepted" &&
+                      hasReviewedParticipantConsent(other) &&
                       other.owner === request.owner &&
                       other.locator === request.locator &&
                       other.category === request.category &&
@@ -691,6 +698,11 @@ export function createControlsServer({
                     canonical.kind === "evidence" &&
                     canonical.id !== id &&
                     canonical.status === "accepted",
+                );
+                requireThat(
+                  hasReviewedParticipantConsent(canonical),
+                  409,
+                  "Canonical evidence requires current participant consent",
                 );
                 requireThat(
                   canonical.owner === request.owner &&

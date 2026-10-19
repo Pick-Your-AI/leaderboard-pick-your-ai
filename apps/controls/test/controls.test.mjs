@@ -474,11 +474,18 @@ test("independent acceptance, collaborator opt-in/decline, withdrawal and restar
   assert.equal(invitation.id, receipt.id);
   assert.equal(invitation.detail, undefined);
   receipt = (
+    await h.call(`/controls/requests/${receipt.id}/consent`, {
+      user: collaborator,
+      method: "POST",
+      input: { version: receipt.version, consent: true },
+    })
+  ).data;
+  receipt = (
     await h.call(`/controls/requests/${receipt.id}/review`, {
       user: reviewer,
       method: "POST",
       input: {
-        version: 1,
+        version: receipt.version,
         decision: "accept",
         conflict: false,
         reason: "Synthetic public artifact/role verified",
@@ -488,7 +495,8 @@ test("independent acceptance, collaborator opt-in/decline, withdrawal and restar
     })
   ).data;
   let published = (await h.call("/controls/public")).data;
-  assert.deepEqual(published.claims[0].collaborators, []);
+  assert.deepEqual(published.claims[0].collaborators, ["5"]);
+  const acceptedVersion = receipt.version;
   receipt = (
     await h.call(`/controls/requests/${receipt.id}/consent`, {
       user: collaborator,
@@ -496,6 +504,7 @@ test("independent acceptance, collaborator opt-in/decline, withdrawal and restar
       input: { version: receipt.version, consent: true },
     })
   ).data;
+  assert.equal(receipt.version, acceptedVersion);
   assert.deepEqual((await h.call("/controls/public")).data.claims[0].collaborators, ["5"]);
   receipt = (
     await h.call(`/controls/requests/${receipt.id}/consent`, {
@@ -504,10 +513,11 @@ test("independent acceptance, collaborator opt-in/decline, withdrawal and restar
       input: { version: receipt.version, consent: false },
     })
   ).data;
-  assert.deepEqual((await h.call("/controls/public")).data.claims[0].collaborators, []);
+  assert.equal(receipt.status, "pending");
+  assert.deepEqual((await h.call("/controls/public")).data.claims, []);
   const reopened = new ControlStore(h.filename);
   try {
-    assert.equal(reopened.publicSnapshot().claims[0].id, receipt.id);
+    assert.deepEqual(reopened.publicSnapshot().claims, []);
     assert.equal(reopened.read().requests[receipt.id].history.length, 4);
     assert.equal(
       (
@@ -615,19 +625,27 @@ test("self profile controls and suppression atomically remove profile, authored 
     200,
   );
   for (const user of [owner, other]) {
-    const receipt = (
+    let receipt = (
       await h.call("/controls/requests", {
         user,
         method: "POST",
         input: fixture(user === other ? { collaborators: ["1"] } : {}),
       })
     ).data;
+    if (user === other)
+      receipt = (
+        await h.call(`/controls/requests/${receipt.id}/consent`, {
+          user: owner,
+          method: "POST",
+          input: { version: receipt.version, consent: true },
+        })
+      ).data;
     const accepted = (
       await h.call(`/controls/requests/${receipt.id}/review`, {
         user: reviewer,
         method: "POST",
         input: {
-          version: 1,
+          version: receipt.version,
           decision: "accept",
           conflict: false,
           reason: "Synthetic review",
@@ -636,12 +654,7 @@ test("self profile controls and suppression atomically remove profile, authored 
         },
       })
     ).data;
-    if (user === other)
-      await h.call(`/controls/requests/${receipt.id}/consent`, {
-        user: owner,
-        method: "POST",
-        input: { version: accepted.version, consent: true },
-      });
+    assert.equal(accepted.status, "accepted");
   }
   assert.equal((await h.call("/controls/public")).data.claims.length, 2);
   const receipt = await h.call("/controls/profile/suppression", {
@@ -800,7 +813,7 @@ test("GitHub adapter rejects broad returned scopes and revokes even on identity 
   }
 });
 
-test("amendment suspends recognition, preserves prior audit and requires collaborator consent again", async (t) => {
+test("amendment preserves a participant decline and cannot turn it into accepted recognition", async (t) => {
   const h = await harness(t);
   const owner = await h.login("1");
   const reviewer = await h.login("2");
@@ -815,21 +828,20 @@ test("amendment suspends recognition, preserves prior audit and requires collabo
       input: { version: receipt.version, consent: false },
     })
   ).data;
-  receipt = (
-    await h.call(`/controls/requests/${receipt.id}/review`, {
-      user: reviewer,
-      method: "POST",
-      input: {
-        version: receipt.version,
-        decision: "accept",
-        conflict: false,
-        reason: "Synthetic source verified",
-        sourceReviewedPublic: true,
-        policyVersion: "test-1",
-      },
-    })
-  ).data;
-  assert.equal((await h.call("/controls/public")).data.claims.length, 1);
+  const blocked = await h.call(`/controls/requests/${receipt.id}/review`, {
+    user: reviewer,
+    method: "POST",
+    input: {
+      version: receipt.version,
+      decision: "accept",
+      conflict: false,
+      reason: "Synthetic source verified",
+      sourceReviewedPublic: true,
+      policyVersion: "test-1",
+    },
+  });
+  assert.equal(blocked.status, 409);
+  assert.deepEqual((await h.call("/controls/public")).data.claims, []);
   const input = {
     version: receipt.version,
     reason: "Synthetic amendment",

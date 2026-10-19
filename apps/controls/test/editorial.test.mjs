@@ -15,6 +15,7 @@ function fixture() {
         kind: "evidence",
         status: "accepted",
         version: 2,
+        history: [{ action: "accepted", version: 2 }],
         collaborators: { 3: "accepted" },
         locator: "https://github.com/synthetic/example/issues/1",
         category: "governance",
@@ -29,6 +30,27 @@ const accept = {
   publicExplanation: "Reviewed public decision record explains the outcome",
   conflict: false,
 };
+
+test("legacy incomplete or later participant consent cannot nominate, approve or serve a spotlight", () => {
+  for (const disposition of ["pending", "declined", "late-consent", "unknown-version"]) {
+    const state = fixture();
+    const entry = nominateSpotlight(state, owner, { claimId: "claim", consent: true }, 1000);
+    const approved = structuredClone(state);
+    decideSpotlight(approved, reviewer, entry.id, accept, 2000);
+    for (const candidate of [state, approved]) {
+      const claim = candidate.requests.claim;
+      if (disposition === "late-consent") claim.history[0].version = 1;
+      else if (disposition === "unknown-version") delete claim.history[0].version;
+      else claim.collaborators["3"] = disposition;
+      assert.throws(
+        () => nominateSpotlight(candidate, owner, { claimId: "claim", consent: true }, 3000),
+        /participant consent and review/,
+      );
+      assert.deepEqual(projectSpotlights(candidate, () => true).spotlights, []);
+    }
+    assert.throws(() => decideSpotlight(state, reviewer, entry.id, accept, 4000), /participant consent and review/);
+  }
+});
 
 test("spotlights require contributor opt-in and independent selection of current accepted evidence", () => {
   const state = fixture();
