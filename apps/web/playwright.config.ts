@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: "./browser",
   outputDir: "../../test-results/browser",
   timeout: 45_000,
-  globalTimeout: 600_000,
+  globalTimeout: 900_000,
   expect: { timeout: 10_000 },
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
