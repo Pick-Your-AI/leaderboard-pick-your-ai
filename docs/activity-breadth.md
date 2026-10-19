@@ -103,6 +103,12 @@ fork flags, matching titles, mentions, payload prose and a shared commit are not
 substitutes for this evidence. A caller that cannot supply an authorized frozen
 capture must not use this API to certify breadth.
 
+Source and evidence identifier arrays must contain distinct, non-empty strings
+in every own array slot. Sparse holes, inherited values and explicit missing
+values are rejected before a copy can be excluded. Admitted identifiers are
+captured once for validation and the retained lineage signature; valid frozen
+arrays remain supported without changing the caller's input.
+
 An admitted `mirror_of` or `imported_from` relation excludes its target artifact
 from both measures. Original source attribution remains eligible under its own
 policy and scope. `squash_of`, `cherry_pick_of`, `reverted_by` and `transferred_to`
