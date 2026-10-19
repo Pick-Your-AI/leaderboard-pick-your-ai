@@ -234,13 +234,16 @@ test("real controls current spotlights reject filtered scope and disappear after
   const api = await service(page);
   const { ControlStore } = await import(new URL("../../controls/src/store.mjs", import.meta.url).href);
   const { createControlsServer } = await import(new URL("../../controls/src/server.mjs", import.meta.url).href);
+  const { attachSyntheticEvidenceIntake } = await import(
+    new URL("../../../tests/fixtures/evidence-intake.mjs", import.meta.url).href
+  );
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const directory = mkdtempSync(join(tmpdir(), "synthetic-recognition-browser-"));
   const store = new ControlStore(join(directory, "controls.sqlite"));
   store.transaction((state: any) => {
-    state.requests.claim = {
+    state.requests.claim = attachSyntheticEvidenceIntake({
       id: "claim",
       owner: "1",
       kind: "evidence",
@@ -248,7 +251,13 @@ test("real controls current spotlights reject filtered scope and disappear after
       version: 2,
       locator: "https://github.com/synthetic/example/issues/1",
       category: "governance",
-    };
+      scope: "Synthetic reviewed governance claim",
+      collaborators: {},
+      policyVersion: "synthetic-recognition-v1",
+      history: [
+        { actor: "3", action: "accepted", at: Date.parse(at), version: 2, policyVersion: "synthetic-recognition-v1" },
+      ],
+    });
     state.spotlights = {
       nomination: {
         id: "nomination",
@@ -282,6 +291,8 @@ test("real controls current spotlights reject filtered scope and disappear after
     await page.clock.install();
     await page.goto("/?ui=api");
     await expect(page.getByRole("heading", { name: "Public contribution evidence", exact: true })).toBeVisible();
+    // Health and the optional spotlight module mount from the same loaded-data render.
+    await expect(page.getByRole("heading", { name: /^(Recently reconciled|Stale or degraded)$/ })).toBeVisible();
     if (!(await page.getByRole("heading", { name: "Editorial spotlights", exact: true }).count())) {
       expect(calls).toBe(0);
       return; // An unconfigured controls deployment must not be auto-enabled by the UI.

@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { nominateSpotlight, decideSpotlight, projectSpotlights } from "../src/editorial.mjs";
+import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-intake.mjs";
 
 const owner = { actorId: "1", roles: [] };
 const reviewer = { actorId: "2", roles: ["reviewer"] };
-function fixture() {
+function legacyFixture() {
   return {
     profiles: { 1: { public: true, bio: "Explicit profile text" } },
     audit: [],
@@ -23,6 +24,25 @@ function fixture() {
     },
   };
 }
+function fixture() {
+  const state = legacyFixture();
+  const claim = state.requests.claim;
+  Object.assign(claim, {
+    scope: "One synthetic governance decision record",
+    detail: "Synthetic private source-use detail",
+    policyVersion: "synthetic-editorial-1",
+  });
+  Object.assign(claim.history[0], {
+    id: "synthetic-independent-claim-review",
+    receipt: claim.id,
+    actor: "2",
+    at: 900,
+    policyVersion: claim.policyVersion,
+  });
+  state.audit = [structuredClone(claim.history[0])];
+  attachSyntheticEvidenceState(state);
+  return state;
+}
 const accept = {
   version: 1,
   action: "accept",
@@ -30,6 +50,17 @@ const accept = {
   publicExplanation: "Reviewed public decision record explains the outcome",
   conflict: false,
 };
+
+test("pre-intake accepted evidence cannot be promoted into a new editorial selection", () => {
+  const state = legacyFixture();
+  const before = structuredClone(state);
+  assert.throws(() => nominateSpotlight(state, owner, { claimId: "claim", consent: true }, 1000), {
+    status: 409,
+    message: "Current claim-scoped intake and source-use review required",
+  });
+  assert.deepEqual(state, before, "An old acceptance must not be silently migrated during nomination");
+  assert.deepEqual(projectSpotlights(state, () => true).spotlights, []);
+});
 
 test("legacy incomplete or later participant consent cannot nominate, approve or serve a spotlight", () => {
   for (const disposition of ["pending", "declined", "late-consent", "unknown-version"]) {

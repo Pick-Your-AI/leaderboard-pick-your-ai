@@ -4,6 +4,7 @@ import { mkdirSync, chmodSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 import { configurationOverlay } from "./overlay.mjs";
 import { hasReviewedParticipantConsent } from "./evidence-consent.mjs";
+import { hasReviewedEvidenceIntake } from "./evidence-intake.mjs";
 
 export class ControlError extends Error {
   constructor(status, message) {
@@ -55,7 +56,10 @@ export function projectPublic(state) {
     .filter(([id, profile]) => visible(id) && profile.public)
     .map(([id, profile]) => ({ actorId: id, bio: profile.bio, highlights: profile.highlights }));
   const claims = Object.values(state.requests)
-    .filter((r) => r.status === "accepted" && hasReviewedParticipantConsent(r) && visible(r.owner))
+    .filter(
+      (r) =>
+        r.status === "accepted" && hasReviewedParticipantConsent(r) && hasReviewedEvidenceIntake(r) && visible(r.owner),
+    )
     .map((r) => ({
       id: r.id,
       actorId: r.owner,
@@ -115,6 +119,7 @@ export class ControlStore {
       return (
         request?.status === "accepted" &&
         hasReviewedParticipantConsent(request) &&
+        hasReviewedEvidenceIntake(request) &&
         !state.profiles[request.owner]?.suppressed
       );
     });

@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { harness, components, publicScope, ago } from "./harness.mjs";
+import { attachSyntheticEvidenceIntake } from "../../../tests/fixtures/evidence-intake.mjs";
 
 const mergedAt = ago(3);
 const acceptedAt = ago(1);
@@ -104,6 +105,7 @@ async function setup(t, category, payloads, extra = {}) {
       collaborators: {},
       history: [decision],
     };
+    attachSyntheticEvidenceIntake(request);
     h.controlsStore.transaction((state) => {
       state.requests[request.id] = request;
       state.audit.push(structuredClone(decision));

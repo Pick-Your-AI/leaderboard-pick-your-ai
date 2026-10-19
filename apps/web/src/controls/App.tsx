@@ -1,7 +1,27 @@
 import { Operations } from "./Operations.tsx";
 import { PolicyComparison } from "./PolicyComparison.tsx";
 import React, { useEffect, useRef, useState } from "react";
-import { canReview, control, ControlsFailure, verifiedSession, type Receipt, type Session } from "./client.ts";
+import {
+  canAcceptEvidence,
+  canReview,
+  control,
+  ControlsFailure,
+  evidenceSubmissionInput,
+  sourceUseReviewInput,
+  verifiedEvidenceTerms,
+  verifiedSession,
+  type EvidenceInvitation,
+  type EvidenceTerms,
+  type Receipt,
+  type Session,
+} from "./client.ts";
+import {
+  AttributionInvitation,
+  EvidenceIntakeDetails,
+  EvidenceIntakeFields,
+  SourceUseReviewFields,
+  useControlFormErrors,
+} from "./EvidenceIntake.tsx";
 
 import { Amendment } from "./Amendment.tsx";
 import { Configuration, type ConfigurationState } from "./Configuration.tsx";
@@ -27,8 +47,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </label>
   );
 }
-function RequestForm({ run }: { run: Run }) {
+function RequestForm({ run, actorId, terms }: { run: Run; actorId: string; terms: EvidenceTerms | null }) {
   const [kind, setKind] = useState("correction");
+  const { errors, showErrors } = useControlFormErrors();
   return (
     <section>
       <h2>Submit a private request</h2>
@@ -37,25 +58,22 @@ function RequestForm({ run }: { run: Run }) {
         commitment. Do not include credentials or private source content.
       </p>
       <form
+        noValidate={kind === "evidence"}
         onSubmit={async (e) => {
           e.preventDefault();
           const form = e.currentTarget;
           const data = new FormData(form);
+          if (kind === "evidence") {
+            const evidence = evidenceSubmissionInput(data, terms, actorId, categories);
+            showErrors(form, evidence.ok ? {} : evidence.errors);
+            if (!evidence.ok) return;
+            if (await run("/controls/requests", { kind, ...evidence.value })) form.reset();
+            return;
+          }
           const input = {
             kind,
             detail: data.get("detail"),
             ...(data.get("locator") ? { locator: data.get("locator") } : {}),
-            ...(kind === "evidence"
-              ? {
-                  category: data.get("category"),
-                  scope: data.get("scope"),
-                  consent: data.get("consent") === "on",
-                  collaborators: String(data.get("collaborators") ?? "")
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                }
-              : {}),
           };
           if (await run("/controls/requests", input)) form.reset();
         }}
@@ -68,34 +86,21 @@ function RequestForm({ run }: { run: Run }) {
             <option value="evidence">Contribution evidence</option>
           </select>
         </Field>
-        <Field label="Details">
-          <textarea name="detail" required maxLength={2000} />
-        </Field>
-        <Field label="Public GitHub source URL">
-          <input name="locator" type="url" required={kind === "evidence"} />
-        </Field>
-        {kind === "evidence" && (
+        {kind === "evidence" ? (
+          <EvidenceIntakeFields actorId={actorId} terms={terms} categories={categories} errors={errors} />
+        ) : (
           <>
-            <Field label="Category">
-              <select name="category">
-                {categories.map((c) => (
-                  <option key={c}>{c}</option>
-                ))}
-              </select>
+            <Field label="Details">
+              <textarea name="detail" required maxLength={2000} />
             </Field>
-            <Field label="Contribution scope">
-              <input name="scope" required maxLength={300} />
+            <Field label="Public GitHub source URL">
+              <input name="locator" type="url" />
             </Field>
-            <Field label="Collaborator GitHub numeric IDs, comma separated">
-              <input name="collaborators" />
-            </Field>
-            <label>
-              <input type="checkbox" name="consent" required /> I consent to public attribution of this evidence if
-              independently accepted.
-            </label>
           </>
         )}
-        <button type="submit">Submit request</button>
+        <button type="submit" disabled={kind === "evidence" && !terms}>
+          Submit request
+        </button>
       </form>
     </section>
   );
@@ -173,13 +178,16 @@ function ReceiptCard({
   session,
   run,
   admin,
+  terms,
 }: {
   receipt: Receipt;
   session: Session;
   run: Run;
   admin: boolean;
+  terms: EvidenceTerms | null;
 }) {
   const [decision, setDecision] = useState("reject");
+  const { errors, showErrors } = useControlFormErrors();
   const own = r.owner === session.actorId;
   return (
     <article className="control-receipt">
@@ -195,14 +203,15 @@ function ReceiptCard({
         </p>
       )}
       {r.policyVersion && <p>Policy: {r.policyVersion}</p>}
+      {r.kind === "evidence" && <EvidenceIntakeDetails receipt={r} />}
       <details>
         <summary>Audit history</summary>
         <pre>{JSON.stringify(r.history, null, 2)}</pre>
       </details>
       {own && r.kind === "evidence" && !["withdrawn", "merged"].includes(r.status) && (
-        <Amendment receipt={r} categories={categories} run={run} />
+        <Amendment receipt={r} categories={categories} terms={terms} run={run} />
       )}
-      {own && r.kind === "evidence" && r.status === "accepted" && (
+      {own && r.kind === "evidence" && r.status === "accepted" && r.intakeEligibility?.state === "eligible" && (
         <form
           onSubmit={async (e) => {
             e.preventDefault();
@@ -246,9 +255,20 @@ function ReceiptCard({
       )}
       {admin && canReview(r, session) && (
         <form
+          noValidate={decision === "accept"}
           onSubmit={async (e) => {
             e.preventDefault();
-            const d = new FormData(e.currentTarget);
+            const form = e.currentTarget;
+            const d = new FormData(form);
+            const sourceUseReview = decision === "accept" ? sourceUseReviewInput(d) : null;
+            if (sourceUseReview) {
+              const next = sourceUseReview.ok ? {} : sourceUseReview.errors;
+              if (!canAcceptEvidence(r))
+                next.sourceUseRationale =
+                  "Current intake and participant consent are required before accepting this claim.";
+              showErrors(form, next);
+              if (!sourceUseReview.ok || !canAcceptEvidence(r) || !form.reportValidity()) return;
+            }
             await run(`/controls/requests/${r.id}/review`, {
               version: r.version,
               decision,
@@ -258,6 +278,7 @@ function ReceiptCard({
                 ? {
                     policyVersion: d.get("policy"),
                     sourceReviewedPublic: d.get("source") === "on",
+                    ...(sourceUseReview?.ok ? { sourceUseReview: sourceUseReview.value } : {}),
                     ...localizationReviewInput(d),
                   }
                 : {}),
@@ -268,7 +289,11 @@ function ReceiptCard({
           <Field label="Review decision">
             <select value={decision} onChange={(e) => setDecision(e.target.value)}>
               <option value="reject">Reject</option>
-              {r.kind === "evidence" && <option value="accept">Accept evidence</option>}
+              {r.kind === "evidence" && (
+                <option value="accept" disabled={!canAcceptEvidence(r)}>
+                  Accept evidence
+                </option>
+              )}
               <option value="rollback">Roll back decision</option>
               {r.kind === "evidence" && <option value="merge">Merge duplicate</option>}
             </select>
@@ -278,6 +303,7 @@ function ReceiptCard({
           </Field>
           {decision === "accept" && (
             <>
+              <SourceUseReviewFields errors={errors} />
               <LocaleReviewFields />
               <Field label="Approved policy version">
                 <input name="policy" required maxLength={100} />
@@ -313,9 +339,9 @@ export function ControlsApp() {
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
   const [receipts, setReceipts] = useState<Receipt[]>([]);
-  const [invitations, setInvitations] = useState<
-    Array<{ id: string; version: number; locator: string; scope: string; consent: string }>
-  >([]);
+  const [invitations, setInvitations] = useState<EvidenceInvitation[]>([]);
+  const [terms, setTerms] = useState<EvidenceTerms | null>(null);
+  const [termsError, setTermsError] = useState("");
   const [configuration, setConfiguration] = useState<unknown>(null);
   const [nominations, setNominations] = useState<Nomination[]>([]);
   const generation = useRef(0);
@@ -324,6 +350,8 @@ export function ControlsApp() {
     setSession(null);
     setReceipts([]);
     setInvitations([]);
+    setTerms(null);
+    setTermsError("");
     setConfiguration(null);
     setProfile(null);
     setNominations([]);
@@ -336,11 +364,21 @@ export function ControlsApp() {
     clear();
     try {
       const s = verifiedSession(await control<Session>("/controls/session"));
-      const [p, r, i, editorial] = await Promise.all([
+      const [p, r, i, editorial, evidenceTerms] = await Promise.all([
         control<ProfileData>("/controls/profile"),
         control<{ requests: Receipt[] }>("/controls/requests"),
         control<{ invitations: typeof invitations }>("/controls/invitations"),
         control<{ nominations: Nomination[] }>("/controls/spotlights/queue"),
+        control<{ terms: unknown }>("/controls/evidence-terms")
+          .then((result) => ({ terms: verifiedEvidenceTerms(result.terms), error: "" }))
+          .catch((error: unknown) => {
+            if (error instanceof ControlsFailure && [401, 403].includes(error.status)) throw error;
+            return {
+              terms: null,
+              error:
+                "Current submission terms could not be loaded. Reload before submitting or amending evidence. Other requests, decline and withdrawal remain available.",
+            };
+          }),
       ]);
       let c: unknown = null;
       if (admin && s.roles.includes("operator")) c = await control("/controls/configuration");
@@ -363,6 +401,8 @@ export function ControlsApp() {
       setSession(s);
       setReceipts(r.requests);
       setInvitations(i.invitations);
+      setTerms(evidenceTerms.terms);
+      setTermsError(evidenceTerms.error);
       setConfiguration(c);
       return true;
     } catch (e) {
@@ -479,39 +519,20 @@ export function ControlsApp() {
           ) : (
             <fieldset disabled={busy || loading}>
               <legend>{admin ? "Authorized administration" : "Account controls"}</legend>
+              {termsError && <p>{termsError}</p>}
               {!admin && (
                 <>
                   {profile && <Profile run={run} profile={profile} />}
-                  <RequestForm run={run} />
+                  <RequestForm run={run} actorId={session.actorId} terms={terms} />
                   <section>
                     <h2>Attribution invitations</h2>
                     {invitations.length === 0 && <p>No invitations.</p>}
-                    {invitations.map((i) => (
-                      <article key={i.id}>
-                        <p>
-                          {i.locator} · {i.scope} · {i.consent}
-                        </p>
-                        <form
-                          onSubmit={async (e) => {
-                            e.preventDefault();
-                            await run(`/controls/requests/${i.id}/consent`, {
-                              version: i.version,
-                              consent: new FormData(e.currentTarget).get("consent") === "accept",
-                            });
-                          }}
-                        >
-                          <Field label="Attribution consent">
-                            <select name="consent">
-                              <option value="decline">Decline</option>
-                              <option value="accept">Accept</option>
-                            </select>
-                          </Field>
-                          <label>
-                            <input type="checkbox" required /> Confirm my choice for {i.id}
-                          </label>
-                          <button>Save consent</button>
-                        </form>
-                      </article>
+                    {invitations.map((invitation) => (
+                      <AttributionInvitation
+                        key={`${invitation.id}:${invitation.version}`}
+                        invitation={invitation}
+                        run={run}
+                      />
                     ))}
                   </section>
                 </>
@@ -524,7 +545,14 @@ export function ControlsApp() {
                 {receipts
                   .filter((r) => admin || r.owner === session.actorId)
                   .map((r) => (
-                    <ReceiptCard key={`${r.id}:${r.version}`} receipt={r} session={session} run={run} admin={admin} />
+                    <ReceiptCard
+                      key={`${r.id}:${r.version}`}
+                      receipt={r}
+                      session={session}
+                      run={run}
+                      admin={admin}
+                      terms={terms}
+                    />
                   ))}
               </section>
               <Spotlights nominations={nominations} session={session} run={run} admin={admin} />
