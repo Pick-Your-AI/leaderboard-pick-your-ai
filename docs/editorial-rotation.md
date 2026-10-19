@@ -38,7 +38,11 @@ Withdrawal does not silently withdraw the original category-only nomination.
 The additive `editorial-dimensions/v1` sidecar is `state.spotlightRotations`. The unchanged Controls SQLite
 store serializes it within its synchronous whole-document transaction with `publish: false`. No new
 migration, cache format, public metric revision, ranking publication or network call inside the transaction
-is introduced. Existing authentication, role refresh, CSRF and final persisted-session checks apply.
+is introduced. Existing authentication, role refresh and CSRF checks apply. After a synchronous source-eligibility
+callback, mutations recheck the persisted session before writing the proposed state and again at commit;
+private queue reads recheck it after serialization and before sending response bytes. A failed mutation
+rolls back its whole SQLite transaction, including any session deletion made by the callback through the
+same connection. This prevents an unauthorized declaration or review without claiming a durable logout.
 
 | Route                                    | Meaning                                                                                         |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
@@ -122,8 +126,12 @@ npm run test:browser -- apps/web/browser/editorial-rotation.spec.ts
 
 The new backend cases exercise independent review, current eligibility, immutable proposal history, caps,
 amendment and unconditional owner withdrawal. The actual loopback HTTP cases exercise authentication/CSRF,
-role and expected-version failures, SQLite close/reopen persistence and unchanged public metric state. Their
-sessions and evidence are synthetic; they do not claim a real OAuth login or source approval.
+role and expected-version failures, SQLite close/reopen persistence and unchanged public metric state. They
+also verify that session revocation inside the configured synchronous eligibility callback prevents proposal,
+review and private queue access, while current sessions retain those paths. Queue cases also advance the
+supported clock to exact session expiry during eligible or unavailable source context for both owners and
+reviewers, without changing persisted state. Their sessions and evidence are synthetic; they do not claim
+a real OAuth login or source approval.
 
 The client cases exercise the actual profile/history service producer, exact parent pinning, bounded concurrency,
 late replies, final-projection changes, deterministic deduplication and explicit unknown recovery. The mounted
