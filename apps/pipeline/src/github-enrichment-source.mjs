@@ -1,5 +1,6 @@
 import { githubReviewRevision, verifyGithubRestSnapshotRevision } from "@pick-your-ai/github";
 import { compareSourceInstants } from "@pick-your-ai/contracts";
+import { types } from "node:util";
 
 const abortedState = Object.getOwnPropertyDescriptor(AbortSignal.prototype, "aborted").get;
 const addListener = EventTarget.prototype.addEventListener;
@@ -37,9 +38,20 @@ const instant = (value) => {
     unavailable();
   return value;
 };
-const ignoreAsync = (value) => {
-  if (value && typeof value.then === "function") void Promise.resolve(value).catch(() => undefined);
-};
+function drainUnexpectedPromise(value, seen = new WeakSet()) {
+  // Invalid synchronous callbacks must not execute foreign then getters or methods.
+  if (!types.isPromise(value) || seen.has(value)) return;
+  seen.add(value);
+  try {
+    // Observe native rejection reasons once, including cycles; discard fulfilled
+    // values. Promise constructor/species behavior remains trusted host code.
+    void Promise.prototype.then.call(
+      value,
+      () => undefined,
+      (reason) => drainUnexpectedPromise(reason, seen),
+    );
+  } catch {}
+}
 const copy = (value) => {
   if (!object(value)) unavailable();
   return structuredClone(value);
@@ -222,6 +234,10 @@ export function createGithubEnrichmentSource(options) {
       )
         invalid();
       const view = forRepository.call(client, value.id);
+      if (types.isPromise(view)) {
+        drainUnexpectedPromise(view);
+        invalid();
+      }
       const rest = view?.rest;
       if (
         !view ||
@@ -230,13 +246,14 @@ export function createGithubEnrichmentSource(options) {
         typeof view.then === "function" ||
         typeof rest !== "function"
       ) {
-        ignoreAsync(view);
+        drainUnexpectedPromise(view);
         invalid();
       }
       scopes.set(value.id, Object.freeze({ ...value, rest: rest.bind(view) }));
       slugs.add(value.slug.toLowerCase());
     }
-  } catch {
+  } catch (error) {
+    drainUnexpectedPromise(error);
     invalid();
   }
 
@@ -262,7 +279,7 @@ export function createGithubEnrichmentSource(options) {
           if (isAborted()) unavailable();
           const result = assertAuthorized();
           if (result !== undefined) {
-            ignoreAsync(result);
+            drainUnexpectedPromise(result);
             unavailable();
           }
           if (isAborted()) unavailable();
@@ -271,7 +288,7 @@ export function createGithubEnrichmentSource(options) {
         const clock = () => {
           const value = now();
           if (!positive(value) || value < lastClock) {
-            ignoreAsync(value);
+            drainUnexpectedPromise(value);
             unavailable();
           }
           lastClock = value;
@@ -352,7 +369,8 @@ export function createGithubEnrichmentSource(options) {
         fence();
         if (isAborted() || record.recordedAt > completedAt || record.validUntil <= completedAt) unavailable();
         return { sourceRevision: fact.sourceRevision, acceptedOutcome: record.acceptedOutcome, ...metadata };
-      } catch {
+      } catch (error) {
+        drainUnexpectedPromise(error);
         unavailable();
       } finally {
         if (abort) removeListener.call(signal, "abort", abort);
