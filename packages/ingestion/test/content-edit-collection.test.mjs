@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { before, beforeEach, after, test } from "node:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { PGlite } from "@electric-sql/pglite";
 import { CollectionStore } from "../dist/index.js";
-import { parseGithubContentEditMetadata, githubContentEditRevision } from "../../github/dist/content-edit-history.js";
+import { parseContentEditMetadata } from "../dist/content-edit-metadata.js";
 import { edit, parent, repository } from "../../../tests/fixtures/content-edit-metadata.mjs";
 
 const migrations = await Promise.all(
@@ -41,7 +42,7 @@ after(async () => engine?.close());
 function metadata(kind = "issue", number = 11) {
   const native = parent(kind, number);
   const item = edit();
-  return parseGithubContentEditMetadata({
+  return parseContentEditMetadata({
     version: "github-content-edit-metadata/v1",
     parent: { kind, id: native.id, number: native.number, url: native.url },
     includesCreatedEdit: true,
@@ -62,10 +63,16 @@ function metadata(kind = "issue", number = 11) {
     },
   });
 }
+function syntheticRevision(value, scanId) {
+  const prefix = "gh-content-edit-v1:";
+  const selected = parseContentEditMetadata(value);
+  const hash = (input) => createHash("sha256").update(JSON.stringify(input)).digest("hex");
+  return `${prefix}${hash(selected)}.${hash([prefix, scanId]).slice(0, 32)}`;
+}
 function fact(value = metadata(), scanId = "synthetic-metadata-scan") {
   return {
     subjectId: value.parent.id,
-    sourceRevision: githubContentEditRevision(value, scanId),
+    sourceRevision: syntheticRevision(value, scanId),
     sourceUrl: value.parent.url,
     evidence: "current_state",
     actorId: null,
@@ -284,7 +291,7 @@ test("malformed metadata cannot commit any item of a page or advance its previou
       (x) => {
         x.subjectId = "I".repeat(129);
         x.contentEditMetadata.parent.id = x.subjectId;
-        x.sourceRevision = githubContentEditRevision(x.contentEditMetadata, "synthetic-long-parent");
+        x.sourceRevision = syntheticRevision(x.contentEditMetadata, "synthetic-long-parent");
       },
     ],
     ["parent URL", (x) => (x.sourceUrl = "https://github.com/Synthetic/Other/issues/11")],

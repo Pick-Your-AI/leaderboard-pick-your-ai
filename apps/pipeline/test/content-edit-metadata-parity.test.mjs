@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { parseContentEditMetadata, collectionContentEditMetadata } from "../dist/content-edit-metadata.js";
-import { parseGithubContentEditMetadata, githubContentEditRevision } from "../../github/dist/content-edit-history.js";
+import {
+  parseContentEditMetadata,
+  collectionContentEditMetadata,
+} from "../../../packages/ingestion/dist/content-edit-metadata.js";
+import {
+  parseGithubContentEditMetadata,
+  githubContentEditRevision,
+} from "../../../packages/github/dist/content-edit-history.js";
 import { edit, parent } from "../../../tests/fixtures/content-edit-metadata.mjs";
 
 function metadata({ kind = "issue", number = 11, records = [edit()] } = {}) {
