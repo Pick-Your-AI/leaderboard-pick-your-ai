@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { validateMaintenanceSource } from "@pick-your-ai/github";
 import { domainDateBasis, qualifyDomainRecognition } from "./domain-recognition.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
 
@@ -31,6 +32,9 @@ export function recognitionFingerprint(state, bindings = []) {
   // Earlier generic bug receipts admitted non-issue and explicitly synthetic sources.
   if (bindings.some((binding) => binding.metricId === "confirmed_bugs"))
     authority.push("confirmed-bug-source-admission/v1");
+  // Prior maintenance receipts lacked merged-participant, clock and unit admission.
+  if (bindings.some((binding) => binding.metricId === "maintenance"))
+    authority.push("maintenance-merged-participant/v1");
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
@@ -45,6 +49,7 @@ export function materializeRecognition(
 ) {
   let output = structuredClone(input);
   const domainUnits = new Set();
+  const maintenanceUnits = new Set();
   const domainReasons = new Map();
   const decisionTime = (request) => {
     const at = request.history?.findLast((event) => event.action === "accepted")?.at;
@@ -98,13 +103,14 @@ export function materializeRecognition(
       });
       if (localeReasons.length !== 3) throw new Error("invalid_localization_binding");
     }
+    const requiredDateBasis = binding.metricId === "maintenance" ? "occurredAt" : domainDateBasis(binding.metricId);
     if (
       !policies.some(
         (p) =>
           p.policy.metricId === binding.metricId &&
           p.policy.version === binding.policyVersion &&
-          (domainDateBasis(binding.metricId) !== null
-            ? p.policy.dateBasis === domainDateBasis(binding.metricId) &&
+          (requiredDateBasis !== null
+            ? p.policy.dateBasis === requiredDateBasis &&
               p.policy.groupBy === "canonical" &&
               p.policy.rankedStates?.length === 1 &&
               p.policy.rankedStates[0] === "qualified"
@@ -212,6 +218,9 @@ export function materializeRecognition(
       )
         throw new Error("recognition_source_unverified");
     }
+    // Validate source authority before even a host-supplied receipt callback.
+    const maintenance =
+      binding.metricId === "maintenance" ? validateMaintenanceSource(input, candidates[0].id, acceptedAt) : null;
     const domain = qualifyDomainRecognition({
       input,
       request,
@@ -225,6 +234,12 @@ export function materializeRecognition(
       const unit = JSON.stringify([request.owner, domain.changesetId]);
       if (domainUnits.has(unit)) continue;
       domainUnits.add(unit);
+    }
+    if (maintenance) {
+      // Every repeated receipt still passes policy, audit and source validation.
+      // Deterministic accepted-time ordering retains the earliest valid authority.
+      if (maintenanceUnits.has(maintenance.unit)) continue;
+      maintenanceUnits.add(maintenance.unit);
     }
     const previousFacts = output.facts.length;
     const previousEvidence = output.evidence.length;

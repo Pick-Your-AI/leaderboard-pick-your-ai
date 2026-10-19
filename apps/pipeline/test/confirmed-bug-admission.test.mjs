@@ -278,6 +278,10 @@ function previousAuthority(state, bindings) {
   const authority = ["localization-review-target/v1", requests, suppressed, audit, bindings];
   if (bindings.some((binding) => binding.metricId === "data_quality")) authority.push("data-quality-recognition/v1");
   if (bindings.some((binding) => binding.metricId === "reproductions")) authority.push("reproduction-recognition/v1");
+  // Isolate the bug-source correction from the independent maintenance fence.
+  // maintenance-recognition.test.mjs tests that category's exact old authority.
+  if (bindings.some((binding) => binding.metricId === "maintenance"))
+    authority.push("maintenance-merged-participant/v1");
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
