@@ -14,7 +14,7 @@ Receipt authentication and independent reviewer authorization remain required. T
 
 Acceptance cannot precede the evidenced merge. The source fact and public evidence retain the merge time in `occurredAt`; the later category review is separately recorded in `acceptedAt` and accepted evidence metadata. Timestamp comparison preserves fractional precision. Period selection therefore follows the merge date, including half-open period boundaries, even if review happens later.
 
-The conserved unit is the maintenance category, repository, PR and contributor. Neither a receipt identifier nor a caller-supplied `changesetId` can mint another unit or combine distinct PRs. Verified coauthors retain separate participant units. This does not introduce a finer category taxonomy or change the 98 metric definitions.
+The conserved unit is the maintenance category, repository, PR and contributor. Neither a receipt identifier nor a caller-supplied `changesetId` can mint another unit or combine distinct PRs. Verified coauthors retain separate participant units. The optional [reviewed maintenance classification policy](maintenance-classification.md) adds positive evidence facets to this same unit; it does not multiply the count or change the 98 metric definitions.
 
 The pipeline processes currently accepted requests in deterministic acceptance-time and request-ID order. All requests, including duplicates, must pass current policy, independent review, exact audit and source validation. Only then does a repeated unit retain its earliest valid receipt. A later invalid duplicate cannot silently disappear behind deduplication. A withdrawn or rejected request supplies no accepted overlay; a direct rejected receipt on a valid source remains explicitly excluded. Raw observations remain unchanged.
 
@@ -35,6 +35,10 @@ The matching policy must use:
 The normal metric-policy validation, definition version, unit, source/role scope and approval requirements also apply. An acceptance-time policy, raw-state ranking or artifact-level grouping fails before a receipt callback is invoked. The shared source validator also runs before a host-supplied receipt callback, so swapping that callback cannot bypass maintenance source admission.
 
 This correction does not enable the definition-only maintenance UI, add a default binding, authorize a new source, or establish live ranking accuracy. The broader [recognition runtime](recognition-runtime.md) and [metric policy](metric-recognition-policy.md) controls remain applicable.
+
+## Optional reviewed kinds
+
+`maintenance-classification/v1` adds explicitly reviewed dependency maintenance, build-fix and accepted-bug-fix explanations only when the protected binding opts in. The [policy and supported intake](maintenance-classification.md) define exact source/detail/reference binding, current consent/review, positive-only unknown semantics and fixed public projection. Generic narrative receipts remain unclassified. Only opted-in bindings receive its additional recognition authority marker; the source/cache/scan contract is unchanged.
 
 ## Previously saved results
 

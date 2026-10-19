@@ -63,6 +63,47 @@ facts, exact filters, current controls on pinned pages, cursor tampering/replay/
 expiry and byte-limited continuation. These prove bounded synthetic behavior,
 not source completeness, production load or a correction-event history.
 
+The additive compact view addresses bursts that span repositories. The original
+`/api/v1/activity` and `/api/v1/activity/:groupId` responses, group identities and
+proof cursors remain unchanged. New `/api/v1/activity-bursts` wrappers combine
+those groups only when contributor, explicit work state and known UTC hour
+match. Unknown action dates remain singleton groups; observed metadata is never
+promoted to accepted work. Every wrapper contains at most five original group
+previews. `/api/v1/activity-bursts/:burstId` pages through all original groups,
+whose proof links continue to use the v1 endpoint. No source event is removed,
+new contribution total is inferred, or history outside the authorized bounded
+publication is scanned.
+
+The envelope carries `compactionVersion: actor-state-utc-hour-v1`, the original
+`groupingVersion: actor-repository-state-utc-hour-v1`, and `groupPreviewLimit: 5`.
+New cursors bind both versions, the exact route/member identity, complete scope,
+category, actor filter and page size, then retain the existing snapshot, current
+policy, expiry and byte bounds. The client rejects incompatible versions and
+contradictory wrapper/member actors, repositories, states, clocks or previews.
+Source and collection timestamp strings remain separate and unrounded.
+Member pages reserve the repeated wrapper, envelope, cursor and array separators
+before filling the existing byte budget. The large-name regression traverses all
+five original groups in pages of three and two below the 1.5 MB response ceiling,
+and both actual service responses pass the client decoder.
+
+New `/activity` reads use the compact endpoint. Compact continuation pages use
+`/activity/bursts?cursor=…` and expansion uses `/activity/bursts/:burstId`.
+Existing `/activity?cursor=…` bookmarks continue to use the original API cursor;
+original `/activity/:groupId` proof routes are unchanged. Deploy the additive
+API before or together with the new UI; the old UI remains compatible with the
+original API. An unavailable compact endpoint is reported as an unavailable
+read, without silently changing the selected feed or snapshot.
+
+The cross-repository regression supplies 205 synthetic label updates by one
+contributor and a slightly earlier independently accepted contribution by
+another. It requires two first-page entries, at most five previews, all 205
+original groups and proofs, and unchanged v1 responses. Its browser journey
+checks keyboard expansion, 100/100/5 subgroup pages, original proof navigation,
+Back and return focus, held snapshot/viewport position, legacy cursor bookmarks,
+current suppression, 360px overflow and axe. These bounded cases do not certify
+arbitrary multi-contributor or multi-hour floods, real-source completeness,
+screen-reader usability or physical-device interaction.
+
 ## Native browser zoom journeys (#56)
 
 [The zoom cases](../apps/web/browser/zoom.spec.ts) run in the ordinary browser suite. For a focused replay after building the workspace:

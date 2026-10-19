@@ -49,3 +49,24 @@ node --test --test-isolation=none packages/github/test/discussion-answer-time.te
 ```
 
 These fixtures demonstrate local source and persistence behavior. They are not collected contribution evidence, a live capability receipt, source-history coverage, a hosting qualification or a public-release claim.
+
+## Capability-to-rendering fixture
+
+The separate `discussion-capability-harness.mjs` supplies synthetic GitHub HTTP responses to the actual `GithubReadClient` and collection adapter. The built-in normalizer, PGlite publication store, SQLite controls and public service remain in the path. The browser cases forward their public reads through that service's real loopback HTTP listener. They do not replace its response bodies with rendered fixtures.
+
+| Source observation | Collection and public result | Rendering assertion |
+| --- | --- | --- |
+| `hasDiscussionsEnabled: false` before a first publication | Failed collection, no source facts or snapshot, public 503 | Public read unavailable; no contribution rows or zero-value substitute |
+| `hasDiscussionsEnabled: true` with a complete empty page | Completed collection with zero expected items; empty board; historical coverage remains partial | Explicit empty-page explanation that this does not establish zero activity |
+| A valid published answer followed by a disabled-source read | No replacement snapshot; the prior answer and publication remain; current collection health is degraded | The pinned historical answer remains visible with stale/degraded freshness, not rewritten as zero |
+
+The disabled-source error is distinct from a configuration-disabled metric. These tests do not add a per-repository capability field or claim that the public error reveals the private provider exception. They preserve the existing sanitized unavailable result and the separate current-health versus immutable-snapshot boundary. The positive source uses distinct Discussion author, answer author and selector IDs; only the answer author receives native answer credit.
+
+The fixture's configuration and metric policy are explicitly approved by its synthetic host. The public registry, real installation permissions and metric/source enablement are unchanged. Its memory scan checkpoints and in-memory PGlite database do not demonstrate durable reopen; the separate persisted migration cases above cover that boundary. Moderated support, distinct helpful-thread counting and live source-capability acceptance remain separate work under #46 and #41.
+
+After the workspace build, run the bounded API and browser cases with:
+
+```sh
+node --test --test-isolation=none --test-reporter=tap apps/pipeline/test/discussion-capability.test.mjs
+npm run test:browser -- apps/web/browser/discussion-capability.spec.ts --workers=1
+```
