@@ -8,6 +8,7 @@ import { normalizeGithubObservation, applyRecognitionReceipt } from "@pick-your-
 import { aggregateMetric, getMetricDefinition, getMetricUi, metricRegistryV1 } from "@pick-your-ai/metrics";
 import { materializeRecognition, recognitionFingerprint } from "../src/recognition-adapter.mjs";
 import { attachSyntheticEvidenceIntake } from "../../../tests/fixtures/evidence-intake.mjs";
+import { evidenceIntakeAuthority } from "../../controls/src/evidence-intake.mjs";
 
 const fixture = JSON.parse(
   readFileSync(new URL("../../../packages/github/test/fixtures/engineering.json", import.meta.url), "utf8"),
@@ -805,3 +806,134 @@ test("operations: unaffected automatic metrics retain prior fingerprints while m
   assert.equal(recognitionFingerprint(empty, bindings), priorAuthority(empty, bindings));
   assert.equal(recognitionFingerprint(empty, []), priorAuthority(empty, []));
 });
+
+// These fictional operations-only fixtures use explicit empty collaborators and
+// current reviewed intake. Preserve their exact authority encoding before the
+// identifier-list admission marker; do not obtain the oracle from the adapter.
+function priorOperationsIdentifierAuthority(state, bindings) {
+  assert.ok(bindings.every((binding) => metrics.includes(binding.metricId)));
+  const requests = Object.values(state.requests ?? {})
+    .filter((request) => request.kind === "evidence")
+    .sort((a, b) => a.id.localeCompare(b.id));
+  assert.ok(requests.every((request) => Object.keys(request.collaborators).length === 0));
+  const suppressed = Object.entries(state.profiles ?? {})
+    .filter(([, profile]) => profile.suppressed)
+    .map(([id]) => id)
+    .sort();
+  const decisions = new Set(
+    requests.flatMap((request) =>
+      request.history.filter((event) => event.action === "accepted").map((event) => event.id),
+    ),
+  );
+  const audit = (state.audit ?? [])
+    .filter((event) => decisions.has(event.id))
+    .map((event) => JSON.stringify(event))
+    .sort();
+  const authority = ["localization-review-target/v1", requests, suppressed, audit, bindings];
+  if (bindings.length) authority.push("operations-contribution-evidence/v1");
+  if (requests.length) authority.push(evidenceIntakeAuthority());
+  return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
+}
+
+for (const metric of metrics) {
+  for (const shape of ["sparse", "undefined"]) {
+    test(`operations ${metric}: selected ${shape} owner roster retires its pre-identifier authority`, () => {
+      const s = scenario(metric);
+      assert.equal(
+        recognitionFingerprint(s.state, [s.binding]),
+        priorOperationsIdentifierAuthority(s.state, [s.binding]),
+      );
+      const sparse = [s.decision.actor];
+      sparse.length = 2;
+      const explicit = [s.decision.actor, undefined];
+      s.binding.domainEvidence.ownerIds = sparse;
+      const sparseAuthority = priorOperationsIdentifierAuthority(s.state, [s.binding]);
+      s.binding.domainEvidence.ownerIds = explicit;
+      assert.equal(priorOperationsIdentifierAuthority(s.state, [s.binding]), sparseAuthority);
+      s.binding.domainEvidence.ownerIds = shape === "sparse" ? sparse : explicit;
+      rejectBeforeReceipt(s);
+      assert.notEqual(recognitionFingerprint(s.state, [s.binding]), sparseAuthority);
+    });
+  }
+
+  test(`operations ${metric}: valid dense owner roster preserves its pre-identifier authority and unit`, () => {
+    const s = scenario(metric);
+    s.binding.domainEvidence.ownerIds = [s.decision.actor, "909"];
+    const expected = priorOperationsIdentifierAuthority(s.state, [s.binding]);
+    let calls = 0;
+    const output = run(s, {
+      applyReceipt: (...args) => {
+        calls++;
+        return applyRecognitionReceipt(...args);
+      },
+    });
+    assert.equal(calls, 1);
+    assert.equal(recognized(s, output).length, 1);
+    assert.equal(recognitionFingerprint(s.state, [s.binding]), expected);
+  });
+
+  test(`operations ${metric}: unused sparse specialist rosters preserve current authority and unit`, () => {
+    const s = scenario(metric);
+    s.binding.domainEvidence.contractReviewerIds = new Array(1);
+    s.binding.domainEvidence.disclosureReviewerIds = [undefined];
+    assert.equal(
+      recognitionFingerprint(s.state, [s.binding]),
+      priorOperationsIdentifierAuthority(s.state, [s.binding]),
+    );
+    assert.equal(recognized(s).length, 1);
+  });
+
+  test(`operations ${metric}: sparse owner fencing selects only the current request and decision record`, () => {
+    for (const mutate of [
+      (s) => {
+        s.record.requestId = "other-request";
+      },
+      (s) => {
+        s.record.requestVersion--;
+      },
+      (s) => {
+        s.record.decisionId = "older-decision";
+      },
+    ]) {
+      const s = scenario(metric);
+      s.binding.domainEvidence.ownerIds = [s.decision.actor, undefined];
+      mutate(s);
+      rejectBeforeReceipt(s);
+      assert.equal(
+        recognitionFingerprint(s.state, [s.binding]),
+        priorOperationsIdentifierAuthority(s.state, [s.binding]),
+      );
+    }
+  });
+
+  test(`operations ${metric}: inactive or unmatched sparse owners preserve unselected authority without callbacks`, () => {
+    for (const mutate of [
+      (s) => {
+        s.request.status = "withdrawn";
+      },
+      (s) => {
+        s.state.profiles[s.request.owner] = { suppressed: true };
+      },
+      (s) => {
+        s.binding.scope = "repository:2:unselected";
+      },
+      (s) => {
+        s.state.requests = {};
+      },
+    ]) {
+      const s = scenario(metric);
+      s.binding.domainEvidence.ownerIds = [s.decision.actor, undefined];
+      mutate(s);
+      const output = run(s, {
+        applyReceipt: () => {
+          assert.fail("unselected source must not reach the receipt callback");
+        },
+      });
+      assert.deepEqual(output, s.input);
+      assert.equal(
+        recognitionFingerprint(s.state, [s.binding]),
+        priorOperationsIdentifierAuthority(s.state, [s.binding]),
+      );
+    }
+  });
+}
