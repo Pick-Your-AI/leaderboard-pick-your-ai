@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
+import { canonicalPublicScope, publicScopeParameters } from "@pick-your-ai/contracts";
 import { createService } from "../dist/app.js";
 import { readFixture, at } from "../../../tests/fixtures/pending-metric.mjs";
 
@@ -238,4 +239,106 @@ test("card source counts describe distinct public links without collapsing revie
       }
     });
   }
+});
+
+test("SVG cards preserve complete admitted source, scope, Project and policy identities without rewriting their input", async (t) => {
+  const value = fixture();
+  const projects = Array.from({ length: 100 }, (_, index) => "W".repeat(125) + String(index).padStart(3, "0"));
+  const scope = canonicalPublicScope({
+    organization: "W".repeat(200),
+    repository: "M".repeat(200),
+    workstream: "W".repeat(200),
+    start: null,
+    end: null,
+    context: "current",
+    projects,
+  });
+  value.selected.scope = scope;
+  for (const entry of [...value.selected.evidence, ...value.selected.pendingEvidence])
+    entry.artifact.repositoryId = scope.repository;
+  for (const coverage of [
+    ...value.selected.snapshot.coverage,
+    ...value.selected.rows.map((row) => row.result.coverage),
+  ])
+    coverage.scopeId = scope.repository;
+  const prefix = "https://github.com/synthetic-org/synthetic-repo/blob/main/";
+  const source = prefix + "W".repeat(2048 - prefix.length);
+  value.selected.evidence[0].artifact.publicUrl = source;
+  const policyVersion = "W".repeat(200);
+  value.selected.methodology[0].policyVersion = policyVersion;
+  const original = structuredClone(value);
+  const params = new URLSearchParams({
+    ...publicScopeParameters(scope),
+    metric: "pr_merged",
+    snapshot: "synthetic-pending-1",
+  });
+  const { app } = harness(t, value);
+  const path = "/api/v1/cards/101/image?" + params;
+  const response = await app.inject(path);
+  assert.equal(response.statusCode, 200, response.body);
+  const description = response.body.match(/<desc id="description">(.*?)<\/desc>/s)?.[1];
+  const visible = [...response.body.matchAll(/<text\b[^>]*>(.*?)<\/text>/gs)].map((match) => match[1]).join("");
+  for (const expected of [
+    source,
+    scope.organization,
+    scope.repository,
+    scope.workstream,
+    projects.join(", "),
+    policyVersion,
+  ]) {
+    assert.ok(description.includes(expected), "complete admitted identity remains accessible");
+  }
+  const height = Number(response.body.match(/<svg\b[^>]*height="(\d+)"/)?.[1]);
+  assert.ok(height <= 1024, `the maximum identity selection remains a readable card, not a ${height}px transcript`);
+  assert.equal((visible.match(/… \[full text in description\]/g) ?? []).length, 3);
+  for (const label of ["Projects:", "Scope:", "Source:", "Policy:", policyVersion])
+    assert.ok(visible.includes(label), "visible field labels and ordinary bounded values remain");
+  assert.match(description, /14 \(partial\)/);
+  assert.match(description, /Archived snapshot: 2026-10-17T12:00:00.000Z/);
+  assert.match(description, /Dated evidence, not a live activity or productivity claim\./);
+  assert.match(visible, /Dated evidence, not a live activity or productivity claim\./);
+  assert.ok(Buffer.byteLength(response.body) < 65536, "the largest canonical identity inputs produce a bounded SVG");
+  assert.equal((await app.inject(path)).body, response.body, "presentation is deterministic");
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.equal(response.headers["x-content-type-options"], "nosniff");
+  assert.equal(response.headers["content-security-policy"], "default-src 'none'; sandbox; frame-ancestors 'none'");
+  assert.doesNotMatch(response.body, /<script|<foreignObject|<image|href=|onload=/);
+  assert.deepEqual(value, original);
+  value.controls.suppressedActorIds.push("101");
+  const suppressed = await app.inject({ url: path, headers: { "if-none-match": response.headers.etag } });
+  assert.equal(suppressed.statusCode, 404);
+  assert.doesNotMatch(suppressed.body, /synthetic-org|Archived snapshot|Source:/);
+});
+
+test("bounded SVG publisher labels abbreviate whole graphemes and leave the original full HTML text available", async (t) => {
+  for (const suffix of ["😀", "e\u0301", "👩‍💻"]) {
+    await t.test(suffix, async (t) => {
+      const value = fixture();
+      const login = "A".repeat(111) + suffix + "Z".repeat(20);
+      value.selected.actors[0].actor.login = login;
+      const original = structuredClone(value);
+      const { app } = harness(t, value);
+      const image = await app.inject(url("pr_merged", true));
+      assert.equal(image.statusCode, 200, image.body);
+      const description = image.body.match(/<desc id="description">(.*?)<\/desc>/s)?.[1];
+      assert.ok(description.includes("A".repeat(111) + "…"), "the whole boundary grapheme is omitted together");
+      assert.doesNotMatch(description, /\uFFFD/);
+      const html = await app.inject(url("pr_merged"));
+      assert.equal(html.statusCode, 200, html.body);
+      assert.ok(html.body.includes(login));
+      assert.deepEqual(value, original);
+    });
+  }
+});
+
+test("SVG publisher-label abbreviation retains a finite output without adding an input admission limit", async (t) => {
+  const value = fixture();
+  value.selected.actors[0].actor.login = "W".repeat(100000);
+  const original = structuredClone(value);
+  const { app } = harness(t, value);
+  const image = await app.inject(url("pr_merged", true));
+  assert.equal(image.statusCode, 200, image.body);
+  assert.ok(Buffer.byteLength(image.body) < 16384);
+  assert.ok(image.body.includes("W".repeat(112) + "…"));
+  assert.deepEqual(value, original);
 });
