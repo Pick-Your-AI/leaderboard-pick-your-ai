@@ -51,7 +51,7 @@ async function repository(t, format) {
   git("commit", "--quiet", "-m", "Synthetic second object");
   const after = git("rev-parse", "HEAD");
   git("commit", "--quiet", "--allow-empty", "-m", "Synthetic distinct commit with identical tree");
-  return { directory, before, after, equalTree: git("rev-parse", "HEAD") };
+  return { directory, before, after, equalTree: git("rev-parse", "HEAD"), git };
 }
 
 for (const [format, length] of [
@@ -143,3 +143,94 @@ for (const [format, length] of [
     assert.equal(classifyPhysicalDiff(empty).changed, 0);
   });
 }
+
+test("classifier rejects mixed SHA-1 and SHA-256 pin widths", () => {
+  const short = "abcdef01".repeat(5);
+  const long = "abcdef01".repeat(8);
+  for (const [before, after] of [
+    [short, long],
+    [long, short],
+  ]) {
+    assert.equal(pinnedSha(before), true);
+    assert.equal(pinnedSha(after), true);
+    const input = { before, after, complete: true, files: [file] };
+    const original = structuredClone(input);
+    assert.throws(() => classifyPhysicalDiff(input), {
+      message: "Pinned before/after SHAs must use the same object format",
+    });
+    assert.deepEqual(input, original);
+  }
+});
+
+test("mixed pin widths reject before an unusable Git repository is read", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "physical-revision-width-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const repositoryPath = join(directory, "absent-repository");
+  const short = "abcdef01".repeat(5);
+  const long = "abcdef01".repeat(8);
+  for (const [before, after] of [
+    [short, long],
+    [long, short],
+  ]) {
+    const input = { repositoryPath, before, after };
+    const original = structuredClone(input);
+    await assert.rejects(readPinnedGitDiff(input), {
+      message: "Pinned before/after SHAs must use the same object format",
+    });
+    assert.deepEqual(input, original);
+  }
+});
+
+test("SHA-256 local reader rejects one real object named by a prefix and a full pin", async (t) => {
+  const repo = await repository(t, "sha256");
+  const prefix = repo.after.slice(0, 40);
+  assert.equal(repo.git("rev-parse", "--verify", prefix), repo.after);
+  for (const [before, after] of [
+    [prefix, repo.after],
+    [repo.after.toUpperCase(), mixedCase(prefix)],
+  ]) {
+    const input = { repositoryPath: repo.directory, before, after };
+    const original = structuredClone(input);
+    await assert.rejects(readPinnedGitDiff(input), {
+      message: "Pinned before/after SHAs must use the same object format",
+    });
+    assert.deepEqual(input, original);
+  }
+});
+
+test("SHA-256 local reader requires full storage-format pins for distinct real objects", async (t) => {
+  const repo = await repository(t, "sha256");
+  const before = mixedCase(repo.before.slice(0, 40));
+  const after = repo.after.slice(0, 40).toUpperCase();
+  assert.equal(pinnedSha(before), true);
+  assert.equal(pinnedSha(after), true);
+  assert.notEqual(before.toLowerCase(), after.toLowerCase());
+  assert.equal(repo.git("rev-parse", "--verify", before), repo.before);
+  assert.equal(repo.git("rev-parse", "--verify", after), repo.after);
+  const input = { repositoryPath: repo.directory, before, after };
+  const original = structuredClone(input);
+  await assert.rejects(readPinnedGitDiff(input), {
+    message: "Full pinned SHAs matching the repository object format are required for Git fallback",
+  });
+  assert.deepEqual(input, original);
+});
+
+test("local reader retains positive and rejecting custom byte bounds", async (t) => {
+  for (const format of ["sha1", "sha256"]) {
+    const repo = await repository(t, format);
+    const input = { repositoryPath: repo.directory, before: repo.before, after: repo.after };
+    const expected = await readPinnedGitDiff(input);
+    for (const maxBytes of [64, Number.MAX_SAFE_INTEGER]) {
+      assert.deepEqual(await readPinnedGitDiff({ ...input, maxBytes }), expected);
+    }
+    await assert.rejects(readPinnedGitDiff({ ...input, maxBytes: 1 }), {
+      code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+    });
+    for (const maxBytes of [0, Number.MAX_SAFE_INTEGER + 1]) {
+      await assert.rejects(
+        readPinnedGitDiff({ ...input, repositoryPath: join(repo.directory, "absent-repository"), maxBytes }),
+        { message: "Invalid Git resource bounds" },
+      );
+    }
+  }
+});
