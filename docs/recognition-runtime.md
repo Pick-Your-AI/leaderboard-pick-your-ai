@@ -2,6 +2,37 @@
 
 Refs #68, #69, #70, #123, #124, #128. These engineering implementations do not close evidence review, accessible journey, production source or launch gates.
 
+## Accepted issue-answer source time (#96)
+
+An accepted `issue_answers` receipt cannot predate its selected source fact's
+known occurrence. Both the direct normalizer receipt boundary and the pipeline
+enforce that lower bound using contract-valid source timestamps, including
+equivalent offsets and fractional precision. The pipeline checks the already
+unique target before invoking host receipt authority; it never resolves an
+ambiguous claim by removing future candidates. An unknown source occurrence
+remains unknown. Collection time, fetched revision time and a different decision
+clock do not replace it. The original occurrence and the accepted-at ranking
+clock retain their separate meanings and bytes.
+
+The `issue-answer-source-time/v1` authority marker applies only when a configured
+destination is `issue_answers`. A source-only answer binding to another metric
+keeps its earlier authority and source-specific rules. A mixed configuration
+containing an answer destination retires the whole earlier publication, even
+without a currently accepted answer request. Current and pinned public reads,
+exports and proofs, private previews and aggregate explanations withhold old
+authority across database reopen. Reads and startup preserve existing source
+facts, snapshot content and recognition fingerprints. Only authorized
+recomputation can renew a publication confirmation: unchanged, still-valid
+content can retain its content-addressed snapshot ID while receiving the current
+fingerprint. Changed valid content can produce a new snapshot. Contributor
+withdrawal continues to remove current authorization.
+
+These synthetic chronology and persistence checks do not establish answer
+quality, voluntary support recognition, response-time samples, complete source
+history or production rollout. The metric definition and maturity remain
+unchanged. Native prerequisites and the other evidence-review criteria of #96
+retain their existing scope.
+
 ## Confirmed bug source admission (#68)
 
 The generic private receipt path for `confirmed_bugs` requires an
