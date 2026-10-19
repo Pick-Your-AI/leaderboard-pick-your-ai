@@ -67,6 +67,19 @@ export interface ActivityBreadthAggregate {
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 const unique = (values: readonly string[]) => [...new Set(values)].sort(compare);
 const required = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
+function ownIdentifiers(value: unknown): string[] | null {
+  if (!Array.isArray(value) || !value.length) return null;
+  const identifiers: string[] = [];
+  const seen = new Set<string>();
+  for (let index = 0; index < value.length; index++) {
+    if (!Object.hasOwn(value, index)) return null;
+    const id: unknown = value[index];
+    if (!required(id) || seen.has(id)) return null;
+    identifiers.push(id);
+    seen.add(id);
+  }
+  return identifiers;
+}
 const relations = new Set([
   "squash_of",
   "cherry_pick_of",
@@ -104,24 +117,19 @@ export function aggregateActivityBreadth(
   const copies = new Set<string>();
   const retainedLineage: ActivityBreadthLineage[] = [];
   for (const link of lineage) {
+    if (!link || link.verified !== true || !relations.has(link.relation) || !required(link.targetId))
+      throw new Error("Source-verified lineage identity, evidence and observation time are required");
+    const sourceIds = ownIdentifiers(link.sourceIds);
+    const evidenceIds = ownIdentifiers(link.evidenceIds);
     if (
-      !link ||
-      link.verified !== true ||
-      !relations.has(link.relation) ||
-      !required(link.targetId) ||
-      !Array.isArray(link.sourceIds) ||
-      !link.sourceIds.length ||
-      link.sourceIds.some((id: unknown) => !required(id) || id === link.targetId) ||
-      new Set(link.sourceIds).size !== link.sourceIds.length ||
-      !Array.isArray(link.evidenceIds) ||
-      !link.evidenceIds.length ||
-      link.evidenceIds.some((id: unknown) => !required(id)) ||
-      new Set(link.evidenceIds).size !== link.evidenceIds.length ||
+      sourceIds === null ||
+      sourceIds.includes(link.targetId) ||
+      evidenceIds === null ||
       !sourceEventSchema.shape.observedAt.safeParse(link.observedAt).success
     )
       throw new Error("Source-verified lineage identity, evidence and observation time are required");
     if (compareSourceInstants(link.observedAt, input.cutoff) > 0) continue;
-    retainedLineage.push({ ...link, sourceIds: unique(link.sourceIds), evidenceIds: unique(link.evidenceIds) });
+    retainedLineage.push({ ...link, sourceIds: unique(sourceIds), evidenceIds: unique(evidenceIds) });
     // Sources retain their original attribution. Only the explicit copy target
     // is excluded; an independent cherry-pick, revert or transfer is not a mirror.
     if (link.relation === "mirror_of" || link.relation === "imported_from") copies.add(link.targetId);

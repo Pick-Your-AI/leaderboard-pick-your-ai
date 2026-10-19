@@ -345,6 +345,36 @@ test("lineage must have explicit verified identities and evidence and cannot pre
   assert.throws(() => aggregateActivityBreadth(input, breadthPolicy(), scope), /Explicit frozen lineage/);
 });
 
+for (const field of ["sourceIds", "evidenceIds"]) {
+  test(`lineage ${field} requires explicit own identifiers before excluding a copy`, () => {
+    const outputs = [normalized(), normalized({ repo: 9002 })];
+    const input = frozen(outputs);
+    const link = {
+      verified: true,
+      relation: "mirror_of",
+      sourceIds: [accepted(outputs[0]).artifactId],
+      targetId: accepted(outputs[1]).artifactId,
+      evidenceIds: ["synthetic-lineage"],
+      observedAt,
+    };
+    const original = structuredClone(link);
+    assert.equal(calculate(input, { lineage: [link] }).repositories.rows[0].value, 1);
+    assert.throws(() => calculate(input, { lineage: [{ ...link, [field]: [undefined] }] }), /Source-verified lineage/);
+
+    const inherited = new Array(1);
+    Object.setPrototypeOf(inherited, Object.assign(Object.create(Array.prototype), { 0: link[field][0] }));
+    for (const ids of [new Array(1), [link[field][0], , "synthetic-additional-id"], inherited]) {
+      assert.throws(() => calculate(input, { lineage: [{ ...link, [field]: ids }] }), /Source-verified lineage/);
+    }
+
+    const dense = Object.freeze([...link[field], "synthetic-additional-id"]);
+    const retained = calculate(input, { lineage: [{ ...link, [field]: dense }] });
+    assert.equal(retained.repositories.rows[0].value, 1);
+    assert.deepEqual(JSON.parse(JSON.parse(retained.repositories.lineageSignature)[0])[field], [...dense].sort());
+    assert.deepEqual(link, original);
+  });
+}
+
 test("source occurrence uses half-open boundaries even when independent acceptance is later", () => {
   const window = { ...scope, from: "2026-10-05T00:00:00.001Z", to: "2026-10-06T00:00:00Z" };
   const outputs = [
