@@ -10,6 +10,8 @@ export interface DocumentationPathPolicy {
   importedPaths: readonly string[];
   /** Explicit language/category mapping; a path or extension never implies a locale. */
   localizationPaths?: readonly LocalizationPathRule[];
+  /** Selected notes paths are a source candidate, never a review or publication claim. */
+  releaseNotesPaths?: readonly string[];
 }
 export interface LocalizationPathRule {
   locale: string;
@@ -46,6 +48,7 @@ export function validateDocumentationPolicy(policy: DocumentationPathPolicy): vo
   for (const key of ["documentationPaths", "researchPaths", "generatedPaths", "importedPaths"] as const) {
     validatePaths(policy[key], key === "documentationPaths");
   }
+  releaseNotesPaths(policy);
   const rules = policy.localizationPaths ?? [];
   if (!Array.isArray(rules) || rules.length > 32) throw new Error("Bounded localization rules required");
   const identities = new Set<string>();
@@ -92,14 +95,32 @@ export function validateDocumentationPolicy(policy: DocumentationPathPolicy): vo
 }
 const matches = (path: string, rules: readonly string[]) =>
   rules.some((rule) => (rule.endsWith("/") ? path.startsWith(rule) : path === rule));
+function releaseNotesPaths(policy: DocumentationPathPolicy): string[] {
+  if (policy.releaseNotesPaths === undefined) return [];
+  const selected = policy.releaseNotesPaths;
+  if (!Array.isArray(selected) || selected.length < 1 || selected.length > 100)
+    throw new Error("Explicit bounded release notes paths required");
+  const paths: string[] = [];
+  for (let index = 0; index < selected.length; index++) {
+    if (!Object.hasOwn(selected, index)) throw new Error("Dense release notes paths required");
+    paths.push(selected[index]!);
+  }
+  validatePaths(paths, true);
+  if (paths.some((path) => !matches(path, policy.documentationPaths)))
+    throw new Error("Release notes paths must be within the documentation policy");
+  return paths;
+}
 export function classifyDocumentation(diff: PinnedPhysicalDiff, policy: DocumentationPathPolicy) {
   validateDocumentationPolicy(policy);
   const physical = classifyPhysicalDiff(diff);
   const localizations: { locale: string; category: string }[] = [];
-  if (!physical.complete) return { eligible: false, localizations, reasons: ["documentation_diff_incomplete"] };
+  if (!physical.complete)
+    return { eligible: false, releaseNotes: false, localizations, reasons: ["documentation_diff_incomplete"] };
   const reasons = new Set<string>();
   const locales = new Map<string, { locale: string; category: string }>();
-  let eligible = false;
+  let eligible = false,
+    releaseNotes = false;
+  const notesPaths = releaseNotesPaths(policy);
   for (const file of physical.files) {
     const paths = [file.path, ...(file.previousPath ? [file.previousPath] : [])];
     const documentation = paths.some((path) => matches(path, policy.documentationPaths));
@@ -122,6 +143,7 @@ export function classifyDocumentation(diff: PinnedPhysicalDiff, policy: Document
       if (localizations.length > 0) reasons.add(`localization_excluded_${exclusion}`);
     } else if (file.additions > 0 || file.deletions > 0) {
       if (documentation) eligible = true; // Substantive deletion is participation too; zero-change moves are not new content.
+      if (documentation && paths.some((path) => matches(path, notesPaths))) releaseNotes = true;
       // A substantive rename affects both configured paths. The same
       // locale/category remains one unit, including moves within its own paths.
       for (const { locale, category } of localizations) {
@@ -131,5 +153,5 @@ export function classifyDocumentation(diff: PinnedPhysicalDiff, policy: Document
   }
   if (!eligible) reasons.add("no_eligible_documentation_change");
   localizations.push(...[...locales].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, value]) => value));
-  return { eligible, localizations, reasons: [...reasons].sort() };
+  return { eligible, releaseNotes, localizations, reasons: [...reasons].sort() };
 }

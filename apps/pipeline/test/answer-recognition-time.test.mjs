@@ -263,7 +263,18 @@ test("issue_answers: its configuration fence preserves automatic-source authorit
     const old = previousAuthority(empty, bindings);
     const current = recognitionFingerprint(empty, bindings);
     // Preserve the literal old fingerprint and the received independent category fences.
-    if (["issue_answers", "maintenance", "automation", "issue_ordering"].includes(metric.id))
+    if (
+      [
+        "issue_answers",
+        "maintenance",
+        "automation",
+        "governance",
+        "deployment_work",
+        "incidents",
+        "release_changes",
+        "issue_ordering",
+      ].includes(metric.id)
+    )
       assert.notEqual(current, old);
     else assert.equal(current, old, `${metric.id}: exact prior authority remains`);
   }

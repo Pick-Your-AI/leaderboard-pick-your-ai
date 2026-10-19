@@ -9,9 +9,13 @@ const escape = (value: string) =>
 
 const svgGraphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
 
+/** XML 1.0 cannot carry every JSON string. Replace forbidden code points only in image text. */
+const svgText = (value: string) =>
+  value.replace(/[^\u0009\u000A\u000D\u0020-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/gu, "\uFFFD");
+
 /** Keep the existing free-text budget without manufacturing half a surrogate pair or grapheme. */
 function svgLabel(value: string): string {
-  const text = value;
+  const text = svgText(value);
   if (text.length <= 115) return text;
   let end = 0;
   for (const part of svgGraphemes.segment(text)) {
@@ -187,7 +191,7 @@ export function renderContributorCardImage(
     `Coverage: ${row.result.coverage.state}`,
     `Source: ${sources[0] ?? "public link unavailable"}${sources.length > 1 ? ` (+${sources.length - 1} more in portfolio)` : ""}`,
     "Dated evidence, not a live activity or productivity claim.",
-  ];
+  ].map(svgText);
   const rows = svgRows(lines);
   const height = 76 + (rows.length - 1) * 36;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="${height}" viewBox="0 0 960 ${height}" role="img" aria-labelledby="title description"><title id="title">${escape(`${svgLabel(metric.name)} — dated contribution card`)}</title><desc id="description">${lines.map(escape).join("; ")}</desc><rect width="960" height="${height}" rx="12" fill="#ffffff" stroke="#334155"/><g fill="#172033" font-family="monospace" font-size="14">${rows.map((line, index) => `<text x="24" y="${38 + index * 36}" textLength="${line.length}" lengthAdjust="spacingAndGlyphs" xml:space="preserve">${escape(line.text)}</text>`).join("")}</g></svg>`;
