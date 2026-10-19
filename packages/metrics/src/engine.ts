@@ -413,7 +413,23 @@ const uncertaintyReasons = new Set([
   "conflicting_policy_unit",
 ]);
 const hasUncertainty = (prepared: Prepared) => prepared.audit.some((entry) => uncertaintyReasons.has(entry.reason));
-function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope, conserveReleaseWork = true): Prepared {
+function validMembershipIdentifiers(ids: readonly unknown[]): boolean {
+  const seen = new Set<string>();
+  for (let index = 0; index < ids.length; index++) {
+    if (!Object.hasOwn(ids, index)) return false;
+    const id = ids[index];
+    if (typeof id !== "string" || !id.trim() || seen.has(id)) return false;
+    seen.add(id);
+  }
+  return true;
+}
+function prepare(
+  input: FrozenInput,
+  policy: MetricPolicy,
+  scope: MetricScope,
+  conserveReleaseWork = true,
+  requireKnownWorkstreams = false,
+): Prepared {
   const cutoff = instant(input.cutoff);
   if (instant(scope.to) > cutoff) throw new Error("Scope cannot exceed the frozen cutoff");
   required(input.datasetId, "Dataset ID");
@@ -468,7 +484,7 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope, c
         (context.projectScope !== undefined && !Array.isArray(context.projectScope)) ||
         (context.workstreamScope !== undefined && !Array.isArray(context.workstreamScope)) ||
         [context.projects, context.workstreams, context.projectScope ?? [], context.workstreamScope ?? []].some(
-          (ids) => ids.some((id) => typeof id !== "string" || !id.trim()) || new Set(ids).size !== ids.length,
+          (ids) => !validMembershipIdentifiers(ids),
         ) ||
         (context.projectScope !== undefined && context.projects.some((id) => !context.projectScope!.includes(id))) ||
         (context.workstreamScope !== undefined &&
@@ -607,6 +623,7 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope, c
       else if (scope.workstreams.length && !scope.workstreams.some((id) => context.workstreams.includes(id)))
         reason =
           context.workstreamsKnown === false ||
+          (requireKnownWorkstreams && context.workstreamsKnown !== true) ||
           (context.workstreamScope !== undefined &&
             scope.workstreams.some((id) => !context.workstreamScope!.includes(id)))
             ? "unknown_membership_context"
@@ -790,6 +807,57 @@ export function selectPortfolioFacts(
   // Keep both immutable facts for audit and recomputation, but expose one current
   // locale activity unit. An unaccepted or unrelated language remains observed.
   return selected.filter((fact) => !acceptedSources.has(fact.id));
+}
+
+/** Private accepted source units for descriptive event-time derivations.
+ * Preserve the selected source policy's evidence class, roles and per-unit
+ * quantity admission; this selector does not calculate source totals.
+ * Breadth uses source occurrence time, never a later acceptance or
+ * current association. Canonical source units avoid collapsing distinct event
+ * contexts through an unrelated source board's interval grouping.
+ */
+export function selectAcceptedActivityFacts(
+  input: FrozenInput,
+  policy: MetricPolicy,
+  requestedScope: MetricScope,
+): { facts: MetricFact[]; audit: AuditEntry[]; complete: boolean; scope: MetricScope } {
+  validateMetricPolicy(policy);
+  const metric = getMetricDefinition(policy.metricId)!;
+  if (
+    policy.rankedStates[0] === "observed" ||
+    !["count", "sum"].includes(policy.aggregation) ||
+    policy.groupBy !== "canonical" ||
+    metric.family === "breadth"
+  )
+    throw new Error("Accepted activity requires an explicit qualified or reviewed canonical source policy");
+  const scope = canonicalScope(requestedScope);
+  if (scope.context !== "event") throw new Error("Activity breadth requires event-time context");
+  // Breadth retains each release-time source unit and its historical mapping.
+  // Lifetime PR-work conservation belongs to the release total, not this selector.
+  // Breadth treats omitted historical mapping markers as unknown, including
+  // negative filter matches. Existing board/portfolio legacy-marker handling is unchanged.
+  const prepared = prepare(input, { ...policy, dateBasis: "occurredAt" }, scope, false, true);
+  const facts: MetricFact[] = [];
+  for (const fact of prepared.facts) {
+    const reason = !policy.rankedStates.includes(fact.state as never)
+      ? "source_evidence_class_not_accepted"
+      : !fact.artifactId?.trim()
+        ? "unknown_artifact_identity"
+        : policy.aggregation === "sum" && fact.quantity === undefined
+          ? "unknown_source_quantity"
+          : null;
+    if (reason) prepared.audit.push({ factIds: [fact.id], actorId: fact.actorId, reason });
+    else facts.push(fact);
+  }
+  return {
+    facts,
+    audit: prepared.audit.sort((a, b) => compare(key(a.reason, a.factIds), key(b.reason, b.factIds))),
+    complete:
+      hasCompleteSourceCoverage(input, policy, scope) &&
+      !hasUncertainty(prepared) &&
+      !prepared.audit.some((entry) => entry.reason === "unknown_source_quantity"),
+    scope,
+  };
 }
 
 /** Private collaboration admission over all retained acceptance history before the
