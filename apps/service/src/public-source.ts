@@ -570,7 +570,7 @@ export function projectRead(
           classification: parsed.metricIds.includes("localization") ? classification : null,
           reproduction: parsed.metricIds.includes("reproductions") ? reproduction : null,
           maintenance: parsed.metricIds.includes("maintenance") ? maintenance : null,
-          documentationPurpose: parsed.metricIds.includes("documentation")
+          documentationPurpose: documentationPurpose.length
             ? {
                 reasons: documentationPurpose,
                 ...(documentationPurpose.length
