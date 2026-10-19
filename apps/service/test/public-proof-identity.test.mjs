@@ -150,6 +150,24 @@ test("legacy and equivalent copies preserve canonical contribution identity and 
   assert.deepEqual(response.json().contribution.reasonCodes, ["public_accepted_work"]);
 });
 
+test("unapproved maintenance membership without a facet preserves equivalent public proof", async (t) => {
+  const input = fixture();
+  const proof = input.selected.evidence[0];
+  const app = harness(t, input);
+  const url = `/api/v1/evidence/${proof.contribution.contributionId}`;
+  assert.equal((await app.inject(url)).statusCode, 200);
+  input.selected.portfolioEvidence[0].contribution.metricIds.push("maintenance");
+  for (const suffix of ["", `?snapshot=${input.head.snapshotId}`]) {
+    const response = await app.inject(url + suffix);
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json().contribution.metricIds, proof.contribution.metricIds);
+    assert.ok(response.json().contribution.reasonCodes.every((reason) => !reason.startsWith("maintenance_")));
+  }
+  input.controls.suppressedArtifactIds.push(proof.artifact.stableId);
+  for (const suffix of ["", `?snapshot=${input.head.snapshotId}`])
+    assert.equal((await app.inject(url + suffix)).statusCode, 404);
+});
+
 test("distinct contribution IDs may attribute the same artifact and source event to collaborators", async (t) => {
   const input = fixture();
   const shared = structuredClone(input.selected.portfolioEvidence[0]);
