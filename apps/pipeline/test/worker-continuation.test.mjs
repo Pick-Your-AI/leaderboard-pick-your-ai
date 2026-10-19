@@ -573,18 +573,22 @@ test("implicit named scan retains mixed month and role scopes across a database 
     assert.deepEqual(await pendingScans(h), []);
     assert.deepEqual(h.config.scopes, templates, "neither retry nor resolution may mutate the approved templates");
 
-    await assert.rejects(resumed.runOnce({ maxPages: 1 }), /named_period_requires_whole_second_cutoff/);
-    assert.equal(fixture.requests.length, 2, "an invalid new cutoff cannot collect a replacement page");
-    assert.deepEqual(await pendingScans(h), [], "an invalid new window must not leave a permanently invalid cycle");
-    time.set(time.following);
+    await assert.rejects(
+      resumed.runOnce({ cutoff: time.fractional, maxPages: 1 }),
+      /named_period_requires_whole_second_cutoff/,
+    );
+    assert.equal(fixture.requests.length, 2, "an explicit invalid cutoff cannot collect a replacement page");
+    assert.deepEqual(await pendingScans(h), [], "an explicit invalid cutoff must not create a cycle");
     assert.equal((await resumed.runOnce({ maxPages: 1 })).state, "collecting");
+    assert.equal(new Date((await pendingScans(h))[0].event_cutoff).toISOString(), time.next);
+    time.set(time.following);
     assert.equal((await resumed.runOnce({ maxPages: 1 })).state, "published");
     assert.deepEqual(
       fixture.requests.map((request) => request.cursor),
       [null, "page-2", null, "page-2"],
     );
     assert.equal(new Set(fixture.requests.map((request) => request.runId)).size, 2);
-    assert.ok(fixture.requests.slice(2).every((request) => request.cutoff === time.following));
+    assert.ok(fixture.requests.slice(2).every((request) => request.cutoff === time.next));
     const nextHeads = (await h.db.query("SELECT scope_key,snapshot_id FROM leaderboard_pipeline.heads")).rows;
     const oldMonthKeys = expected.slice(0, 2).map(components.contracts.publicScopeKey);
     for (const key of oldMonthKeys)
@@ -592,7 +596,7 @@ test("implicit named scan retains mixed month and role scopes across a database 
         nextHeads.find((head) => head.scope_key === key)?.snapshot_id,
         originalHeads.find((head) => head.scope_key === key)?.snapshot_id,
       );
-    const nextKeys = namedScopesAt(templates, time.following).map(components.contracts.publicScopeKey);
+    const nextKeys = namedScopesAt(templates, time.next).map(components.contracts.publicScopeKey);
     assert.equal(nextHeads.length, 6, "two new named heads coexist with the prior month and the two exact scopes");
     assert.ok(nextKeys.every((key) => nextHeads.some((head) => head.scope_key === key)));
     assert.deepEqual(await pendingScans(h), []);
@@ -601,7 +605,7 @@ test("implicit named scan retains mixed month and role scopes across a database 
   }
 });
 
-test("a new fractional implicit named cutoff rolls back its pending row before any collection", async (t) => {
+test("a new fractional implicit named clock binds the preceding whole second before collection", async (t) => {
   const fixture = paginatedSource();
   const time = namedClock();
   time.set(time.fractional);
@@ -612,10 +616,15 @@ test("a new fractional implicit named cutoff rolls back its pending row before a
       config.scopes = [{ ...publicScope, period: "month" }];
     },
   });
-  await assert.rejects(h.runtime.runOnce({ maxPages: 1 }), /named_period_requires_whole_second_cutoff/);
-  assert.deepEqual(fixture.requests, []);
-  assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_ingestion.collection_runs")).rows[0].n, 0);
-  assert.deepEqual(await pendingScans(h), []);
+  assert.equal((await h.runtime.runOnce({ maxPages: 1 })).state, "collecting");
+  assert.equal(fixture.requests.length, 1);
+  assert.equal(fixture.requests[0].cutoff, time.next);
+  const runs = (await h.db.query("SELECT until_at FROM leaderboard_ingestion.collection_runs")).rows;
+  assert.equal(runs.length, 1);
+  assert.equal(new Date(runs[0].until_at).toISOString(), time.next);
+  const pending = await pendingScans(h);
+  assert.equal(pending.length, 1);
+  assert.equal(new Date(pending[0].event_cutoff).toISOString(), time.next);
 });
 
 test("a new named cycle resolves its head keys from the event cutoff selected under its row lock", async (t) => {
@@ -641,7 +650,7 @@ test("a new named cycle resolves its head keys from the event cutoff selected un
             sql === "SELECT * FROM leaderboard_pipeline.scan_continuations WHERE configuration_key=$1 FOR UPDATE"
           ) {
             advance = false;
-            time.set(time.next);
+            time.set(time.fractional);
           }
           return result;
         },
@@ -655,7 +664,7 @@ test("a new named cycle resolves its head keys from the event cutoff selected un
     Object.keys(retained.scope_heads),
     namedScopesAt(templates, time.next).map(components.contracts.publicScopeKey),
   );
-  time.set(time.fractional);
+  time.set(time.following);
   assert.equal((await h.runtime.runOnce({ maxPages: 1 })).state, "published");
   assert.ok(fixture.requests.every((request) => request.cutoff === time.next));
   assert.deepEqual(await pendingScans(h), []);

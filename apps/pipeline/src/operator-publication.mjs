@@ -40,11 +40,11 @@ export function createOperatorPublicationVerifier({
       operation.normalizationVersion !== webhookDispatchVersion ||
       operation.policyVersion !== policyVersion ||
       operation.dataMode !== dataMode ||
-      binding.publications.length !== config.scopes.length ||
       binding.sourceGenerations.length !== config.repositories.length
     )
       return null;
     // The persisted event cutoff owns the scopes, independently of later read clocks.
+    // Several named presets can share one concrete scope and publication.
     const scopes = new Map(publicationScopesAt(operation.cutoff).map((scope) => [scopeKey(scope), scope]));
     if (
       scopes.size !== binding.publications.length ||

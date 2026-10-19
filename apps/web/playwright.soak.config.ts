@@ -36,7 +36,7 @@ export default defineConfig({
     storageState: { cookies: [], origins: [] },
   },
   webServer: {
-    command: `npm exec --workspace @pick-your-ai/web -- vite preview --host 127.0.0.1 --port ${port} --strictPort`,
+    command: `npm run preview --workspace @pick-your-ai/web -- --host 127.0.0.1 --port ${port} --strictPort`,
     url: baseURL,
     cwd: "../..",
     reuseExistingServer: false,
