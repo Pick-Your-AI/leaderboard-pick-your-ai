@@ -19,7 +19,7 @@ const completeCoverage = () => ({
   sourceErrors: [],
 });
 const selected = selection(
-  "?organization=Pick-Your-AI&snapshot=public-1&repository=repo-1&metric=pr_opened&search=alice&category=pr_opened&cursor=old.signature",
+  "?organization=Pick-Your-AI&snapshot=public-1&repository=repo-1&metric=pr_opened&search=alice&cursor=old.signature",
 );
 const fixture = () => ({
   schemaVersion: "leaderboard/v1",
@@ -51,15 +51,65 @@ const fixture = () => ({
 });
 
 test("sharing pins exact approved scope and drops directory/cursor filters", () => {
-  const params = recognitionParameters(selected, "public-1");
+  const sharingSelection = { ...selected, category: "pr_opened" };
+  const params = recognitionParameters(sharingSelection, "public-1");
   assert.equal(params.get("snapshot"), "public-1");
   assert.equal(params.get("repository"), "repo-1");
   for (const key of ["cursor", "category", "search", "metric"]) assert.equal(params.get(key), null);
-  const url = new URL(cardHref("https://example.test/api/v1", selected, "public-1", "alice", "pr_opened"));
+  const url = new URL(cardHref("https://example.test/api/v1", sharingSelection, "public-1", "alice", "pr_opened"));
   assert.equal(url.pathname, "/api/v1/cards/alice");
   assert.equal(url.searchParams.get("metric"), "pr_opened");
-  assert.throws(() => recognitionParameters(selected, "public-2"));
-  assert.throws(() => cardHref("https://example.test/api/v1", selected, "public-1", "../private", "pr_opened"));
+  assert.throws(() => recognitionParameters(sharingSelection, "public-2"));
+  assert.throws(() => cardHref("https://example.test/api/v1", sharingSelection, "public-1", "../private", "pr_opened"));
+});
+
+test("v1 achievements cannot stand in for a category-selected response, even when empty or echoing the category", () => {
+  for (const category of ["documentation", "pr_opened"]) {
+    for (const empty of [false, true]) {
+      for (const echoed of [false, true]) {
+        const value = fixture();
+        if (empty) value.achievements = [];
+        if (echoed) value.category = category;
+        const before = JSON.stringify(value);
+        assert.throws(() => achievements(value, { ...selected, category }, "alice"), {
+          status: 502,
+          code: "invalid_recognition_response",
+        });
+        assert.equal(JSON.stringify(value), before);
+      }
+    }
+  }
+  assert.equal(achievements(fixture(), selected, "alice").achievements.length, 1);
+  const empty = fixture();
+  empty.achievements = [];
+  empty.coverage = [];
+  assert.deepEqual(achievements(empty, selected, "alice").achievements, []);
+});
+
+test("achievement ruleVersion requires an exact supported string before an empty response is accepted", () => {
+  for (const ruleVersion of [
+    ["accepted-evidence/v1"],
+    ["accepted-evidence/v2"],
+    [["accepted-evidence/v1"]],
+    null,
+    true,
+    1,
+    {},
+    " accepted-evidence/v1",
+    "accepted-evidence/v2\n",
+    "ACCEPTED-EVIDENCE/V1",
+  ]) {
+    const value = fixture();
+    value.ruleVersion = ruleVersion;
+    value.achievements = [];
+    value.coverage = [];
+    const before = JSON.stringify(value);
+    assert.throws(() => achievements(value, selected, "alice"), {
+      status: 502,
+      code: "invalid_recognition_response",
+    });
+    assert.equal(JSON.stringify(value), before);
+  }
 });
 
 test("achievement parser rejects scope, snapshot, identity, policy, unsafe links and missing evidence", () => {

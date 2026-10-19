@@ -10,6 +10,8 @@ import {
   reconciliationRunId,
 } from "../src/reconciliation-plan.mjs";
 import { leastReconciliationTime, readReconciliationProgress } from "../src/reconciliation-progress.mjs";
+import { createGithubCollectionSource } from "../src/github-source.mjs";
+import { syntheticRepositoryClient } from "../../../packages/github/test/synthetic-client.mjs";
 
 const require = createRequire(new URL("../../../packages/ingestion/package.json", import.meta.url));
 const { PGlite } = require("@electric-sql/pglite");
@@ -113,6 +115,55 @@ test("an exact completed full audit records its event cutoff separately from its
   assert.equal(result.itemCount, 1);
   assert.equal(result.expectedCount, 1);
   assert.equal(result.pageCount, 1);
+});
+
+test("a repeated REST subject with a changed revision cannot establish exact-count progress", async () => {
+  await insertRun();
+  const repository = { ...repositories[0], slug: "synthetic-owner/repository" };
+  const item = (number, updatedAt) => ({
+    id: number,
+    number,
+    node_id: `I_SYNTHETIC_${number}`,
+    html_url: `https://github.com/${repository.slug}/issues/${number}`,
+    created_at: at(-55),
+    updated_at: updatedAt,
+    body: `Synthetic observation ${updatedAt}`,
+    state: "open",
+  });
+  // A changed first subject can move past a later REST page boundary. Counting
+  // both observations would conceal the omitted third subject as a complete scan.
+  const rows = [item(1, at(-50)), item(2, at(-40)), item(4, at(-20)), item(1, at(-10))];
+  const source = createGithubCollectionSource({
+    sourceId: "synthetic",
+    repositories: [repository],
+    isSynthetic: true,
+    client: syntheticRepositoryClient(2, {
+      rest: async () => ({ id: 2, private: false, full_name: repository.slug }),
+      scanRest: async (options) => options.select(rows),
+    }),
+  });
+  const runId = reconciliationRunId(contextDigest, tokenFor(serial++), 0, 1);
+  await collection.start({
+    runId,
+    repositoryId: 2,
+    family: "issues",
+    mode: "reconcile",
+    since: at(-60),
+    until: cutoff,
+  });
+  assert.equal(await collection.step(runId, source), "failed");
+  const saved = (
+    await db.query(
+      "SELECT state,item_count,expected_count,page_count FROM leaderboard_ingestion.collection_runs WHERE run_id=$1",
+      [runId],
+    )
+  ).rows[0];
+  assert.deepEqual(saved, { state: "failed", item_count: 0, expected_count: null, page_count: 0 });
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM leaderboard_ingestion.source_facts")).rows[0].n, 0);
+  const result = await one({ observationCutoff: new Date(Date.now() + 1000).toISOString() });
+  assert.equal(result.reconciledThrough, at(-60));
+  assert.equal(result.windowComplete, false);
+  assert.equal(result.state, "failed");
 });
 
 test("overlapping, nested and boundary-touching intervals advance only the connected exact-count chain", async () => {

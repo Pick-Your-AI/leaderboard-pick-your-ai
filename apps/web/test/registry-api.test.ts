@@ -111,6 +111,16 @@ test("API methods and discovery render supplied metadata without prototype recor
     );
     assert.match(unavailable, /Deferred/);
     assert.match(unavailable, /not a measured zero/);
+    for (const metricId of ["label_taxonomy", "milestone_definitions"]) {
+      const definition = renderToStaticMarkup(
+        React.createElement(RegistryMetadata, { registry, metric: registryMetric(registry, metricId) }),
+      );
+      assert.match(definition, /triage-definition-day\/v1/);
+      assert.match(definition, /UTC calendar day/);
+      assert.match(definition, /source or acceptance/);
+      assert.match(definition, /No selectable candidate view registered/);
+      assert.doesNotMatch(definition, /Raw triage grouping/);
+    }
     const catalogPage = renderToStaticMarkup(
       React.createElement(RegistryCatalog, {
         registry,

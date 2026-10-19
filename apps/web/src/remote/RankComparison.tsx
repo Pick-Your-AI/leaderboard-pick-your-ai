@@ -26,7 +26,9 @@ export function RankMovementValue({ value }: { value: RankMovement | undefined }
     return (
       <>
         Unavailable:{" "}
-        {reasons[value.reason] ?? "The service cannot establish compatible history (" + value.reason + ")."}
+        {Object.hasOwn(reasons, value.reason)
+          ? reasons[value.reason]
+          : "The service cannot establish compatible history (" + value.reason + ")."}
       </>
     );
   if (value.delta === 0) return <>Rank unchanged</>;
