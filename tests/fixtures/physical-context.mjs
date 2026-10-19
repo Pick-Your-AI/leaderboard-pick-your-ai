@@ -15,6 +15,8 @@ export function physicalFixture({
   files = physicalFiles,
   scope = {},
   legacy = false,
+  actorId = 101,
+  integrationOffset = 0,
 } = {}) {
   const selectedScope = canonicalPublicScope({
     organization: "Pick-Your-AI",
@@ -27,11 +29,20 @@ export function physicalFixture({
   const outputs = Array.from({ length: sampleCount }, (_, index) => {
     const { envelope } = physicalSource({ files });
     const pull = envelope.payload.pull_request;
-    pull.id += index;
-    pull.node_id += `_${index}`;
-    pull.number += index;
+    const sample = index + integrationOffset;
+    pull.id += sample;
+    pull.node_id += `_${sample}`;
+    pull.number += sample;
     pull.html_url = `https://github.com/${envelope.repository.slug}/pull/${pull.number}`;
-    envelope.integration.canonicalChangeId += `_${index}`;
+    if (actorId !== 101) {
+      pull.user = {
+        id: actorId,
+        node_id: `U_SYNTHETIC_PHYSICAL_${actorId}`,
+        login: `synthetic-author-${actorId}`,
+        type: "User",
+      };
+    }
+    envelope.integration.canonicalChangeId += `_${sample}`;
     return normalizeGithubObservation(envelope);
   });
   const coverage = {
@@ -89,13 +100,13 @@ export function physicalFixture({
       },
       actors: [
         {
-          actorId: "101",
+          actorId: String(actorId),
           state: "public",
           actor: {
             schemaVersion: "leaderboard/v1",
             identityState: "resolved",
-            githubNodeId: "U_SYNTHETIC_PHYSICAL",
-            login: "synthetic-author",
+            githubNodeId: actorId === 101 ? "U_SYNTHETIC_PHYSICAL" : `U_SYNTHETIC_PHYSICAL_${actorId}`,
+            login: actorId === 101 ? "synthetic-author" : `synthetic-author-${actorId}`,
             kind: "user",
             executionMode: "unknown",
           },
@@ -103,7 +114,7 @@ export function physicalFixture({
       ],
       rows: [
         {
-          actorId: "101",
+          actorId: String(actorId),
           result: {
             schemaVersion: "leaderboard/v1",
             metricId,
@@ -124,7 +135,7 @@ export function physicalFixture({
             physicalContexts: [
               {
                 schemaVersion: "physical-context/v1",
-                actorId: "101",
+                actorId: String(actorId),
                 metricId,
                 policyVersion: methodology[0].policyVersion,
                 policySignature: methodology[0].policySignature,

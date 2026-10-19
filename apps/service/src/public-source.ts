@@ -9,10 +9,14 @@ import {
   publicDocumentationReasons,
   publicDocumentationRecognitionReasons,
   publicReproductionRecognitionReasons,
+  publicMaintenanceClassificationReasons,
   matchesActorFilter,
   type ActorFilter,
   publicEvidenceMetadataSchema,
   type PublicEvidenceMetadata,
+  publicProjectContextSchema,
+  publicProjectContextMatches,
+  type PublicProjectContext,
   actorSchema,
   artifactSchema,
   publicArtifactIdSchema,
@@ -42,6 +46,7 @@ import { compareSourceInstants } from "./source-time.js";
 export type { PublicScope } from "@pick-your-ai/contracts";
 export interface PublicEvidence {
   evidenceMetadata?: PublicEvidenceMetadata;
+  projectContext?: PublicProjectContext;
   artifact: Artifact;
   contribution: Contribution;
   occurredAt: string | null;
@@ -507,12 +512,20 @@ export function projectRead(
         checkVisibility(visibilityByArtifact, artifact.stableId, artifact.visibility);
         checkVisibility(visibilityByArtifact, parsed.artifactId, artifact.visibility);
         const classification = publicDocumentationReasons(parsed);
+        const maintenance = publicMaintenanceClassificationReasons(parsed);
+        const documentation = publicDocumentationRecognitionReasons(parsed);
+        const documentationPurpose = documentation.filter((reason) => reason.startsWith("documentation_purpose:"));
         const activityState = (entry as Partial<PortfolioEvidence>).activityState;
         if (
           parsed.metricIds.includes("reproductions") &&
           acceptedReproductions &&
           activityState !== undefined &&
           activityState !== "accepted"
+        )
+          return reject();
+        if (
+          maintenance.length &&
+          (parsed.qualification !== "eligible" || (activityState !== undefined && activityState !== "accepted"))
         )
           return reject();
         const reproduction = publicReproductionRecognitionReasons(
@@ -533,7 +546,11 @@ export function projectRead(
         const contribution = {
           ...parsed,
           ...(parsed.metricIds.some(
-            (metric) => metric === "documentation" || metric === "localization" || metric === "reproductions",
+            (metric) =>
+              metric === "documentation" ||
+              metric === "localization" ||
+              metric === "reproductions" ||
+              metric === "maintenance",
           )
             ? {
                 reasonCodes: [
@@ -548,8 +565,9 @@ export function projectRead(
                     ].includes(reason),
                   ),
                   ...classification,
-                  ...publicDocumentationRecognitionReasons(parsed),
+                  ...documentation,
                   ...reproduction,
+                  ...maintenance,
                 ],
               }
             : {}),
@@ -588,7 +606,40 @@ export function projectRead(
         if (!date(entry.occurredAt) || (entry.sourceRevision !== null && !id(entry.sourceRevision))) return reject();
         const metadata =
           entry.evidenceMetadata === undefined ? undefined : publicEvidenceMetadataSchema.parse(entry.evidenceMetadata);
-        if (reproduction.length > 0 && metadata && metadata.activityState !== "accepted") return reject();
+        const projectContext =
+          entry.projectContext === undefined ? undefined : publicProjectContextSchema.parse(entry.projectContext);
+        if (
+          projectContext &&
+          !publicProjectContextMatches(projectContext, artifact, contribution, scope.context ?? "event")
+        )
+          return reject();
+        if (documentationPurpose.length) {
+          const repository = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/pull\/[1-9][0-9]*$/.exec(
+            artifact.publicUrl ?? "",
+          )?.[1];
+          if (
+            parsed.qualification !== "eligible" ||
+            parsed.roles.length !== 1 ||
+            parsed.roles[0] !== "author" ||
+            artifact.source !== "github" ||
+            artifact.kind !== "pull_request" ||
+            (activityState !== undefined && activityState !== "accepted") ||
+            typeof entry.sourceRevision !== "string" ||
+            !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(entry.sourceRevision) ||
+            !repository ||
+            entry.sourceRevisionUrl !== "https://github.com/" + repository + "/commit/" + entry.sourceRevision ||
+            entry.occurredAt === null ||
+            (metadata &&
+              (metadata.activityState !== "accepted" ||
+                metadata.sourceOccurredAt === null ||
+                compareSourceInstants(metadata.sourceOccurredAt, entry.occurredAt) !== 0 ||
+                metadata.acceptedAt === null ||
+                compareSourceInstants(metadata.acceptedAt, entry.occurredAt) < 0))
+          )
+            return reject();
+        }
+        if ((reproduction.length > 0 || maintenance.length > 0) && metadata && metadata.activityState !== "accepted")
+          return reject();
         // Absence is part of the metadata projection too: route preference must
         // not choose a legacy copy over a richer copy of the same contribution.
         // Locale units require identical labels on every copy. Earlier generic
@@ -596,8 +647,23 @@ export function projectRead(
         // so retain their readability without inventing missing classifications.
         const serialized = JSON.stringify({
           metadata: metadata ?? null,
+          projectContext: projectContext ?? null,
           classification: parsed.metricIds.includes("localization") ? classification : null,
           reproduction: parsed.metricIds.includes("reproductions") ? reproduction : null,
+          maintenance: maintenance.length ? maintenance : null,
+          documentationPurpose: documentationPurpose.length
+            ? {
+                reasons: documentationPurpose,
+                ...(documentationPurpose.length
+                  ? {
+                      classification,
+                      sourceRevision: entry.sourceRevision,
+                      sourceRevisionUrl: entry.sourceRevisionUrl,
+                      occurredAt: entry.occurredAt,
+                    }
+                  : {}),
+              }
+            : null,
         });
         if (
           metadataByContribution.has(contribution.contributionId) &&
@@ -615,6 +681,7 @@ export function projectRead(
           return reject();
         return {
           ...(metadata === undefined ? {} : { evidenceMetadata: metadata }),
+          ...(projectContext === undefined ? {} : { projectContext }),
           artifact,
           contribution,
           occurredAt: entry.occurredAt,
@@ -672,6 +739,7 @@ export function projectRead(
             ? [
                 ...publicDocumentationRecognitionReasons(entry.contribution),
                 ...publicReproductionRecognitionReasons(entry.contribution, true),
+                ...publicMaintenanceClassificationReasons(entry.contribution),
               ]
             : []),
         ],

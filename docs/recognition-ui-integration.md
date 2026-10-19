@@ -55,6 +55,16 @@ labels, no-store responses, framing restrictions and current privacy checks rema
 in force. This presentation does not supply missing denominator
 evidence, authorize ranking a descriptive measure or establish a live service.
 
+SVG image text uses the [XML 1.0 character range](https://www.w3.org/TR/xml/#charsets).
+An admitted JSON label can contain a character that XML cannot encode. In the
+image presentation, such code points become the visible replacement character
+U+FFFD before grapheme abbreviation and row measurement. This also keeps the
+title and accessible description well-formed XML. TAB, LF, CR, permitted BMP
+characters and complete supplementary code points remain unchanged; the XML
+parser's ordinary CR-to-LF normalization still applies. Publisher objects,
+evidence identities, admission rules and the original HTML serialization are
+unchanged. This is an image-format fallback, not a correction to contributor data.
+
 ## Validation and remaining browser integration
 
 Client tests cover exact scope/pin binding, dropped pagination/search filters, mismatched actor/policy/snapshot rejection, unsafe URLs, bounded evidence, private-field omission and unapproved-policy failures without fallback. Web TypeScript validation passes.

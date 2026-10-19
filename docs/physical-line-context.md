@@ -73,6 +73,13 @@ repository, artifact and integration clock. Keeping this dependency does not
 create an extra public contribution or require enabling a different board.
 Private contexts and merge dependencies are excluded from public serialization.
 
+Every private merge-proof copy uses the same frozen Project-context projector
+as its published evidence and portfolio copies. The projector consumes the
+original proof, selected merged fact, engine scope and observation cutoff;
+physical context does not supply a replacement membership history. Complete
+copy equality, including explicit unknown context or absence, still applies
+before public privacy filtering.
+
 The same complete receipt can support the four physical metric contexts without
 consuming four distinct-source budgets. Every copy must agree on the entire
 parsed receipt and merged-evidence ID for the same repository, canonical
@@ -129,6 +136,24 @@ out-of-window integrations and mismatched minimized source proofs. Export byte
 and page limits remain in force independently of the optional context budget.
 Legacy `public-export/v1`–`v3` retain their established fields and columns; they
 do not infer a physical context or presentation policy from current code.
+
+Board pagination also bounds the complete serialized response to the browser's
+2,000,000-byte UTF-8 ceiling. The requested row limit is an upper bound: a page
+may contain fewer whole rows after counting its fixed metadata, selected
+diagnostics, escaped row contents and actual signed continuation. The full
+visible cohort determines ranking before pagination, and the cursor advances
+by the number of returned rows. A final page uses its actual null cursor. An
+indivisible row or fixed envelope that cannot fit returns
+`board_response_too_large` without a partial row or context.
+
+Exports use the selected board page and retain their independent serialization
+limits and existing errors. A bounded board row can still exceed an export's
+evidence or cell limit. In particular, a CSV-only cell overflow does not withhold
+an otherwise valid board or JSON export. The synthetic large-board regression
+traverses all 50 actors with 90 samples each through the real browser reader;
+separate supported 20-row pages exercise both download readers without raising
+any export limit. Exact-byte, terminal-cursor, empty-board and current-privacy
+cases cover the page boundary independently of that large fixture.
 
 ## Reading the breakdown
 

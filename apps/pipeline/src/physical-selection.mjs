@@ -18,7 +18,15 @@ export function capturePhysicalSources(normalized, normalizationSources, digest,
 /** Select from the engine's actual aggregate units, never descriptive portfolio
  * grouping. Original source absence and a corrected/collapsed unit stay unknown.
  */
-export function selectPhysicalContexts({ sources, aggregates, policies, contracts, serialize, policyDigest }) {
+export function selectPhysicalContexts({
+  sources,
+  aggregates,
+  policies,
+  contracts,
+  serialize,
+  policyDigest,
+  projectContextFor,
+}) {
   const applicable = policies.filter((item) => contracts.physicalMetricIds.includes(item.policy.metricId));
   if (!applicable.length) return {};
   const copies = new Map();
@@ -109,6 +117,7 @@ export function selectPhysicalContexts({ sources, aggregates, policies, contract
         const dependency = {
           ...structuredClone(proof),
           ...materializeEvidenceMetadata(proof, merged[0]),
+          ...projectContextFor(proof, merged[0]),
         };
         const previous = sampleDependencies.get(merged[0].id);
         if (previous && serialize(previous) !== serialize(dependency)) {

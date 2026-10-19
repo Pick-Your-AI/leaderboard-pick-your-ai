@@ -1,6 +1,6 @@
 # API-backed contribution proof
 
-Partial implementation evidence for [#116](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/116), not issue closure or public-release authorization.
+The implemented public evidence interface was accepted for [#116](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/116) on 19 October 2026. That issue records the reviewed criteria, actual browser and service results, and remaining validation boundaries. This interface acceptance does not authorize public release.
 
 ## Behavior
 
@@ -12,11 +12,13 @@ At 1024 CSS pixels and wider, the panel is a non-modal dialog. Below 1024 pixels
 
 A drawer always uses its opening snapshot. Publication following and “Apply new snapshot” cannot replace an open proof. The existing 20-second visible-page, window-focus and visibility rechecks also revalidate the drawer. A manual permission recheck is available inside the modal. Hiding the page clears the displayed proof until a fresh read. Failed evidence reads, suppressed actors/artifacts and revoked snapshots remove the old proof, including under a historical pin; they never substitute stored evidence. API responses are not stored in browser history.
 
-## Contract limits and remaining acceptance
+## Contract limits and remaining validation
 
 The optional strict [`leaderboard-evidence/v1` metadata projection](public-evidence-metadata.md) supplies bounded as-collected titles, credited-fact actions, separate source/collection clocks, receipt-qualified acceptance time, and explicitly public partial revision/correction records. Legacy or unprovided data remains visibly unknown. It does not equate eligibility, collection or snapshot publication with acceptance, and does not say that missing correction history means “none.” Generated/imported/reverted exclusions are explained only to the extent the API supplies qualification/reason codes.
 
-The default hydration adapter does not invent historic titles or public revision/correction records. Real-source verification, permitted public history/receipt provenance, two representative assistive-technology walkthroughs, real mobile-device interaction and participant/owner acceptance remain open. This change does not alter publication, privacy or acceptance policies. No issue is claimed closed.
+The default hydration adapter does not invent historic titles or public revision/correction records. The #116 acceptance record reconciles this document's earlier partial-implementation status with the later integrated evidence: eleven drawer browser cases and fifteen public-source identity regressions passed in the original accepted `d94468b5` main execution. The drawer and permanent route use the same permitted projection. A served snapshot with contradictory actor or artifact identities is rejected before public projection and ETag handling. Those synthetic results establish the implemented interface behavior only.
+
+Real-source verification and permitted public history/receipt provenance still require their source-specific evidence. The two representative assistive-technology walkthroughs, real mobile-device interaction and participant validation previously identified here remain unperformed. [#128](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/128) retains the separate primary-journey accessibility gate, including screen-reader walkthroughs; [#71](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/71) retains representative participant understanding and feedback. Implemented keyboard, focus, modal, 320px and axe checks do not establish those observations, WCAG certification or an operating-owner commitment. Publication and privacy policies are unchanged.
 
 ## Reproducible checks
 
@@ -24,4 +26,4 @@ The default hydration adapter does not invent historic titles or public revision
 - `apps/web/browser/evidence-drawer.spec.ts`: real Fastify handler with synthetic provider input; identical drawer/permanent proof; scope and cursor continuity; held heads; 320px keyboard, modal/inert, focus restoration, resize and axe checks; Close/Back/Forward; focused proof withdrawal for actor/artifact suppression, revocation and provider failure; hostile literal text; unknown fields; and unavailable-source deep links.
 - `apps/web/browser/remote.spec.ts`: existing permanent-route, current privacy, pinned navigation, directory and export regressions.
 
-Run the documented repository toolchain (`npm run build`, `npm run typecheck`, `npm test`, `npm run test:browser`) and planning validation. Synthetic checks are not a deployed-source or accessibility acceptance record. Browser execution status must be reported separately from successful browser test compilation.
+Run the documented repository toolchain (`npm run build`, `npm run typecheck`, `npm test`, `npm run test:browser`) and planning validation. Report the exact source and original execution results, including failures and unexecuted cases. Synthetic checks are not deployed-source, screen-reader, physical-device or participant evidence. Browser execution status must be reported separately from successful browser test compilation.

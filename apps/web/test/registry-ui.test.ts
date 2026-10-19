@@ -96,10 +96,15 @@ test("domain candidate metadata preserves the documentation prototype and cannot
   const domainMetrics = metrics.filter((metric) =>
     getMetricUi(metric.id)!.verification_cases.includes("apps/pipeline/test/domain-recognition.test.mjs"),
   );
-  assert.equal(domainMetrics.length, 21);
+  assert.equal(domainMetrics.length, 24);
   for (const metric of domainMetrics) {
     const ui = getMetricUi(metric.id)!;
-    assert.equal(ui.maturity, "synthetic_verified");
+    assert.equal(ui.maturity, metric.id === "incidents" ? "definition_only" : "synthetic_verified");
+    if (metric.id === "incidents") {
+      assert.deepEqual(ui.supported_combinations, []);
+      assert.equal(ui.default_combination, null);
+      assert.throws(() => selectMetricView(metric.id), /No supported selectable view/);
+    }
     for (const pair of ui.supported_combinations) {
       assert.deepEqual(selectMetricView(metric.id, pair), pair);
       if (metric.id === "documentation" && pair.date_basis === "acceptedAt") {

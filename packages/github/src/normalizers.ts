@@ -10,6 +10,7 @@ import {
   compareSourceInstants,
   sourceEventSchema,
   publicDocumentationReasons,
+  maintenanceClassificationVersion,
   serviceAccountClassificationSchema,
   type ServiceAccountClassification,
   publicEvidenceActionSchema,
@@ -23,6 +24,7 @@ import {
 } from "@pick-your-ai/contracts";
 import { physicalContextReceipt } from "./physical-context.js";
 import { GithubReadClient } from "./client.js";
+import { readGithubCommentSource, readGithubCommentIdentity } from "./comment-identity.js";
 import { consistentReviewCohortIdentities, reviewParentMatches, reviewSourceMatches } from "./review-cohort.js";
 import {
   hasGithubRestSnapshotPrefix,
@@ -31,7 +33,23 @@ import {
   verifyGithubRestSnapshotRevision,
 } from "./rest-snapshot.js";
 import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
+import { validateDocumentationPurposeSource } from "./documentation-purpose.js";
+import {
+  validateMaintenanceClassification,
+  type MaintenanceClassificationRecord,
+} from "./maintenance-classification.js";
+import {
+  collectGithubReleaseInclusion,
+  validateGithubReleaseInclusion,
+  type GithubReleaseInclusionRecord,
+} from "./release-inclusion.js";
+import {
+  validateReleaseChangesSource,
+  type GithubReleaseReviewTarget,
+  type GithubReleaseMembership,
+} from "./release-recognition.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
+import { readIssueFieldEvent, issueFieldHistoryRevision } from "./issue-field-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
   readPublicSubjectProjectSnapshot,
@@ -191,6 +209,8 @@ export interface NormalizedGithubFact {
   firstReviewAt?: string | null;
   /** Original observed locale unit superseded only in descriptive current activity. */
   recognitionSourceFactId?: string;
+  /** Private accepted release membership and conserved work identity. */
+  releaseInclusion?: GithubReleaseMembership;
 }
 export interface NormalizedGithubActor {
   id: string;
@@ -251,6 +271,8 @@ export interface NormalizedGithubResult {
   isSynthetic: boolean;
   /** Private provenance retained when the pipeline combines observation results. */
   syntheticFactIds?: readonly string[];
+  /** Private output of the bounded authorized release collector. */
+  releaseInclusions?: readonly GithubReleaseInclusionRecord[];
   facts: NormalizedGithubFact[];
   actors: NormalizedGithubActor[];
   evidence: NormalizedPublicEvidence[];
@@ -301,6 +323,8 @@ export interface GithubEvidenceEnvelope {
     | "project_snapshot"
     | "thread_resolution"
     | "comment"
+    | "pull_request_conversation_comment"
+    | "pull_request_review_comment"
     | "revert";
   observedAt: string;
   /** Exact evidenced transition time only. A delivery/observation/updated_at time is not a substitute. */
@@ -545,7 +569,10 @@ export function normalizeGithubObservation(
     return out;
   }
   const payload = envelope.payload;
-  const observedAction = envelope.action ?? text(payload.action) ?? "snapshot";
+  const prComment = ["pull_request_conversation_comment", "pull_request_review_comment"].includes(envelope.family);
+  const observedAction = prComment
+    ? envelope.family + "_snapshot"
+    : (envelope.action ?? text(payload.action) ?? "snapshot");
   const sourceAction = envelope.family === "triage" ? canonicalTriageAction(observedAction) : observedAction;
   const definitionKind =
     envelope.family === "triage" && sourceAction.startsWith("label_")
@@ -586,7 +613,7 @@ export function normalizeGithubObservation(
           : envelope.family === "project_snapshot" ||
               (envelope.family === "field_change" && envelope.action?.startsWith("project"))
             ? "project"
-            : envelope.family === "discussion" || envelope.family === "comment" || definitionKind !== null
+            : envelope.family === "discussion" || envelope.family === "comment" || prComment || definitionKind !== null
               ? "other"
               : "issue";
   const id = definitionKind
@@ -601,14 +628,20 @@ export function normalizeGithubObservation(
     out.reasons.push("repository_scope_mismatch");
     return out;
   }
-  const publicUrl =
-    url(resource.html_url ?? resource.url, repository.slug, kind === "project") ??
-    url(payload.subject_url, repository.slug, kind === "project");
+  const commentIdentity = prComment ? readGithubCommentIdentity(repository.slug, resource) : null;
+  if (prComment && commentIdentity?.kind !== envelope.family) {
+    out.reasons.push("comment_source_identity_unverified");
+    return out;
+  }
+  const publicUrl = prComment
+    ? commentIdentity!.sourceUrl
+    : (url(resource.html_url ?? resource.url, repository.slug, kind === "project") ??
+      url(payload.subject_url, repository.slug, kind === "project"));
   if (!id || !publicUrl) {
     out.reasons.push("missing_public_artifact_identity");
     return out;
   }
-  const at = time(envelope.occurredAt);
+  const at = prComment ? null : time(envelope.occurredAt);
   const history =
     envelope.publicHistory?.approvedPublic === true
       ? publicEvidenceHistorySchema.parse(envelope.publicHistory.history)
@@ -680,7 +713,7 @@ export function normalizeGithubObservation(
     return parsed;
   };
   const author = register(resource.user ?? resource.author);
-  const sender = register(sourceActor(payload), payload.execution_mode === "automated");
+  const sender = prComment ? null : register(sourceActor(payload), payload.execution_mode === "automated");
   out.observations.push({
     id: observationId,
     source: proof.source,
@@ -851,6 +884,8 @@ export function normalizeGithubObservation(
     if (sourceAction === "closed")
       emit("issue_closure_stewardship", sender, "triager", at, transitionUnit, { rawState: "closed" });
     // Closed, assignee and closer never manufacture implementing contributors.
+  } else if (prComment) {
+    out.reasons.push("pr_comment_snapshot_does_not_prove_submitted_review_or_accepted_answer");
   } else if (envelope.family === "comment") {
     emit("issue_answers", author, "author", time(resource.created_at), `${id}:comment-evidence`, {
       state: author && time(resource.created_at) ? "pending" : "unknown",
@@ -1266,6 +1301,8 @@ export function normalizeGithubObservation(
         evidence.sourceRevision = integration.after;
         evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
         evidence.contribution.reasonCodes.push(`documentation_path_policy:${documentationPolicy.version}`);
+        if (classification.releaseNotes)
+          evidence.contribution.reasonCodes.push("documentation_purpose_candidate:release_notes");
       }
       for (const { locale, category } of classification.localizations) {
         const fact = emit(
@@ -1363,6 +1400,12 @@ export interface VerifiedRecognitionReceipt {
   changesetId?: string;
   /** Exact immutable merge revision reviewed for a localization target. */
   sourceRevision?: string;
+  /** Exact target authenticated in the private release acceptance audit. */
+  releaseInclusion?: GithubReleaseReviewTarget;
+  /** Optional private, source-bound positive facets; never additional counted units. */
+  maintenanceClassification?: MaintenanceClassificationRecord;
+  /** Reviewed authored notes on this original pinned documentation PR; no new unit. */
+  documentationPurpose?: "release_notes";
 }
 const receiptMetrics = new Set([
   "catalog_proposals",
@@ -1396,6 +1439,7 @@ const receiptMetrics = new Set([
   "automation",
   "deployment_work",
   "incidents",
+  "governance",
   "maintenance",
   "reproductions",
   "issue_answers",
@@ -1464,11 +1508,45 @@ export function applyRecognitionReceipt(
       : receipt.metricId === "automation"
         ? validateAutomationSource(input, target.id, receipt.acceptedAt)
         : null;
-  const unit = mergedChange
-    ? mergedChange.unit
-    : receipt.metricId === "localization"
-      ? target.canonicalKey
-      : (receipt.changesetId ?? target.canonicalKey);
+  if (
+    receipt.maintenanceClassification !== undefined &&
+    (receipt.metricId !== "maintenance" || receipt.decision !== "accepted")
+  )
+    throw new Error("maintenance_classification_unverified");
+  const maintenanceClassification =
+    receipt.maintenanceClassification === undefined
+      ? null
+      : validateMaintenanceClassification(input, target.id, receipt.acceptedAt, receipt.maintenanceClassification);
+  if (
+    receipt.documentationPurpose !== undefined &&
+    (receipt.documentationPurpose !== "release_notes" ||
+      receipt.metricId !== "documentation" ||
+      receipt.decision !== "accepted" ||
+      receipt.evidenceIds.length !== 1 ||
+      receipt.evidenceIds[0] !== target.id)
+  )
+    throw new Error("documentation_purpose_source_unverified");
+  const documentationPurpose =
+    receipt.documentationPurpose === undefined
+      ? null
+      : validateDocumentationPurposeSource(input, target.id, receipt.acceptedAt);
+  if (documentationPurpose && receipt.sourceRevision !== documentationPurpose.evidence.sourceRevision)
+    throw new Error("documentation_purpose_source_unverified");
+  const release =
+    receipt.metricId === "release_changes"
+      ? validateReleaseChangesSource(input, target.id, receipt.acceptedAt, receipt.releaseInclusion)
+      : null;
+  if (release && (receipt.evidenceIds.length !== 1 || receipt.evidenceIds[0] !== target.id))
+    throw new Error("release_inclusion_source_unverified");
+  const unit = release
+    ? release.membershipUnit
+    : documentationPurpose
+      ? documentationPurpose.unit
+      : mergedChange
+        ? mergedChange.unit
+        : receipt.metricId === "localization"
+          ? target.canonicalKey
+          : (receipt.changesetId ?? target.canonicalKey);
   if (receipt.metricId === "localization" && target.state !== "observed")
     throw new Error("Localization acceptance must target its original observed source fact");
   if (
@@ -1494,17 +1572,37 @@ export function applyRecognitionReceipt(
     acceptedBy: receipt.reviewerId,
     acceptanceReceipt: receipt.id,
     ...(receipt.metricId === "localization" ? { recognitionSourceFactId: target.id } : {}),
+    ...(release
+      ? {
+          occurredAt: release.record.release.publishedAt,
+          observedAt: release.observedAt,
+          releaseInclusion: release.membership,
+        }
+      : {}),
   };
   out.facts.push(fact);
   const evidence = targetEvidence;
   if (evidence)
     out.evidence.push({
       ...structuredClone(evidence),
-      occurredAt: receipt.metricId === "localization" || mergedChange ? target.occurredAt : fact.acceptedAt,
+      occurredAt: release
+        ? release.record.release.publishedAt
+        : receipt.metricId === "localization" || mergedChange || documentationPurpose
+          ? target.occurredAt
+          : fact.acceptedAt,
+      ...(release
+        ? {
+            sourceRevision: release.record.tag.commitSha,
+            sourceRevisionUrl: `https://github.com/${release.record.repository.slug}/commit/${release.record.tag.commitSha}`,
+          }
+        : {}),
       ...(evidence.evidenceMetadata
         ? {
             evidenceMetadata: {
               ...structuredClone(evidence.evidenceMetadata),
+              ...(release
+                ? { sourceOccurredAt: release.record.release.publishedAt, observedAt: release.observedAt }
+                : {}),
               sourceAction: receipt.decision === "accepted" ? ("recognition_accepted" as const) : ("unknown" as const),
               activityState: receipt.decision === "accepted" ? ("accepted" as const) : ("unknown" as const),
               acceptedAt: receipt.decision === "accepted" ? fact.acceptedAt : null,
@@ -1519,6 +1617,20 @@ export function applyRecognitionReceipt(
         qualification: receipt.decision === "accepted" ? "eligible" : "ineligible",
         reasonCodes: [
           "independent_recognition_receipt",
+          ...(documentationPurpose
+            ? [
+                "domain_metric:documentation",
+                "domain_clock:merged_at",
+                "domain_authorship:authored",
+                "documentation_purpose:release_notes",
+              ]
+            : []),
+          ...(maintenanceClassification
+            ? [
+                `maintenance_classification_policy:${maintenanceClassificationVersion}`,
+                ...maintenanceClassification.classifications.map(({ kind }) => `maintenance_kind:${kind}`),
+              ]
+            : []),
           ...(receipt.metricId === target.metricId && ["documentation", "localization"].includes(target.metricId)
             ? publicDocumentationReasons(evidence.contribution)
             : []),
@@ -1541,6 +1653,8 @@ export interface NormalizedProjectContext {
 }
 
 export interface CollectionNormalizerInput {
+  /** Ephemeral host identity shared only within one native-history normalization batch. */
+  issueFieldHistoryBatch?: object;
   /** Trusted host selects the current subject revision at its frozen cutoff. */
   selectedCurrentState?: boolean;
   repository: { id: number; slug: string; allowedProjectIds?: readonly string[] };
@@ -1550,8 +1664,9 @@ export interface CollectionNormalizerInput {
   policyVersion: string;
   fact: {
     subjectId: string;
-    /** Native issue/PR identity retained by the trusted Project-history collector. */
+    /** Native issue/PR identity retained by the trusted typed-history collector. */
     historySubjectId?: string;
+    issueFieldId?: string;
     projectSubjectId?: string;
     sourceRevision: string;
     sourceUrl: string;
@@ -1563,6 +1678,8 @@ export interface CollectionNormalizerInput {
 }
 export interface GithubEvidenceNormalizerOptions {
   client: GithubReadClient;
+  /** Protected actual clock for new release lookups; original source observation stays unchanged. */
+  now?: () => string;
   /** Synchronous host authorization rechecked by the transport before every HTTP attempt. */
   assertAuthorized?: () => void;
   source: string;
@@ -1585,10 +1702,33 @@ export interface GithubEvidenceNormalizerOptions {
   documentationPolicies?: readonly DocumentationPathPolicy[];
   researchPolicies?: readonly ResearchPathPolicy[];
   projectWorkstreamMappings?: readonly (ProjectWorkstreamMapping & { repositoryId: number })[];
+  /** Protected, finite selections; submitted notes cannot nominate release proof. */
+  releaseInclusionTargets?: readonly { repositoryId: number; releaseId: number; pullRequestNumber: number }[];
 }
 
 /** Read-only collection-to-metric adapter. Lossy snapshots are hydrated rather than guessed. */
 export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizerOptions) {
+  const releaseNow = options.now ?? (() => new Date().toISOString());
+  const releaseTargets = structuredClone(options.releaseInclusionTargets ?? []);
+  if (
+    !Array.isArray(releaseTargets) ||
+    releaseTargets.length > 1000 ||
+    releaseTargets.some(
+      (target) =>
+        !object(target) ||
+        Object.keys(target).sort().join(",") !== "pullRequestNumber,releaseId,repositoryId" ||
+        ![target.repositoryId, target.releaseId, target.pullRequestNumber].every(
+          (id) => typeof id === "number" && Number.isSafeInteger(id) && id > 0,
+        ) ||
+        typeof target.repositoryId !== "number" ||
+        !options.allowedRepositoryIds.includes(target.repositoryId),
+    ) ||
+    new Set(
+      releaseTargets.map((target) => JSON.stringify([target.repositoryId, target.releaseId, target.pullRequestNumber])),
+    ).size !== releaseTargets.length ||
+    (releaseTargets.length > 0 && typeof options.assertAuthorized !== "function")
+  )
+    throw new Error("invalid_release_inclusion_targets");
   const projectMappings = structuredClone(options.projectWorkstreamMappings ?? []);
   if (
     !Array.isArray(projectMappings) ||
@@ -1628,6 +1768,56 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       return none("hydrated_source_revision_unverified");
     let repositoryClient: GithubReadClient | undefined;
     const client = () => (repositoryClient ??= options.client.forRepository(input.repository.id));
+    if (input.family === "issue_field_history") {
+      const match = input.fact.sourceUrl.match(
+        new RegExp("^https://github\\.com/" + input.repository.slug.replaceAll(".", "\\.") + "/issues/([1-9]\\d*)$"),
+      );
+      if (
+        !match ||
+        input.fact.evidence !== "observed_transition" ||
+        typeof input.fact.historySubjectId !== "string" ||
+        !input.fact.historySubjectId ||
+        typeof input.fact.issueFieldId !== "string" ||
+        !input.fact.issueFieldId
+      )
+        return none("issue_field_collected_binding_unverified");
+      const record = await readIssueFieldEvent({
+        client: options.client,
+        source: options.source,
+        repository: input.repository,
+        number: Number(match[1]),
+        subjectId: input.fact.historySubjectId,
+        eventId: input.fact.subjectId,
+        issueFieldId: input.fact.issueFieldId,
+        scanId: input.factKey,
+        ...(input.issueFieldHistoryBatch ? { issueFieldHistoryBatch: input.issueFieldHistoryBatch } : {}),
+        ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
+      });
+      if (issueFieldHistoryRevision(record) !== input.fact.sourceRevision)
+        return none("issue_field_revision_unverified");
+      const nativeActorId = positive(record.event.actor?.databaseId) ? String(record.event.actor.databaseId) : null;
+      if (input.fact.actorId !== nativeActorId || input.fact.occurredAt !== time(record.event.createdAt))
+        return none("issue_field_collected_attribution_unverified");
+      return normalizeGithubObservation({
+        repository: { ...input.repository, visibility: "public" },
+        proof: {
+          verified: true,
+          source: "github_graphql",
+          eventId: record.event.id,
+          revision: input.fact.sourceRevision,
+          isSynthetic: options.isSynthetic === true,
+        },
+        family: "field_change",
+        action: "issue_field_changed",
+        observedAt: input.observedAt,
+        occurredAt: record.event.createdAt,
+        payload: {
+          issue: { id: record.subject.id, url: record.subject.url },
+          sender: record.event.actor,
+          change: record.change,
+        },
+      });
+    }
     if (input.family === "relationships" || input.family === "project_history") {
       const match = input.fact.sourceUrl.match(
         new RegExp(`^https://github\\.com/${input.repository.slug.replaceAll(".", "\\.")}/(issues|pull)/([1-9]\\d*)$`),
@@ -1867,6 +2057,11 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           `/repos/${input.repository.slug}/pulls/${pull[1]}`,
           options.assertAuthorized,
         );
+      } else if (input.family === "comments" && pull) {
+        const comment = readGithubCommentSource(input.repository.slug, input.fact.sourceUrl);
+        if (!comment || comment.kind === "issue_comment") return none("comment_source_identity_unverified");
+        family = comment.kind;
+        endpoint = comment.apiPath;
       } else if (input.family === "comments" && issue && /^issuecomment-\d+$/.test(fragment ?? "")) {
         family = "comment";
         endpoint = `/repos/${input.repository.slug}/issues/comments/${fragment!.slice("issuecomment-".length)}`;
@@ -1899,6 +2094,11 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         return revoked;
       }
       if (!object(payload)) return none("missing_hydrated_source_object");
+      if (["pull_request_conversation_comment", "pull_request_review_comment"].includes(family)) {
+        const comment = readGithubCommentIdentity(input.repository.slug, payload);
+        if (!comment || comment.kind !== family || comment.sourceUrl !== input.fact.sourceUrl)
+          return none("comment_source_identity_unverified");
+      }
       if (family === "review" && pull) {
         const parentApiUrl = `https://api.github.com/repos/${input.repository.slug}/pulls/${pull[1]}`;
         if (
@@ -2044,6 +2244,44 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           ? { discussionAnswerSelection: { verified: true as const } }
           : {}),
       });
+    }
+    if (input.family === "pull_requests" && normalized.isSynthetic !== true) {
+      const candidates = releaseTargets.filter(
+        (target) =>
+          target.repositoryId === input.repository.id &&
+          input.fact.sourceUrl === `https://github.com/${input.repository.slug}/pull/${target.pullRequestNumber}`,
+      );
+      if (candidates.length) {
+        const records: GithubReleaseInclusionRecord[] = [];
+        const authorizeRelease = options.assertAuthorized!;
+        const readClock = () => {
+          if (typeof releaseNow !== "function") throw new Error("release_inclusion_observation_clock_invalid");
+          const value = releaseNow();
+          if (typeof value !== "string" || !sourceEventSchema.shape.observedAt.safeParse(value).success)
+            throw new Error("release_inclusion_observation_clock_invalid");
+          return value;
+        };
+        for (const target of candidates) {
+          const startedAt = readClock();
+          const record = await collectGithubReleaseInclusion({
+            client: client(),
+            source: options.source,
+            repository: input.repository,
+            releaseId: target.releaseId,
+            pullRequestNumber: target.pullRequestNumber,
+            observedAt: startedAt,
+            assertAuthorized: authorizeRelease,
+          });
+          const completedAt = readClock();
+          if (compareSourceInstants(completedAt, startedAt) < 0)
+            throw new Error("release_inclusion_observation_clock_invalid");
+          authorizeRelease();
+          // A retained PR can precede this release. Its original source clock is
+          // not the observation time of these new, fully completed proof reads.
+          records.push(validateGithubReleaseInclusion({ ...record, observedAt: completedAt }));
+        }
+        normalized.releaseInclusions = records;
+      }
     }
     if (options.acceptance)
       for (const receipt of await options.acceptance(input, normalized)) {

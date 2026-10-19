@@ -1,3 +1,4 @@
+import { publicMaintenanceClassificationReasons, documentationPurposeVersion } from "@pick-your-ai/contracts";
 import { validatePublicationPeriods, publicScopeFromTemplate } from "./publication-windows.mjs";
 import {
   resolveDiscoverablePublicationWindows,
@@ -24,9 +25,15 @@ import { AggregateExplanationStore } from "./aggregate-explanations.mjs";
 import { assertPipelineSourcesNotRetired } from "./derived-retirement.mjs";
 import { ControlError, requireThat } from "../../controls/src/store.mjs";
 import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-metadata.mjs";
+import { createPublicProjectContextProjector } from "./public-project-context.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createMetadataEnrichment } from "./metadata-enrichment.mjs";
-import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
+import {
+  createGithubCollectionSource,
+  isProjectSourceScopeFailure,
+  isIssueFieldSourceScopeFailure,
+} from "./github-source.mjs";
+import { githubCommentsContext, expandedGithubCommentsRun, startGithubCommentsRun } from "./comments-inventory.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
 import { retainPhysicalContext } from "./physical-context.mjs";
 import { capturePhysicalSources, selectPhysicalContexts } from "./physical-selection.mjs";
@@ -298,10 +305,35 @@ export async function createPipeline(options) {
     verifiedMergeNormalizationSignature,
     projectWorkstreamMappings,
   ]);
-  const normalizationSignature = digest([
+  const projectNormalizationSignature = digest([
     "project-membership-context/v2",
     verifiedMergeNormalizationSignature,
     projectWorkstreamMappings,
+  ]);
+  // A newly selected release must collect its own proof even when the PR's
+  // ordinary source revision and metric arithmetic remain unchanged.
+  const previousPurposeNormalizationSignature = config.releaseInclusionTargets?.length
+    ? digest([
+        dataMode === "public" ? "github-release-inclusion/v2" : "github-release-inclusion/v1",
+        projectNormalizationSignature,
+        config.releaseInclusionTargets,
+      ])
+    : projectNormalizationSignature;
+  // Older hosts could retain this complete policy while ignoring its optional
+  // notes paths. Reclassify selected sources without overwriting frozen rows.
+  const selectedDocumentationPurpose = classificationPolicies.documentation.some(
+    (policy) => policy.releaseNotesPaths !== undefined,
+  );
+  const normalizationSignature = selectedDocumentationPurpose
+    ? digest([documentationPurposeVersion, previousPurposeNormalizationSignature])
+    : previousPurposeNormalizationSignature;
+  const previousPurposeReviewNormalizationSignature = digest([
+    reviewSourceNormalizationVersion,
+    previousPurposeNormalizationSignature,
+  ]);
+  const previousPurposeDiscussionNormalizationSignature = digest([
+    discussionSourceNormalizationVersion,
+    previousPurposeNormalizationSignature,
   ]);
   // Family-specific source rules have separate immutable cache generations.
   const reviewNormalizationSignature = digest([reviewSourceNormalizationVersion, normalizationSignature]);
@@ -317,6 +349,24 @@ export async function createPipeline(options) {
     discussionSourceNormalizationVersion,
     previousProjectNormalizationSignature,
   ]);
+  // Selected release configurations also retained the preceding Project
+  // generation under their release wrapper. Keep every old family wrapper for
+  // frozen identity and migration hints, never as a fresh normalization.
+  const previousReleaseNormalizationSignature = config.releaseInclusionTargets?.length
+    ? digest([
+        dataMode === "public" ? "github-release-inclusion/v2" : "github-release-inclusion/v1",
+        previousProjectNormalizationSignature,
+        config.releaseInclusionTargets,
+      ])
+    : previousProjectNormalizationSignature;
+  const previousReleaseReviewNormalizationSignature = digest([
+    reviewSourceNormalizationVersion,
+    previousReleaseNormalizationSignature,
+  ]);
+  const previousReleaseDiscussionNormalizationSignature = digest([
+    discussionSourceNormalizationVersion,
+    previousReleaseNormalizationSignature,
+  ]);
   const frozenNormalizationSignatures = [
     defaultDeliverySignature(normalizationSignature),
     defaultDeliverySignature(reviewNormalizationSignature),
@@ -324,17 +374,33 @@ export async function createPipeline(options) {
     discussionNormalizationSignature,
     reviewNormalizationSignature,
     normalizationSignature,
+    projectNormalizationSignature,
     defaultDeliverySignature(previousProjectNormalizationSignature),
     defaultDeliverySignature(previousReviewNormalizationSignature),
     defaultDeliverySignature(previousDiscussionNormalizationSignature),
     previousDiscussionNormalizationSignature,
     previousReviewNormalizationSignature,
     previousProjectNormalizationSignature,
+    defaultDeliverySignature(previousReleaseNormalizationSignature),
+    defaultDeliverySignature(previousReleaseReviewNormalizationSignature),
+    defaultDeliverySignature(previousReleaseDiscussionNormalizationSignature),
+    previousReleaseDiscussionNormalizationSignature,
+    previousReleaseReviewNormalizationSignature,
+    previousReleaseNormalizationSignature,
     verifiedMergeNormalizationSignature,
     documentationNormalizationSignature,
     attributionNormalizationSignature,
     normalizationPolicySignature,
   ];
+  if (selectedDocumentationPurpose)
+    frozenNormalizationSignatures.push(
+      previousPurposeNormalizationSignature,
+      previousPurposeReviewNormalizationSignature,
+      previousPurposeDiscussionNormalizationSignature,
+      defaultDeliverySignature(previousPurposeNormalizationSignature),
+      defaultDeliverySignature(previousPurposeReviewNormalizationSignature),
+      defaultDeliverySignature(previousPurposeDiscussionNormalizationSignature),
+    );
   if (classificationPolicies.documentation.length) {
     const previousDocumentationSignature = digest(["documentation-locales/v1", attributionNormalizationSignature]);
     // Both historical locale formats bind the complete active classification.
@@ -737,6 +803,7 @@ export async function createPipeline(options) {
         isSynthetic: dataMode === "synthetic",
         assertAuthorized: () => assertRunConfiguration(),
         onUnavailable: (repo, reason) => denyRepository(repo, reason, utc(now())),
+        includePullRequestReviewComments: ({ runId }) => expandedGithubCommentsRun(runId),
         async useRestSnapshotRevisions({ repositoryId, family }) {
           if (reconciliationPolicy) return true;
           // Keep immutable observation identities after an approved policy change
@@ -753,6 +820,10 @@ export async function createPipeline(options) {
       })
     : null;
   const collectionSource = options.source ?? defaultSource;
+  const defaultCommentsInventory =
+    defaultSource !== null &&
+    collectionSource === defaultSource &&
+    config.repositories.some((repository) => repository.families.includes("comments"));
   const probeSource = options.probeRepository ?? defaultSource?.probeRepository;
   const collection = new c.ingestion.CollectionStore(db);
   const scanContinuations = new ScanContinuationStore(db);
@@ -782,8 +853,33 @@ export async function createPipeline(options) {
     };
   const projectDeniedRepositories = new Set();
   const projectDenialKey = (repo) => `project-scope-denial:${repo.id}:${digest(config.version)}`;
+  const issueFieldDeniedRepositories = new Set();
+  const issueFieldDenialKey = (repo) => `issue-field-scope-denial:${repo.id}:${digest(config.version)}`;
+  const sourceDenialScopes = [
+    {
+      reason: "project_scope_unavailable",
+      kind: "project_scope_denial",
+      key: projectDenialKey,
+      denied: projectDeniedRepositories,
+    },
+    {
+      reason: "issue_field_scope_unavailable",
+      kind: "issue_field_scope_denial",
+      key: issueFieldDenialKey,
+      denied: issueFieldDeniedRepositories,
+    },
+  ];
   const restrictConfiguration = (state) => {
     const overlay = configurationOverlay(state);
+    if (
+      config.repositories.some(
+        (repo) =>
+          issueFieldDeniedRepositories.has(repo.id) ||
+          (state.pipelineSourceDenials?.[repo.id]?.configurationVersion === config.version &&
+            state.pipelineSourceDenials[repo.id].reason === "issue_field_scope_unavailable"),
+      )
+    )
+      fail("issue_field_source_scope_requires_reapproval");
     if (
       config.repositories.some(
         (repo) =>
@@ -835,7 +931,21 @@ export async function createPipeline(options) {
   };
   const scanContext = (mode, sources, revision, fingerprint) => ({
     key: digest(["bounded-scan/v1", config, dataMode, mode]),
-    contextHash: digest([revision, recognitionBindings.length ? fingerprint : null, sources]),
+    contextHash: digest(
+      githubCommentsContext(
+        [
+          revision,
+          recognitionBindings.length ? fingerprint : null,
+          sources,
+          // Selected release proofs use the PR delivery generation. Retire an older
+          // frozen scan before collecting a newly required normalization generation.
+          ...(dataMode === "public" && (config.releaseInclusionTargets?.length || selectedDocumentationPurpose)
+            ? [defaultDeliverySignature(normalizationSignature)]
+            : []),
+        ],
+        defaultCommentsInventory,
+      ),
+    ),
   });
   async function reconciliationState(tx, repositories, asOf, { untilCutoff = asOf, scan = null } = {}) {
     const state = controlsStore.read();
@@ -900,6 +1010,8 @@ export async function createPipeline(options) {
           assertAuthorized: () => assertRunConfiguration(),
           documentationPolicies: config.documentationPolicies ?? [],
           researchPolicies: config.researchPolicies ?? [],
+          releaseInclusionTargets: config.releaseInclusionTargets ?? [],
+          now: () => utc(now()),
           projectWorkstreamMappings,
           ...(options.githubEnrich ? { enrich: options.githubEnrich } : {}),
         })
@@ -945,18 +1057,21 @@ export async function createPipeline(options) {
     authorized = Boolean(await verifyConfig(copy(config)));
     if (!authorized) return false;
     assertDataMode(config);
-    const persistedDenials = await transaction.query(
-      `SELECT receipt.operation_key
+    for (const scope of sourceDenialScopes) {
+      // Each fixed source class retains its exact receipt kind and bounded key
+      // lookup. In particular, the existing Project query and keys stay intact.
+      const persistedDenials = await transaction.query(
+        `SELECT receipt.operation_key
       FROM unnest($1::text[]) AS requested(operation_key)
       JOIN leaderboard_pipeline.receipts AS receipt
         ON receipt.operation_hash=pg_catalog.sha256(pg_catalog.convert_to(requested.operation_key,'UTF8'))
         AND receipt.operation_key=requested.operation_key
-      WHERE receipt.kind='project_scope_denial'`,
-      [config.repositories.map(projectDenialKey)],
-    );
-    for (const repo of config.repositories)
-      if (persistedDenials.rows.some((row) => row.operation_key === projectDenialKey(repo)))
-        projectDeniedRepositories.add(repo.id);
+      WHERE receipt.kind='${scope.kind}'`,
+        [config.repositories.map(scope.key)],
+      );
+      for (const repo of config.repositories)
+        if (persistedDenials.rows.some((row) => row.operation_key === scope.key(repo))) scope.denied.add(repo.id);
+    }
     restrictConfiguration(controlsStore.read());
     required(config.version, "config_version_required");
     required(config.organization, "organization_required");
@@ -1099,10 +1214,11 @@ export async function createPipeline(options) {
   }
   async function denyRepository(repo, reason, checkedAt) {
     let controlsFailure;
-    if (reason === "project_scope_unavailable") {
+    const scopeDenial = sourceDenialScopes.find((scope) => scope.reason === reason);
+    if (scopeDenial) {
       // Persist the public-read/write fence before SQL work. A repository-level
-      // public probe cannot reauthorize its now-private Project evidence.
-      projectDeniedRepositories.add(repo.id);
+      // public probe cannot reauthorize hidden Project or native field evidence.
+      scopeDenial.denied.add(repo.id);
       try {
         controlsStore.transaction((state) => {
           state.pipelineSourceDenials ||= {};
@@ -1119,8 +1235,8 @@ export async function createPipeline(options) {
         generation=repository_access.generation+1,checked_at=clock_timestamp()`,
         [repo.id, repo.installationId],
       );
-      if (reason === "project_scope_unavailable")
-        await receipt(tx, projectDenialKey(repo), "project_scope_denial", {
+      if (scopeDenial)
+        await receipt(tx, scopeDenial.key(repo), scopeDenial.kind, {
           repositoryId: repo.id,
           configurationVersion: config.version,
           reason,
@@ -1202,7 +1318,7 @@ export async function createPipeline(options) {
             entry.artifact.publicUrl === dispatch.lease.observation.sourceUrl,
         ),
     );
-  async function normalizeStored(repositoryIds, cutoff, dispatch) {
+  async function normalizeStored(repositoryIds, cutoff, dispatch, releasePass = null) {
     // Current association is selected from one completed whole-repository scan.
     // A partial later run cannot replace it, and subjects absent from the latest
     // complete inventory cannot inherit older membership rows.
@@ -1266,6 +1382,9 @@ export async function createPipeline(options) {
       )
     ).rows;
     if (unlabeled.length) fail("cross_mode_or_unproven_source_data");
+    // Trusted native readers may share one fresh issue-membership scan within
+    // this invocation. The opaque token never survives into another batch.
+    const issueFieldHistoryBatch = Object.freeze({});
     const outputs = [];
     for (const row of sourceRows) {
       const baseSignature =
@@ -1275,13 +1394,30 @@ export async function createPipeline(options) {
             ? discussionNormalizationSignature
             : normalizationSignature;
       const deliverySignature = defaultDeliverySignature(baseSignature);
-      const previousBaseSignature =
-        row.family === "reviews"
-          ? previousReviewNormalizationSignature
-          : row.family === "discussions"
-            ? previousDiscussionNormalizationSignature
-            : previousProjectNormalizationSignature;
-      const previousDeliverySignature = defaultDeliverySignature(previousBaseSignature);
+      const previousBaseSignatures = [
+        ...new Set([
+          ...(selectedDocumentationPurpose
+            ? [
+                row.family === "reviews"
+                  ? previousPurposeReviewNormalizationSignature
+                  : row.family === "discussions"
+                    ? previousPurposeDiscussionNormalizationSignature
+                    : previousPurposeNormalizationSignature,
+              ]
+            : []),
+          row.family === "reviews"
+            ? previousReviewNormalizationSignature
+            : row.family === "discussions"
+              ? previousDiscussionNormalizationSignature
+              : previousProjectNormalizationSignature,
+          row.family === "reviews"
+            ? previousReleaseReviewNormalizationSignature
+            : row.family === "discussions"
+              ? previousReleaseDiscussionNormalizationSignature
+              : previousReleaseNormalizationSignature,
+        ]),
+      ];
+      const previousDeliverySignatures = previousBaseSignatures.map(defaultDeliverySignature);
       if (
         row.family === "reviews" &&
         (options.normalizer || options.githubEnrich
@@ -1297,18 +1433,33 @@ export async function createPipeline(options) {
       )
         fail("discussion_normalizer_version_unverified");
       const repository = config.repositories.find((repo) => String(repo.id) === String(row.repository_id));
+      const releaseTargets =
+        dataMode === "public" && row.family === "pull_requests"
+          ? (config.releaseInclusionTargets ?? []).filter(
+              (target) =>
+                target.repositoryId === repository.id &&
+                row.document.sourceUrl === `https://github.com/${repository.slug}/pull/${target.pullRequestNumber}`,
+            )
+          : [];
+      if (releasePass && !releaseTargets.length) continue;
       const candidates = (
         await db.query(
           "SELECT policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=ANY($2::text[])",
-          [row.fact_key, [deliverySignature, baseSignature, previousDeliverySignature, previousBaseSignature]],
+          [row.fact_key, [deliverySignature, baseSignature, ...previousDeliverySignatures, ...previousBaseSignatures]],
         )
       ).rows;
       const deliveryCache = candidates.find((entry) => entry.policy_signature === deliverySignature);
       const cached = deliveryCache ?? candidates.find((entry) => entry.policy_signature === baseSignature);
-      const previousDeliveryCache = candidates.find((entry) => entry.policy_signature === previousDeliverySignature);
-      const previousCached =
-        previousDeliveryCache ?? candidates.find((entry) => entry.policy_signature === previousBaseSignature);
-      if (previousCached) {
+      const previousDeliveryCaches = previousDeliverySignatures.map((signature) =>
+        candidates.find((entry) => entry.policy_signature === signature),
+      );
+      const previousCaches = previousBaseSignatures
+        .map(
+          (signature, index) =>
+            previousDeliveryCaches[index] ?? candidates.find((entry) => entry.policy_signature === signature),
+        )
+        .filter(Boolean);
+      for (const previousCached of previousCaches) {
         if (digest(previousCached.document) !== previousCached.document_hash) fail("normalization_integrity_error");
         if (previousCached.document.isSynthetic !== (dataMode === "synthetic"))
           fail("normalization_data_mode_mismatch");
@@ -1322,9 +1473,9 @@ export async function createPipeline(options) {
       let defaultDelivery =
         ["commits", "pull_requests"].includes(row.family) ||
         !!deliveryCache ||
-        !!previousDeliveryCache ||
+        previousDeliveryCaches.some(Boolean) ||
         hasDefaultDeliveryClaims(cached?.document) ||
-        hasDefaultDeliveryClaims(previousCached?.document);
+        previousCaches.some((entry) => hasDefaultDeliveryClaims(entry.document));
       let signature = defaultDelivery ? deliverySignature : baseSignature;
       if (defaultDelivery) assertDefaultDeliveryNormalizer();
       if (cached) {
@@ -1343,6 +1494,9 @@ export async function createPipeline(options) {
         if (
           currentHistoryNormalizer &&
           currentProjectNormalizer &&
+          // Native field visibility can change without changing an event or its
+          // revision. Revalidate every retained transition before publication.
+          row.family !== "issue_field_history" &&
           (!defaultDelivery ||
             (cached.policy_signature === deliverySignature &&
               cached.document.defaultDeliveryNormalizationVersion === defaultDeliveryNormalizationVersion)) &&
@@ -1358,6 +1512,27 @@ export async function createPipeline(options) {
           }) &&
           hasDispatchEvidence(cached.document, dispatch, row)
         ) {
+          if (releaseTargets.length && !releasePass?.collect) {
+            const records = cached.document.releaseInclusions;
+            if (
+              !Array.isArray(records) ||
+              !records.length ||
+              !records.every(
+                (record) =>
+                  c.contracts.sourceEventSchema.shape.observedAt.safeParse(record?.observedAt).success &&
+                  c.contracts.compareSourceInstants(record.observedAt, cutoff) <= 0,
+              ) ||
+              !releaseTargets.every((target) =>
+                records.some(
+                  (record) =>
+                    record.request?.repositoryId === target.repositoryId &&
+                    record.request?.releaseId === target.releaseId &&
+                    record.request?.pullRequestNumber === target.pullRequestNumber,
+                ),
+              )
+            )
+              fail("release_inclusion_frozen_normalization_unavailable");
+          }
           normalizedProjectContext(cached.document, row, repository, projectWorkstreamMappings);
           retainPhysicalContext(cached.document, row, repository, c.contracts, dataMode);
           await retainSourceArtifacts(db, row.fact_key, cached.document);
@@ -1365,6 +1540,9 @@ export async function createPipeline(options) {
           continue;
         }
       }
+      // A frozen publication may only consume proof collected before its cutoff.
+      // Missing compatible caches require a fresh cycle, never a backdated lookup.
+      if (releaseTargets.length && !releasePass?.collect) fail("release_inclusion_frozen_normalization_unavailable");
       const normalizationStarted = performance.now();
       let output;
       try {
@@ -1372,6 +1550,7 @@ export async function createPipeline(options) {
         output = await normalizer({
           repository: copy(repository),
           family: row.family,
+          ...(row.family === "issue_field_history" ? { issueFieldHistoryBatch } : {}),
           factKey: row.fact_key,
           selectedCurrentState: row.document.evidence === "current_state",
           fact: copy(row.document),
@@ -1383,6 +1562,8 @@ export async function createPipeline(options) {
       } catch (error) {
         if (isProjectSourceScopeFailure(error, row.family))
           await denyRepository(repository, "project_scope_unavailable", utc(now()));
+        else if (isIssueFieldSourceScopeFailure(error, row.family))
+          await denyRepository(repository, "issue_field_scope_unavailable", utc(now()));
         monitorFailure(monitorSource(repository.id), "normalization", "schema_changed");
         if (dispatch) {
           assertRunConfiguration();
@@ -1487,6 +1668,37 @@ export async function createPipeline(options) {
       // Persist authoritative exclusions even when this dispatch cannot yet
       // prove the target creation. Failure must not leave older evidence visible.
       if (!hasDispatchEvidence(output, dispatch, row)) fail("dispatch_enrichment_unavailable");
+      // Keep collector products private and bound to this source repository.
+      // The normalizer's public evidence is validated separately above; copying
+      // this explicit, minimized field never expands that public boundary.
+      let releaseInclusions;
+      if (output.releaseInclusions !== undefined) {
+        if (!Array.isArray(output.releaseInclusions) || output.releaseInclusions.length > 1000)
+          fail("invalid_normalized_release_inclusions");
+        releaseInclusions = output.releaseInclusions.map((value) => {
+          const record = c.github.validateGithubReleaseInclusion(value);
+          if (
+            row.family !== "pull_requests" ||
+            record.repository.id !== repository.id ||
+            String(record.repository.id) !== String(row.repository_id) ||
+            record.repository.slug !== repository.slug ||
+            !output.facts.some((fact) => fact.metricId === "pr_merged" && fact.artifactId === record.pullRequest.nodeId)
+          )
+            fail("normalized_release_inclusion_scope_mismatch");
+          return record;
+        });
+      }
+      let syntheticFactIds;
+      if (output.syntheticFactIds !== undefined) {
+        if (
+          !Array.isArray(output.syntheticFactIds) ||
+          output.syntheticFactIds.length > output.facts.length ||
+          new Set(output.syntheticFactIds).size !== output.syntheticFactIds.length ||
+          output.syntheticFactIds.some((id) => typeof id !== "string" || !output.facts.some((fact) => fact.id === id))
+        )
+          fail("invalid_normalized_synthetic_facts");
+        syntheticFactIds = [...output.syntheticFactIds];
+      }
       const document = {
         ...(defaultDelivery ? { defaultDeliveryNormalizationVersion } : {}),
         ...(row.family === "reviews" ? { reviewSourceNormalizationVersion } : {}),
@@ -1500,6 +1712,8 @@ export async function createPipeline(options) {
         facts: output.facts,
         actors: output.actors,
         evidence: output.evidence,
+        ...(releaseInclusions === undefined ? {} : { releaseInclusions }),
+        ...(syntheticFactIds === undefined ? {} : { syntheticFactIds }),
         ...privateAttribution(output, row),
         ...retainPhysicalContext(output, row, repository, c.contracts, dataMode),
         ...normalizedProjectContext(output, row, repository, projectWorkstreamMappings),
@@ -1796,7 +2010,11 @@ export async function createPipeline(options) {
         facts: outputs.flatMap((o) => o.facts),
         actors: [...actors.values()],
         evidence: outputs.flatMap((o) => o.evidence),
-        syntheticFactIds: outputs.filter((o) => o.isSynthetic === true).flatMap((o) => o.facts.map((fact) => fact.id)),
+        releaseInclusions: outputs.flatMap((o) => o.releaseInclusions ?? []),
+        syntheticFactIds: outputs.flatMap((o) => [
+          ...(o.syntheticFactIds ?? []),
+          ...(o.isSynthetic === true ? o.facts.map((fact) => fact.id) : []),
+        ]),
         reasons: [],
       };
       combined.facts = [
@@ -1885,6 +2103,7 @@ export async function createPipeline(options) {
       actors: "all",
       context: scope.context ?? "event",
     };
+    const projectContextFor = createPublicProjectContextProjector(normalized, engineScope.context, observationCutoff);
     const state = controlsStore.read();
     assertRunConfiguration();
     for (const actor of actors.values()) if (state.profiles[actor.id]?.suppressed) actor.publicState = "suppressed";
@@ -1972,6 +2191,7 @@ export async function createPipeline(options) {
       contracts: c.contracts,
       serialize: c.metrics.stableJSON,
       policyDigest,
+      projectContextFor,
     });
     const pendingFor = (aggregate, row) => ({
       schemaVersion: "leaderboard-pending/v1",
@@ -2031,6 +2251,7 @@ export async function createPipeline(options) {
               sourceRevision: original.sourceRevision,
               sourceRevisionUrl: original.sourceRevisionUrl,
               ...materializeEvidenceMetadata(original, fact),
+              ...projectContextFor(original, fact),
             },
           ];
         }),
@@ -2061,6 +2282,7 @@ export async function createPipeline(options) {
                 ? [
                     ...c.contracts.publicDocumentationRecognitionReasons(original.contribution),
                     ...c.contracts.publicReproductionRecognitionReasons(original.contribution, true),
+                    ...publicMaintenanceClassificationReasons(original.contribution),
                   ]
                 : []),
             ],
@@ -2071,6 +2293,7 @@ export async function createPipeline(options) {
           sourceRevision: original.sourceRevision,
           sourceRevisionUrl: original.sourceRevisionUrl,
           ...materializeEvidenceMetadata(original, fact),
+          ...projectContextFor(original, fact),
         },
       ];
     });
@@ -2087,6 +2310,7 @@ export async function createPipeline(options) {
         entry.occurredAt =
           fact[config.policies.find((item) => item.policy.metricId === fact.metricId).policy.dateBasis];
         Object.assign(entry, materializeEvidenceMetadata(entry, fact));
+        Object.assign(entry, projectContextFor(entry, fact));
       }
     }
     const content = {
@@ -2487,7 +2711,7 @@ export async function createPipeline(options) {
         if (signal.aborted || discoveryEpoch() !== epoch) return null;
         // One statement snapshot is the final SQL authorization point. It checks
         // full tuples and expanded removal sets even for an empty menu, together
-        // with persisted Project denials that need not change SQLite revisions.
+        // with persisted source denials that need not change SQLite revisions.
         const rows = (
           await tx.query(
             `WITH access AS MATERIALIZED (
@@ -2509,10 +2733,16 @@ export async function createPipeline(options) {
               ON receipt.operation_hash=pg_catalog.sha256(pg_catalog.convert_to(requested.operation_key,'UTF8'))
               AND receipt.operation_key=requested.operation_key
             WHERE receipt.kind='project_scope_denial'
+          UNION ALL SELECT 'denial',NULL,NULL,NULL,NULL,receipt.operation_key,NULL,NULL,NULL,NULL,NULL,NULL
+            FROM unnest($3::text[]) AS requested(operation_key)
+            JOIN leaderboard_pipeline.receipts AS receipt
+              ON receipt.operation_hash=pg_catalog.sha256(pg_catalog.convert_to(requested.operation_key,'UTF8'))
+              AND receipt.operation_key=requested.operation_key
+            WHERE receipt.kind='issue_field_scope_denial'
           UNION ALL SELECT 'correction',NULL,NULL,NULL,NULL,NULL,
             request_id,fact_id,artifact_id,repository_id,document,receipt FROM correction_rows
           ORDER BY kind,request_id`,
-            [repositoryIds, config.repositories.map(projectDenialKey)],
+            [repositoryIds, config.repositories.map(projectDenialKey), config.repositories.map(issueFieldDenialKey)],
           )
         ).rows;
         if (signal.aborted || discoveryEpoch() !== epoch || rows.some((row) => row.kind === "denial")) return null;
@@ -2955,10 +3185,15 @@ export async function createPipeline(options) {
             until: cutoff,
           }));
       for (const request of requests) {
-        const { runId, family } = request;
-        // Scheduled plan rows were committed atomically with the continuation.
-        // Legacy/explicit callers retain their existing per-family start path.
-        if (!scan?.plan) await collection.start(request);
+        // Scheduled rows already bind the versioned default inventory context.
+        // For explicit/dispatch runs, retain an existing old operation literally;
+        // otherwise atomically materialize and pin the expanded inventory ID.
+        const selectedRequest =
+          !scan?.plan && defaultCommentsInventory && request.family === "comments"
+            ? await startGithubCommentsRun(db, collection, request, assertRunConfiguration)
+            : request;
+        const { runId, family } = selectedRequest;
+        if (!scan?.plan && selectedRequest === request) await collection.start(request);
         const collectionStarted = performance.now();
         let status = "progress";
         for (let page = 0; page < maxPages && status === "progress"; page++) {
@@ -2976,6 +3211,17 @@ export async function createPipeline(options) {
         progress.push({ repositoryId: repo.id, family, runId, status });
         if (status !== "complete") return { state: "collecting", progress, publications: [] };
       }
+    }
+    // New release proof is a separate observation from the immutable PR row.
+    // Complete only explicitly selected public lookups before freezing the cycle;
+    // a frozen retry reuses its exact compatible cache and never recollects it.
+    if (dataMode === "public" && config.releaseInclusionTargets?.length) {
+      const releaseRepositoryIds = config.repositories
+        .filter((repo) => config.releaseInclusionTargets.some((target) => target.repositoryId === repo.id))
+        .map((repo) => repo.id);
+      await normalizeStored(releaseRepositoryIds, scan?.observationCutoff ?? utc(now()), null, {
+        collect: !scan?.observationCutoff,
+      });
     }
     const publications = [];
     let observationCutoff = utc(now());

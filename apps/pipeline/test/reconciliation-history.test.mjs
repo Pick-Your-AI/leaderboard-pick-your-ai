@@ -216,3 +216,56 @@ test("scope validation happens before any retained-data query", async () => {
     await assert.rejects(readImportedHistory(unavailable, [2], time), /^Error: reconciliation_history_scope_invalid$/);
   assert.equal(reads, 0);
 });
+
+test("inline comment v2 history keeps retained v1 entries and counts only new semantic versions and restorations", async () => {
+  const inline = (content, observation) => `gh-rest-comment-v2:${digest(content)}.${digest(observation).slice(0, 32)}`;
+  await seed({
+    runId: "synthetic-inline-legacy",
+    family: "comments",
+    subject: "PRRC_1",
+    revision: rest("A", "legacy"),
+    time: at(0),
+    mode: "reconcile",
+  });
+  const expected = [];
+  for (const [index, content] of ["A", "A", "B", "A", "A"].entries()) {
+    const pair = await seed({
+      runId: `synthetic-inline-v2-${index}`,
+      family: "comments",
+      subject: "PRRC_1",
+      revision: inline(content, String(index)),
+      time: at(index + 1),
+      mode: index === 4 ? "backfill" : "audit",
+    });
+    if ([0, 2, 3].includes(index)) expected.push(pair);
+  }
+  expected.push(
+    await seed({
+      runId: "synthetic-conversation-v1",
+      family: "comments",
+      subject: "IC_1",
+      revision: rest("conversation", "1"),
+      time: at(1),
+    }),
+  );
+  const before = (await db.query("SELECT * FROM leaderboard_ingestion.source_facts ORDER BY fact_key")).rows;
+  assert.deepEqual(await read(), sorted(expected));
+  assert.deepEqual((await db.query("SELECT * FROM leaderboard_ingestion.source_facts ORDER BY fact_key")).rows, before);
+});
+
+test("inline comment markers cannot authorize another family or an unknown version in imported history", async () => {
+  const valid = `gh-rest-comment-v2:${digest("A")}.${digest("1").slice(0, 32)}`;
+  const entries = [
+    ...["issues", "pull_requests", "releases", "commits", "reviews"].map((family) => ({ family, revision: valid })),
+    { family: "comments", revision: valid.replace("comment-v2:", "comment-v3:") },
+    { family: "comments", revision: valid.slice(0, -1) },
+    { family: "comments", revision: valid + "x" },
+  ];
+  for (const [index, entry] of entries.entries()) {
+    await seed({ runId: `synthetic-inline-invalid-${index}`, ...entry });
+    await assert.rejects(read(), /^Error: reconciliation_history_revision_unverified$/);
+    await db.exec(
+      "TRUNCATE leaderboard_ingestion.repository_access, leaderboard_ingestion.collection_runs, leaderboard_ingestion.source_facts CASCADE",
+    );
+  }
+});

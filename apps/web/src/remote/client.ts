@@ -18,6 +18,9 @@ import {
   type ActorFilter,
   publicEvidenceMetadataSchema,
   type PublicEvidenceMetadata,
+  publicProjectContextSchema,
+  publicProjectContextMatches,
+  type PublicProjectContext,
   actorSchema,
   artifactSchema,
   contributionSchema,
@@ -1191,6 +1194,7 @@ export function board(value: unknown, selected: Selection): Board {
 }
 export interface Evidence {
   evidenceMetadata?: PublicEvidenceMetadata;
+  projectContext?: PublicProjectContext;
   artifact: Artifact;
   contribution: Contribution;
   occurredAt: string | null;
@@ -1204,6 +1208,22 @@ export function evidence(value: unknown, selected?: Selection): Evidence {
   const metadata =
     data.evidenceMetadata === undefined ? undefined : publicEvidenceMetadataSchema.parse(data.evidenceMetadata);
   const contribution = contributionSchema.parse(data.contribution);
+  const artifact = artifactSchema.parse(data.artifact);
+  let projectContext: PublicProjectContext | undefined;
+  if (data.projectContext !== undefined) {
+    const parsed = publicProjectContextSchema.safeParse(data.projectContext);
+    if (
+      !parsed.success ||
+      !publicProjectContextMatches(
+        parsed.data,
+        artifact,
+        contribution,
+        selected ? (selectionScope(selected).context ?? "event") : parsed.data.basis,
+      )
+    )
+      throw new ReadFailure(502, "invalid_api_response");
+    projectContext = parsed.data;
+  }
   if (selected?.roles?.length && !selected.roles.some((role) => contribution.roles.includes(role)))
     throw new ReadFailure(502, "api_role_filter_mismatch");
   if (metadata?.acceptedAt && contribution.qualification !== "eligible")
@@ -1219,9 +1239,10 @@ export function evidence(value: unknown, selected?: Selection): Evidence {
     throw new ReadFailure(502, "invalid_api_response");
   return {
     ...(metadata === undefined ? {} : { evidenceMetadata: metadata }),
+    ...(projectContext === undefined ? {} : { projectContext }),
     activityState: activityState as Evidence["activityState"],
     observedAt: activityTime(data.observedAt === undefined ? (metadata?.observedAt ?? null) : data.observedAt),
-    artifact: artifactSchema.parse(data.artifact),
+    artifact,
     contribution,
     occurredAt: activityTime(data.occurredAt),
     sourceRevision: data.sourceRevision === null ? null : string(data.sourceRevision),
@@ -1465,7 +1486,7 @@ function activityContract(value: unknown, selected: Selection) {
     throw new ReadFailure(502, "invalid_activity_response");
   return data;
 }
-function activityGroup(value: unknown, selected: Selection): ActivityGroup {
+export function activityGroup(value: unknown, selected: Selection): ActivityGroup {
   const data = object(value);
   const state = data.activityState;
   if (typeof state !== "string" || !["observed", "pending", "accepted", "unknown"].includes(state))

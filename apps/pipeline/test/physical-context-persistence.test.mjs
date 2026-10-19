@@ -8,7 +8,7 @@ import { physicalSource } from "./fixtures/physical-context.mjs";
 const hash = (value) => createHash("sha256").update(components.metrics.stableJSON(value)).digest("hex");
 const boardUrl = "/api/v1/boards?metric=pr_lines_added";
 
-async function setup(t, legacy = false) {
+async function setup(t, legacy = false, includeMerge = false) {
   let calls = 0,
     stripReceipt = legacy;
   const { pull } = physicalSource();
@@ -29,6 +29,20 @@ async function setup(t, legacy = false) {
       config.policies = [
         { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-physical-policy" },
       ];
+      if (includeMerge) {
+        const merged = {
+          ...policy,
+          metricId: "pr_merged",
+          unit: components.metrics.getMetricDefinition("pr_merged").definition.unit,
+          aggregation: "count",
+          groupBy: "actor_artifact",
+        };
+        config.policies.push({
+          policy: merged,
+          signature: components.metrics.stableJSON(merged),
+          approvalReceipt: "synthetic-merged-policy",
+        });
+      }
     },
     enrichmentFactory(client, slug) {
       return async (input) => {
@@ -63,6 +77,51 @@ async function setup(t, legacy = false) {
     },
   };
 }
+
+test("a private physical dependency retains the same frozen Project context as its published merge proof", async (t) => {
+  const h = await setup(t, false, true);
+  const publication = await h.runtime.runOnce({ cutoff: clock() });
+  assert.equal(publication.state, "published");
+  const snapshotId = publication.publications[0].snapshotId;
+  const selected = (
+    await h.db.query("SELECT document FROM leaderboard_pipeline.snapshots WHERE snapshot_id=$1", [snapshotId])
+  ).rows[0].document;
+  assert.equal(selected.physicalEvidence.length, 1);
+  const dependency = selected.physicalEvidence[0];
+  const merged = selected.evidence.find(
+    (entry) => entry.contribution.contributionId === dependency.contribution.contributionId,
+  );
+  assert.ok(merged);
+  assert.equal(merged.projectContext.state, "unknown");
+  assert.equal(merged.projectContext.basis, "event");
+  const paths = [
+    boardUrl,
+    `${boardUrl}&snapshot=${snapshotId}`,
+    `/api/v1/exports?metric=pr_lines_added&snapshot=${snapshotId}&format=json`,
+    `/api/v1/exports?metric=pr_lines_added&snapshot=${snapshotId}&format=csv`,
+  ];
+  const responses = [];
+  for (const path of paths) responses.push(await h.runtime.app.inject(path));
+  assert.deepEqual(
+    responses.map((response) => response.statusCode),
+    [200, 200, 200, 200],
+    responses.map((response) => response.body).join("\n"),
+  );
+  for (const [index, response] of responses.entries()) {
+    assert.doesNotMatch(response.body, /github-physical-context|canonicalIntegrationId|mergedEvidenceId/);
+    if (!paths[index].endsWith("format=csv")) {
+      assert.equal(response.json().rows[0].result.value, 17);
+      assert.equal(response.json().rows[0].physicalContext.state, "available");
+    }
+  }
+  const mergeBoard = await h.runtime.app.inject("/api/v1/boards?metric=pr_merged");
+  assert.equal(mergeBoard.statusCode, 200, mergeBoard.body);
+  assert.equal(mergeBoard.json().rows[0].result.value, 1);
+  assert.deepEqual(dependency.projectContext, merged.projectContext);
+  assert.equal(dependency.projectContext.binding.contributionId, merged.contribution.contributionId);
+  const physical = selected.evidence.find((entry) => entry.contribution.metricIds.includes("pr_lines_added"));
+  assert.notEqual(dependency.projectContext.binding.contributionId, physical.projectContext.binding.contributionId);
+});
 
 async function assertPrivate(runtime, snapshotId) {
   for (const path of [
