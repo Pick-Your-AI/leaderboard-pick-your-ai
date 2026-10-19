@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createPipeline } from "../src/index.mjs";
-import { reversionHash } from "../src/reversion-effectiveness.mjs";
+import { reversionHash, recordReversionDecision, reversionReceiptDocument } from "../src/reversion-effectiveness.mjs";
 import { readCorrectionState } from "../src/reversion-store.mjs";
 import { harness, components, publicScope, fixtureId } from "./harness.mjs";
 
@@ -684,3 +684,155 @@ test("confirmed named discovery retains exact reviewed-unit authority through wi
   assert.equal(unsealed.statusCode, 503, unsealed.body);
   assert.equal(unsealed.json().windows, undefined);
 });
+
+for (const changed of ["unchanged", "sealed ancestor", "receipt seal", "removed chain"])
+  test(`named discovery final statement checks ${changed} reversion authority after the host wait`, async (t) => {
+    let armed = false,
+      committed = false,
+      held = false;
+    let reach, release;
+    const reached = new Promise((resolve) => {
+      reach = resolve;
+    });
+    const released = new Promise((resolve) => {
+      release = resolve;
+    });
+    const h = await scenario(t, {
+      namedPeriods: ["7d", "30d"],
+      discoveryAuthority: true,
+      async verifyConfiguration() {
+        if (armed && committed && !held) {
+          held = true;
+          reach();
+          await released;
+        }
+        return true;
+      },
+    });
+    const inactive = h.operation(1);
+    h.request(inactive);
+    h.setTime(6);
+    assert.equal((await h.invoke(h.runtime, inactive)).status, "applied");
+    const active = h.operation(2, "active", inactive.requestId);
+    h.request(active);
+    h.setTime(8);
+    assert.equal((await h.invoke(h.runtime, active)).status, "applied");
+    h.setTime(9);
+    assert.equal((await h.publish()).state, "published");
+    const url = "/api/v1/windows?" + new URLSearchParams(components.contracts.publicScopeParameters(publicScope));
+    const before = await h.runtime.app.inject(url);
+    assert.equal(before.statusCode, 200, before.body);
+    assert.equal(before.json().windows.length, 2);
+    const controls = h.controlsStore.read();
+    const initial = await readCorrectionState(h.db, [2]);
+    assert.equal(initial.decisions.length, 2);
+    const access = (await h.db.query("SELECT * FROM leaderboard_ingestion.repository_access ORDER BY repository_id"))
+      .rows;
+    const snapshots = (
+      await h.db.query(
+        "SELECT snapshot_id,document,document_hash FROM leaderboard_pipeline.snapshots ORDER BY snapshot_id",
+      )
+    ).rows;
+    const transaction = h.db.transaction.bind(h.db);
+    let transactions = 0,
+      finalStatements = 0;
+    h.db.transaction = async (work) => {
+      const number = ++transactions;
+      const result = await transaction((tx) =>
+        work({
+          query: async (sql, params) => {
+            if (number === 2) finalStatements++;
+            return tx.query(sql, params);
+          },
+        }),
+      );
+      if (armed && number === 1 && result && Array.isArray(result.windows)) committed = true;
+      return result;
+    };
+    armed = true;
+    const pending = h.runtime.app.inject(url);
+    let response, timer;
+    try {
+      await Promise.race([
+        reached,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("final reversion host wait was not reached")), 5000);
+        }),
+      ]);
+      clearTimeout(timer);
+      assert.equal(committed, true);
+      assert.equal(held, true);
+      if (changed === "sealed ancestor") {
+        const previous = initial.decisions.find((decision) => decision.operation.requestId === inactive.requestId);
+        const { decisionHash, recordedAt, ...candidate } = structuredClone(previous);
+        candidate.operation.approvalReceipt = "synthetic-review-resealed-ancestor";
+        const alternate = recordReversionDecision(candidate, recordedAt);
+        const seal = reversionReceiptDocument(alternate);
+        await transaction(async (tx) => {
+          await tx.query("UPDATE leaderboard_pipeline.corrections SET document=$1::jsonb WHERE request_id=$2", [
+            JSON.stringify(alternate),
+            inactive.requestId,
+          ]);
+          await tx.query(
+            "UPDATE leaderboard_pipeline.receipts SET document=$1::jsonb,document_hash=$2 WHERE operation_key=$3",
+            [JSON.stringify(seal), reversionHash(seal), "reversion:" + inactive.requestId + ":1"],
+          );
+        });
+        const state = await readCorrectionState(h.db, [2]);
+        assert.equal(state.decisions.length, 2, "both rows and seals remain valid");
+        assert.deepEqual(
+          state.decisions.find((decision) => decision.operation.requestId === active.requestId),
+          initial.decisions.find((decision) => decision.operation.requestId === active.requestId),
+          "the active tail is unchanged",
+        );
+        assert.notEqual(state.fingerprint, initial.fingerprint);
+      } else if (changed === "receipt seal") {
+        const decision = initial.decisions.find((value) => value.operation.requestId === active.requestId);
+        const seal = { ...reversionReceiptDocument(decision), approvalReceipt: "synthetic-other-approval" };
+        await h.db.query(
+          "UPDATE leaderboard_pipeline.receipts SET document=$1::jsonb,document_hash=$2 WHERE operation_key=$3",
+          [JSON.stringify(seal), reversionHash(seal), "reversion:" + active.requestId + ":1"],
+        );
+        await assert.rejects(
+          readCorrectionState(h.db, [2]),
+          /unsealed_correction/,
+          "a self-consistent receipt hash cannot replace the exact required seal",
+        );
+      } else if (changed === "removed chain") {
+        await h.db.query("DELETE FROM leaderboard_pipeline.corrections WHERE request_id=ANY($1::text[])", [
+          [inactive.requestId, active.requestId],
+        ]);
+        assert.equal((await readCorrectionState(h.db, [2])).decisions.length, 0);
+      } else assert.equal((await readCorrectionState(h.db, [2])).fingerprint, initial.fingerprint);
+      assert.deepEqual(h.controlsStore.read(), controls, "SQL authority changes do not need a SQLite revision change");
+      assert.deepEqual(
+        (await h.db.query("SELECT * FROM leaderboard_ingestion.repository_access ORDER BY repository_id")).rows,
+        access,
+      );
+      release();
+      response = await pending;
+    } finally {
+      clearTimeout(timer);
+      release();
+      await pending;
+      h.db.transaction = transaction;
+    }
+    assert.equal(transactions, 2);
+    assert.equal(finalStatements, 1, "the complete final authority is read in one SQL statement");
+    assert.deepEqual(
+      (
+        await h.db.query(
+          "SELECT snapshot_id,document,document_hash FROM leaderboard_pipeline.snapshots ORDER BY snapshot_id",
+        )
+      ).rows,
+      snapshots,
+      "discovery does not rewrite the retained publications",
+    );
+    if (changed === "unchanged") {
+      assert.equal(response.statusCode, 200, response.body);
+      assert.deepEqual(response.json(), before.json());
+    } else {
+      assert.equal(response.statusCode, 503, response.body);
+      assert.equal(response.json().windows, undefined);
+    }
+  });

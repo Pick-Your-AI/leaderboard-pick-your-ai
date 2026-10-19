@@ -182,3 +182,16 @@ supersession, unsafe details and derived-cache purge remain literal tracked
 work. This path adds no disappearance heuristic or retention authority. Real
 deployment, permitted source access and actual maintainer decisions remain
 separate from synthetic implementation evidence.
+
+### Named-window discovery authority
+
+Confirmed named-window discovery preserves exact contribution suppression and the
+complete current reversion chain, including active restorations. The final SQL
+statement reads the existing joined correction rows and exact receipt seals
+alongside repository access, source suppressions and Project denials. It compares
+that complete authority with the captured choices before the existing synchronous
+host-epoch and private-state checks permit return. A changed sealed ancestor,
+changed receipt or removed chain invalidates that captured menu even when the
+repository generation and private controls revision are unchanged. Legacy
+corrections continue to suppress their whole artifact; reviewed reversion tags do
+not broaden a qualified-unit restriction into artifact erasure.

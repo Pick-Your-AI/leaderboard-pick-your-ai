@@ -24,12 +24,9 @@ const repositoryIds = (values) => {
   return [...new Set(values.map(Number))].sort((a, b) => a - b);
 };
 
-/** Every consumer reads the row and its exact existing-kind receipt together.
- * Unknown/unsealed tags are errors, never exemptions from artifact suppression. */
-export async function readCorrectionState(tx, ids) {
-  const rows = (
-    await tx.query(
-      `SELECT c.request_id,c.fact_id,c.artifact_id,c.repository_id,c.document,
+/** Keep the exact joined row/receipt query reusable in a larger single-statement
+ * authority capture. Its native column types, ordering and budget stay intact. */
+export const correctionStateQuery = `SELECT c.request_id,c.fact_id,c.artifact_id,c.repository_id,c.document,
        CASE WHEN r.operation_key IS NULL THEN NULL ELSE jsonb_build_object(
          'operation_key',r.operation_key,'kind',r.kind,'document',r.document,'document_hash',r.document_hash) END AS receipt
      FROM leaderboard_pipeline.corrections AS c
@@ -37,10 +34,10 @@ export async function readCorrectionState(tx, ids) {
        ON r.operation_hash=pg_catalog.sha256(pg_catalog.convert_to(
          ('reversion:' || c.request_id || ':' || (c.document->'operation'->>'expectedVersion')), 'UTF8'))
        AND r.operation_key=('reversion:' || c.request_id || ':' || (c.document->'operation'->>'expectedVersion'))
-     WHERE c.repository_id=ANY($1::bigint[]) ORDER BY c.request_id LIMIT 10001`,
-      [repositoryIds(ids)],
-    )
-  ).rows;
+     WHERE c.repository_id=ANY($1::bigint[]) ORDER BY c.request_id LIMIT 10001`;
+
+/** Unknown/unsealed tags are errors, never artifact-suppression exemptions. */
+export function correctionStateFromRows(rows) {
   const classified = classifyCorrectionRows(rows);
   // Validate the entire chain, including future decisions, before selecting any view.
   reversionAuthority(classified.decisions, "9999-12-31T23:59:59.999Z");
@@ -49,6 +46,11 @@ export async function readCorrectionState(tx, ids) {
     fingerprint: reversionHash(rows),
     ...(classified.decisions.length ? { recordsHash: reversionHash(classified.decisions) } : {}),
   };
+}
+
+/** Every consumer reads the row and its exact existing-kind receipt together. */
+export async function readCorrectionState(tx, ids) {
+  return correctionStateFromRows((await tx.query(correctionStateQuery, [repositoryIds(ids)])).rows);
 }
 
 /** Preserve absent legacy capture fields. A complete retained tagged record set
