@@ -40,6 +40,7 @@ if (["/account", "/admin"].includes(location.pathname.replace(/\/+$/, ""))) {
     ),
   );
 } else {
+  // Keep the static fallback until the selected application's module is ready.
   void import("./remote/App.tsx").then(({ RemoteApp }) =>
     root.render(
       <React.StrictMode>

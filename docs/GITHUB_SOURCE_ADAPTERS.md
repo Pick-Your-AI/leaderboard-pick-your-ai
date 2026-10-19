@@ -67,6 +67,20 @@ Parent/blocker endpoints must both be public in the approved repository; foreign
 or hidden endpoints remain unavailable. Current parent or blocker fields never
 stand in for missing history. Other event subtypes remain unsupported.
 
+Relationship records are checked again after every fresh, resumed or completed
+timeline read. The exact selected event type must carry its own `parent` or
+`blockingIssue` field, without a competing non-null endpoint. Unsupported events
+and swapped endpoint fields cannot become intentional parent or blocker facts.
+Event and endpoint IDs must contain text; the endpoint URL must be the exact
+approved repository's canonical positive issue-number URL, without a query,
+fragment or alternate path. Cached events receive the same event-field shape
+checks as fresh pages. Valid event bytes and revision fingerprints are preserved;
+unknown actors and unsupported clock text remain unknown. These checks neither
+add source privileges nor certify an installed history. Existing published data
+still needs its authorized source replay and publication review; changing the
+reader alone is not a claim that old snapshots were rebuilt. Synthetic reader and
+normalization regressions are in `packages/github/test/timeline-relationship-integrity.test.mjs`.
+
 The Project-status inventory includes open and closed issues and PRs, then selects
 the explicit issue or pullRequest timeline and verifies its exact repository,
 subject URL and event revision again during normalization. Collection binds the

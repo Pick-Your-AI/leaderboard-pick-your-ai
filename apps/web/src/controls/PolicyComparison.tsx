@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ControlsFailure, type Session } from "./client.ts";
+import { PolicyAudit } from "./PolicyAudit.tsx";
 import {
   comparePolicy,
   policyInputs,
@@ -288,6 +289,7 @@ export function PolicyComparison({ session, onAuthorityLost }: { session: Sessio
               </button>
             </>
           )}
+          <PolicyAudit key={result.responseHash} result={result} />
           <details>
             <summary>Private comparison receipt</summary>
             <dl>

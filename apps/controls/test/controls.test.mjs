@@ -1480,6 +1480,16 @@ for (const revoked of ["7", "8"])
     assert.deepEqual(h.store.publicSnapshot(), publicBefore);
   });
 
+function rejectedPromiseWithShadowedMethod(method) {
+  const rejected = Promise.reject(Error("synthetic-private-shadowed-rejection"));
+  Object.defineProperty(rejected, method, {
+    get() {
+      throw Error("synthetic-private-shadowed-method");
+    },
+  });
+  return rejected;
+}
+
 for (const [name, callback] of [
   ["missing", undefined],
   ["false", () => false],
@@ -1494,6 +1504,50 @@ for (const [name, callback] of [
   ["promise", () => Promise.resolve(true)],
   ["rejected promise", () => Promise.reject(Error("synthetic-private-rejection"))],
   [
+    "then getter throwing rejected promise",
+    () => ({
+      get then() {
+        throw Promise.reject(Error("synthetic-private-then-rejection"));
+      },
+    }),
+  ],
+  [
+    "then method throwing rejected promise",
+    () => ({
+      then() {
+        throw Promise.reject(Error("synthetic-private-method-rejection"));
+      },
+    }),
+  ],
+  [
+    "thenable rejecting with rejected promise",
+    () => ({
+      then(_resolve, reject) {
+        reject(Promise.reject(Error("synthetic-private-nested-thenable-rejection")));
+      },
+    }),
+  ],
+  [
+    "promise rejecting with rejected promise",
+    () => Promise.reject(Promise.reject(Error("synthetic-private-nested-promise-rejection"))),
+  ],
+  [
+    "native promise rejection chain",
+    () => {
+      let reason = Error("synthetic-private-rejection-chain");
+      for (let index = 0; index < 32; index++) reason = Promise.reject(reason);
+      return reason;
+    },
+  ],
+  [
+    "native promise rejection cycle",
+    () => {
+      const { promise, reject } = Promise.withResolvers();
+      reject(promise);
+      return promise;
+    },
+  ],
+  [
     "thrown rejected promise",
     () => {
       throw Promise.reject(Error("synthetic-private-thrown-rejection"));
@@ -1504,6 +1558,46 @@ for (const [name, callback] of [
     () => ({
       get then() {
         throw Error("synthetic-private-then-error");
+      },
+    }),
+  ],
+  ["rejected promise with throwing then getter", () => rejectedPromiseWithShadowedMethod("then")],
+  [
+    "thrown rejected promise with throwing then getter",
+    () => {
+      throw rejectedPromiseWithShadowedMethod("then");
+    },
+  ],
+  ["rejected promise with throwing catch getter", () => rejectedPromiseWithShadowedMethod("catch")],
+  [
+    "fulfilled promise with changed payload",
+    () => {
+      const payload = {};
+      const fulfilled = Promise.resolve(payload);
+      Object.defineProperty(payload, "then", {
+        get() {
+          throw Error("synthetic-private-changed-payload");
+        },
+      });
+      Object.defineProperty(fulfilled, "then", {
+        get() {
+          throw Error("synthetic-private-shadowed-method");
+        },
+      });
+      return fulfilled;
+    },
+  ],
+  [
+    "fulfilled thenable with changed payload",
+    () => ({
+      then(resolve) {
+        const payload = {};
+        resolve(payload);
+        Object.defineProperty(payload, "then", {
+          get() {
+            throw Error("synthetic-private-changed-thenable-payload");
+          },
+        });
       },
     }),
   ],
@@ -1520,6 +1614,43 @@ for (const [name, callback] of [
     assert.equal(denied.data.error, "Configuration authority changed or unavailable");
     assert.doesNotMatch(JSON.stringify(denied.data), /synthetic-private/);
     await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(h.store.read(), before);
+    assert.deepEqual(h.store.publicSnapshot(), publicBefore);
+  });
+
+for (const fault of ["self throwing getter", "fresh throwing getter chain", "resolving method", "rejecting method"])
+  test(`configuration rejects ${fault} authority without inspecting provider values`, async (t) => {
+    let reads = 0,
+      calls = 0;
+    const makeValue = () => {
+      if (fault.endsWith("method"))
+        return {
+          then(resolve) {
+            calls++;
+            if (fault === "rejecting method") return Promise.reject(Error("synthetic-private-foreign-method"));
+            resolve(true);
+          },
+        };
+      return {
+        get then() {
+          reads++;
+          if (fault === "self throwing getter") throw this;
+          throw makeValue();
+        },
+      };
+    };
+    const h = await harness(t, { sourceVerifier: sourceReceipt, configurationAuthorityCurrent: makeValue });
+    const owner = await h.login("7"),
+      approver = await h.login("8"),
+      approved = await approvedConfiguration(h, owner, approver);
+    const before = h.store.read(),
+      publicBefore = h.store.publicSnapshot();
+    const denied = await activateApprovedConfiguration(h, owner, approved);
+    assert.equal(denied.status, 409);
+    assert.equal(denied.data.error, "Configuration authority changed or unavailable");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(reads, 0, "invalid authority getters must not be evaluated");
+    assert.equal(calls, 0, "invalid authority methods must not be invoked");
     assert.deepEqual(h.store.read(), before);
     assert.deepEqual(h.store.publicSnapshot(), publicBefore);
   });

@@ -405,7 +405,7 @@ Distinct contribution roles can share an artifact, but a repeated event or impor
 
 ## Decision register
 
-The dedicated repository boundary has been selected. The [metric and recognition decision](metric-recognition-policy.md) and its [definition review](metric-definition-review.md) specify this project's policy choices; review and merge record their acceptance. Each register entry retains its unresolved source, role or operating evidence. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
+The dedicated repository boundary has been selected. The [metric and recognition decision](metric-recognition-policy.md) and its [definition review](metric-definition-review.md) specify this project's policy choices; review and merge record their acceptance. The [hosting architecture](hosting-architecture.md) selects the runtime, ingress and persistence boundaries with a dated cost model. Each register entry retains its unresolved source, role or operating evidence. Paid provisioning, actual DNS/TLS, source installation, operating ownership and release acceptance remain separate from this repository publication.
 
 The [release-phase decision](release-decision.md) defines transition evidence and proposed evaluation targets. Its adoption does not establish that a phase has passed or turn a proposed role into a named operational commitment.
 

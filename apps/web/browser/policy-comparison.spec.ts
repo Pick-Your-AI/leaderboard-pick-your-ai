@@ -51,7 +51,7 @@ for (const replacement of ["edit", "session reload"] as const) {
   });
 }
 
-async function service(page: Page, roles = ["reviewer"]) {
+async function service(page: Page, roles = ["reviewer"], auditFixture = false) {
   const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -61,14 +61,14 @@ async function service(page: Page, roles = ["reviewer"]) {
   const { PolicyComparisonStore } = await import(
     new URL("../../controls/src/policy-comparison.mjs", import.meta.url).href
   );
-  const { privatePolicyFixture } = await import(
+  const { privatePolicyFixture, privatePolicyAuditFixture } = await import(
     new URL("../../../tests/fixtures/private-policy-preview.mjs", import.meta.url).href
   );
   const metrics = await import(new URL("../../../packages/metrics/dist/index.js", import.meta.url).href);
   const directory = await mkdtemp(join(tmpdir(), "synthetic-policy-browser-"));
   const store = new ControlStore(join(directory, "controls.sqlite"));
   const comparisons = new PolicyComparisonStore(store, metrics);
-  const fixture = privatePolicyFixture();
+  const fixture = auditFixture ? privatePolicyAuditFixture() : privatePolicyFixture();
   fixture.policies[0].unit = metrics.getMetricDefinition("issues_opened").definition.unit;
   const retained = store.transaction((s: any) => comparisons.capture(s, fixture));
   const candidate = { ...fixture.policies[0], version: "synthetic-preview/v2", groupBy: "canonical" };
@@ -129,6 +129,7 @@ async function service(page: Page, roles = ["reviewer"]) {
   return {
     inputId: retained.inputId,
     candidate,
+    baseline: fixture.policies[0],
     writes,
     suppress() {
       store.transaction((s: any) => {
@@ -273,6 +274,95 @@ test("editing candidate input while a request is pending discards the previous c
     await expect(page.getByLabel("Complete candidate policy JSON")).toHaveValue(/synthetic-preview\/v3/);
   } finally {
     release?.();
+    await api.close();
+  }
+});
+
+test("reviewer inspects bounded audit pages and exact grouped fact identities on actual frozen input", async ({
+  page,
+}) => {
+  const api = await service(page, ["reviewer"], true);
+  try {
+    await page.setViewportSize({ width: 360, height: 900 });
+    await selectInput(page, api);
+    await page.getByRole("button", { name: "Compare candidate policy", exact: true }).click();
+    const audit = page.getByRole("region", { name: "Calculation evidence audit", exact: true });
+    await expect(audit).toBeVisible();
+    await expect(audit.getByText("61 visible audit entries for this selection.", { exact: true })).toBeVisible();
+    await page.getByLabel("Audit condition", { exact: true }).selectOption("repeated_policy_unit");
+    await expect(audit.getByText("28 visible audit entries for this selection.", { exact: true })).toBeVisible();
+    await expect(audit.getByRole("row")).toHaveCount(26);
+    await audit.getByRole("button", { name: "Next audit entries", exact: true }).click();
+    await expect(audit.getByRole("row")).toHaveCount(4);
+    await expect(audit.getByText("Baseline audit entries 26–28 of 28", { exact: true })).toBeVisible();
+    await audit.getByRole("button", { name: "Previous audit entries", exact: true }).click();
+    await audit.getByText("Inspect 40 fact identities", { exact: true }).click();
+    const facts = audit.locator("pre");
+    await expect(facts).toHaveText(
+      Array.from({ length: 25 }, (_, n) => "synthetic-audit-00-large-" + String(n + 1).padStart(3, "0")).join("\n"),
+    );
+    await audit.getByRole("button", { name: "Next fact identities", exact: true }).click();
+    await expect(facts).toHaveText(
+      Array.from({ length: 15 }, (_, n) => "synthetic-audit-00-large-" + String(n + 26).padStart(3, "0")).join("\n"),
+    );
+    await expect(audit.getByRole("button", { name: "Next fact identities", exact: true })).toBeDisabled();
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await page.getByLabel("Audit policy", { exact: true }).selectOption("after");
+    await expect(page.getByLabel("Audit condition", { exact: true })).toHaveValue("");
+    await expect(audit.getByText("100 visible audit entries for this selection.", { exact: true })).toBeVisible();
+    await expect(audit.getByRole("heading", { name: /Fact identities for audit entry/ })).toHaveCount(0);
+    await expect(audit.getByRole("button", { name: "Previous audit entries", exact: true })).toBeDisabled();
+    expect(api.writes).toEqual(["/controls/policy-comparisons"]);
+  } finally {
+    await api.close();
+  }
+});
+
+test("unchanged policy previews still expose correction and unknown-actor audit entries for review", async ({
+  page,
+}) => {
+  const api = await service(page, ["reviewer"], true);
+  try {
+    await selectInput(page, api);
+    await page.getByLabel("Complete candidate policy JSON").fill(JSON.stringify(api.baseline));
+    await page.getByRole("button", { name: "Compare candidate policy", exact: true }).click();
+    await expect(page.getByText("0 visible changed contributors.", { exact: false })).toBeVisible();
+    const audit = page.getByRole("region", { name: "Calculation evidence audit", exact: true });
+    await page.getByLabel("Audit condition", { exact: true }).selectOption("unknown_actor");
+    await expect(audit.getByRole("cell", { name: "Unknown actor", exact: true })).toBeVisible();
+    await page.getByLabel("Audit condition", { exact: true }).selectOption("excluded_by_policy_or_correction");
+    await audit.getByRole("button", { name: /^Inspect .+ for audit entry / }).click();
+    await expect(audit.locator("pre")).toHaveText("synthetic-audit-corrected");
+    await expect(audit.getByText(/do not establish contributor intent or authorize a penalty/)).toBeVisible();
+    await expect(page.getByRole("button", { name: /activate|approve policy/i })).toHaveCount(0);
+    expect(api.writes).toEqual(["/controls/policy-comparisons"]);
+  } finally {
+    await api.close();
+  }
+});
+
+test("privacy recheck removes expanded audit evidence and pagination state before an empty view is shown", async ({
+  page,
+}) => {
+  const api = await service(page, ["reviewer"], true);
+  try {
+    await selectInput(page, api);
+    await page.getByRole("button", { name: "Compare candidate policy", exact: true }).click();
+    const audit = page.getByRole("region", { name: "Calculation evidence audit", exact: true });
+    await page.getByLabel("Audit condition", { exact: true }).selectOption("repeated_policy_unit");
+    await audit.getByText("Inspect 40 fact identities", { exact: true }).click();
+    await audit.getByRole("button", { name: "Next fact identities", exact: true }).click();
+    api.suppress();
+    await page.getByRole("button", { name: "Recheck saved comparison", exact: true }).click();
+    await expect(audit.getByText("0 visible audit entries for this selection.", { exact: true })).toBeVisible();
+    await expect(audit.getByText(/An empty list does not establish complete source history/)).toBeVisible();
+    await expect(page.getByLabel("Audit condition", { exact: true })).toHaveValue("");
+    await expect(audit.getByRole("heading", { name: /Fact identities for audit entry/ })).toHaveCount(0);
+    await expect(audit.getByRole("button", { name: "Next audit entries", exact: true })).toHaveCount(0);
+    await expect(audit.locator("pre")).toHaveCount(0);
+    await expect(page.getByText(/synthetic-audit-/)).toHaveCount(0);
+    expect(api.writes).toEqual(["/controls/policy-comparisons"]);
+  } finally {
     await api.close();
   }
 });
