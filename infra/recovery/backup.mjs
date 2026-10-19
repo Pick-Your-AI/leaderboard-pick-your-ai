@@ -52,8 +52,11 @@ export function encryptBackup({
   }
   if (!watermarks || typeof watermarks !== "object" || Array.isArray(watermarks))
     throw new Error("Source watermarks are required");
+  // An unpooled allocation also isolates the snapshot from the caller's backing ArrayBuffer.
+  const capturedDump = Buffer.alloc(databaseDump.length);
+  capturedDump.set(databaseDump);
   const payload = Buffer.from(
-    JSON.stringify({ databaseDump: databaseDump.toString("base64"), configuration, policyVersions, watermarks }),
+    JSON.stringify({ databaseDump: capturedDump.toString("base64"), configuration, policyVersions, watermarks }),
   );
   if (payload.length > maxBytes * 2) throw new Error("Backup payload exceeds serialization bound");
   const metadata = {
@@ -61,7 +64,7 @@ export function encryptBackup({
     createdAt,
     expiresAt,
     sourceCutoff,
-    dumpSha256: digest(databaseDump),
+    dumpSha256: digest(capturedDump),
     payloadSha256: digest(payload),
   };
   const iv = randomBytes(12);
@@ -193,8 +196,9 @@ export async function restoreBackup({
   await restoreDatabase(decoded.databaseDump);
   // Current deletion/opt-out tombstones must be applied before any restored data is public.
   await reapplySuppressions();
-  const state = await inspectRestoredState();
-  if (canonical(state) !== expectedCanonical)
+  // Verify and identify the same serialization of the inspected restore state.
+  const restoredCanonical = canonical(await inspectRestoredState());
+  if (restoredCanonical !== expectedCanonical)
     throw new Error("Restored state does not match the expected snapshot/correction state");
   return {
     format: "restore-drill-receipt/v1",
@@ -203,7 +207,7 @@ export async function restoreBackup({
     sourceGapMilliseconds: observed - cutoff,
     restoredSnapshotLoss: 0,
     postBackupDataLoss: null,
-    restoredStateSha256: digest(canonical(state)),
+    restoredStateSha256: digest(restoredCanonical),
     sourceReconciliationRequired: true,
     watermarksSha256: digest(JSON.stringify(decoded.watermarks)),
   };

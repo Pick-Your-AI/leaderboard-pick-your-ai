@@ -111,7 +111,13 @@ test("named-period validation rejects lossy cutoffs and ambiguous bounds before 
   await h.runtime.stop();
   const runtime = await createPipeline({
     ...h.options,
-    config: { ...h.config, scopes: ["month", "quarter"].map((period) => ({ ...publicScope, period })) },
+    config: {
+      ...h.config,
+      scopes: [
+        { ...publicScope, period: "month" },
+        { ...publicScope, start: "2026-10-01T00:00:00.000Z", end: "2026-10-16T12:00:00.000Z", period: "custom" },
+      ],
+    },
   });
   t.after(() => runtime.stop());
   await assert.rejects(runtime.runOnce({ cutoff: "2026-10-16T12:00:00.000Z" }), /ambiguous_public_period_bounds/);
