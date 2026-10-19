@@ -1,0 +1,702 @@
+{
+  "format": "public-source-observation/v1",
+  "purpose": "Bounded public-source examples for LB-04.01; documentation evidence, not an ingestion fixture or ranking input.",
+  "observation_window_utc": {
+    "from": "2026-10-19T04:46:12Z",
+    "through": "2026-10-19T04:50:21Z"
+  },
+  "repository": {
+    "id": 1422874501,
+    "node_id": "R_kgDOVM9XhQ",
+    "full_name": "Pick-Your-AI/pick-your-ai-leaderboard",
+    "private": false,
+    "visibility": "public"
+  },
+  "reader": {
+    "kind": "existing_connected_github_reader",
+    "operation": "GET public repository REST resources",
+    "product_app_installation_verified": false,
+    "application_id": null,
+    "installation_id": null,
+    "credential_kind": null,
+    "granted_installation_permissions": null,
+    "response_status": null,
+    "response_headers": null,
+    "requested_api_version": null,
+    "unavailable_metadata_reason": "The exposed reader returned parsed response content without the request authorization, requested API version, HTTP response status, Link/quota headers or installation grant.",
+    "repository_permissions_object_observed": true,
+    "repository_permissions_interpretation": "Connection-relative repository roles were exposed, not a separately verified product App grant; role values are not retained.",
+    "product_collection_client_executed": false,
+    "webhook_delivery_observed": false,
+    "enabled_product_event_families": []
+  },
+  "sanitization": {
+    "selection": "Retain only the listed public source identities, actor account identities, action names, timestamps, review states, commit pins, observed field names and pagination counts.",
+    "excluded": [
+      "authorization and credentials",
+      "repository-role values",
+      "issue and review bodies",
+      "titles and descriptions",
+      "account profile links and avatars",
+      "emails",
+      "reaction and follower metadata",
+      "full raw API responses"
+    ],
+    "raw_http_payload_retained": false,
+    "missing_field_rule": "An omitted manifest value does not prove source absence. Only explicitly named absent_* fields were checked against the returned source objects.",
+    "account_identity_limit": "GitHub type User is an account classification. It does not identify the individual operator, prove manual work or establish independent human reviewers."
+  },
+  "pagination": {
+    "timeline": {
+      "scope": "issue:41",
+      "page_requests": [
+        {
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/41/timeline?per_page=10&page=1",
+          "count": 10
+        },
+        {
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/41/timeline?per_page=10&page=2",
+          "count": 10
+        },
+        {
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/41/timeline?per_page=10&page=3",
+          "count": 3
+        },
+        {
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/41/timeline?per_page=10&page=4",
+          "count": 0
+        }
+      ],
+      "comparison_request": {
+        "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/41/timeline?per_page=100&page=1",
+        "count": 23
+      },
+      "concatenated_parsed_values_equal": true,
+      "comparison_basis": "All returned parsed JSON values, before sanitization; not HTTP bytes or response headers.",
+      "terminal_empty_page_observed": true
+    },
+    "events": {
+      "scope": "issue:41",
+      "page_requests": [
+        {
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/41/events?per_page=10&page=1",
+          "count": 10
+        },
+        {
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/41/events?per_page=10&page=2",
+          "count": 2
+        },
+        {
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/41/events?per_page=10&page=3",
+          "count": 0
+        }
+      ],
+      "comparison_request": {
+        "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/41/events?per_page=100&page=1",
+        "count": 12
+      },
+      "concatenated_parsed_values_equal": true,
+      "comparison_basis": "All returned parsed JSON values, before sanitization; not HTTP bytes or response headers.",
+      "terminal_empty_page_observed": true
+    },
+    "reviews": {
+      "scope": "pull_request:337",
+      "page_requests": [
+        {
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/pulls/337/reviews?per_page=10&page=1",
+          "count": 10
+        },
+        {
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/pulls/337/reviews?per_page=10&page=2",
+          "count": 10
+        },
+        {
+          "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/pulls/337/reviews?per_page=10&page=3",
+          "count": 0
+        }
+      ],
+      "comparison_request": {
+        "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/pulls/337/reviews?per_page=100&page=1",
+        "count": 20
+      },
+      "concatenated_parsed_values_equal": true,
+      "comparison_basis": "All returned parsed JSON values, before sanitization; not HTTP bytes or response headers.",
+      "terminal_empty_page_observed": true
+    }
+  },
+  "timeline_event_inventory": [
+    {
+      "id": 33498901728,
+      "event": "labeled",
+      "created_at": "2026-10-17T02:42:37Z",
+      "actor_id": 5861166
+    },
+    {
+      "id": 33498902326,
+      "event": "parent_issue_added",
+      "created_at": "2026-10-17T02:42:37Z",
+      "actor_id": 5861166
+    },
+    {
+      "id": 33498902149,
+      "event": "issue_type_added",
+      "created_at": "2026-10-17T02:42:38Z",
+      "actor_id": 5861166
+    },
+    {
+      "id": 33498903036,
+      "event": "added_to_project_v2",
+      "created_at": "2026-10-17T02:42:39Z",
+      "actor_id": 5861166
+    },
+    {
+      "id": 33498905106,
+      "event": "project_v2_item_status_changed",
+      "created_at": "2026-10-17T02:42:40Z",
+      "actor_id": 5861166
+    },
+    {
+      "id": 33499563027,
+      "event": "blocked_by_added",
+      "created_at": "2026-10-17T03:01:47Z",
+      "actor_id": 5861166
+    },
+    {
+      "id": 33499564554,
+      "event": "blocking_added",
+      "created_at": "2026-10-17T03:01:50Z",
+      "actor_id": 5861166
+    },
+    {
+      "id": 33499568704,
+      "event": "blocking_added",
+      "created_at": "2026-10-17T03:01:56Z",
+      "actor_id": 5861166
+    },
+    {
+      "id": 33499589488,
+      "event": "blocking_added",
+      "created_at": "2026-10-17T03:02:30Z",
+      "actor_id": 5861166
+    },
+    {
+      "id": 33499640275,
+      "event": "blocking_added",
+      "created_at": "2026-10-17T03:03:56Z",
+      "actor_id": 5861166
+    },
+    {
+      "id": 33499676616,
+      "event": "blocking_added",
+      "created_at": "2026-10-17T03:04:50Z",
+      "actor_id": 5861166
+    },
+    {
+      "id": 33499742942,
+      "event": "blocking_added",
+      "created_at": "2026-10-17T03:06:45Z",
+      "actor_id": 5861166
+    }
+  ],
+  "timeline_comparison": {
+    "count": 23,
+    "stable_event_id_count": 12,
+    "stable_event_ids": [
+      33498901728,
+      33498902326,
+      33498902149,
+      33498903036,
+      33498905106,
+      33499563027,
+      33499564554,
+      33499568704,
+      33499589488,
+      33499640275,
+      33499676616,
+      33499742942
+    ],
+    "timeline_stable_event_ids_match_event_collection": true,
+    "cross_references_without_top_level_event_id": 11,
+    "cross_reference_limit": "No stable event ID was synthesized from the linked source object."
+  },
+  "examples": {
+    "issue_type_added": {
+      "request_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events/33498902149",
+      "retained": {
+        "id": 33498902149,
+        "node_id": "ITAE_lADOVM9Xhc8AAAABX1Bm_M8AAAAHzLCuhQ",
+        "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events/33498902149",
+        "event": "issue_type_added",
+        "created_at": "2026-10-17T02:42:38Z",
+        "actor": {
+          "id": 5861166,
+          "node_id": "MDQ6VXNlcjU4NjExNjY=",
+          "type": "User"
+        },
+        "issue": {
+          "id": 5894072060,
+          "node_id": "I_kwDOVM9Xhc8AAAABX1Bm_A",
+          "number": 41,
+          "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/41"
+        },
+        "issue_type": {
+          "id": 906513009,
+          "name": "Task"
+        }
+      },
+      "observed_top_level_fields": [
+        "actor",
+        "commit_id",
+        "commit_url",
+        "created_at",
+        "event",
+        "id",
+        "intent",
+        "issue",
+        "issue_type",
+        "node_id",
+        "performed_via_github_app",
+        "url"
+      ],
+      "collection_and_hydration_revision_inputs_equal": true
+    },
+    "project_item_status_changed": {
+      "request_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events/33498905106",
+      "retained": {
+        "id": 33498905106,
+        "node_id": "PVTISC_lADOVM9Xhc8AAAABX1Bm_M8AAAAHzLC6Eg",
+        "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events/33498905106",
+        "event": "project_v2_item_status_changed",
+        "created_at": "2026-10-17T02:42:40Z",
+        "actor": {
+          "id": 5861166,
+          "node_id": "MDQ6VXNlcjU4NjExNjY=",
+          "type": "User"
+        },
+        "issue": {
+          "id": 5894072060,
+          "node_id": "I_kwDOVM9Xhc8AAAABX1Bm_A",
+          "number": 41,
+          "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/41"
+        }
+      },
+      "observed_top_level_fields": [
+        "actor",
+        "commit_id",
+        "commit_url",
+        "created_at",
+        "event",
+        "id",
+        "issue",
+        "node_id",
+        "performed_via_github_app",
+        "url"
+      ],
+      "absent_top_level_fields": [
+        "project",
+        "project_id",
+        "project_node_id",
+        "previous_status",
+        "previousStatus",
+        "status",
+        "was_automated",
+        "wasAutomated"
+      ],
+      "limit": "The event exposes actor and occurrence time, but does not supply Project identity, previous/new status or the automation flag required by the typed Project-status adapter."
+    },
+    "parent_issue_added": {
+      "request_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events/33498902326",
+      "retained": {
+        "id": 33498902326,
+        "node_id": "PIAE_lADOVM9Xhc8AAAABX1Bm_M8AAAAHzLCvNg",
+        "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events/33498902326",
+        "event": "parent_issue_added",
+        "created_at": "2026-10-17T02:42:37Z",
+        "actor": {
+          "id": 5861166,
+          "node_id": "MDQ6VXNlcjU4NjExNjY=",
+          "type": "User"
+        },
+        "issue": {
+          "id": 5894072060,
+          "node_id": "I_kwDOVM9Xhc8AAAABX1Bm_A",
+          "number": 41,
+          "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/41"
+        },
+        "parent_issue": {
+          "number": 5,
+          "repository": {
+            "id": 1422874501,
+            "node_id": "R_kgDOVM9XhQ",
+            "full_name": "Pick-Your-AI/pick-your-ai-leaderboard",
+            "private": false
+          }
+        }
+      },
+      "observed_top_level_fields": [
+        "actor",
+        "commit_id",
+        "commit_url",
+        "created_at",
+        "event",
+        "id",
+        "issue",
+        "node_id",
+        "parent_issue",
+        "performed_via_github_app",
+        "url"
+      ],
+      "observed_target_fields": [
+        "issue_type",
+        "number",
+        "repository",
+        "state",
+        "state_reason",
+        "title"
+      ],
+      "absent_target_fields": [
+        "id",
+        "node_id"
+      ],
+      "limit": "The linked endpoint exposes repository identity and issue number, but no issue database or node ID. No stable endpoint identity was fabricated or joined from a current snapshot."
+    },
+    "blocked_by_added": {
+      "request_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events/33499563027",
+      "retained": {
+        "id": 33499563027,
+        "node_id": "BBAE_lADOVM9Xhc8AAAABX1Bm_M8AAAAHzLrEEw",
+        "url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events/33499563027",
+        "event": "blocked_by_added",
+        "created_at": "2026-10-17T03:01:47Z",
+        "actor": {
+          "id": 5861166,
+          "node_id": "MDQ6VXNlcjU4NjExNjY=",
+          "type": "User"
+        },
+        "issue": {
+          "id": 5894072060,
+          "node_id": "I_kwDOVM9Xhc8AAAABX1Bm_A",
+          "number": 41,
+          "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/41"
+        },
+        "blocked_by": {
+          "number": 38,
+          "repository": {
+            "id": 1422874501,
+            "node_id": "R_kgDOVM9XhQ",
+            "full_name": "Pick-Your-AI/pick-your-ai-leaderboard",
+            "private": false
+          }
+        }
+      },
+      "observed_top_level_fields": [
+        "actor",
+        "blocked_by",
+        "commit_id",
+        "commit_url",
+        "created_at",
+        "event",
+        "id",
+        "issue",
+        "node_id",
+        "performed_via_github_app",
+        "url"
+      ],
+      "observed_target_fields": [
+        "issue_type",
+        "number",
+        "repository",
+        "state",
+        "state_reason",
+        "title"
+      ],
+      "absent_target_fields": [
+        "id",
+        "node_id"
+      ],
+      "limit": "The linked endpoint omits the issue database and node IDs. Its current hydrated state was not retained as the state at the historical event time."
+    }
+  },
+  "current_native_snapshot": {
+    "request_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/41",
+    "retained": {
+      "id": 5894072060,
+      "node_id": "I_kwDOVM9Xhc8AAAABX1Bm_A",
+      "number": 41,
+      "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/41",
+      "type": {
+        "id": 906513009,
+        "node_id": "IT_kwDOFHg4Xc42CEpx",
+        "name": "Task"
+      },
+      "issue_field_values": [],
+      "sub_issues_summary": {
+        "total": 0,
+        "completed": 0,
+        "percent_completed": 0
+      },
+      "issue_dependencies_summary": {
+        "blocked_by": 0,
+        "total_blocked_by": 1,
+        "blocking": 6,
+        "total_blocking": 6
+      },
+      "parent_issue_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/5"
+    },
+    "sub_issues": {
+      "request_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/41/sub_issues?per_page=10&page=1",
+      "count": 0
+    },
+    "blockers": {
+      "request_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/41/dependencies/blocked_by?per_page=10&page=1",
+      "retained": [
+        {
+          "id": 5894069547,
+          "node_id": "I_kwDOVM9Xhc8AAAABX1BdKw",
+          "number": 38,
+          "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/38",
+          "state": "closed"
+        }
+      ]
+    },
+    "limit": "These are current metadata and relationships. They do not supply historical actors, change times, removed relationships, reorder history or field-change before/after values."
+  },
+  "reviews": {
+    "request_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/pulls/337/reviews?per_page=100&page=1",
+    "count": 20,
+    "actor_accounts": [
+      {
+        "id": 5861166,
+        "node_id": "MDQ6VXNlcjU4NjExNjY=",
+        "type": "User"
+      }
+    ],
+    "retained": [
+      {
+        "id": 5565769335,
+        "submitted_at": "2026-10-19T00:10:08Z",
+        "state": "COMMENTED",
+        "commit_id": "af1bd48adc24414fcb7eb150e11188675ec0eddd",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5565769335",
+        "user_id": 5861166
+      },
+      {
+        "id": 5565839311,
+        "submitted_at": "2026-10-19T00:29:43Z",
+        "state": "COMMENTED",
+        "commit_id": "af1bd48adc24414fcb7eb150e11188675ec0eddd",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5565839311",
+        "user_id": 5861166
+      },
+      {
+        "id": 5565903495,
+        "submitted_at": "2026-10-19T00:46:57Z",
+        "state": "COMMENTED",
+        "commit_id": "39dc71743929edbc34498b40606d15d81a1189fd",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5565903495",
+        "user_id": 5861166
+      },
+      {
+        "id": 5565928822,
+        "submitted_at": "2026-10-19T00:53:31Z",
+        "state": "COMMENTED",
+        "commit_id": "39dc71743929edbc34498b40606d15d81a1189fd",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5565928822",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566076727,
+        "submitted_at": "2026-10-19T01:28:41Z",
+        "state": "COMMENTED",
+        "commit_id": "39dc71743929edbc34498b40606d15d81a1189fd",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566076727",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566124560,
+        "submitted_at": "2026-10-19T01:40:40Z",
+        "state": "COMMENTED",
+        "commit_id": "a8534b06a6482280152410f5ee50f2f4bfa57f71",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566124560",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566159918,
+        "submitted_at": "2026-10-19T01:49:09Z",
+        "state": "COMMENTED",
+        "commit_id": "a8534b06a6482280152410f5ee50f2f4bfa57f71",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566159918",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566217950,
+        "submitted_at": "2026-10-19T02:03:07Z",
+        "state": "COMMENTED",
+        "commit_id": "a8534b06a6482280152410f5ee50f2f4bfa57f71",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566217950",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566250103,
+        "submitted_at": "2026-10-19T02:10:09Z",
+        "state": "COMMENTED",
+        "commit_id": "a5fbc22e1e263a759386dd3f4895b51f3838b504",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566250103",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566306414,
+        "submitted_at": "2026-10-19T02:23:17Z",
+        "state": "COMMENTED",
+        "commit_id": "19554fb6c65d8846abd68afcc688e7a953d5b7cb",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566306414",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566345290,
+        "submitted_at": "2026-10-19T02:32:05Z",
+        "state": "COMMENTED",
+        "commit_id": "19554fb6c65d8846abd68afcc688e7a953d5b7cb",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566345290",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566359279,
+        "submitted_at": "2026-10-19T02:34:54Z",
+        "state": "COMMENTED",
+        "commit_id": "19554fb6c65d8846abd68afcc688e7a953d5b7cb",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566359279",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566418006,
+        "submitted_at": "2026-10-19T02:47:48Z",
+        "state": "COMMENTED",
+        "commit_id": "19554fb6c65d8846abd68afcc688e7a953d5b7cb",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566418006",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566499230,
+        "submitted_at": "2026-10-19T03:06:34Z",
+        "state": "COMMENTED",
+        "commit_id": "19554fb6c65d8846abd68afcc688e7a953d5b7cb",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566499230",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566573447,
+        "submitted_at": "2026-10-19T03:23:29Z",
+        "state": "COMMENTED",
+        "commit_id": "19554fb6c65d8846abd68afcc688e7a953d5b7cb",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566573447",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566583541,
+        "submitted_at": "2026-10-19T03:25:32Z",
+        "state": "COMMENTED",
+        "commit_id": "59e6a3884e35082c4a54d5c12f2e1212387ff20a",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566583541",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566606459,
+        "submitted_at": "2026-10-19T03:30:57Z",
+        "state": "COMMENTED",
+        "commit_id": "59e6a3884e35082c4a54d5c12f2e1212387ff20a",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566606459",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566622083,
+        "submitted_at": "2026-10-19T03:34:32Z",
+        "state": "COMMENTED",
+        "commit_id": "59e6a3884e35082c4a54d5c12f2e1212387ff20a",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566622083",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566626157,
+        "submitted_at": "2026-10-19T03:35:30Z",
+        "state": "COMMENTED",
+        "commit_id": "59e6a3884e35082c4a54d5c12f2e1212387ff20a",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566626157",
+        "user_id": 5861166
+      },
+      {
+        "id": 5566628717,
+        "submitted_at": "2026-10-19T03:36:03Z",
+        "state": "COMMENTED",
+        "commit_id": "59e6a3884e35082c4a54d5c12f2e1212387ff20a",
+        "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/337#pullrequestreview-5566628717",
+        "user_id": 5861166
+      }
+    ],
+    "limit": "All twenty observed states are COMMENTED by one account. This is neither twenty distinct humans nor an APPROVED review. Submission metadata is not a complete edit, dismissal or thread-resolution history; body-dependent source revisions were not computed."
+  },
+  "endpoint_results": {
+    "repository_events": {
+      "request_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/events?per_page=2&page=1",
+      "outcome": "connector_route_rejected",
+      "error_code": "INVALID_ARGUMENT",
+      "github_response_status": null,
+      "meaning": "The reader rejected its route before exposing a GitHub response. This is not a measured GitHub 401, 403 or 404, and does not establish GitHub endpoint support."
+    },
+    "repository_issue_events": {
+      "request_url": "https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events?per_page=2&page=1",
+      "outcome": "readable",
+      "returned_count": 2,
+      "retained": [
+        {
+          "id": 33611391737,
+          "event": "referenced",
+          "created_at": "2026-10-19T04:49:40Z",
+          "issue": {
+            "id": 5894133361,
+            "node_id": "I_kwDOVM9Xhc8AAAABX1FWcQ",
+            "number": 91,
+            "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/91"
+          }
+        },
+        {
+          "id": 33611383259,
+          "event": "convert_to_draft",
+          "created_at": "2026-10-19T04:49:29Z",
+          "issue": {
+            "id": 5915463616,
+            "node_id": "PR_kwDOVM9Xhc8AAAABJOQ17Q",
+            "number": 335,
+            "html_url": "https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/335"
+          }
+        }
+      ],
+      "completeness": "Only the first two-row page was read. No repository-wide history completeness is claimed."
+    }
+  },
+  "unprobed": [
+    "product App registration and installation grant",
+    "webhook subscription and real delivery",
+    "private or inaccessible repository comparisons",
+    "Link-header traversal and quota/retry behavior",
+    "GraphQL typed history and cursors",
+    "native issue field changes",
+    "Project custom field changes",
+    "Project progress-update posts",
+    "Project configuration changes",
+    "relationship removals, transfers and reorder history",
+    "content edit history",
+    "label and milestone definition changes",
+    "public moderation history"
+  ],
+  "implementation_reference": {
+    "repository_commit": "19f300c996af859cc33ef5f4ba0f4fbf1cac9191",
+    "files": [
+      "apps/pipeline/src/github-source.mjs",
+      "packages/github/src/normalizers.ts",
+      "packages/github/src/timeline-history.ts",
+      "docs/GITHUB_SOURCE_ADAPTERS.md"
+    ],
+    "interpretation": "Source inspection maps the observed wire fields to current adapter requirements. No production normalizer, collector, authorization grant, checkpoint or publication was exercised."
+  }
+}
