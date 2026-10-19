@@ -256,8 +256,8 @@ test("confirmed_bugs: the source guard does not alter other generic receipt metr
   assert.throws(() => selectMetricView("confirmed_bugs"), /No supported selectable view/);
 });
 
-// The exact earlier authority format is independently retained here. It includes
-// the prior data-quality and reproduction fences, without the new issue guard.
+// Isolate missing confirmed-bug authority while retaining the independent
+// data-quality, reproduction, maintenance and automation fences.
 function previousAuthority(state, bindings) {
   const requests = Object.values(state.requests ?? {})
     .filter((request) => request.kind === "evidence")
@@ -278,6 +278,12 @@ function previousAuthority(state, bindings) {
   const authority = ["localization-review-target/v1", requests, suppressed, audit, bindings];
   if (bindings.some((binding) => binding.metricId === "data_quality")) authority.push("data-quality-recognition/v1");
   if (bindings.some((binding) => binding.metricId === "reproductions")) authority.push("reproduction-recognition/v1");
+  // Isolate the bug-source correction from the independent maintenance fence.
+  // maintenance-recognition.test.mjs tests that category's exact old authority.
+  if (bindings.some((binding) => binding.metricId === "maintenance"))
+    authority.push("maintenance-merged-participant/v1");
+  // Keep the independent tooling fence while isolating this category.
+  if (bindings.some((binding) => binding.metricId === "automation")) authority.push("automation-merged-participant/v1");
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
