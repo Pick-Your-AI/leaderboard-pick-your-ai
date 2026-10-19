@@ -2159,12 +2159,31 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       // but cannot replace the source that will be qualified after it yields.
       // Preserve the host's opaque native-history batch identity on its input.
       const receipts = structuredClone(await acceptance(detachedCollectionInput(input), structuredClone(normalized)));
+      if (!Array.isArray(receipts)) throw new TypeError("Invalid recognition receipt batch");
       const plans = new Map<string, { unit: string; identity: string }>();
-      const admitted = receipts.filter((receipt) => {
-        if (receipt.metricId !== "issue_ordering" || receipt.decision !== "accepted") return true;
+      const orderingSlots = new Map<string, number>();
+      const admitted: VerifiedRecognitionReceipt[] = [];
+      // Iterate every slot: sparse entries must fail like explicit undefined,
+      // rather than disappearing through an array predicate before validation.
+      for (const receipt of receipts) {
+        if (receipt.metricId !== "issue_ordering" || receipt.decision !== "accepted") {
+          admitted.push(receipt);
+          continue;
+        }
         const ordering = verifiedOrderingReceipt(normalized, receipt, reviewers);
-        return !registerOrderingPlan(plans, ordering.review);
-      });
+        const duplicate = registerOrderingPlan(plans, ordering.review);
+        if (!duplicate) {
+          orderingSlots.set(ordering.unit, admitted.length);
+          admitted.push(receipt);
+          continue;
+        }
+        // A later duplicate cannot move accepted-at credit into another window.
+        // Keep unrelated receipt positions and use a stable ID for equal clocks.
+        const slot = orderingSlots.get(ordering.unit)!;
+        const retained = admitted[slot]!;
+        const chronology = compareSourceInstants(receipt.acceptedAt, retained.acceptedAt);
+        if (chronology < 0 || (chronology === 0 && receipt.id < retained.id)) admitted[slot] = receipt;
+      }
       for (const receipt of admitted) normalized = applyRecognitionReceipt(normalized, receipt, reviewers);
     }
     return normalized;

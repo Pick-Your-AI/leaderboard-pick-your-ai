@@ -12,7 +12,7 @@ import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-i
 const at = Date.parse("2026-10-19T12:00:00.000Z"),
   origin = "https://editorial.example.test";
 const hash = (v) => createHash("sha256").update(v).digest("base64url");
-async function harness(t) {
+async function harness(t, { onEligibility, clock = () => at } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "editorial-rotation-http-"));
   const filename = join(directory, "private.sqlite");
   let store = new ControlStore(filename),
@@ -86,7 +86,7 @@ async function harness(t) {
     server = createControlsServer({
       store,
       origin,
-      now: () => at,
+      now: clock,
       provider: {
         authorizationURL() {
           throw Error("Unused synthetic OAuth");
@@ -96,7 +96,10 @@ async function harness(t) {
         },
       },
       rolesForActor: async (id) => structuredClone(authorities[id] ?? { roles: [], version: "0" }),
-      spotlightEligibility: () => eligible,
+      spotlightEligibility: () => {
+        onEligibility?.({ store });
+        return eligible;
+      },
     });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     base = `http://127.0.0.1:${server.address().port}`;
@@ -224,3 +227,193 @@ test("real route rejects CSRF, stale versions, role revocation and caller-suppli
   assert.deepEqual((await h.call("/controls/spotlight-rotation")).data.candidates, []);
   assert.equal((await h.call("/controls/spotlight-rotation?historyKey=forged")).status, 400);
 });
+
+function revokePersistedSession(store, sid) {
+  const state = store.read();
+  assert.equal(Object.hasOwn(state.sessions, sid), true);
+  delete state.sessions[sid];
+  // Use the existing SQLite connection: a nested transaction would be rejected
+  // before exercising the supported synchronous source callback boundary.
+  store.db.prepare("UPDATE controls_state SET document=? WHERE id=1").run(JSON.stringify(state));
+  assert.equal(Object.hasOwn(store.read().sessions, sid), false);
+}
+
+test("current sessions retain proposal, independent review and private queue access across read-only eligibility callbacks", async (t) => {
+  let calls = 0;
+  const h = await harness(t, {
+    onEligibility: ({ store }) => {
+      calls++;
+      assert.equal(store.read().requests.claim.status, "accepted");
+    },
+  });
+  const owner = h.user("1"),
+    reviewer = h.user("2"),
+    ranking = h.store.publicSnapshot();
+  assert.equal((await h.call("/controls/spotlight-rotation", owner, proposal(h.nomination))).status, 201);
+  assert.equal((await h.call(`/controls/spotlight-rotation/${h.nomination}`, reviewer, accept(1))).status, 200);
+  const queue = await h.call("/controls/spotlight-rotation/queue", owner);
+  assert.equal(queue.status, 200);
+  assert.equal(queue.data.records.length, 1);
+  assert.equal(queue.data.records[0].status, "accepted");
+  assert.equal(queue.data.records[0].lastEvent.reason, accept(1).reason);
+  assert.equal(queue.data.records[0].currentContext.state, "current");
+  assert.ok(calls >= 3);
+  assert.equal(Object.hasOwn(h.store.read().sessions, hash(owner.token)), true);
+  assert.equal(Object.hasOwn(h.store.read().sessions, hash(reviewer.token)), true);
+  assert.deepEqual(h.store.publicSnapshot(), ranking);
+});
+
+test("eligibility callback session revocation rejects the owner proposal before the cloned state is persisted", async (t) => {
+  let sid,
+    revocations = 0;
+  const h = await harness(t, {
+    onEligibility: ({ store }) => {
+      if (!sid) return;
+      const current = sid;
+      sid = undefined;
+      revokePersistedSession(store, current);
+      revocations++;
+    },
+  });
+  const owner = h.user("1"),
+    before = h.store.read(),
+    ranking = h.store.publicSnapshot();
+  sid = hash(owner.token);
+  const response = await h.call("/controls/spotlight-rotation", owner, proposal(h.nomination));
+  t.diagnostic(
+    JSON.stringify({
+      status: response.status,
+      revocations,
+      proposalCreated: Object.hasOwn(h.store.read().spotlightRotations ?? {}, h.nomination),
+    }),
+  );
+  assert.equal(revocations, 1);
+  assert.equal(response.status, 401);
+  assert.deepEqual(response.data, { error: "Session revoked" });
+  // The failed transaction rolls back both its declaration/audit changes and
+  // the callback's same-transaction session deletion. No durable logout is claimed.
+  assert.deepEqual(h.store.read(), before);
+  assert.deepEqual(h.store.publicSnapshot(), ranking);
+});
+
+test("eligibility callback session revocation cannot promote a pending declaration through independent review", async (t) => {
+  let sid,
+    revocations = 0;
+  const h = await harness(t, {
+    onEligibility: ({ store }) => {
+      if (!sid) return;
+      const current = sid;
+      sid = undefined;
+      revokePersistedSession(store, current);
+      revocations++;
+    },
+  });
+  const owner = h.user("1"),
+    reviewer = h.user("2");
+  assert.equal((await h.call("/controls/spotlight-rotation", owner, proposal(h.nomination))).status, 201);
+  const before = h.store.read(),
+    ranking = h.store.publicSnapshot();
+  sid = hash(reviewer.token);
+  const response = await h.call(`/controls/spotlight-rotation/${h.nomination}`, reviewer, accept(1));
+  t.diagnostic(
+    JSON.stringify({
+      status: response.status,
+      revocations,
+      declarationStatus: h.store.read().spotlightRotations[h.nomination].status,
+    }),
+  );
+  assert.equal(revocations, 1);
+  assert.equal(response.status, 401);
+  assert.deepEqual(response.data, { error: "Session revoked" });
+  assert.deepEqual(h.store.read(), before);
+  assert.deepEqual(h.store.publicSnapshot(), ranking);
+  assert.deepEqual((await h.call("/controls/spotlight-rotation")).data.candidates, []);
+});
+
+test("eligibility callback session revocation withholds the private queue before response bytes are sent", async (t) => {
+  let sid,
+    revocations = 0;
+  const h = await harness(t, {
+    onEligibility: ({ store }) => {
+      if (!sid) return;
+      const current = sid;
+      sid = undefined;
+      revokePersistedSession(store, current);
+      revocations++;
+    },
+  });
+  const owner = h.user("1"),
+    reviewer = h.user("2");
+  assert.equal((await h.call("/controls/spotlight-rotation", owner, proposal(h.nomination))).status, 201);
+  assert.equal((await h.call(`/controls/spotlight-rotation/${h.nomination}`, reviewer, accept(1))).status, 200);
+  const before = h.store.read(),
+    ranking = h.store.publicSnapshot();
+  const revoked = hash(owner.token);
+  sid = revoked;
+  const response = await h.call("/controls/spotlight-rotation/queue", owner);
+  t.diagnostic(
+    JSON.stringify({
+      status: response.status,
+      revocations,
+      privateReasonDisclosed: JSON.stringify(response.data).includes(accept(1).reason),
+      sessionPresent: Object.hasOwn(h.store.read().sessions, revoked),
+    }),
+  );
+  assert.equal(revocations, 1);
+  assert.equal(response.status, 401);
+  assert.deepEqual(response.data, { error: "Session revoked" });
+  // Queue projection is outside the mutation transaction, so this deletion
+  // persists. Every other private field and the public metric state stay exact.
+  delete before.sessions[revoked];
+  assert.deepEqual(h.store.read(), before);
+  assert.deepEqual(h.store.publicSnapshot(), ranking);
+});
+
+for (const actorId of ["1", "2"]) {
+  for (const eligible of [true, false]) {
+    const actor = actorId === "1" ? "owner" : "reviewer";
+    const context = eligible ? "eligible" : "unavailable";
+    test(`queue denies ${actor} when its session expires during ${context} source context`, async (t) => {
+      let current = at,
+        expires,
+        armed = false,
+        expiryTransitions = 0;
+      const h = await harness(t, {
+        clock: () => current,
+        onEligibility: () => {
+          if (!armed) return;
+          armed = false;
+          current = expires;
+          expiryTransitions++;
+        },
+      });
+      const owner = h.user("1"),
+        reviewer = h.user("2");
+      assert.equal((await h.call("/controls/spotlight-rotation", owner, proposal(h.nomination))).status, 201);
+      assert.equal((await h.call(`/controls/spotlight-rotation/${h.nomination}`, reviewer, accept(1))).status, 200);
+      const reader = actorId === "1" ? owner : reviewer;
+      expires = h.store.read().sessions[hash(reader.token)].expires;
+      const before = h.store.db.prepare("SELECT document FROM controls_state WHERE id=1").get().document;
+      const ranking = h.store.publicSnapshot();
+      h.setEligible(eligible);
+      armed = true;
+      const response = await h.call("/controls/spotlight-rotation/queue", reader);
+      t.diagnostic(
+        JSON.stringify({
+          status: response.status,
+          expiryTransitions,
+          reachedExactExpiry: current === expires,
+          privateReasonDisclosed: JSON.stringify(response.data).includes(accept(1).reason),
+        }),
+      );
+      assert.equal(expiryTransitions, 1);
+      assert.equal(current, expires);
+      assert.equal(response.status, 401);
+      assert.deepEqual(response.data, { error: "Session revoked" });
+      // Only the supported clock advances. No callback SQL write or transaction
+      // rollback can explain the denial, and the complete private document stays exact.
+      assert.equal(h.store.db.prepare("SELECT document FROM controls_state WHERE id=1").get().document, before);
+      assert.deepEqual(h.store.publicSnapshot(), ranking);
+    });
+  }
+}
