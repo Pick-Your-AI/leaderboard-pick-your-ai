@@ -166,6 +166,27 @@ The existing session, operator role and current `authorizeRepository` grant rema
 required. None of these options chooses an installation, acquires a public-source
 grant or enables the synthetic dispatcher for public data.
 
+Every runtime replay-result read captures its current source binding and private
+configuration revision before reading the retained result. The host currentness
+check applies to legacy, queued, processing, failed, superseded, processed and
+unavailable results as well as verified publications. It runs again after final
+operator reauthorization, at the synchronous HTTP serialization/send fence, and
+after an awaited native observer. The native adapter also rechecks its captured
+host fence after asynchronous transaction completion before returning data.
+A stopped runtime cannot serve
+retained diagnostics; an independently authorized fresh runtime can read the same
+immutable receipts. Publication verification remains an additional requirement
+for publication references, so an authorized pending or unavailable result does
+not require a publication proof.
+
+A trusted standalone `OperatorInbox` host can opt into the same per-read fence
+with `replayReadGuard(scope)`, returning a synchronous closure that returns exactly
+`true` while that captured read remains authorized. A supplied invalid factory or
+closure fails closed with a fixed error, and returned rejected promises are
+drained. Omitting this optional host adapter leaves the existing explicitly
+authorized retained reader available; it does not opt a pipeline runtime into
+diagnostics.
+
 | Protected GET route | Meaning |
 | --- | --- |
 | `/controls/operations/:repositoryId/health` | Current-generation collection observations, retained current-installation queues, bounded quota observations and the latest independently verified completed publication |
