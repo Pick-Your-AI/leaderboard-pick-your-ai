@@ -7,18 +7,39 @@ const instant = (value: unknown): value is string =>
   sourceEventSchema.shape.observedAt.safeParse(value).success &&
   Number.isFinite(Date.parse(value));
 
-export interface VerifiedMaintenanceSource {
+export interface VerifiedMergedChangeSource {
   target: NormalizedGithubFact;
   evidence: NormalizedPublicEvidence;
   unit: string;
 }
 
-/** A category receipt qualifies original merged participation; it cannot create that source fact. */
+// Retain the established maintenance API while sharing the same source proof.
+export type VerifiedMaintenanceSource = VerifiedMergedChangeSource;
+export type VerifiedAutomationSource = VerifiedMergedChangeSource;
+
 export function validateMaintenanceSource(
   input: NormalizedGithubResult,
   targetFactId: string,
   acceptedAt: string,
 ): VerifiedMaintenanceSource {
+  return validateMergedChangeSource(input, targetFactId, acceptedAt, "maintenance");
+}
+
+export function validateAutomationSource(
+  input: NormalizedGithubResult,
+  targetFactId: string,
+  acceptedAt: string,
+): VerifiedAutomationSource {
+  return validateMergedChangeSource(input, targetFactId, acceptedAt, "automation");
+}
+
+/** A category receipt qualifies original merged participation; it cannot create that source fact. */
+function validateMergedChangeSource(
+  input: NormalizedGithubResult,
+  targetFactId: string,
+  acceptedAt: string,
+  category: "maintenance" | "automation",
+): VerifiedMergedChangeSource {
   const targets = input.facts.filter((fact) => fact.id === targetFactId);
   const target = targets[0];
   const proofs = input.evidence.filter((entry) => entry.contribution.contributionId === targetFactId);
@@ -68,9 +89,11 @@ export function validateMaintenanceSource(
         !instant(evidence.evidenceMetadata.sourceOccurredAt) ||
         compareSourceInstants(evidence.evidenceMetadata.sourceOccurredAt, target.occurredAt) !== 0))
   )
-    throw new Error("Maintenance recognition requires an observed merged pull-request participant");
+    throw new Error(
+      `${category === "maintenance" ? "Maintenance" : "Automation"} recognition requires an observed merged pull-request participant`,
+    );
 
-  // One maintenance-category participation per repository, PR and contributor.
+  // One participation per category, repository, PR and contributor.
   // Receipt aliases and caller-supplied bulk changesets cannot change this unit.
-  return { target, evidence, unit: JSON.stringify(["maintenance", target.repoId, target.artifactId, target.actorId]) };
+  return { target, evidence, unit: JSON.stringify([category, target.repoId, target.artifactId, target.actorId]) };
 }

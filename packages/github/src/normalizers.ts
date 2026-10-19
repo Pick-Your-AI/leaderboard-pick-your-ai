@@ -19,7 +19,7 @@ import {
   type PublicEvidenceAction,
 } from "@pick-your-ai/contracts";
 import { GithubReadClient } from "./client.js";
-import { validateMaintenanceSource } from "./maintenance.js";
+import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
@@ -1339,10 +1339,14 @@ export function applyRecognitionReceipt(
     throw new Error("Confirmed bug recognition requires a nonsynthetic issue source");
   // Localization is one PR/language/category unit. A bulk changeset must never
   // collapse different languages or mint another unit for the same source fact.
-  const maintenance =
-    receipt.metricId === "maintenance" ? validateMaintenanceSource(input, target.id, receipt.acceptedAt) : null;
-  const unit = maintenance
-    ? maintenance.unit
+  const mergedChange =
+    receipt.metricId === "maintenance"
+      ? validateMaintenanceSource(input, target.id, receipt.acceptedAt)
+      : receipt.metricId === "automation"
+        ? validateAutomationSource(input, target.id, receipt.acceptedAt)
+        : null;
+  const unit = mergedChange
+    ? mergedChange.unit
     : receipt.metricId === "localization"
       ? target.canonicalKey
       : (receipt.changesetId ?? target.canonicalKey);
@@ -1377,7 +1381,7 @@ export function applyRecognitionReceipt(
   if (evidence)
     out.evidence.push({
       ...structuredClone(evidence),
-      occurredAt: receipt.metricId === "localization" || maintenance ? target.occurredAt : fact.acceptedAt,
+      occurredAt: receipt.metricId === "localization" || mergedChange ? target.occurredAt : fact.acceptedAt,
       ...(evidence.evidenceMetadata
         ? {
             evidenceMetadata: {

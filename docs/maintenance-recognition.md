@@ -38,7 +38,7 @@ This correction does not enable the definition-only maintenance UI, add a defaul
 
 ## Previously saved results
 
-Configurations containing a maintenance binding now include `maintenance-merged-participant/v1` in their recognition authority. Other configurations keep their prior fingerprint bytes. Even a maintenance configuration with no accepted request requires the new authority, so old publications cannot be reused as though this source rule had already run.
+Configurations containing a maintenance binding include `maintenance-merged-participant/v1` in their recognition authority. The separate [tooling correction](automation-recognition.md) adds its own `automation-merged-participant/v1` marker only for automation bindings; the maintenance marker and behavior are unchanged. Even a maintenance configuration with no accepted request requires the new authority, so old publications cannot be reused as though this source rule had already run.
 
 Existing publication checks withhold current and pinned reads, evidence, exports, policy previews and aggregate explanations when their saved recognition authority differs. The boundary survives closing and reopening both the controls and pipeline stores. A fresh run must recompute accepted overlays under the current rules before the data becomes available again. Recognition withdrawal continues to invalidate the recomputed publication.
 
@@ -48,9 +48,9 @@ No persisted schema migration or source-data rewrite is required. An operator up
 
 The regression files use fictional source observations and disposable databases:
 
-- `packages/github/test/maintenance-source.test.mjs` covers direct source denial, accepted/rejected merged participants, merge/acceptance clocks, receipt aliases, distinct PRs and coauthors, optional metadata, opaque source revisions, fractional timing and bot attribution.
+- `packages/github/test/maintenance-source.test.mjs` runs the shared merged-change contract cases for maintenance, covering direct source denial, accepted/rejected merged participants, merge/acceptance clocks, receipt aliases, distinct PRs and coauthors, optional metadata, opaque source revisions, fractional timing and bot attribution.
 - `apps/pipeline/test/maintenance-recognition.test.mjs` covers admission before a custom callback, policy validation, deterministic duplicate handling, reporting periods, the exact prior authority for all 98 bindings, private-reason filtering, persisted public reads and private previews across reopen and repair, and subsequent withdrawal.
-- `apps/pipeline/test/confirmed-bug-admission.test.mjs` continues to isolate the existing confirmed-bug source fence while accounting for the independent maintenance marker.
+- `apps/pipeline/test/confirmed-bug-admission.test.mjs` continues to isolate the existing confirmed-bug source fence while accounting for the independent maintenance and automation markers.
 
 Before this correction, 27 of the original 28 direct cases failed on unchanged accepted source. The pipeline baseline had 3 passing and 24 failing cases: its old acceptance-time policy gate masked deeper source checks, while direct tests established those source failures. These are synthetic causal comparisons, not measurements of a live deployment.
 

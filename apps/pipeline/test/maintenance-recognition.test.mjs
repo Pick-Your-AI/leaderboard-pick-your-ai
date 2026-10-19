@@ -438,8 +438,8 @@ test("maintenance: withdrawal, rejection, reviewer conflicts and audit removal r
   }
 });
 
-// Exact accepted pre-maintenance authority serialization. Keep the prior three
-// category fences so the new marker cannot silently perturb other bindings.
+// Isolate missing maintenance authority while retaining the other independent
+// category fences. Automation tests separately preserve its exact prior format.
 function previousAuthority(state, bindings) {
   const requests = Object.values(state.requests ?? {})
     .filter((request) => request.kind === "evidence")
@@ -462,6 +462,8 @@ function previousAuthority(state, bindings) {
   if (bindings.some((binding) => binding.metricId === "reproductions")) authority.push("reproduction-recognition/v1");
   if (bindings.some((binding) => binding.metricId === "confirmed_bugs"))
     authority.push("confirmed-bug-source-admission/v1");
+  // Keep the independent tooling fence while isolating this category.
+  if (bindings.some((binding) => binding.metricId === "automation")) authority.push("automation-merged-participant/v1");
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
