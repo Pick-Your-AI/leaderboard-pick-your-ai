@@ -44,9 +44,15 @@ async function retainedContexts(t, count, bindSources) {
   assert.equal(
     seed.policy_signature,
     comparisonHash([
-      "project-membership-context/v2",
-      comparisonHash(["verified-default-branch-merge-pins/v1", attributionSignature]),
-      [],
+      "pipeline-issue-transfer/v1",
+      comparisonHash([
+        "github-issue-transfer-admission/v1",
+        comparisonHash([
+          "project-membership-context/v2",
+          comparisonHash(["verified-default-branch-merge-pins/v1", attributionSignature]),
+          [],
+        ]),
+      ]),
     ]),
   );
   // These disposable actor-only source contexts carry no credited event. Their
@@ -86,6 +92,7 @@ async function retainedContexts(t, count, bindSources) {
         [seed.policy_signature],
       )
     ).rows.map((row) => ({ factKey: row.fact_key, documentHash: row.document_hash }));
+  else delete frozen.identityAuthorization.identityEvidence.normalizationSources;
   const replaceFrozen = (document) =>
     h.db.query(
       "UPDATE leaderboard_pipeline.frozen_inputs SET document=$2::jsonb,document_hash=$3 WHERE snapshot_id=$1",
@@ -230,3 +237,66 @@ for (const [generation, wrappers] of [
     );
     await assert.rejects(restarted.previewPolicy(request), /Frozen identity evidence integrity failure/);
   });
+
+for (const contextGeneration of ["A(P1)", "P2"])
+  for (const [generation, wrappers] of [
+    ["base", []],
+    ["review", [components.github.reviewSourceNormalizationVersion]],
+    ["Discussion", [components.github.discussionSourceNormalizationVersion]],
+    ["delivery", [components.github.defaultDeliveryNormalizationVersion]],
+    [
+      "review delivery",
+      [components.github.reviewSourceNormalizationVersion, components.github.defaultDeliveryNormalizationVersion],
+    ],
+    [
+      "Discussion delivery",
+      [components.github.discussionSourceNormalizationVersion, components.github.defaultDeliveryNormalizationVersion],
+    ],
+  ])
+    test(`${contextGeneration} ${generation} frozen identity survives restart with no current generation present`, async (t) => {
+      const setup = await retainedContexts(t, 3, true);
+      const { h, seed, request } = setup;
+      const base =
+        contextGeneration === "A(P1)"
+          ? comparisonHash(["github-issue-transfer-admission/v1", setup.projectV1Signature])
+          : comparisonHash([
+              "project-membership-context/v2",
+              comparisonHash(["verified-default-branch-merge-pins/v1", setup.attributionSignature]),
+              [],
+            ]);
+      const signature = wrappers.reduce((value, version) => comparisonHash([version, value]), base);
+      assert.notEqual(signature, seed.policy_signature);
+      const before = await h.runtime.previewPolicy(request);
+      await setup.duplicateGeneration(signature);
+      await h.db.query("DELETE FROM leaderboard_pipeline.normalizations WHERE policy_signature=$1", [
+        seed.policy_signature,
+      ]);
+      const retained = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY fact_key")).rows;
+      assert.ok(retained.every((row) => row.policy_signature === signature));
+      const frozen = (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id")).rows;
+      const sources = (await h.db.query("SELECT * FROM leaderboard_ingestion.source_facts ORDER BY fact_key")).rows;
+      await h.runtime.stop();
+      await h.reopenDatabase();
+      const restarted = await createPipeline(h.options);
+      t.after(() => restarted.stop());
+      assert.deepEqual(await restarted.previewPolicy(request), before);
+      assert.deepEqual(
+        (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY fact_key")).rows,
+        retained,
+      );
+      assert.deepEqual(
+        (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id")).rows,
+        frozen,
+      );
+      assert.deepEqual(
+        (await h.db.query("SELECT * FROM leaderboard_ingestion.source_facts ORDER BY fact_key")).rows,
+        sources,
+      );
+      await h.db.query(
+        `UPDATE leaderboard_pipeline.normalizations
+         SET document=jsonb_set(document,'{actors,0,githubNodeId}','"U_SYNTHETIC_TAMPERED"'::jsonb)
+         WHERE fact_key=$1 AND policy_signature=$2`,
+        [seed.fact_key, signature],
+      );
+      await assert.rejects(restarted.previewPolicy(request), /Frozen identity evidence integrity failure/);
+    });

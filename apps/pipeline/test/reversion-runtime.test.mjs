@@ -737,12 +737,18 @@ for (const changed of ["unchanged", "sealed ancestor", "receipt seal", "removed 
     const transaction = h.db.transaction.bind(h.db);
     let transactions = 0,
       finalStatements = 0;
+    const finalQueries = [];
+    const isFinalAuthority = (sql) =>
+      sql.includes("WITH access AS MATERIALIZED") && sql.includes("correction_rows AS MATERIALIZED");
     h.db.transaction = async (work) => {
       const number = ++transactions;
       const result = await transaction((tx) =>
         work({
           query: async (sql, params) => {
-            if (number === 2) finalStatements++;
+            if (number === 2) {
+              finalQueries.push(sql);
+              if (isFinalAuthority(sql)) finalStatements++;
+            }
             return tx.query(sql, params);
           },
         }),
@@ -820,6 +826,10 @@ for (const changed of ["unchanged", "sealed ancestor", "receipt seal", "removed 
     }
     assert.equal(transactions, 2);
     assert.equal(finalStatements, 1, "the complete final authority is read in one SQL statement");
+    assert.match(finalQueries[0], /pg_advisory_xact_lock_shared/, "dependency preparation is graph-first");
+    assert.equal(isFinalAuthority(finalQueries.at(-1)), true, "no SQL follows the complete final authority");
+    assert.match(finalQueries.at(-1), /project_scope_denial/);
+    assert.match(finalQueries.at(-1), /UNION ALL SELECT 'correction'/);
     assert.deepEqual(
       (
         await h.db.query(

@@ -342,3 +342,60 @@ test("SVG publisher-label abbreviation retains a finite output without adding an
   assert.ok(image.body.includes("W".repeat(112) + "…"));
   assert.deepEqual(value, original);
 });
+
+test("SVG cards replace XML-forbidden publisher text while retaining the original HTML and input", async (t) => {
+  for (const codePoint of [0x00, 0x08, 0x0b, 0x0c, 0x0e, 0x1f, 0xfffe, 0xffff]) {
+    const value = fixture();
+    const login = "before" + String.fromCodePoint(codePoint) + "after";
+    value.selected.actors[0].actor.login = login;
+    const original = structuredClone(value);
+    const { app } = harness(t, value);
+    const image = await app.inject(url("pr_merged", true));
+    assert.equal(image.statusCode, 200, image.body);
+    assert.ok(image.body.includes("before\uFFFDafter"), `XML-invalid U+${codePoint.toString(16)} is visibly replaced`);
+    assert.ok(!image.body.includes(login));
+    assert.equal(image.headers["content-type"], "image/svg+xml; charset=utf-8");
+    assert.equal(image.headers["cache-control"], "no-store");
+    assert.equal(image.headers["content-security-policy"], "default-src 'none'; sandbox; frame-ancestors 'none'");
+    const html = await app.inject(url("pr_merged"));
+    assert.equal(html.statusCode, 200, html.body);
+    assert.ok(html.body.includes(login), "the HTML serialization and admitted label are unchanged");
+    assert.deepEqual(value, original);
+  }
+});
+
+test("SVG text retains XML-permitted whitespace, BMP and supplementary values", async (t) => {
+  const value = fixture();
+  const login = "A\tB\nC\rD \u0020\uD7FF\uE000\uFFFD\u007F\u0085\uFDD0\u{10000}\u{1FFFE}\u{10FFFF} e\u0301 👩‍💻";
+  value.selected.actors[0].actor.login = login;
+  const original = structuredClone(value);
+  const { app } = harness(t, value);
+  const image = await app.inject(url("pr_merged", true));
+  assert.equal(image.statusCode, 200, image.body);
+  assert.ok(image.body.includes(login), "XML-permitted characters are not removed, escaped or normalized");
+  assert.deepEqual(value, original);
+});
+
+test("SVG titles and definition context use the same XML-safe presentation", async (t) => {
+  const value = fixture();
+  const registry = structuredClone(metricRegistryV1);
+  const metric = registry.metrics.find((entry) => entry.id === "pr_merged");
+  metric.name = "metric\u0000name";
+  metric.definition.unit = "unit\uffffname";
+  const original = structuredClone({ value, registry });
+  const app = createService({
+    registry,
+    now: () => Date.parse(at),
+    source: { read: async () => structuredClone(value) },
+  });
+  t.after(() => app.close());
+  const image = await app.inject(url("pr_merged", true));
+  assert.equal(image.statusCode, 200, image.body);
+  assert.ok(image.body.includes('<title id="title">metric\uFFFDname — dated contribution card</title>'));
+  assert.ok(image.body.includes("Unit: unit\uFFFDname"));
+  const html = await app.inject(url("pr_merged"));
+  assert.equal(html.statusCode, 200, html.body);
+  assert.ok(html.body.includes("metric\u0000name"));
+  assert.ok(html.body.includes("unit\uffffname"));
+  assert.deepEqual({ value, registry }, original);
+});

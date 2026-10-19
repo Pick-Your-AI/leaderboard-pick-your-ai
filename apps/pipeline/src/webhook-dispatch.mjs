@@ -15,6 +15,7 @@ export function createWebhookDispatcher({
   execute,
   confirm,
   assertAuthorized,
+  prepareCompletion,
   now,
 }) {
   const configurationHash = hash(JSON.stringify(config));
@@ -65,7 +66,13 @@ export function createWebhookDispatcher({
       )
         throw new Error("unsupported_dispatch_observation");
       const publications = await execute(lease);
-      return (await outbox.complete(lease, publications, (tx) => confirm(tx, lease, publications), assertAuthorized))
+      return (await outbox.complete(
+        lease,
+        publications,
+        (tx) => confirm(tx, lease, publications),
+        assertAuthorized,
+        prepareCompletion,
+      ))
         ? "processed"
         : "lease_lost";
     } catch (error) {

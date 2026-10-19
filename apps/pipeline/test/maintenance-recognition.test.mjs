@@ -485,7 +485,17 @@ test("maintenance: configuration fences preserve automatic sources while manual 
       `${metric.id}: manual intake retires prior claim authority`,
     );
     // Keep the literal pre-maintenance authority; the answer clock has its own fence.
-    if (["maintenance", "issue_answers"].includes(metric.id))
+    if (
+      [
+        "maintenance",
+        "issue_answers",
+        "governance",
+        "deployment_work",
+        "incidents",
+        "release_changes",
+        "release_stewardship",
+      ].includes(metric.id)
+    )
       assert.notEqual(recognitionFingerprint(empty, bindings), previousAuthority(empty, bindings));
     else assert.equal(recognitionFingerprint(empty, bindings), previousAuthority(empty, bindings), metric.id);
   }

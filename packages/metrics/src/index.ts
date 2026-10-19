@@ -8,4 +8,10 @@ export {
 
 export * from "./engine.js";
 
+export * from "./breadth.js";
+
+export * from "./activity-periods.js";
+
 export * from "./ui.js";
+
+export * from "./collaborations.js";

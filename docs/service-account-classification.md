@@ -108,6 +108,27 @@ included.
   Rollback must preserve the reviewed exclusion or withhold affected rows,
   never erase the distinction to make a legacy reader succeed.
 
+## Typed-history cache revisions
+
+Native issue fields, relationships and Project-status history all pass the two
+protected classification options through the shared observation admission. Their
+corrected derived records use the `typed-history-actor-classification/v1` wrapper
+around the complete source normalization signature, before any default-delivery
+wrapper. Other source families retain their existing keys.
+
+The preceding base and default-delivery records remain intact. They can supply
+validated historical identity evidence or a migration hint, never fresh actor
+facts. Retained history is migrated even when its collection family is no longer
+enabled. Native issue-field scope and values still require a fresh read on every
+normalization; the new generation does not enable cross-batch cache reuse.
+
+Later source-generation upgrades must retain these typed-history predecessor
+keys and their default-delivery wrappers for frozen reads. A missing or corrupt
+historical normalization remains unavailable; migration does not reconstruct it.
+The synthetic regressions exercise physical database reopen, mixed-source actor
+consistency, unchanged observations and frozen previews, and rejection of corrupt
+predecessors even when a valid current record exists.
+
 ## Publication and private preview boundary
 
 Publication passes full normalized provider bindings to the engine, after

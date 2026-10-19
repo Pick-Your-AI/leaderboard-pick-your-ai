@@ -1,6 +1,7 @@
 import { captureRankEvidence, retainedRankHistory } from "./rank-history.mjs";
 import { createHash } from "node:crypto";
 import { reversionAuthorityVersion } from "./reversion-effectiveness.mjs";
+import { captureIssueTransferAuthorization } from "./issue-transfer-authority.mjs";
 
 // Local fail-closed bounds, not a production retention or capacity commitment.
 // Records have the retained snapshot's lifecycle, never the optional preview TTL.
@@ -396,6 +397,10 @@ export function buildAggregateExplanation(capture, binding) {
     metrics,
     rankEvidence: captureRankEvidence(aggregates, policies),
   };
+  Object.assign(
+    document.authorization,
+    captureIssueTransferAuthorization(authorization, document.authorization.corrections),
+  );
   retainedRankHistory(document);
   check(Number.isSafeInteger(snapshot.revision) && snapshot.revision > 0);
   check(

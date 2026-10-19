@@ -56,6 +56,17 @@ export interface MetricFact {
   firstReviewAt?: string | null;
   /** Exact observed locale fact whose accepted representation replaces current portfolio display. */
   recognitionSourceFactId?: string;
+  /** Private inclusion identity; the public projection exposes only selected evidence. */
+  releaseInclusion?: {
+    version: "release-inclusion-units/v1";
+    releaseId: number;
+    releaseNodeId: string;
+    pullRequestNodeId: string;
+    mergeCommitSha: string;
+    releaseCommitSha: string;
+    publishedAt: string;
+    proofHash: string;
+  };
 }
 export interface EngineActor {
   id: string;
@@ -240,6 +251,18 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
       "Localization accepted units require independent acceptance, canonical language/category grouping and the source merge clock",
     );
   if (
+    policy.metricId === "release_changes" &&
+    (policy.dateBasis !== "occurredAt" ||
+      policy.groupBy !== "canonical" ||
+      policy.rankedStates[0] !== "qualified" ||
+      policy.roles.length !== 1 ||
+      policy.roles[0] !== "author" ||
+      policy.groupingPolicyVersion !== "release-inclusion-units/v1")
+  )
+    throw new Error(
+      "Release inclusion requires its publication clock, qualified authors and versioned canonical units",
+    );
+  if (
     !policy.roles.length ||
     policy.roles.some((role) => !knownRoles.includes(role) || role === "unknown") ||
     !policy.sources.length ||
@@ -381,6 +404,7 @@ const uncertaintyReasons = new Set([
   "unknown_actor",
   "unknown_membership_context",
   "missing_independent_acceptance",
+  "release_inclusion_unverified",
   "unknown_acceptance_time",
   "unknown_effective_time",
   "unknown_artifact_identity",
@@ -389,7 +413,23 @@ const uncertaintyReasons = new Set([
   "conflicting_policy_unit",
 ]);
 const hasUncertainty = (prepared: Prepared) => prepared.audit.some((entry) => uncertaintyReasons.has(entry.reason));
-function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): Prepared {
+function validMembershipIdentifiers(ids: readonly unknown[]): boolean {
+  const seen = new Set<string>();
+  for (let index = 0; index < ids.length; index++) {
+    if (!Object.hasOwn(ids, index)) return false;
+    const id = ids[index];
+    if (typeof id !== "string" || !id.trim() || seen.has(id)) return false;
+    seen.add(id);
+  }
+  return true;
+}
+function prepare(
+  input: FrozenInput,
+  policy: MetricPolicy,
+  scope: MetricScope,
+  conserveReleaseWork = true,
+  requireKnownWorkstreams = false,
+): Prepared {
   const cutoff = instant(input.cutoff);
   if (instant(scope.to) > cutoff) throw new Error("Scope cannot exceed the frozen cutoff");
   required(input.datasetId, "Dataset ID");
@@ -444,7 +484,7 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
         (context.projectScope !== undefined && !Array.isArray(context.projectScope)) ||
         (context.workstreamScope !== undefined && !Array.isArray(context.workstreamScope)) ||
         [context.projects, context.workstreams, context.projectScope ?? [], context.workstreamScope ?? []].some(
-          (ids) => ids.some((id) => typeof id !== "string" || !id.trim()) || new Set(ids).size !== ids.length,
+          (ids) => !validMembershipIdentifiers(ids),
         ) ||
         (context.projectScope !== undefined && context.projects.some((id) => !context.projectScope!.includes(id))) ||
         (context.workstreamScope !== undefined &&
@@ -501,6 +541,39 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
   }
   const canonical = new Map<string, MetricFact[]>();
   for (const fact of current) {
+    // Select the current correction before admission. An unproved latest
+    // membership must never restore a lower revision that previously counted.
+    if (policy.metricId === "release_changes") {
+      const inclusion = fact.releaseInclusion;
+      const sha = (value: unknown) => typeof value === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value);
+      if (
+        !inclusion ||
+        typeof inclusion !== "object" ||
+        Array.isArray(inclusion) ||
+        Object.keys(inclusion).sort().join(",") !==
+          "mergeCommitSha,proofHash,publishedAt,pullRequestNodeId,releaseCommitSha,releaseId,releaseNodeId,version" ||
+        inclusion.version !== "release-inclusion-units/v1" ||
+        !Number.isSafeInteger(inclusion.releaseId) ||
+        inclusion.releaseId < 1 ||
+        typeof inclusion.releaseNodeId !== "string" ||
+        !/^[A-Za-z0-9_+=/\-]{1,256}$/.test(inclusion.releaseNodeId) ||
+        inclusion.pullRequestNodeId !== fact.artifactId ||
+        !fact.artifactId ||
+        fact.role !== "author" ||
+        !sha(inclusion.mergeCommitSha) ||
+        !sha(inclusion.releaseCommitSha) ||
+        inclusion.mergeCommitSha.length !== inclusion.releaseCommitSha.length ||
+        typeof inclusion.proofHash !== "string" ||
+        !/^[a-f0-9]{64}$/.test(inclusion.proofHash) ||
+        inclusion.publishedAt !== fact.occurredAt ||
+        !fact.occurredAt ||
+        !fact.acceptedAt ||
+        instant(fact.occurredAt) > instant(fact.acceptedAt)
+      ) {
+        reject([fact], "release_inclusion_unverified");
+        continue;
+      }
+    }
     const bucket = canonical.get(fact.canonicalKey!) ?? [];
     bucket.push(fact);
     canonical.set(fact.canonicalKey!, bucket);
@@ -550,6 +623,7 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
       else if (scope.workstreams.length && !scope.workstreams.some((id) => context.workstreams.includes(id)))
         reason =
           context.workstreamsKnown === false ||
+          (requireKnownWorkstreams && context.workstreamsKnown !== true) ||
           (context.workstreamScope !== undefined &&
             scope.workstreams.some((id) => !context.workstreamScope!.includes(id)))
             ? "unknown_membership_context"
@@ -595,6 +669,20 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
   const grouped = new Map<string, MetricFact[]>();
   for (const fact of facts) {
     let group = fact.canonicalKey!;
+    if (policy.metricId === "release_changes") {
+      // Filter and correction selection above must precede lifetime conservation.
+      // A prior release outside this window or context cannot hide current work.
+      group =
+        conserveReleaseWork && scope.from === null
+          ? key("release-inclusion-units/v1", fact.repoId, fact.artifactId, fact.actorId)
+          : key(
+              "release-inclusion-units/v1",
+              fact.repoId,
+              fact.releaseInclusion!.releaseNodeId,
+              fact.artifactId,
+              fact.actorId,
+            );
+    }
     if (policy.groupBy !== "canonical") {
       if (!fact.artifactId) {
         reject([fact], "unknown_artifact_identity");
@@ -691,6 +779,7 @@ export function selectPortfolioFacts(
       rank: false,
     },
     scope,
+    false,
   ).facts.filter((fact) => fact.role !== "unknown" && fact.occurredAt !== null);
   const observed = new Map(selected.filter((fact) => fact.state === "observed").map((fact) => [fact.id, fact]));
   const acceptedSources = new Set<string>();
@@ -718,6 +807,118 @@ export function selectPortfolioFacts(
   // Keep both immutable facts for audit and recomputation, but expose one current
   // locale activity unit. An unaccepted or unrelated language remains observed.
   return selected.filter((fact) => !acceptedSources.has(fact.id));
+}
+
+/** Private accepted source units for descriptive event-time derivations.
+ * Preserve the selected source policy's evidence class, roles and per-unit
+ * quantity admission; this selector does not calculate source totals.
+ * Breadth uses source occurrence time, never a later acceptance or
+ * current association. Canonical source units avoid collapsing distinct event
+ * contexts through an unrelated source board's interval grouping.
+ */
+export function selectAcceptedActivityFacts(
+  input: FrozenInput,
+  policy: MetricPolicy,
+  requestedScope: MetricScope,
+): { facts: MetricFact[]; audit: AuditEntry[]; complete: boolean; scope: MetricScope } {
+  validateMetricPolicy(policy);
+  const metric = getMetricDefinition(policy.metricId)!;
+  if (
+    policy.rankedStates[0] === "observed" ||
+    !["count", "sum"].includes(policy.aggregation) ||
+    policy.groupBy !== "canonical" ||
+    metric.family === "breadth"
+  )
+    throw new Error("Accepted activity requires an explicit qualified or reviewed canonical source policy");
+  const scope = canonicalScope(requestedScope);
+  if (scope.context !== "event") throw new Error("Activity breadth requires event-time context");
+  // Breadth retains each release-time source unit and its historical mapping.
+  // Lifetime PR-work conservation belongs to the release total, not this selector.
+  // Breadth treats omitted historical mapping markers as unknown, including
+  // negative filter matches. Existing board/portfolio legacy-marker handling is unchanged.
+  const prepared = prepare(input, { ...policy, dateBasis: "occurredAt" }, scope, false, true);
+  const facts: MetricFact[] = [];
+  for (const fact of prepared.facts) {
+    const reason = !policy.rankedStates.includes(fact.state as never)
+      ? "source_evidence_class_not_accepted"
+      : !fact.artifactId?.trim()
+        ? "unknown_artifact_identity"
+        : policy.aggregation === "sum" && fact.quantity === undefined
+          ? "unknown_source_quantity"
+          : null;
+    if (reason) prepared.audit.push({ factIds: [fact.id], actorId: fact.actorId, reason });
+    else facts.push(fact);
+  }
+  return {
+    facts,
+    audit: prepared.audit.sort((a, b) => compare(key(a.reason, a.factIds), key(b.reason, b.factIds))),
+    complete:
+      hasCompleteSourceCoverage(input, policy, scope) &&
+      !hasUncertainty(prepared) &&
+      !prepared.audit.some((entry) => entry.reason === "unknown_source_quantity"),
+    scope,
+  };
+}
+
+/** Private collaboration admission over all retained acceptance history before the
+ * selected end. Pair formation applies the requested start after both proofs are
+ * known; source occurrence time is never substituted for acceptance time.
+ */
+export function selectAcceptedCollaborationFacts(
+  input: FrozenInput,
+  policy: MetricPolicy,
+  requestedScope: MetricScope,
+): { scope: MetricScope; facts: MetricFact[]; audit: AuditEntry[] } {
+  for (const values of [
+    policy.roles,
+    policy.sources,
+    policy.rankedStates,
+    requestedScope.roles,
+    requestedScope.repos,
+    requestedScope.projects,
+    requestedScope.workstreams,
+  ]) {
+    if (!Array.isArray(values)) throw new Error("Collaboration policy and scope lists must be arrays");
+    for (let index = 0; index < values.length; index++)
+      if (!Object.hasOwn(values, index)) throw new Error("Collaboration policy and scope lists must be dense");
+  }
+  validateMetricPolicy(policy);
+  const scope = canonicalScope(requestedScope);
+  if (scope.actors !== "user" || scope.context !== "event")
+    throw new Error("Collaborations require the user and event-context selection");
+  if (
+    policy.aggregation !== "count" ||
+    policy.groupBy !== "canonical" ||
+    !["qualified", "reviewed"].includes(policy.rankedStates[0]!)
+  )
+    throw new Error("Collaborations require accepted canonical count source policies");
+  const prepared = prepare(
+    input,
+    { ...policy, dateBasis: "acceptedAt", rank: false },
+    { ...scope, from: null, period: "all" },
+    false,
+  );
+  const actors = new Map(input.actors.map((actor) => [actor.id, actor]));
+  const facts: MetricFact[] = [];
+  const audit = [...prepared.audit];
+  for (const fact of prepared.facts) {
+    const actor = fact.actorId === null ? undefined : actors.get(fact.actorId);
+    let reason: string | null = null;
+    if (fact.state !== policy.rankedStates[0]) reason = "collaboration_evidence_class";
+    else if (actor?.kind !== "user" || actor.publicState !== "visible" || actor.executionMode === "automated")
+      reason = "collaboration_actor_unavailable";
+    else if (!["author", "coauthor", "reviewer"].includes(fact.role)) reason = "collaboration_role_ineligible";
+    else if (typeof fact.occurredAt !== "string") reason = "collaboration_source_time_unknown";
+    else if (compareSourceInstants(fact.acceptedAt!, fact.occurredAt) < 0)
+      reason = "collaboration_acceptance_before_source";
+    else if (compareSourceInstants(fact.observedAt, fact.occurredAt) < 0)
+      reason = "collaboration_observation_before_source";
+    else if (typeof fact.artifactId !== "string" || !fact.artifactId.trim())
+      reason = "collaboration_artifact_identity_unknown";
+    if (reason) audit.push({ factIds: [fact.id], actorId: fact.actorId, reason });
+    else facts.push(fact);
+  }
+  return { scope, facts, audit };
 }
 
 export function aggregateMetric(
