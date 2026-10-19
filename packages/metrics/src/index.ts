@@ -8,4 +8,6 @@ export {
 
 export * from "./engine.js";
 
+export * from "./breadth.js";
+
 export * from "./ui.js";

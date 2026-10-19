@@ -720,6 +720,53 @@ export function selectPortfolioFacts(
   return selected.filter((fact) => !acceptedSources.has(fact.id));
 }
 
+/** Private accepted source units for descriptive event-time derivations.
+ * Preserve the selected source policy's evidence class, roles and per-unit
+ * quantity admission; this selector does not calculate source totals.
+ * Breadth uses source occurrence time, never a later acceptance or
+ * current association. Canonical source units avoid collapsing distinct event
+ * contexts through an unrelated source board's interval grouping.
+ */
+export function selectAcceptedActivityFacts(
+  input: FrozenInput,
+  policy: MetricPolicy,
+  requestedScope: MetricScope,
+): { facts: MetricFact[]; audit: AuditEntry[]; complete: boolean; scope: MetricScope } {
+  validateMetricPolicy(policy);
+  const metric = getMetricDefinition(policy.metricId)!;
+  if (
+    policy.rankedStates[0] === "observed" ||
+    !["count", "sum"].includes(policy.aggregation) ||
+    policy.groupBy !== "canonical" ||
+    metric.family === "breadth"
+  )
+    throw new Error("Accepted activity requires an explicit qualified or reviewed canonical source policy");
+  const scope = canonicalScope(requestedScope);
+  if (scope.context !== "event") throw new Error("Activity breadth requires event-time context");
+  const prepared = prepare(input, { ...policy, dateBasis: "occurredAt" }, scope);
+  const facts: MetricFact[] = [];
+  for (const fact of prepared.facts) {
+    const reason = !policy.rankedStates.includes(fact.state as never)
+      ? "source_evidence_class_not_accepted"
+      : !fact.artifactId?.trim()
+        ? "unknown_artifact_identity"
+        : policy.aggregation === "sum" && fact.quantity === undefined
+          ? "unknown_source_quantity"
+          : null;
+    if (reason) prepared.audit.push({ factIds: [fact.id], actorId: fact.actorId, reason });
+    else facts.push(fact);
+  }
+  return {
+    facts,
+    audit: prepared.audit.sort((a, b) => compare(key(a.reason, a.factIds), key(b.reason, b.factIds))),
+    complete:
+      hasCompleteSourceCoverage(input, policy, scope) &&
+      !hasUncertainty(prepared) &&
+      !prepared.audit.some((entry) => entry.reason === "unknown_source_quantity"),
+    scope,
+  };
+}
+
 export function aggregateMetric(
   input: FrozenInput,
   policy: MetricPolicy,
