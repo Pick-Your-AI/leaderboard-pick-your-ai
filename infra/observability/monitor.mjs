@@ -56,7 +56,8 @@ export class OperationalMonitor {
       throw new Error("Invalid failure telemetry");
     const sourceKey = this.sourceKey(source);
     const at = this.now();
-    const prior = this.sources.get(`${sourceKey}:${stage}`);
+    const existing = this.sources.get(`${sourceKey}:${stage}`);
+    const prior = existing && existing.at >= at - this.retentionMs ? existing : null;
     this.sources.delete(`${sourceKey}:${stage}`);
     this.sources.set(`${sourceKey}:${stage}`, {
       at,
