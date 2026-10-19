@@ -28,6 +28,7 @@ for (const conflict of [false, true]) {
         "/controls/profile": { bio: "", highlights: [], public: false, suppressed: false },
         "/controls/invitations": { invitations: [] },
         "/controls/spotlights/queue": { nominations: [] },
+        "/controls/spotlight-rotation/queue": { schemaVersion: "editorial-dimensions/v1", records: [] },
         "/controls/requests": {
           requests: [
             {
@@ -75,7 +76,9 @@ for (const conflict of [false, true]) {
       await expect(page.getByText(/Service confirmed/)).toHaveCount(0);
       await expect(page.getByLabel("Amended contribution scope")).toHaveValue("Revised scope");
     } else {
-      await expect(page.getByRole("status")).toContainText("Service confirmed");
+      await expect(page.getByRole("status").filter({ hasText: "Service confirmed" })).toContainText(
+        "Service confirmed",
+      );
       await expect(page.getByText("evidence · pending · version 5")).toBeVisible();
       await expect(page.getByRole("button", { name: "Nominate for spotlight" })).toHaveCount(0);
     }
@@ -138,6 +141,7 @@ test("foreign and terminal evidence never offers an amendment", async ({ page })
       },
       "/controls/invitations": { invitations: [] },
       "/controls/spotlights/queue": { nominations: [] },
+      "/controls/spotlight-rotation/queue": { schemaVersion: "editorial-dimensions/v1", records: [] },
       "/controls/configuration": { revision: 0, proposals: {} },
     };
     await route.fulfill({ json: responses[path] ?? {} });

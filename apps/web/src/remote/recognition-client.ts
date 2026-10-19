@@ -11,6 +11,15 @@ const text = (value: unknown, max = 2000): string =>
   typeof value === "string" && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value)
     ? value
     : fail();
+// Editorial explanations use the controls service's bounded prose contract.
+// Identity, URL, category, timestamp and profile fields retain strict text rules.
+const explanationText = (value: unknown): string =>
+  typeof value === "string" &&
+  value.trim().length > 0 &&
+  value.length <= 1000 &&
+  !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)
+    ? value
+    : fail();
 const identity = (value: unknown) => {
   const result = text(value, 200);
   return id.test(result) ? result : fail();
@@ -168,7 +177,7 @@ export function spotlights(value: unknown) {
       claimId: identity(item.claimId),
       sourceUrl: publicLink(text(item.sourceUrl)) ?? fail(),
       category: text(item.category),
-      selectionExplanation: text(item.selectionExplanation, 1000),
+      selectionExplanation: explanationText(item.selectionExplanation),
       selectedAt: date(item.selectedAt),
       bio: item.bio === null || item.bio === "" ? null : text(item.bio, 500),
     };

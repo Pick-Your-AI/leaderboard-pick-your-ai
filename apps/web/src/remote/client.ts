@@ -1312,7 +1312,7 @@ function activityContract(value: unknown, selected: Selection) {
     throw new ReadFailure(502, "invalid_activity_response");
   return data;
 }
-function activityGroup(value: unknown, selected: Selection): ActivityGroup {
+export function activityGroup(value: unknown, selected: Selection): ActivityGroup {
   const data = object(value);
   const state = data.activityState;
   if (typeof state !== "string" || !["observed", "pending", "accepted", "unknown"].includes(state))

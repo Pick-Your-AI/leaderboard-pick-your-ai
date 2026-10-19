@@ -1,8 +1,27 @@
 import { createHash } from "node:crypto";
-import { compareSourceInstants, sourceEventSchema } from "@pick-your-ai/contracts";
-import { validateAutomationSource, validateMaintenanceSource } from "@pick-your-ai/github";
-import { domainDateBasis, qualifyDomainRecognition } from "./domain-recognition.mjs";
+import {
+  compareSourceInstants,
+  sourceEventSchema,
+  maintenanceClassificationVersion,
+  documentationPurposeVersion,
+} from "@pick-your-ai/contracts";
+import {
+  validateAutomationSource,
+  validateMaintenanceSource,
+  validateReleaseChangesSource,
+} from "@pick-your-ai/github";
+import {
+  qualifyMaintenanceClassification,
+  validateMaintenanceClassificationBinding,
+} from "./maintenance-classification.mjs";
+import { qualifyDocumentationPurpose, validateDocumentationPurposeBinding } from "./documentation-purpose.mjs";
+import {
+  domainDateBasis,
+  qualifyDomainRecognition,
+  hasSparseDomainIdentifierAuthority,
+} from "./domain-recognition.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
+import { releaseReviewRequest, parseReleaseReviewTarget } from "../../controls/src/release-review.mjs";
 import { hasRequiredParticipantConsent, hasReviewedParticipantConsent } from "../../controls/src/evidence-consent.mjs";
 import {
   evidenceIntakeAuthority,
@@ -12,6 +31,11 @@ import {
 
 // Private controls only. Never accept a public claim projection as authentication.
 export function recognitionFingerprint(state, bindings = []) {
+  // An unsupported opt-in cannot keep an old saved hash current without rematerialization.
+  for (const binding of bindings) {
+    validateMaintenanceClassificationBinding(binding);
+    validateDocumentationPurposeBinding(binding);
+  }
   const requests = Object.values(state.requests ?? {})
     .filter((r) => r.kind === "evidence")
     .sort((a, b) => a.id.localeCompare(b.id));
@@ -49,11 +73,43 @@ export function recognitionFingerprint(state, bindings = []) {
   // Prior maintenance receipts lacked merged-participant, clock and unit admission.
   if (bindings.some((binding) => binding.metricId === "maintenance"))
     authority.push("maintenance-merged-participant/v1");
+  // Retire only explicitly opted-in classification authority. Generic maintenance
+  // and every unrelated binding keep their exact established fingerprint format.
+  if (bindings.some((binding) => binding.metricId === "maintenance" && binding.maintenanceClassification !== undefined))
+    authority.push(maintenanceClassificationVersion);
+  if (bindings.some((binding) => binding.documentationPurpose !== undefined))
+    authority.push(documentationPurposeVersion);
   // Tooling receipts independently require verified merged participation as well.
   if (bindings.some((binding) => binding.metricId === "automation")) authority.push("automation-merged-participant/v1");
+  // Older generic operations receipts lack the current source, public artifact
+  // and affected-owner evidence boundary. Unrelated configurations stay exact.
+  if (bindings.some((binding) => ["governance", "deployment_work", "incidents"].includes(binding.metricId)))
+    authority.push("operations-contribution-evidence/v1");
+  // Retire generic receipts and the earlier pre-collection release observation authority.
+  if (bindings.some((binding) => binding.metricId === "release_changes"))
+    authority.push("release-inclusion-recognition/v2");
   // Missing legacy intake cannot keep manual recognition current, even without collaborators.
   // No-manual-request automatic source authority keeps its existing exact format.
   if (requests.length) authority.push(evidenceIntakeAuthority());
+  // A validator-only upgrade cannot revoke a previously confirmed result. Fence
+  // only selected unsafe lists; valid and unrelated authority bytes stay exact.
+  if (
+    bindings.some((binding) =>
+      requests.some(
+        (request) =>
+          request.status === "accepted" &&
+          !state.profiles?.[request.owner]?.suppressed &&
+          binding.category === request.category &&
+          binding.scope === request.scope &&
+          binding.policyVersion === request.policyVersion &&
+          hasSparseDomainIdentifierAuthority(binding, request) &&
+          hasReviewedParticipantConsent(request) &&
+          hasConsentedEvidenceIntake(request) &&
+          hasReviewedEvidenceIntake(request),
+      ),
+    )
+  )
+    authority.push("domain-id-list-admission/v1");
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
@@ -66,10 +122,13 @@ export function materializeRecognition(
   cutoff,
   publicReasons = () => [],
 ) {
+  for (const binding of bindings) validateDocumentationPurposeBinding(binding);
   let output = structuredClone(input);
   const domainUnits = new Set();
   const mergedChangeUnits = new Set();
+  const releaseMemberships = new Set();
   const domainReasons = new Map();
+  const reviewedOperationArtifacts = new Map();
   const decisionTime = (request) => {
     const at = request.history?.findLast((event) => event.action === "accepted")?.at;
     const time = typeof at === "number" ? at : typeof at === "string" ? Date.parse(at) : NaN;
@@ -125,15 +184,18 @@ export function materializeRecognition(
       });
       if (localeReasons.length !== 3) throw new Error("invalid_localization_binding");
     }
-    const requiredDateBasis =
-      binding.metricId === "maintenance" || binding.metricId === "automation"
-        ? "occurredAt"
-        : domainDateBasis(binding.metricId);
+    const requiredDateBasis = ["maintenance", "automation", "release_changes"].includes(binding.metricId)
+      ? "occurredAt"
+      : domainDateBasis(binding.metricId);
     if (
       !policies.some(
         (p) =>
           p.policy.metricId === binding.metricId &&
           p.policy.version === binding.policyVersion &&
+          (binding.metricId !== "release_changes" ||
+            (p.policy.groupingPolicyVersion === "release-inclusion-units/v1" &&
+              p.policy.roles?.length === 1 &&
+              p.policy.roles[0] === "author")) &&
           (requiredDateBasis !== null
             ? p.policy.dateBasis === requiredDateBasis &&
               p.policy.groupBy === "canonical" &&
@@ -201,6 +263,26 @@ export function materializeRecognition(
       )
         continue;
     }
+    let releaseTarget = null;
+    if (binding.metricId === "release_changes") {
+      try {
+        releaseTarget = parseReleaseReviewTarget(decision.releaseInclusion);
+        const configured = parseReleaseReviewTarget(binding.releaseInclusion);
+        if (
+          JSON.stringify(releaseTarget) !== JSON.stringify(configured) ||
+          releaseTarget.policyVersion !== binding.policyVersion ||
+          binding.sourceMetricId !== "pr_merged" ||
+          decision.receipt !== request.id ||
+          !Number.isSafeInteger(request.version) ||
+          request.version < 1 ||
+          decision.version !== request.version ||
+          JSON.stringify(decision.evidenceRequest) !== JSON.stringify(releaseReviewRequest(request))
+        )
+          throw new Error();
+      } catch {
+        throw new Error("release_inclusion_review_unverified");
+      }
+    }
     const candidates = input.facts.filter(
       (f) =>
         f.actorId === request.owner &&
@@ -261,6 +343,19 @@ export function materializeRecognition(
         : binding.metricId === "automation"
           ? validateAutomationSource(input, candidates[0].id, acceptedAt)
           : null;
+    const maintenanceClassification = qualifyMaintenanceClassification({
+      input,
+      binding,
+      request,
+      decision,
+      candidate: candidates[0],
+      acceptedAt,
+    });
+    const release = releaseTarget
+      ? validateReleaseChangesSource(input, candidates[0].id, acceptedAt, releaseTarget)
+      : null;
+    if (release && compareSourceInstants(release.observedAt, cutoff) > 0)
+      throw new Error("release_inclusion_source_unverified");
     const domain = qualifyDomainRecognition({
       input,
       request,
@@ -270,6 +365,22 @@ export function materializeRecognition(
       acceptedAt,
       cutoff,
     });
+    const documentationPurpose = qualifyDocumentationPurpose({
+      input,
+      binding,
+      request,
+      decision,
+      candidate: candidates[0],
+      acceptedAt,
+      domain,
+    });
+    if (documentationPurpose) domain.publicReasonCodes.push("documentation_purpose:release_notes");
+    if (domain?.reviewedArtifact) {
+      const { url, hash } = domain.reviewedArtifact;
+      const previous = reviewedOperationArtifacts.get(url);
+      if (previous !== undefined && previous !== hash) throw new Error("domain_recognition_evidence_unverified");
+      reviewedOperationArtifacts.set(url, hash);
+    }
     if (domain) {
       const unit = JSON.stringify([request.owner, domain.changesetId]);
       if (domainUnits.has(unit)) continue;
@@ -280,6 +391,11 @@ export function materializeRecognition(
       // Deterministic accepted-time ordering retains the earliest valid authority.
       if (mergedChangeUnits.has(mergedChange.unit)) continue;
       mergedChangeUnits.add(mergedChange.unit);
+    }
+    if (release) {
+      // Validate each review and proof before selecting a repeated membership.
+      if (releaseMemberships.has(release.membershipUnit)) continue;
+      releaseMemberships.add(release.membershipUnit);
     }
     const previousFacts = output.facts.length;
     const previousEvidence = output.evidence.length;
@@ -297,9 +413,23 @@ export function materializeRecognition(
         evidenceIds: [candidates[0].id],
         ...(domain ? { changesetId: domain.changesetId } : {}),
         ...(localeTarget ? { sourceRevision: localeTarget.sourceRevision } : {}),
+        ...(releaseTarget ? { releaseInclusion: releaseTarget } : {}),
+        ...(maintenanceClassification ? { maintenanceClassification } : {}),
+        ...(documentationPurpose
+          ? { documentationPurpose: documentationPurpose.purpose, sourceRevision: documentationPurpose.sourceRevision }
+          : {}),
       },
       binding.reviewerIds,
     );
+    if (maintenanceClassification) {
+      const reasons = [
+        "independent_recognition_receipt",
+        `maintenance_classification_policy:${maintenanceClassificationVersion}`,
+        ...maintenanceClassification.classifications.map(({ kind }) => `maintenance_kind:${kind}`),
+      ];
+      for (const evidence of output.evidence.slice(previousEvidence))
+        domainReasons.set(evidence.contribution.contributionId, reasons);
+    }
     if (domain) {
       // Preserve each registry's event clock; acceptance remains independently
       // recorded. Never substitute the later review time for a merge or recheck.

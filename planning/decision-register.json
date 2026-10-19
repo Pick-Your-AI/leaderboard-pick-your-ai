@@ -180,5 +180,21 @@
     "status": "Decision specified; review and merge of LB-01.06 record gate-policy adoption",
     "decision": "Each transition requires the release manifest evidence and attributable receiving review. Existing mandatory and conditional work-package lists remain in force. The local phase decision can use unresolved hosting alternatives as planning input; it cannot certify source activation, appoint a person, authorize spending or substitute rendered/synthetic output for deployment, participant or operational evidence. Full project acceptance retains every in-scope package unless explicitly descoped by reviewed authority.",
     "decision_record": "docs/release-decision.md"
+  },
+  {
+    "id": "DEC-12",
+    "question": "How are dependency maintenance, build fixes and accepted bug fixes represented without count inflation?",
+    "recommended": "Optional independently reviewed positive evidence facets under maintenance-classification/v1, attached to the existing conserved merged PR/contributor unit; omission remains unknown",
+    "alternatives": [
+      "Keep generic maintenance with unknown subtypes",
+      "Add separately governed subtype metrics only after a later explicit scope decision"
+    ],
+    "decision_role": "Project engineering scope authority and affected metric/source reviewers",
+    "before": [
+      "LB-07.05"
+    ],
+    "status": "Decision specified; review and merge adopt the bounded classification policy, not runtime source or reviewer grants",
+    "decision": "maintenance-classification/v1 uses the current authenticated category:other intake, an explicitly selected binding and closed private source/detail/reference record. Independent review qualifies positive dependency_maintenance, build_fix and accepted_bug_fix facets; all remain one existing maintenance PR/actor unit with the merge clock. No titles, labels, paths or green-CI inference, automatic causality, human-effort estimate, new metric or source activation is introduced. Current consent, audit, amendment and fixed public projection remain required; omitted kinds stay unknown and all 98 meanings remain intact.",
+    "decision_record": "docs/maintenance-classification.md"
   }
 ]

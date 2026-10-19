@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createSecretKey, randomBytes } from "node:crypto";
 import { open, link, lstat, unlink, readdir } from "node:fs/promises";
 import { dirname, join, basename, resolve } from "node:path";
 
@@ -55,6 +55,8 @@ export function encryptBackup({
     throw new Error("Database dump must be nonempty and within the 64 MiB backup bound");
   }
   validateRequiredState({ configuration, policyVersions, watermarks });
+  // Capture the selected key before caller serializers can change its backing bytes.
+  const capturedKey = createSecretKey(key);
   // An unpooled allocation also isolates the snapshot from the caller's backing ArrayBuffer.
   const capturedDump = Buffer.alloc(databaseDump.length);
   capturedDump.set(databaseDump);
@@ -73,7 +75,7 @@ export function encryptBackup({
     payloadSha256: digest(payload),
   };
   const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const cipher = createCipheriv("aes-256-gcm", capturedKey, iv);
   cipher.setAAD(Buffer.from(JSON.stringify(metadata)));
   const ciphertext = Buffer.concat([cipher.update(payload), cipher.final()]);
   return {

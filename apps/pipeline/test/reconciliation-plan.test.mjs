@@ -343,7 +343,21 @@ test("approved unique pairs, source generations and progress identities are vali
 });
 
 test("all 1200 approved pairs remain bounded without shortening their complete plan identity", () => {
-  const repos = Array.from({ length: 100 }, (_, index) => ({ id: index + 1, families: [...sourceFamilies] }));
+  // The pair limit remains fixed when an independently supported source family is added.
+  const repos = Array.from({ length: 100 }, (_, index) => ({
+    id: index + 1,
+    families: Array.from({ length: 12 }, (_, offset) => sourceFamilies[(index * 12 + offset) % sourceFamilies.length]),
+  }));
+  assert.equal(repos.length, 100);
+  assert.equal(
+    repos.every((repo) => new Set(repo.families).size === 12),
+    true,
+  );
+  assert.deepEqual([...new Set(repos.flatMap((repo) => repo.families))].sort(), [...sourceFamilies].sort());
+  assert.equal(
+    repos.reduce((count, repo) => count + repo.families.length, 0),
+    1200,
+  );
   const currentScan = { ...scan, sources: repos.map(({ id }) => ({ repositoryId: id, generation: "1" })) };
   const requests = selectReconciliationPlan({
     scan: currentScan,
@@ -361,6 +375,27 @@ test("all 1200 approved pairs remain bounded without shortening their complete p
         parseReconciliationRunId(request.runId).total === 1200,
     ),
     true,
+  );
+  // Keep the repository count valid so this rejection exercises only the pair limit.
+  const additionalFamily = sourceFamilies.find((family) => !repos[0].families.includes(family));
+  assert.notEqual(additionalFamily, undefined);
+  const overfullRepos = repos.map((repo, index) =>
+    index === 0 ? { ...repo, families: [...repo.families, additionalFamily] } : repo,
+  );
+  assert.equal(overfullRepos.length, 100);
+  assert.equal(
+    overfullRepos.reduce((count, repo) => count + repo.families.length, 0),
+    1201,
+  );
+  assert.throws(
+    () =>
+      selectReconciliationPlan({
+        scan: currentScan,
+        repositories: overfullRepos,
+        policy,
+        progress: progressFor(overfullRepos, currentScan),
+      }),
+    /^Error: reconciliation_plan_scope_invalid$/,
   );
   assert.throws(
     () =>

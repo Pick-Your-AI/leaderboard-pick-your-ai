@@ -3,9 +3,11 @@ import { createServer } from "node:http";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { actorId, ControlError, exactKeys, locator, record, requireThat, text } from "./store.mjs";
 import { nominateSpotlight, decideSpotlight, projectSpotlights } from "./editorial.mjs";
+import { proposeRotation, decideRotation, projectRotation, rotationQueue } from "./editorial-rotation.mjs";
 import { createConfigurationManager } from "./configuration.mjs";
 import { createPolicyComparisonManager } from "./policy-comparison.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "./localization-review.mjs";
+import { releaseReviewRequest, parseReleaseReviewTarget } from "./release-review.mjs";
 import { hasRequiredParticipantConsent, hasReviewedParticipantConsent } from "./evidence-consent.mjs";
 import {
   createEvidenceIntake,
@@ -206,6 +208,11 @@ export function createControlsServer({
         send(200, projectSpotlights(store.read(), spotlightEligibility));
         return;
       }
+      if (req.method === "GET" && path === "/controls/spotlight-rotation") {
+        requireThat([...url.searchParams].length === 0, 400, "Unexpected editorial query");
+        send(200, projectRotation(store.read(), spotlightEligibility));
+        return;
+      }
       if (req.method === "GET" && path === "/controls/public") {
         send(200, store.publicSnapshot());
         return;
@@ -332,6 +339,32 @@ export function createControlsServer({
           refreshSession: () => authenticate(req, parsed),
         });
         send(result.status, result.data, result.beforeSend);
+        return;
+      }
+      if (path.startsWith("/controls/spotlight-rotation")) {
+        requireThat([...url.searchParams].length === 0, 400, "Unexpected editorial query");
+        const requireCurrentSession = () =>
+          requireThat(store.read().sessions[session.sid]?.expires > now(), 401, "Session revoked");
+        if (req.method === "GET" && path === "/controls/spotlight-rotation/queue") {
+          send(200, rotationQueue(store.read(), session, spotlightEligibility), requireCurrentSession);
+          return;
+        }
+        const action = path.match(/^\/controls\/spotlight-rotation\/([a-f0-9-]{36})$/);
+        requireThat(req.method === "POST" && (path === "/controls/spotlight-rotation" || action), 404, "Not found");
+        const input = await inputBody();
+        const result = store.transaction(
+          (state) => {
+            const record = action
+              ? decideRotation(state, session, action[1], input, now(), spotlightEligibility)
+              : proposeRotation(state, session, input, now(), spotlightEligibility);
+            // Check persisted authority before ControlStore writes this cloned
+            // state, which could otherwise restore a callback-revoked session.
+            requireCurrentSession();
+            return record;
+          },
+          { beforeCommit: requireCurrentSession },
+        );
+        send(action ? 200 : 201, { record: result });
         return;
       }
       if (req.method === "GET" && path === "/controls/spotlights/queue") {
@@ -685,6 +718,7 @@ export function createControlsServer({
                 "sourceReviewedPublic",
                 "duplicateOf",
                 "localization",
+                "releaseInclusion",
                 "sourceUseReview",
               ]);
               requireThat(session.roles.includes(roleNeeded(request)), 403, "Reviewer role required");
@@ -695,8 +729,13 @@ export function createControlsServer({
               );
               requireThat(input.conflict === false, 403, "Declare conflicts and route to an independent reviewer");
               requireThat(["accept", "reject", "rollback", "merge"].includes(input.decision));
-              requireThat(input.decision === "accept" || input.localization === undefined);
-              requireThat(input.decision === "accept" || input.sourceUseReview === undefined);
+              requireThat(
+                input.decision === "accept" ||
+                  (input.localization === undefined &&
+                    input.releaseInclusion === undefined &&
+                    input.sourceUseReview === undefined),
+              );
+              requireThat(input.localization === undefined || input.releaseInclusion === undefined);
               requireThat(!["withdrawn", "merged", "applied"].includes(request.status), 409, "Request is terminal");
               if (request.status === "appealed" || input.decision === "rollback") {
                 requireThat(
@@ -756,6 +795,19 @@ export function createControlsServer({
                     throw new ControlError(400, "Invalid localization review target");
                   }
                 }
+                let releaseInclusion;
+                if (input.releaseInclusion !== undefined) {
+                  try {
+                    releaseInclusion = parseReleaseReviewTarget(input.releaseInclusion);
+                  } catch {
+                    throw new ControlError(400, "Invalid release review target");
+                  }
+                  requireThat(
+                    releaseInclusion.policyVersion === policyVersion,
+                    400,
+                    "Release review policy does not match acceptance",
+                  );
+                }
                 request.policyVersion = policyVersion;
                 request.status = "accepted";
                 record(s, request, session.actorId, "accepted", timestamp, {
@@ -770,6 +822,7 @@ export function createControlsServer({
                     policyVersion,
                   }),
                   ...(localization ? { localization, evidenceRequest: localizationReviewRequest(request) } : {}),
+                  ...(releaseInclusion ? { releaseInclusion, evidenceRequest: releaseReviewRequest(request) } : {}),
                 });
                 requireThat(
                   hasReviewedEvidenceIntake(request),

@@ -71,13 +71,13 @@ export function Spotlights({
               </label>
               <label className="control-field">
                 Private decision reason
-                <textarea name="reason" required maxLength={2000} />
+                <textarea name="reason" required maxLength={1000} />
               </label>
               {accepting[n.id] && (
                 <>
                   <label className="control-field">
                     Public selection explanation
-                    <textarea name="publicExplanation" required maxLength={2000} />
+                    <textarea name="publicExplanation" required maxLength={1000} />
                   </label>
                   <p>
                     This explanation will be public if the spotlight is selected. Do not include private request
