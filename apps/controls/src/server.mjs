@@ -1,4 +1,5 @@
 import { createOperationsManager } from "./operations.mjs";
+import { bindOrderingReview } from "@pick-your-ai/github";
 import { createServer } from "node:http";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { actorId, ControlError, exactKeys, locator, record, requireThat, text } from "./store.mjs";
@@ -686,6 +687,7 @@ export function createControlsServer({
                 "duplicateOf",
                 "localization",
                 "sourceUseReview",
+                "ordering",
               ]);
               requireThat(session.roles.includes(roleNeeded(request)), 403, "Reviewer role required");
               requireThat(
@@ -697,6 +699,8 @@ export function createControlsServer({
               requireThat(["accept", "reject", "rollback", "merge"].includes(input.decision));
               requireThat(input.decision === "accept" || input.localization === undefined);
               requireThat(input.decision === "accept" || input.sourceUseReview === undefined);
+              requireThat(input.decision === "accept" || input.ordering === undefined);
+              requireThat(request.category === "ordering" || input.ordering === undefined);
               requireThat(!["withdrawn", "merged", "applied"].includes(request.status), 409, "Request is terminal");
               if (request.status === "appealed" || input.decision === "rollback") {
                 requireThat(
@@ -730,6 +734,14 @@ export function createControlsServer({
                 );
                 const sourceUse = parseSourceUseReview(input.sourceUseReview);
                 requireThat(sourceUse, 400, "Independent source-use review and reviewed references required");
+                let ordering;
+                if (request.category === "ordering") {
+                  try {
+                    ordering = bindOrderingReview(input.ordering, request, sourceUse.references);
+                  } catch {
+                    throw new ControlError(400, "Invalid current ordering review");
+                  }
+                }
                 requireThat(
                   !Object.values(s.requests).some(
                     (other) =>
@@ -770,6 +782,7 @@ export function createControlsServer({
                     policyVersion,
                   }),
                   ...(localization ? { localization, evidenceRequest: localizationReviewRequest(request) } : {}),
+                  ...(ordering ? { ordering } : {}),
                 });
                 requireThat(
                   hasReviewedEvidenceIntake(request),

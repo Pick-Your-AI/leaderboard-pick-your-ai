@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { sourceEventSchema } from "@pick-your-ai/contracts";
+import { bindOrderingReview, validateOrderingSource } from "@pick-your-ai/github";
 
 // These are existing registry definitions, not new metrics or source permissions.
 const clocks = {
@@ -27,7 +28,13 @@ const clocks = {
 };
 export const domainMetricIds = Object.freeze(Object.keys(clocks));
 export const domainDateBasis = (metricId) =>
-  Object.hasOwn(clocks, metricId) ? (clocks[metricId] === "accepted_at" ? "acceptedAt" : "occurredAt") : null;
+  metricId === "issue_ordering"
+    ? "acceptedAt"
+    : Object.hasOwn(clocks, metricId)
+      ? clocks[metricId] === "accepted_at"
+        ? "acceptedAt"
+        : "occurredAt"
+      : null;
 const authorMetrics = new Set([
   "catalog_proposals",
   "pricebook_proposals",
@@ -128,6 +135,18 @@ const approvedOwner = (roster, reviewer) => require(ids(roster).includes(reviewe
  * No caller-supplied text, source manifest or private receipt enters public output.
  */
 export function qualifyDomainRecognition({ input, request, decision, binding, candidate, acceptedAt, cutoff }) {
+  if (binding.metricId === "issue_ordering") {
+    const review = bindOrderingReview(decision.ordering, request, decision.sourceUseReview.references);
+    const ordering = validateOrderingSource(input, candidate.id, acceptedAt, review, binding.orderingAuthority);
+    return {
+      changesetId: ordering.unit,
+      dateBasis: "acceptedAt",
+      occurredAt: acceptedAt,
+      publicReasonCodes: ["independent_recognition_receipt"],
+      ordering: ordering.review,
+      orderingAuthority: ordering.authority,
+    };
+  }
   const metric = binding.metricId;
   if (!Object.hasOwn(clocks, metric)) return null;
   require(input.isSynthetic !== true && !(input.syntheticFactIds ?? []).includes(candidate.id));

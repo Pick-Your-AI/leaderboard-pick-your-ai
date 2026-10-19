@@ -14,6 +14,7 @@ export * from "./physical-diff.js";
 export * from "./documentation.js";
 export * from "./research.js";
 export * from "./maintenance.js";
+export * from "./ordering.js";
 
 export type EndpointOutcome =
   | { kind: "readable"; visibility: Visibility }
