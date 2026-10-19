@@ -394,3 +394,82 @@ test("old unbound audit metadata never acquires a publication by timestamp infer
   assert.deepEqual(result.publications, []);
   assert.deepEqual((await db.query("SELECT audit FROM leaderboard_ingestion.replay_receipts")).rows[0].audit, audit);
 });
+
+for (const [name, factory] of [
+  ["null factory", null],
+  ["nonfunction factory", true],
+  [
+    "throwing factory",
+    () => {
+      throw new Error("synthetic-private-factory");
+    },
+  ],
+  ["missing closure", () => undefined],
+  ["promise factory", () => Promise.resolve(() => true)],
+  ["rejected factory", () => Promise.reject(new Error("synthetic-private-factory-rejection"))],
+  ["false closure", () => () => false],
+  [
+    "throwing closure",
+    () => () => {
+      throw new Error("synthetic-private-closure");
+    },
+  ],
+  ["promise closure", () => () => Promise.resolve(true)],
+  ["rejected closure", () => () => Promise.reject(new Error("synthetic-private-closure-rejection"))],
+  ["truthy closure", () => () => "true"],
+])
+  test(`an optional native replay guard rejects a ${name} without leaking host errors`, async () => {
+    await insert();
+    const receipt = await queue();
+    const before = (await db.query("SELECT receipt_id,audit::text FROM leaderboard_ingestion.replay_receipts")).rows;
+    const original = await read(receipt);
+    await assert.rejects(
+      () => read(receipt, { replayReadGuard: factory }),
+      (error) => {
+        assert.match(error.message, /^operation_result_(?:unavailable|changed)$/);
+        return true;
+      },
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(
+      await read(receipt),
+      original,
+      "an explicitly authorized standalone adapter keeps its retained reader",
+    );
+    assert.deepEqual(
+      (await db.query("SELECT receipt_id,audit::text FROM leaderboard_ingestion.replay_receipts")).rows,
+      before,
+    );
+  });
+
+test("a native replay guard captures one immutable source scope per read", async () => {
+  await insert();
+  const receipt = await queue();
+  let factories = 0;
+  const guarded = new OperatorInbox(db, {
+    replayReadGuard(scope) {
+      factories++;
+      assert.deepEqual(scope, { repositoryId: 9, installationId: "1", generation: "1" });
+      assert.equal(Object.isFrozen(scope), true);
+      return () => true;
+    },
+  });
+  assert.equal((await guarded.readReplayResult(9, receipt.id, allow)).status, "queued");
+  assert.equal(factories, 1);
+});
+
+test("a native replay guard fences the final awaited observer", async () => {
+  await insert();
+  const receipt = await queue();
+  let current = true;
+  const guarded = new OperatorInbox(db, { replayReadGuard: () => () => current });
+  await assert.rejects(
+    () =>
+      guarded.readReplayResult(9, receipt.id, allow, async (_data, beforeSend) => {
+        beforeSend();
+        await Promise.resolve();
+        current = false;
+      }),
+    /operation_result_changed/,
+  );
+});

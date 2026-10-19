@@ -75,6 +75,18 @@ A missing input or contradictory reference blocks selection. The same checks run
 again inside the SQLite deletion transaction, so a changed or missing input after
 manifest creation cannot authorize removal or a successful store acknowledgement.
 
+A pending input-stage manifest can predate that result-selection rule. Before a
+new SQLite acknowledgement, each selected input key must have no remaining
+`policy_previews.input_id` reference, even if the input itself is already absent.
+The check runs inside the same deletion transaction, before either deletion or
+an `alreadyAbsent` count. A remaining reference raises
+`derived_preview_reference_remaining`: the input and results are preserved as
+found, no new store acknowledgement is written, and the original manifest stays
+pending for source-owner reconciliation. This does not rewrite the manifest,
+remove the dependent result implicitly or claim a completed erasure. An already
+committed SQLite acknowledgement still supplies its original counts on retry;
+the new guard cannot undo a prior committed deletion.
+
 No free-text search, inferred actor identity, broad table truncation or cascading
 foreign-key deletion is used. Before planning or resuming deletion, a paged
 metadata scan resolves every remaining SQL snapshot and frozen source list.
