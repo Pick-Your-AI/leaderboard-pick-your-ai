@@ -33,13 +33,65 @@ export interface GithubFailureInput {
 
 function parseRetryAfter(value: string | null, now: Date): Date | undefined {
   if (!value) return undefined;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) {
+  // HTTP delay-seconds is a decimal integer, not JavaScript's numeric syntax.
+  // In particular, a signed number must not fall through to Date's loose parser.
+  if (/^[0-9]+$/.test(value)) {
+    const seconds = Number(value);
+    if (!Number.isSafeInteger(seconds)) return undefined;
     const date = new Date(now.getTime() + seconds * 1000);
     return Number.isNaN(date.getTime()) ? undefined : date;
   }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? undefined : date;
+  // RFC 9110 requires all three HTTP-date forms. Parse their fields explicitly
+  // so partial dates, implicit local time and normalized invalid dates cannot
+  // shorten or invent a pause. The obsolete asctime form is also UTC.
+  let parts: string[] | null = /^(\w{3}), (\d{2}) (\w{3}) (\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT$/.exec(value);
+  let shortYear = false;
+  if (!parts) {
+    parts = /^(\w+), (\d{2})-(\w{3})-(\d{2}) (\d{2}):(\d{2}):(\d{2}) GMT$/.exec(value);
+    shortYear = parts !== null;
+  }
+  if (!parts) {
+    const ascii = /^(\w{3}) (\w{3}) (\d{2}| \d) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(value);
+    if (!ascii) return undefined;
+    parts = [ascii[0], ascii[1]!, ascii[3]!, ascii[2]!, ascii[7]!, ascii[4]!, ascii[5]!, ascii[6]!];
+  }
+  const weekdays = shortYear
+    ? ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const weekday = weekdays.indexOf(parts[1]!);
+  const day = Number(parts[2]);
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].indexOf(parts[3]!);
+  let year = Number(parts[4]);
+  const hour = Number(parts[5]),
+    minute = Number(parts[6]),
+    second = Number(parts[7]);
+  if (weekday < 0 || month < 0 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 60) return undefined;
+  if (second === 60 && (hour !== 23 || minute !== 59)) return undefined;
+  const date = new Date(0);
+  date.setUTCHours(hour, minute, Math.min(second, 59), 0);
+  if (shortYear) {
+    const latest = new Date(now);
+    latest.setUTCFullYear(latest.getUTCFullYear() + 50);
+    year += Math.floor(latest.getUTCFullYear() / 100) * 100;
+    date.setUTCFullYear(year, month, day);
+    // Compare the same rounded leap-second instant returned below.
+    if (date.getTime() + (second === 60 ? 1000 : 0) > latest.getTime()) year -= 100;
+  }
+  // HTTP-date imports RFC 5322's year semantics: 1900 or later, including
+  // obsolete two-digit years after applying the HTTP fifty-year rule.
+  if (year < 1900) return undefined;
+  date.setUTCFullYear(year, month, day);
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month ||
+    date.getUTCDate() !== day ||
+    date.getUTCDay() !== weekday
+  )
+    return undefined;
+  // JavaScript has no leap-second instant. Rounding it forward avoids retrying
+  // before the supplied second has elapsed.
+  if (second === 60) date.setTime(date.getTime() + 1000);
+  return date;
 }
 
 function primaryReset(headers: HeaderReader | undefined): Date | undefined {

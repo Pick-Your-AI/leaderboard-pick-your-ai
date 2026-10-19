@@ -24,6 +24,11 @@ const adapterLabels: Record<ContributionRecord["adapter"], string> = {
   reviewed_receipt: "Reviewed receipt",
 };
 
+export function publicPersonLabel(person: Person | null): string {
+  if (!person) return "Unknown actor";
+  return person.publicState === "deleted" ? "Deleted account" : person.displayName;
+}
+
 export function PersonName({ person, link = true }: { person: Person | null; link?: boolean }) {
   if (!person) return <span className="muted">Unknown actor</span>;
   if (person.publicState === "deleted") return <span className="muted">Deleted account</span>;

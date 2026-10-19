@@ -26,7 +26,45 @@
 
 ## Implementation covered here
 
-`packages/github` offers bounded REST `Link` traversal and GraphQL cursor traversal, rate-limit classification and explicit unknown visibility. Its fixtures are synthetic. It does not call GitHub, checkpoint a real scan, verify installed permissions, prove more than one page of live history, or enable any row in this matrix. The runtime transport, persistence/checkpointing and authorized canary remain later acceptance work under #41 and #45.
+Current [source adapters](GITHUB_SOURCE_ADAPTERS.md) include bounded REST and GraphQL collection, retained scan checkpoints, exact event hydration and explicit public-source checks. Their synthetic tests establish implementation behavior separately from installed-App acceptance. The external-reader observations below did not execute that production client, its checkpoint/retry paths or a webhook receiver, and enable no row in this matrix.
+
+## Public REST observations from an existing connected reader
+
+A bounded read on **2026-10-19, 04:46:12–04:50:21 UTC** supplies actual public-source examples for #41. The [sanitized observation manifest](evidence/github-rest-observation-2026-10-19.json) records the selected fields, source endpoints, comparison counts and explicitly checked omissions. These are real repository observations, kept outside synthetic fixtures and ranking inputs.
+
+The reader accessed only public resources in `Pick-Your-AI/pick-your-ai-leaderboard`, repository ID `1422874501`. Its responses did not expose credential kind, application/installation identity, granted installation permissions, requested API version, HTTP response status, `Link` or quota headers. The returned connection-relative repository role object does not establish the separately installed product App's grant. **The installed-App matrix above remains unprobed / not enabled.** No App registration, permission change, webhook delivery or deployment is established by this observation.
+
+### What the returned records establish
+
+| Exact observed source | Retained evidence | Boundary |
+| --- | --- | --- |
+| [Issue-type event 33498902149](https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events/33498902149) | `issue_type_added`; actor account `5861166`; event time `2026-10-17T02:42:38Z`; issue ID `5894072060`; target type ID `906513009` | A real issue-type transition example. It does not establish native issue-field changes or any Project field family. Collection and exact hydration had identical inputs to the current timeline revision function; no production normalization or metric eligibility was exercised. |
+| [Project item status event 33498905106](https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events/33498905106) | Event ID, actor and occurrence time were present | Project identity, previous/new status and automation flag were absent from the returned event. These REST fields cannot satisfy the existing typed Project-status adapter. This does not determine whether a separately authorized GraphQL read could supply them. |
+| [Parent event 33498902326](https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events/33498902326) and [blocker event 33499563027](https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events/33499563027) | Actor/time-bearing actions, exact subject ID, linked issue numbers and public repository identity | Linked endpoints omitted their issue database and node IDs. No historical endpoint identity was filled from current snapshots. These REST representations are distinct from the adapter's GraphQL typed-history contract; removals and reorder history remain unprobed. |
+| [Issue #41 current metadata](https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/41) and native relationship endpoints | Current type, empty `issue_field_values`, no current sub-issues, and one listed blocker whose current state was closed | Current membership/state supplies no historical actor or change time. The empty field list does not establish that native issue fields are unsupported. The dependency summary's zero open blockers and one total blocker describe different quantities. |
+| [PR #337 reviews](https://api.github.com/repos/Pick-Your-AI/pick-your-ai-leaderboard/pulls/337/reviews?per_page=100&page=1) | Twenty stable review IDs with submission times, commit pins and one actor account | All observed states were `COMMENTED`. They are neither twenty distinct humans nor an `APPROVED` review. GitHub `User` identifies an account, without proving its operator or manual work. Edit, dismissal and thread-resolution histories were not qualified. |
+
+The raw issue-event collection and timeline share the same twelve stable event IDs in order. Eleven additional timeline records were cross-references without a top-level event ID; none received an invented identity. A label-application event also occurred, but the returned label target contained its name without an ID. This is not label-definition or rename history, and the current issue's label ID was not used to repair the historical event.
+
+### What the page comparison establishes
+
+Each collection was read using explicit `per_page=10&page=N` requests, including an empty final page, then compared with a separate `per_page=100&page=1` response. The full concatenated **parsed JSON values before sanitization** matched the comparison read exactly.
+
+| Collection | Observed page sizes | Separate comparison count |
+| --- | --- | --- |
+| Issue #41 timeline | 10, 10, 3, 0 | 23 |
+| Issue #41 events | 10, 2, 0 | 12 |
+| PR #337 reviews | 10, 10, 0 | 20 |
+
+This proves agreement within these bounded reads. It does not exercise HTTP `Link` traversal, histories larger than 100 records, concurrent-change recovery, checkpoint reuse, rate limits or the product collector. Later public activity can change those same endpoints.
+
+The separate `/repos/Pick-Your-AI/pick-your-ai-leaderboard/issues/events` route was readable, with only its first two-row page inspected; no repository-wide completeness is claimed. The reader rejected `/repos/Pick-Your-AI/pick-your-ai-leaderboard/events` as outside its supported routes, returning `INVALID_ARGUMENT` before exposing any GitHub response. **That connector limit is not a GitHub authorization denial, 404 or proof that the GitHub endpoint is unsupported.**
+
+### Remaining capability evidence
+
+Native issue-field changes, Project item custom-field changes, Project progress-update posts, content edits, label/milestone definition changes, public moderation, relationship removals/transfers/reordering and Project configuration changes remain separately unprobed by this read. A current Project snapshot must never supply a field editor or transition timestamp. No generic GraphQL capability was exposed by this reader; its absence is a tool boundary, not a GitHub API finding.
+
+The next product-App canary needs the actual installation/repository scope and permission grant, explicit API version and response/pagination/quota metadata, and an exact actor-bearing payload for each proposed enabled subtype. Real webhook subscription/delivery and inaccessible/private-source outcomes need their own observations. Existing project authorization permits implementation work; it does not supply those missing source facts. #41 remains open for that evidence and its literal acceptance criteria.
 
 ## Official references
 
@@ -41,6 +79,6 @@
 ## Review trace
 
 - #41 owns source and permission verification, including separate Issue fields, Projects v2 fields, Project status transitions and Project progress-update posts.
-- #45 owns pagination and quotas; the present package is a bounded helper candidate, without live checkpoint or retry execution.
+- #45 owns pagination and quotas; the bounded external-reader page comparison above is separate from production client, checkpoint, retry and installed-App execution.
 - #39 owns the threat model and test-owner mapping; this candidate records mitigations and remaining proof explicitly.
 - #108 owns safe public rendering, URL handling and optional export protections; this candidate describes requirements and test ownership but does not claim a renderer/export exists.
