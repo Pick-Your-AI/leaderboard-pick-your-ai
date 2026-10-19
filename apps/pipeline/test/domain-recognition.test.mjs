@@ -1433,6 +1433,15 @@ test("specialist policy preserves canonical units and separates reviewed credit 
   }
 });
 
+// These domain fixtures remap their PR proofs through the issue-collection
+// harness. They retain every original fact/proof and mode marker, but do not
+// claim the original collected PR binding needed by an optional physical receipt.
+function domainNormalization(input) {
+  const output = structuredClone(input);
+  delete output.physicalContext;
+  return output;
+}
+
 test("the pipeline retains per-source synthetic provenance when flattening recognition inputs", async (t) => {
   const { harness, components } = await import("./harness.mjs");
   const s = scenario();
@@ -1451,7 +1460,7 @@ test("the pipeline retains per-source synthetic provenance when flattening recog
   s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl;
   const h = await harness(t, {
     payloads: [structuredClone(fixture.pull_request)],
-    normalizerFactory: () => async () => ({ ...structuredClone(s.input), isSynthetic: true }),
+    normalizerFactory: () => async () => ({ ...domainNormalization(s.input), isSynthetic: true }),
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {
@@ -1494,7 +1503,7 @@ test("accepted documentation retains bounded domain reasons through primary and 
     markerFreeConfig: true,
     dataMode: "public",
     payloads: [payload],
-    normalizerFactory: () => async () => structuredClone(s.input),
+    normalizerFactory: () => async () => domainNormalization(s.input),
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {
@@ -1571,7 +1580,7 @@ test("data_quality: correction provenance stays private and obsolete generic aut
     markerFreeConfig: true,
     dataMode: "public",
     payloads: [payload],
-    normalizerFactory: () => async () => structuredClone(s.input),
+    normalizerFactory: () => async () => domainNormalization(s.input),
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {
@@ -1679,7 +1688,7 @@ test("reproductions: persisted accepted outcomes keep private proof bounded and 
     markerFreeConfig: true,
     dataMode: "public",
     payloads: [payload],
-    normalizerFactory: () => async () => structuredClone(s.input),
+    normalizerFactory: () => async () => domainNormalization(s.input),
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {

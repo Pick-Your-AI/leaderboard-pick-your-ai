@@ -1,6 +1,10 @@
 // Synthetic public projections and engine receipts; no source or release approval.
 import { createHash } from "node:crypto";
-import { canonicalPublicScope, publicScopeKey } from "../../packages/contracts/dist/index.js";
+import {
+  canonicalPublicScope,
+  publicScopeKey,
+  currentRankingPresentationPolicy,
+} from "../../packages/contracts/dist/index.js";
 import { aggregateMetric, resolveMetricWindow, stableJSON } from "../../packages/metrics/dist/index.js";
 import { normalized, policy, readFixture, scope } from "./pending-metric.mjs";
 
@@ -16,8 +20,12 @@ export function scopeFixture(selectedScope = currentScope) {
 }
 
 export function comparisonFixture(selectedScope, cutoff, id, revision) {
-  const read = scopeFixture(selectedScope);
-  const normalizedInput = normalized();
+  // Only paired-history fixtures opt into the captured display policy. Ordinary
+  // scope/export fixtures retain their legacy policy absence and two actors.
+  const read = readFixture(5);
+  read.selected.scope = structuredClone(selectedScope);
+  read.selected.rankingPresentationPolicy = structuredClone(currentRankingPresentationPolicy);
+  const normalizedInput = normalized(5);
   const engineScope = {
     ...resolveMetricWindow("30d", cutoff),
     repos: ["2"],

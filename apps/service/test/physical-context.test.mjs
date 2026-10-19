@@ -5,7 +5,7 @@ import { board, selection, validateExport } from "../../web/src/remote/client.ts
 import { parseCSVExport } from "../../web/src/remote/csv-export.ts";
 import { githubPhysicalContextReceiptSchema, physicalContextLimits } from "@pick-your-ai/contracts";
 import { physicalFixture } from "../../../tests/fixtures/physical-context.mjs";
-import { projectRead } from "../src/public-source.ts";
+import { projectRead } from "../dist/public-source.js";
 
 function harness(t, options) {
   const h = createPhysicalContextHarness(options);

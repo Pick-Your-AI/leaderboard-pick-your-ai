@@ -23,9 +23,27 @@ test("actual source transport, collection, normalizer, metric engine and API pre
   assert.deepEqual(
     board.rows.map((row) => [row.actorId, row.result.value, row.rank]),
     [
-      ["101", 1, 1],
-      ["102", 1, 1],
+      ["101", 1, null],
+      ["102", 1, null],
     ],
+  );
+  assert.equal(board.rankingPresentation.state, "small_cohort");
+  assert.equal(board.rankingPresentation.comparableContributors, 2);
+  const retained = await h.runtime.source.readComparison(
+    publicScope,
+    board.snapshotId,
+    { snapshotId: board.snapshotId, scope: publicScope },
+    new AbortController().signal,
+  );
+  assert.deepEqual(
+    retained.currentHistory.metrics
+      .find((entry) => entry.metricId === "issues_opened")
+      .rows.map((row) => [row.actorId, row.rank]),
+    [
+      ["101", 1],
+      ["102", 1],
+    ],
+    "the display convention preserves the original tied private ranks",
   );
   const id = board.rows.find((row) => row.actorId === "101").evidenceIds[0];
   const proof = (await h.runtime.app.inject(`/api/v1/evidence/${id}?snapshot=${board.snapshotId}`)).json();
@@ -1208,7 +1226,21 @@ test("materialization retains separate pending provenance through replay and rev
   assert.equal(row.pending.count, 3);
   assert.equal(row.pending.state, "partial");
   assert.equal(row.pending.evidenceIds.length, 3);
-  assert.equal(row.rank, 2);
+  assert.equal(row.rank, null);
+  assert.equal(before.rankingPresentation.state, "small_cohort");
+  assert.equal(before.rankingPresentation.comparableContributors, 2);
+  const retainedRank = async (snapshotId) => {
+    const paired = await h.runtime.source.readComparison(
+      publicScope,
+      snapshotId,
+      { snapshotId, scope: publicScope },
+      new AbortController().signal,
+    );
+    return paired.currentHistory.metrics
+      .find((entry) => entry.metricId === "pr_merged")
+      .rows.find((entry) => entry.actorId === "101").rank;
+  };
+  assert.equal(await retainedRank(before.snapshotId), 2);
   assert.equal(before.rows.find((entry) => entry.actorId === "102").pending.count, null);
   h.duplicate();
   await h.runtime.runOnce();
@@ -1244,10 +1276,13 @@ test("materialization retains separate pending provenance through replay and rev
   assert.deepEqual(pinned.pending.evidenceIds, []);
   assert.equal(pinned.result.value, 14);
   await h.runtime.runOnce();
-  const corrected = (await h.runtime.app.inject(url)).json().rows.find((entry) => entry.actorId === "101");
+  const correctedBoard = (await h.runtime.app.inject(url)).json();
+  const corrected = correctedBoard.rows.find((entry) => entry.actorId === "101");
   assert.equal(corrected.pending.count, 2);
   assert.equal(corrected.result.value, 14);
-  assert.equal(corrected.rank, 2);
+  assert.equal(corrected.rank, null);
+  assert.equal(correctedBoard.rankingPresentation.state, "small_cohort");
+  assert.equal(await retainedRank(correctedBoard.snapshotId), 2);
   const exported = (await h.runtime.app.inject("/api/v1/exports?metric=pr_merged&format=json")).json();
   assert.equal(exported.pendingEvidence.length, 2);
   assert.equal(exported.rows.find((entry) => entry.actorId === "101").pending.count, 2);
