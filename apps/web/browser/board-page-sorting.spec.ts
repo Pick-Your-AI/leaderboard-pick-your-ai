@@ -161,7 +161,10 @@ test("current suppression and failed reads remove sorted row content and stale s
     await order(page).selectOption("rank_descending");
     api.harness.fail();
     await page.getByRole("button", { name: "Recheck current publication controls", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("public_snapshot_unavailable");
+    const unavailable = page.getByRole("alert");
+    await expect(unavailable.getByRole("heading", { name: "Public read unavailable", exact: true })).toBeVisible();
+    await expect(unavailable).toContainText("public_projection_unavailable");
+    await expect(unavailable).not.toContainText("SENSITIVE_SYNTHETIC_COMPARISON_PROVIDER_FAILURE");
     await expect(
       page.getByRole("region", { name: "Published contributions", exact: true, includeHidden: true }),
     ).toHaveCount(0);
