@@ -1,0 +1,113 @@
+{
+  "schemaVersion": "program-directory/v1",
+  "version": "programs/2026-10-18",
+  "organization": "Pick-Your-AI",
+  "observedOn": "2026-10-18",
+  "sourceUrl": "https://github.com/Pick-Your-AI/leaderboard-pick-your-ai/blob/699550ee6030f2c53ac174d779319cde264f5f1f/planning/organization-inventory-2026-10-18.json",
+  "repositories": [
+    {
+      "id": "1421934086",
+      "name": "pick-your-ai-research"
+    },
+    {
+      "id": "1422238606",
+      "name": "pickyour.ai"
+    },
+    {
+      "id": "1422897313",
+      "name": "pick-your-ai-android"
+    },
+    {
+      "id": "1422897390",
+      "name": "pick-your-ai-apple"
+    }
+  ],
+  "programs": [
+    {
+      "id": "research",
+      "name": "AI Builder Research",
+      "projectId": "PVT_kwDOFHg4Xc4BnUon",
+      "projectNumber": 1,
+      "repositoryIds": [
+        "1421934086"
+      ],
+      "fieldNames": [
+        "Status",
+        "Priority",
+        "Tier",
+        "Readiness",
+        "Work Type",
+        "Research Confidence",
+        "Dependency Status"
+      ]
+    },
+    {
+      "id": "market",
+      "name": "Pick Your AI — Market Research & Competitive Intelligence",
+      "projectId": "PVT_kwDOFHg4Xc4BnViW",
+      "projectNumber": 2,
+      "repositoryIds": [
+        "1421934086"
+      ],
+      "fieldNames": [
+        "Status",
+        "Priority",
+        "Research Area",
+        "Workstream",
+        "Work Type",
+        "Evidence Confidence",
+        "Research Readiness",
+        "Opportunity Impact",
+        "Effort"
+      ]
+    },
+    {
+      "id": "website",
+      "name": "PickYour.AI Website Implementation",
+      "projectId": "PVT_kwDOFHg4Xc4BnX2e",
+      "projectNumber": 3,
+      "repositoryIds": [
+        "1422238606"
+      ],
+      "fieldNames": [
+        "Status"
+      ]
+    },
+    {
+      "id": "android",
+      "name": "Pick Your AI — Android Application Delivery",
+      "projectId": "PVT_kwDOFHg4Xc4BnbMJ",
+      "projectNumber": 4,
+      "repositoryIds": [
+        "1422897313"
+      ],
+      "fieldNames": [
+        "Status",
+        "Priority",
+        "Phase",
+        "Workstream",
+        "Readiness",
+        "Acceptance Gate",
+        "Level"
+      ]
+    },
+    {
+      "id": "apple",
+      "name": "Pick Your AI — Apple/iOS Application Delivery",
+      "projectId": "PVT_kwDOFHg4Xc4BnbQs",
+      "projectNumber": 5,
+      "repositoryIds": [
+        "1422897390"
+      ],
+      "fieldNames": [
+        "Status",
+        "Priority",
+        "Phase",
+        "Workstream",
+        "Readiness",
+        "Acceptance Gate",
+        "Level"
+      ]
+    }
+  ]
+}
