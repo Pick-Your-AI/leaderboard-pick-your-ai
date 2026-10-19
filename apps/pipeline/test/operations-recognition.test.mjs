@@ -764,7 +764,9 @@ test("operations: every unaffected registry metric and the established mixed mar
   for (const definition of metricRegistryV1.metrics) {
     if (metrics.includes(definition.id)) continue;
     const bindings = [{ ...s.binding, metricId: definition.id }];
-    assert.equal(recognitionFingerprint(s.state, bindings), priorAuthority(s.state, bindings), definition.id);
+    if (definition.id === "release_changes")
+      assert.notEqual(recognitionFingerprint(s.state, bindings), priorAuthority(s.state, bindings));
+    else assert.equal(recognitionFingerprint(s.state, bindings), priorAuthority(s.state, bindings), definition.id);
   }
   const bindings = [
     "data_quality",

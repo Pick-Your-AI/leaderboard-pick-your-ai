@@ -6,6 +6,7 @@ import { nominateSpotlight, decideSpotlight, projectSpotlights } from "./editori
 import { createConfigurationManager } from "./configuration.mjs";
 import { createPolicyComparisonManager } from "./policy-comparison.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "./localization-review.mjs";
+import { releaseReviewRequest, parseReleaseReviewTarget } from "./release-review.mjs";
 
 const random = () => randomBytes(32).toString("base64url");
 const hash = (value) => createHash("sha256").update(value).digest("base64url");
@@ -566,16 +567,17 @@ export function createControlsServer({
               );
               requireThat(typeof input.consent === "boolean" && !["withdrawn", "merged"].includes(request.status));
               const nextConsent = input.consent ? "accepted" : "declined";
-              const localeReviewRequired =
+              const previousAcceptance = request.history.findLast((entry) => entry.action === "accepted");
+              const targetReviewRequired =
                 request.status === "accepted" &&
-                request.history.findLast((entry) => entry.action === "accepted")?.localization !== undefined;
-              // Exact locale acceptance binds the reviewed request version. A
+                (previousAcceptance?.localization !== undefined || previousAcceptance?.releaseInclusion !== undefined);
+              // Exact source-target acceptance binds the reviewed request version. A
               // changed attribution must become reviewable, not remain accepted
               // with a stale decision that blocks every subsequent publication.
-              if (localeReviewRequired && request.collaborators[session.actorId] === nextConsent)
+              if (targetReviewRequired && request.collaborators[session.actorId] === nextConsent)
                 return { id: request.id, status: request.status, version: request.version };
               request.collaborators[session.actorId] = nextConsent;
-              if (localeReviewRequired) {
+              if (targetReviewRequired) {
                 request.status = "pending";
                 delete request.policyVersion;
               }
@@ -585,7 +587,7 @@ export function createControlsServer({
                 session.actorId,
                 input.consent ? "attribution-accepted" : "attribution-declined",
                 timestamp,
-                ...(localeReviewRequired ? [{ reviewRequired: true, previousStatus: "accepted" }] : []),
+                ...(targetReviewRequired ? [{ reviewRequired: true, previousStatus: "accepted" }] : []),
               );
             } else if (action === "withdraw") {
               exactKeys(input, ["version"]);
@@ -609,6 +611,7 @@ export function createControlsServer({
                 "sourceReviewedPublic",
                 "duplicateOf",
                 "localization",
+                "releaseInclusion",
               ]);
               requireThat(session.roles.includes(roleNeeded(request)), 403, "Reviewer role required");
               requireThat(
@@ -618,7 +621,11 @@ export function createControlsServer({
               );
               requireThat(input.conflict === false, 403, "Declare conflicts and route to an independent reviewer");
               requireThat(["accept", "reject", "rollback", "merge"].includes(input.decision));
-              requireThat(input.decision === "accept" || input.localization === undefined);
+              requireThat(
+                input.decision === "accept" ||
+                  (input.localization === undefined && input.releaseInclusion === undefined),
+              );
+              requireThat(input.localization === undefined || input.releaseInclusion === undefined);
               requireThat(!["withdrawn", "merged", "applied"].includes(request.status), 409, "Request is terminal");
               if (request.status === "appealed" || input.decision === "rollback") {
                 requireThat(
@@ -664,12 +671,26 @@ export function createControlsServer({
                     throw new ControlError(400, "Invalid localization review target");
                   }
                 }
+                let releaseInclusion;
+                if (input.releaseInclusion !== undefined) {
+                  try {
+                    releaseInclusion = parseReleaseReviewTarget(input.releaseInclusion);
+                  } catch {
+                    throw new ControlError(400, "Invalid release review target");
+                  }
+                  requireThat(
+                    releaseInclusion.policyVersion === policyVersion,
+                    400,
+                    "Release review policy does not match acceptance",
+                  );
+                }
                 request.policyVersion = policyVersion;
                 request.status = "accepted";
                 record(s, request, session.actorId, "accepted", timestamp, {
                   reason,
                   policyVersion: request.policyVersion,
                   ...(localization ? { localization, evidenceRequest: localizationReviewRequest(request) } : {}),
+                  ...(releaseInclusion ? { releaseInclusion, evidenceRequest: releaseReviewRequest(request) } : {}),
                 });
               } else if (input.decision === "reject") {
                 requireThat(["pending", "appealed"].includes(request.status), 409, "Already reviewed");

@@ -21,6 +21,12 @@ import {
 } from "@pick-your-ai/contracts";
 import { GithubReadClient } from "./client.js";
 import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
+import { collectGithubReleaseInclusion, type GithubReleaseInclusionRecord } from "./release-inclusion.js";
+import {
+  validateReleaseChangesSource,
+  type GithubReleaseReviewTarget,
+  type GithubReleaseMembership,
+} from "./release-recognition.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
@@ -164,6 +170,8 @@ export interface NormalizedGithubFact {
   firstReviewAt?: string | null;
   /** Original observed locale unit superseded only in descriptive current activity. */
   recognitionSourceFactId?: string;
+  /** Private accepted release membership and conserved work identity. */
+  releaseInclusion?: GithubReleaseMembership;
 }
 export interface NormalizedGithubActor {
   id: string;
@@ -224,6 +232,8 @@ export interface NormalizedGithubResult {
   isSynthetic: boolean;
   /** Private provenance retained when the pipeline combines observation results. */
   syntheticFactIds?: readonly string[];
+  /** Private output of the bounded authorized release collector. */
+  releaseInclusions?: readonly GithubReleaseInclusionRecord[];
   facts: NormalizedGithubFact[];
   actors: NormalizedGithubActor[];
   evidence: NormalizedPublicEvidence[];
@@ -1305,6 +1315,8 @@ export interface VerifiedRecognitionReceipt {
   changesetId?: string;
   /** Exact immutable merge revision reviewed for a localization target. */
   sourceRevision?: string;
+  /** Exact target authenticated in the private release acceptance audit. */
+  releaseInclusion?: GithubReleaseReviewTarget;
 }
 const receiptMetrics = new Set([
   "catalog_proposals",
@@ -1407,11 +1419,19 @@ export function applyRecognitionReceipt(
       : receipt.metricId === "automation"
         ? validateAutomationSource(input, target.id, receipt.acceptedAt)
         : null;
-  const unit = mergedChange
-    ? mergedChange.unit
-    : receipt.metricId === "localization"
-      ? target.canonicalKey
-      : (receipt.changesetId ?? target.canonicalKey);
+  const release =
+    receipt.metricId === "release_changes"
+      ? validateReleaseChangesSource(input, target.id, receipt.acceptedAt, receipt.releaseInclusion)
+      : null;
+  if (release && (receipt.evidenceIds.length !== 1 || receipt.evidenceIds[0] !== target.id))
+    throw new Error("release_inclusion_source_unverified");
+  const unit = release
+    ? release.membershipUnit
+    : mergedChange
+      ? mergedChange.unit
+      : receipt.metricId === "localization"
+        ? target.canonicalKey
+        : (receipt.changesetId ?? target.canonicalKey);
   if (receipt.metricId === "localization" && target.state !== "observed")
     throw new Error("Localization acceptance must target its original observed source fact");
   if (
@@ -1437,17 +1457,37 @@ export function applyRecognitionReceipt(
     acceptedBy: receipt.reviewerId,
     acceptanceReceipt: receipt.id,
     ...(receipt.metricId === "localization" ? { recognitionSourceFactId: target.id } : {}),
+    ...(release
+      ? {
+          occurredAt: release.record.release.publishedAt,
+          observedAt: release.observedAt,
+          releaseInclusion: release.membership,
+        }
+      : {}),
   };
   out.facts.push(fact);
   const evidence = targetEvidence;
   if (evidence)
     out.evidence.push({
       ...structuredClone(evidence),
-      occurredAt: receipt.metricId === "localization" || mergedChange ? target.occurredAt : fact.acceptedAt,
+      occurredAt: release
+        ? release.record.release.publishedAt
+        : receipt.metricId === "localization" || mergedChange
+          ? target.occurredAt
+          : fact.acceptedAt,
+      ...(release
+        ? {
+            sourceRevision: release.record.tag.commitSha,
+            sourceRevisionUrl: `https://github.com/${release.record.repository.slug}/commit/${release.record.tag.commitSha}`,
+          }
+        : {}),
       ...(evidence.evidenceMetadata
         ? {
             evidenceMetadata: {
               ...structuredClone(evidence.evidenceMetadata),
+              ...(release
+                ? { sourceOccurredAt: release.record.release.publishedAt, observedAt: release.observedAt }
+                : {}),
               sourceAction: receipt.decision === "accepted" ? ("recognition_accepted" as const) : ("unknown" as const),
               activityState: receipt.decision === "accepted" ? ("accepted" as const) : ("unknown" as const),
               acceptedAt: receipt.decision === "accepted" ? fact.acceptedAt : null,
@@ -1528,10 +1568,32 @@ export interface GithubEvidenceNormalizerOptions {
   documentationPolicies?: readonly DocumentationPathPolicy[];
   researchPolicies?: readonly ResearchPathPolicy[];
   projectWorkstreamMappings?: readonly (ProjectWorkstreamMapping & { repositoryId: number })[];
+  /** Protected, finite selections; submitted notes cannot nominate release proof. */
+  releaseInclusionTargets?: readonly { repositoryId: number; releaseId: number; pullRequestNumber: number }[];
 }
 
 /** Read-only collection-to-metric adapter. Lossy snapshots are hydrated rather than guessed. */
 export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizerOptions) {
+  const releaseTargets = structuredClone(options.releaseInclusionTargets ?? []);
+  if (
+    !Array.isArray(releaseTargets) ||
+    releaseTargets.length > 1000 ||
+    releaseTargets.some(
+      (target) =>
+        !object(target) ||
+        Object.keys(target).sort().join(",") !== "pullRequestNumber,releaseId,repositoryId" ||
+        ![target.repositoryId, target.releaseId, target.pullRequestNumber].every(
+          (id) => typeof id === "number" && Number.isSafeInteger(id) && id > 0,
+        ) ||
+        typeof target.repositoryId !== "number" ||
+        !options.allowedRepositoryIds.includes(target.repositoryId),
+    ) ||
+    new Set(
+      releaseTargets.map((target) => JSON.stringify([target.repositoryId, target.releaseId, target.pullRequestNumber])),
+    ).size !== releaseTargets.length ||
+    (releaseTargets.length > 0 && typeof options.assertAuthorized !== "function")
+  )
+    throw new Error("invalid_release_inclusion_targets");
   const projectMappings = structuredClone(options.projectWorkstreamMappings ?? []);
   if (
     !Array.isArray(projectMappings) ||
@@ -1958,6 +2020,29 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           ? { discussionAnswerSelection: { verified: true as const } }
           : {}),
       });
+    }
+    if (input.family === "pull_requests" && normalized.isSynthetic !== true) {
+      const candidates = releaseTargets.filter(
+        (target) =>
+          target.repositoryId === input.repository.id &&
+          input.fact.sourceUrl === `https://github.com/${input.repository.slug}/pull/${target.pullRequestNumber}`,
+      );
+      if (candidates.length) {
+        const records: GithubReleaseInclusionRecord[] = [];
+        for (const target of candidates)
+          records.push(
+            await collectGithubReleaseInclusion({
+              client: client(),
+              source: options.source,
+              repository: input.repository,
+              releaseId: target.releaseId,
+              pullRequestNumber: target.pullRequestNumber,
+              observedAt: input.observedAt,
+              assertAuthorized: options.assertAuthorized!,
+            }),
+          );
+        normalized.releaseInclusions = records;
+      }
     }
     if (options.acceptance)
       for (const receipt of await options.acceptance(input, normalized)) {

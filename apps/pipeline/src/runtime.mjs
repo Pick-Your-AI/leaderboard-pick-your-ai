@@ -254,13 +254,19 @@ export async function createPipeline(options) {
   // Retained Project history still participates after active collection stops.
   // Keep its new semantics in a distinct cache generation for every configuration,
   // so reprocessing cannot overwrite an earlier frozen normalization dependency.
-  const normalizationSignature = digest([
+  const projectNormalizationSignature = digest([
     "project-membership-context/v1",
     verifiedMergeNormalizationSignature,
     projectWorkstreamMappings,
   ]);
+  // A newly selected release must collect its own proof even when the PR's
+  // ordinary source revision and metric arithmetic remain unchanged.
+  const normalizationSignature = config.releaseInclusionTargets?.length
+    ? digest(["github-release-inclusion/v1", projectNormalizationSignature, config.releaseInclusionTargets])
+    : projectNormalizationSignature;
   const frozenNormalizationSignatures = [
     normalizationSignature,
+    projectNormalizationSignature,
     verifiedMergeNormalizationSignature,
     documentationNormalizationSignature,
     attributionNormalizationSignature,
@@ -595,6 +601,7 @@ export async function createPipeline(options) {
           assertAuthorized: () => assertRunConfiguration(),
           documentationPolicies: config.documentationPolicies ?? [],
           researchPolicies: config.researchPolicies ?? [],
+          releaseInclusionTargets: config.releaseInclusionTargets ?? [],
           projectWorkstreamMappings,
           ...(options.githubEnrich ? { enrich: options.githubEnrich } : {}),
         })
@@ -1068,6 +1075,37 @@ export async function createPipeline(options) {
       // Persist authoritative exclusions even when this dispatch cannot yet
       // prove the target creation. Failure must not leave older evidence visible.
       if (!hasDispatchEvidence(output, dispatch, row)) fail("dispatch_enrichment_unavailable");
+      // Keep collector products private and bound to this source repository.
+      // The normalizer's public evidence is validated separately above; copying
+      // this explicit, minimized field never expands that public boundary.
+      let releaseInclusions;
+      if (output.releaseInclusions !== undefined) {
+        if (!Array.isArray(output.releaseInclusions) || output.releaseInclusions.length > 1000)
+          fail("invalid_normalized_release_inclusions");
+        releaseInclusions = output.releaseInclusions.map((value) => {
+          const record = c.github.validateGithubReleaseInclusion(value);
+          if (
+            row.family !== "pull_requests" ||
+            record.repository.id !== repository.id ||
+            String(record.repository.id) !== String(row.repository_id) ||
+            record.repository.slug !== repository.slug ||
+            !output.facts.some((fact) => fact.metricId === "pr_merged" && fact.artifactId === record.pullRequest.nodeId)
+          )
+            fail("normalized_release_inclusion_scope_mismatch");
+          return record;
+        });
+      }
+      let syntheticFactIds;
+      if (output.syntheticFactIds !== undefined) {
+        if (
+          !Array.isArray(output.syntheticFactIds) ||
+          output.syntheticFactIds.length > output.facts.length ||
+          new Set(output.syntheticFactIds).size !== output.syntheticFactIds.length ||
+          output.syntheticFactIds.some((id) => typeof id !== "string" || !output.facts.some((fact) => fact.id === id))
+        )
+          fail("invalid_normalized_synthetic_facts");
+        syntheticFactIds = [...output.syntheticFactIds];
+      }
       const document = {
         ...(row.family === "project_history" ? { projectHistoryNormalizationVersion: "collected-subject/v2" } : {}),
         ...(row.family === "project_current" && row.document.projectSubjectId !== undefined
@@ -1078,6 +1116,8 @@ export async function createPipeline(options) {
         facts: output.facts,
         actors: output.actors,
         evidence: output.evidence,
+        ...(releaseInclusions === undefined ? {} : { releaseInclusions }),
+        ...(syntheticFactIds === undefined ? {} : { syntheticFactIds }),
         ...privateAttribution(output, row),
         ...normalizedProjectContext(output, row, repository, projectWorkstreamMappings),
         reasons: Array.isArray(output.reasons)
@@ -1306,7 +1346,11 @@ export async function createPipeline(options) {
         facts: outputs.flatMap((o) => o.facts),
         actors: [...actors.values()],
         evidence: outputs.flatMap((o) => o.evidence),
-        syntheticFactIds: outputs.filter((o) => o.isSynthetic === true).flatMap((o) => o.facts.map((fact) => fact.id)),
+        releaseInclusions: outputs.flatMap((o) => o.releaseInclusions ?? []),
+        syntheticFactIds: outputs.flatMap((o) => [
+          ...(o.syntheticFactIds ?? []),
+          ...(o.isSynthetic === true ? o.facts.map((fact) => fact.id) : []),
+        ]),
         reasons: [],
       };
       combined.facts = [

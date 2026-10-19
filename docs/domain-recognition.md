@@ -322,3 +322,7 @@ measurement review, reviewer enrollment, affected-owner acceptance, external
 artifact adapters, policy activation and service delivery remain separate work.
 No real participant study, device/accessibility session, benchmark, source grant,
 security disclosure approval or public launch is asserted by these fixtures.
+
+The separate [release-inclusion adapter](release-inclusion.md) binds reviewed
+accepted PR membership to a collected immutable release and its publication clock.
+It does not infer authorship of release notes or stewardship from a publisher.

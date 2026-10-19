@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
 import { compareSourceInstants, sourceEventSchema } from "@pick-your-ai/contracts";
-import { validateAutomationSource, validateMaintenanceSource } from "@pick-your-ai/github";
+import {
+  validateAutomationSource,
+  validateMaintenanceSource,
+  validateReleaseChangesSource,
+} from "@pick-your-ai/github";
 import { domainDateBasis, qualifyDomainRecognition } from "./domain-recognition.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
+import { releaseReviewRequest, parseReleaseReviewTarget } from "../../controls/src/release-review.mjs";
 
 // Private controls only. Never accept a public claim projection as authentication.
 export function recognitionFingerprint(state, bindings = []) {
@@ -45,6 +50,9 @@ export function recognitionFingerprint(state, bindings = []) {
   // and affected-owner evidence boundary. Unrelated configurations stay exact.
   if (bindings.some((binding) => ["governance", "deployment_work", "incidents"].includes(binding.metricId)))
     authority.push("operations-contribution-evidence/v1");
+  // Generic release receipts lacked a collected immutable inclusion and publication clock.
+  if (bindings.some((binding) => binding.metricId === "release_changes"))
+    authority.push("release-inclusion-recognition/v1");
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
@@ -60,6 +68,7 @@ export function materializeRecognition(
   let output = structuredClone(input);
   const domainUnits = new Set();
   const mergedChangeUnits = new Set();
+  const releaseMemberships = new Set();
   const domainReasons = new Map();
   const reviewedOperationArtifacts = new Map();
   const decisionTime = (request) => {
@@ -114,15 +123,18 @@ export function materializeRecognition(
       });
       if (localeReasons.length !== 3) throw new Error("invalid_localization_binding");
     }
-    const requiredDateBasis =
-      binding.metricId === "maintenance" || binding.metricId === "automation"
-        ? "occurredAt"
-        : domainDateBasis(binding.metricId);
+    const requiredDateBasis = ["maintenance", "automation", "release_changes"].includes(binding.metricId)
+      ? "occurredAt"
+      : domainDateBasis(binding.metricId);
     if (
       !policies.some(
         (p) =>
           p.policy.metricId === binding.metricId &&
           p.policy.version === binding.policyVersion &&
+          (binding.metricId !== "release_changes" ||
+            (p.policy.groupingPolicyVersion === "release-inclusion-units/v1" &&
+              p.policy.roles?.length === 1 &&
+              p.policy.roles[0] === "author")) &&
           (requiredDateBasis !== null
             ? p.policy.dateBasis === requiredDateBasis &&
               p.policy.groupBy === "canonical" &&
@@ -189,6 +201,26 @@ export function materializeRecognition(
       )
         continue;
     }
+    let releaseTarget = null;
+    if (binding.metricId === "release_changes") {
+      try {
+        releaseTarget = parseReleaseReviewTarget(decision.releaseInclusion);
+        const configured = parseReleaseReviewTarget(binding.releaseInclusion);
+        if (
+          JSON.stringify(releaseTarget) !== JSON.stringify(configured) ||
+          releaseTarget.policyVersion !== binding.policyVersion ||
+          binding.sourceMetricId !== "pr_merged" ||
+          decision.receipt !== request.id ||
+          !Number.isSafeInteger(request.version) ||
+          request.version < 1 ||
+          decision.version !== request.version ||
+          JSON.stringify(decision.evidenceRequest) !== JSON.stringify(releaseReviewRequest(request))
+        )
+          throw new Error();
+      } catch {
+        throw new Error("release_inclusion_review_unverified");
+      }
+    }
     const candidates = input.facts.filter(
       (f) =>
         f.actorId === request.owner &&
@@ -249,6 +281,11 @@ export function materializeRecognition(
         : binding.metricId === "automation"
           ? validateAutomationSource(input, candidates[0].id, acceptedAt)
           : null;
+    const release = releaseTarget
+      ? validateReleaseChangesSource(input, candidates[0].id, acceptedAt, releaseTarget)
+      : null;
+    if (release && compareSourceInstants(release.observedAt, cutoff) > 0)
+      throw new Error("release_inclusion_source_unverified");
     const domain = qualifyDomainRecognition({
       input,
       request,
@@ -275,6 +312,11 @@ export function materializeRecognition(
       if (mergedChangeUnits.has(mergedChange.unit)) continue;
       mergedChangeUnits.add(mergedChange.unit);
     }
+    if (release) {
+      // Validate each review and proof before selecting a repeated membership.
+      if (releaseMemberships.has(release.membershipUnit)) continue;
+      releaseMemberships.add(release.membershipUnit);
+    }
     const previousFacts = output.facts.length;
     const previousEvidence = output.evidence.length;
     output = applyReceipt(
@@ -291,6 +333,7 @@ export function materializeRecognition(
         evidenceIds: [candidates[0].id],
         ...(domain ? { changesetId: domain.changesetId } : {}),
         ...(localeTarget ? { sourceRevision: localeTarget.sourceRevision } : {}),
+        ...(releaseTarget ? { releaseInclusion: releaseTarget } : {}),
       },
       binding.reviewerIds,
     );
