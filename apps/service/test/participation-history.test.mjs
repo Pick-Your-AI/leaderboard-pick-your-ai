@@ -794,3 +794,82 @@ test("organization history never certifies a bot, automated account or missing h
   );
   assert.equal((await read(app)).json().history.reason, "qualifying_actor_unavailable");
 });
+
+test("reversion contribution authority rejects mismatched history before fresh, pinned or conditional proof reads", async (t) => {
+  const { app, pair } = harness(t),
+    initial = await read(app),
+    before = initial.json().history,
+    proofId = before.firstProof.proof.contributionId;
+  assert.equal(before.state, "known");
+  assert.equal(proofId, "synthetic-earlier-review");
+  for (const side of ["current", "history"]) {
+    delete pair.current.controls.suppressedContributionIds;
+    delete pair.history.publication.controls.suppressedContributionIds;
+    const controls = side === "current" ? pair.current.controls : pair.history.publication.controls;
+    controls.suppressedContributionIds = [proofId];
+    assert.equal(pair.current.controls.version, pair.history.publication.controls.version);
+    for (const url of [
+      historyPath,
+      `${historyPath}&snapshot=${pair.current.selected.snapshot.snapshotId}`,
+      proofPath(before),
+    ]) {
+      for (const headers of [{}, { "if-none-match": initial.headers.etag }]) {
+        const response = await app.inject({ url, headers });
+        assert.equal(response.statusCode, 503, response.body);
+        assert.equal(response.json().error, "participation_history_authority_changed");
+        assert.equal(response.body.includes(proofId), false);
+        assert.equal(response.body.includes("firstProof"), false);
+      }
+    }
+  }
+});
+
+test("reversion contribution authority with matching suppression withholds history without promoting later work", async (t) => {
+  const { app, pair } = harness(t),
+    initial = await read(app),
+    before = initial.json().history,
+    proofId = before.firstProof.proof.contributionId;
+  pair.current.controls.suppressedContributionIds = [proofId];
+  pair.history.publication.controls.suppressedContributionIds = [proofId];
+  const unchanged = structuredClone(pair);
+  const response = await app.inject({ url: historyPath, headers: { "if-none-match": initial.headers.etag } });
+  assert.equal(response.statusCode, 200, response.body);
+  const after = response.json().history;
+  assert.equal(after.state, "unknown");
+  assert.equal(after.reason, "history_evidence_unavailable");
+  assert.equal(after.firstProof, null);
+  assert.equal(after.newcomer, null);
+  assert.equal(response.body.includes(proofId), false);
+  assert.equal(response.body.includes("synthetic-recent-author"), false);
+  assert.equal((await app.inject(proofPath(before))).statusCode, 409);
+  assert.equal(
+    (await read(app, `${historyPath}&snapshot=${pair.current.selected.snapshot.snapshotId}`)).json().history.firstProof,
+    null,
+  );
+  assert.deepEqual(pair, unchanged);
+});
+
+test("reversion contribution authority preserves legacy absence, explicit emptiness and unordered equal sets", async (t) => {
+  const { app, pair } = harness(t),
+    before = (await read(app)).json().history;
+  for (const [current, historical] of [
+    [undefined, undefined],
+    [undefined, []],
+    [[], undefined],
+    [[], []],
+    [
+      ["synthetic-unrelated-a", "synthetic-unrelated-b"],
+      ["synthetic-unrelated-b", "synthetic-unrelated-a"],
+    ],
+  ]) {
+    delete pair.current.controls.suppressedContributionIds;
+    delete pair.history.publication.controls.suppressedContributionIds;
+    if (current !== undefined) pair.current.controls.suppressedContributionIds = [...current];
+    if (historical !== undefined) pair.history.publication.controls.suppressedContributionIds = [...historical];
+    const unchanged = structuredClone(pair);
+    const after = (await read(app)).json().history;
+    assert.equal(after.state, "known");
+    assert.deepEqual(after.firstProof, before.firstProof);
+    assert.deepEqual(pair, unchanged);
+  }
+});

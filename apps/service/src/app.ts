@@ -33,6 +33,7 @@ import {
 import {
   projectRead,
   filterPublicActors,
+  readSuppressedContributionIds,
   PublicReadError,
   unavailableSource,
   type PublicRead,
@@ -311,6 +312,7 @@ export function createService(options: ServiceOptions = {}) {
           [...read.controls.suppressedActorIds].sort(),
           [...read.controls.suppressedArtifactIds].sort(),
           [...read.controls.revokedSnapshotIds].sort(),
+          readSuppressedContributionIds(read.controls).sort(),
         ]);
       // A broken provider pairing must not publish earlier current rows under a
       // different privacy authority merely because movement can be withheld.
