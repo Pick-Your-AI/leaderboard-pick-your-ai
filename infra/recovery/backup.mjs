@@ -229,8 +229,9 @@ export async function restoreBackup({
   await restoreDatabase(decoded.databaseDump);
   // Current deletion/opt-out tombstones must be applied before any restored data is public.
   await reapplySuppressions();
-  const state = await inspectRestoredState();
-  if (canonical(state) !== expectedCanonical)
+  // Verify and identify the same serialization of the inspected restore state.
+  const restoredCanonical = canonical(await inspectRestoredState());
+  if (restoredCanonical !== expectedCanonical)
     throw new Error("Restored state does not match the expected snapshot/correction state");
   return {
     format: "restore-drill-receipt/v1",
@@ -239,7 +240,7 @@ export async function restoreBackup({
     sourceGapMilliseconds: observed - cutoff,
     restoredSnapshotLoss: 0,
     postBackupDataLoss: null,
-    restoredStateSha256: digest(canonical(state)),
+    restoredStateSha256: digest(restoredCanonical),
     sourceReconciliationRequired: true,
     watermarksSha256: digest(JSON.stringify(decoded.watermarks)),
   };
