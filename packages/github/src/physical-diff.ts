@@ -68,7 +68,7 @@ export function classifyFile(file: PhysicalFile): FileClass {
 }
 /** Physical text changes only; neither effort, authorship percentage nor quality. */
 export function classifyPhysicalDiff(diff: PinnedPhysicalDiff): ClassifiedPhysicalDiff {
-  if (!pinnedSha(diff.before) || !pinnedSha(diff.after) || diff.before === diff.after)
+  if (!pinnedSha(diff.before) || !pinnedSha(diff.after) || diff.before.toLowerCase() === diff.after.toLowerCase())
     throw new Error("Distinct pinned before/after SHAs are required");
   const complete = diff.complete;
   if (typeof complete !== "boolean") throw new Error("Boolean diff completeness proof is required");
@@ -158,6 +158,8 @@ export async function readPinnedGitDiff(options: {
   const importedPaths = options.importedPaths?.slice(),
     generatedPaths = options.generatedPaths?.slice();
   if (!pinnedSha(before) || !pinnedSha(after)) throw new Error("Pinned SHAs required for Git fallback");
+  if (before.toLowerCase() === after.toLowerCase())
+    throw new Error("Distinct pinned before/after SHAs are required for Git fallback");
   const maxFiles = options.maxFiles ?? 3000,
     maxBytes = options.maxBytes ?? 8 * 1024 * 1024,
     timeout = options.timeoutMs ?? 30_000;
