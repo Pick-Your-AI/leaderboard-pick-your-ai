@@ -18,6 +18,7 @@ import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { comparePublishedRanks, type ComparedRanks } from "./rank-comparison.js";
 import { acceptedAchievements, ACHIEVEMENT_RULE_VERSION } from "./achievements.js";
 import { acceptedMilestones } from "./achievement-milestones.js";
+import { activityBurstIndex, activityCompactionVersion, activityGroupPreviewLimit } from "./activity-bursts.js";
 import { renderContributorCard, renderContributorCardImage } from "./cards.js";
 import { renderPublicExport } from "./exports.js";
 import { publicParticipation } from "./participation.js";
@@ -620,6 +621,8 @@ export function createService(options: ServiceOptions = {}) {
         "contributors/:actorId/achievements",
         "activity",
         "activity/:groupId",
+        "activity-bursts",
+        "activity-bursts/:burstId",
         "evidence/:contributionId",
         "health",
         "updates",
@@ -702,6 +705,68 @@ export function createService(options: ServiceOptions = {}) {
   app.get("/api/v1/activity", (request, reply) => activity(request, reply, null));
   app.get<{ Params: { groupId: string } }>("/api/v1/activity/:groupId", (request, reply) =>
     activity(request, reply, request.params.groupId),
+  );
+  async function activityBursts(request: FastifyRequest, reply: FastifyReply, burstId: string | null) {
+    const q = query(request);
+    if (q.metric) fail(400, "use_category_filter");
+    if (q.search || q.format !== "json") fail(400, "unsupported_filter");
+    if (burstId !== null && !/^[a-f0-9]{64}$/.test(burstId)) fail(400, "invalid_activity_burst");
+    const binding = JSON.stringify([
+      "activity-bursts",
+      activityGroupingVersion,
+      activityCompactionVersion,
+      burstId,
+      cursorScope(q.scope),
+      q.category,
+      q.limit,
+      q.actors,
+    ]);
+    const cursor = boundCursor(q, binding);
+    const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors);
+    if (cursor && cursor.policy !== read.controls.version) fail(410, "cursor_policy_changed_refetch");
+    const disabled = read.selected.disabledMetrics?.find((entry) => entry.id === q.category);
+    if (disabled)
+      return reply
+        .code(503)
+        .header("Cache-Control", "no-store")
+        .send({ ...meta(read), error: "metric_disabled", metric: disabled });
+    const index = activityBurstIndex(activityIndex(read, q.category));
+    const common = {
+      ...meta(read),
+      category: q.category,
+      groupingVersion: activityGroupingVersion,
+      previewLimit: activityPreviewLimit,
+      correctionHistory: "per_proof",
+      compactionVersion: activityCompactionVersion,
+      groupPreviewLimit: activityGroupPreviewLimit,
+    };
+    let body: unknown;
+    if (burstId === null) {
+      const { entries: bursts, nextCursor } = page(index.bursts, q, read, cursor, binding, activityPageByteLimit);
+      body = { ...common, bursts, totalBursts: index.bursts.length, nextCursor };
+    } else {
+      const burst = index.bursts.find((entry) => entry.burstId === burstId);
+      if (!burst) fail(404, "activity_burst_unavailable");
+      // Every page repeats the wrapper's previews. Reserve its actual envelope,
+      // the admitted cursor ceiling and all possible array separators first.
+      const overhead =
+        Buffer.byteLength(JSON.stringify({ ...common, burst, groups: [], nextCursor: "x".repeat(2048) })) + q.limit - 1;
+      const { entries: groups, nextCursor } = page(
+        index.members.get(burstId)!,
+        q,
+        read,
+        cursor,
+        binding,
+        Math.min(activityPageByteLimit, 1_500_000 - overhead),
+      );
+      body = { ...common, burst, groups, nextCursor };
+    }
+    if (Buffer.byteLength(JSON.stringify(body)) > 1_500_000) fail(503, "activity_response_too_large");
+    return send(request, reply, body);
+  }
+  app.get("/api/v1/activity-bursts", (request, reply) => activityBursts(request, reply, null));
+  app.get<{ Params: { burstId: string } }>("/api/v1/activity-bursts/:burstId", (request, reply) =>
+    activityBursts(request, reply, request.params.burstId),
   );
   app.get("/api/v1/contributors", async (request, reply) => {
     const q = query(request);
