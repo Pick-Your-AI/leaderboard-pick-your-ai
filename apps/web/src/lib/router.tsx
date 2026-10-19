@@ -1,5 +1,6 @@
 import { parseScope, scopedHref } from "./scope.ts";
 import { scopeContext } from "../data/source.ts";
+import { prototypeNavigation } from "./prototype-url.ts";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 /**
@@ -25,14 +26,29 @@ export function RouterProvider({ children }: { children: React.ReactNode }) {
   const [location, setLocation] = useState<LocationState>(current);
 
   useEffect(() => {
-    const onPop = () => setLocation(current());
+    const onPop = () => {
+      const path = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const target = prototypeNavigation(path);
+      if (!target.clientSide) {
+        window.location.reload();
+        return;
+      }
+      if (target.href !== path) window.history.replaceState(window.history.state, "", target.href);
+      setLocation(current());
+    };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
   const navigate = useCallback((to: string, options: { replace?: boolean } = {}) => {
     const url = new URL(to, window.location.href);
-    const next = `${url.pathname}${url.search}${url.hash}`;
+    const target = prototypeNavigation(`${url.pathname}${url.search}${url.hash}`);
+    if (url.origin !== window.location.origin || !target.clientSide) {
+      if (options.replace) window.location.replace(url.href);
+      else window.location.assign(url.href);
+      return;
+    }
+    const next = target.href;
     if (next === `${window.location.pathname}${window.location.search}${window.location.hash}`) return;
     if (options.replace) window.history.replaceState(null, "", next);
     else window.history.pushState(null, "", next);
@@ -53,14 +69,16 @@ type LinkProps = Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, "href"> & {
 
 export function Link({ to, onClick, ...rest }: LinkProps) {
   const { navigate } = useRouter();
+  const target = prototypeNavigation(to);
   return (
     <a
       {...rest}
-      href={to}
+      href={target.href}
       onClick={(event) => {
         onClick?.(event);
         if (
           event.defaultPrevented ||
+          !target.clientSide ||
           event.button !== 0 ||
           event.metaKey ||
           event.ctrlKey ||
@@ -71,7 +89,7 @@ export function Link({ to, onClick, ...rest }: LinkProps) {
           return;
         }
         event.preventDefault();
-        navigate(to);
+        navigate(target.href);
       }}
     />
   );

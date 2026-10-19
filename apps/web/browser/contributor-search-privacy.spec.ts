@@ -35,7 +35,7 @@ for (const [login, displayName] of [
       await expect(page.locator(".directory-entry")).toHaveCount(1);
       await expect(page.locator(".directory-entry").getByRole("link")).toHaveAttribute(
         "href",
-        `/contributors/${login}?period=all&snapshot=syn-r42`,
+        `/contributors/${login}?period=all&snapshot=syn-r42&ui=prototype`,
       );
       await expect(page.locator(".directory-entry")).toContainText(displayName);
       await expect(page.getByRole("searchbox", { name: "Find a contributor" })).toBeFocused();

@@ -32,6 +32,8 @@ Copy `.env.example` to `.env` and start PostgreSQL with `docker compose up -d db
 
 The browser defaults to the [public API UI](remote-ui.md), using `VITE_PUBLIC_API_BASE` or same-origin `/api/v1`. The development server proxies that default path to the local service. The [read API](read-api.md) returns unavailable data and health when no approved public snapshot source is supplied; merely starting the database and development servers does not publish rankings. Select `?ui=prototype` to view the explicitly fictional boards and evidence, or `?ui=api` to return to API mode. The browser remembers an explicit mode choice. API failures never switch to synthetic data.
 
+Prototype route links, the guide's displayed example URLs, and the live-wall configurator's displayed and copied URL carry `ui=prototype` along with their selected scope and snapshot. A recipient can therefore reproduce the fictional view in a fresh browser or one that previously selected API mode. Opening a prototype from a remembered preference also makes that choice explicit in the current address without adding a history entry; Back and Forward preserve the selected scope. Explicit API links and the protected account and administration entry points keep their existing mode and navigation behavior.
+
 The sample database credentials are for loopback development only. These local database commands reject non-local hosts and names that do not end in `_dev` or `_test`; they do not accept production connection strings.
 
 ## Synthetic fixture and migration workflow
