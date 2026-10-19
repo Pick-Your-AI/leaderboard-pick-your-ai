@@ -2,7 +2,13 @@ import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { syntheticBrowserIntake, syntheticEvidenceTerms } from "./controls-intake-fixtures.ts";
 const id = "11111111-1111-1111-1111-111111111111";
-async function controls(page: Page, roles: string[] = [], expires = Date.now() + 600000) {
+async function controls(
+  page: Page,
+  roles: string[] = [],
+  expires = Date.now() + 600000,
+  actorId: unknown = "1",
+  receiptOwner = "2",
+) {
   const writes: Array<{ path: string; body: Record<string, unknown>; csrf: string | undefined }> = [];
   await page.route("**/controls/**", async (route) => {
     const req = route.request(),
@@ -13,21 +19,21 @@ async function controls(page: Page, roles: string[] = [], expires = Date.now() +
       return;
     }
     const responses: Record<string, unknown> = {
-      "/controls/session": { actorId: "1", csrf: "a".repeat(43), roles, expires },
+      "/controls/session": { actorId, csrf: "a".repeat(43), roles, expires },
       "/controls/evidence-terms": { terms: syntheticEvidenceTerms },
       "/controls/profile": { bio: "Saved bio", highlights: [], public: false, suppressed: false },
       "/controls/requests": {
         requests: [
           {
             id,
-            owner: "2",
+            owner: receiptOwner,
             kind: "evidence",
             status: "pending",
             version: 3,
             detail: "Evidence for independent review",
             history: [],
             collaborators: {},
-            intake: syntheticBrowserIntake("2"),
+            intake: syntheticBrowserIntake(receiptOwner),
             intakeEligibility: { state: "awaiting_review" },
           },
         ],
@@ -40,6 +46,66 @@ async function controls(page: Page, roles: string[] = [], expires = Date.now() +
   });
   return writes;
 }
+
+for (const { description, actorId, path } of [
+  { description: "numeric", actorId: 1, path: "/account" },
+  { description: "singleton array", actorId: ["1"], path: "/admin" },
+  { description: "terminal newline", actorId: "1\n", path: "/admin" },
+]) {
+  test(`protected session ${description} identity is refused before private reads`, async ({ page }, testInfo) => {
+    const requests: string[] = [];
+    page.on("request", (request) => {
+      const pathname = new URL(request.url()).pathname;
+      if (pathname.startsWith("/controls/")) requests.push(`${request.method()} ${pathname}`);
+    });
+    const writes = await controls(page, ["reviewer"], Date.now() + 600000, actorId, "1");
+    const response = page.waitForResponse((result) => new URL(result.url()).pathname === "/controls/session");
+    await page.goto(path);
+    await response;
+    await expect(
+      page.getByRole("heading", { name: path === "/admin" ? "Protected administration" : "Your account", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Checking your controls session…", { exact: true })).toHaveCount(0);
+    await testInfo.attach("protected-session-observation", {
+      contentType: "application/json",
+      body: Buffer.from(
+        JSON.stringify({
+          actorId,
+          path,
+          requests,
+          errors: await page.getByRole("alert").allTextContents(),
+          verifiedIdentityCount: await page.getByText("Verified GitHub account ID:", { exact: false }).count(),
+          ownReceiptCount: await page.getByText("Evidence for independent review", { exact: true }).count(),
+          reviewButtonCount: await page.getByRole("button", { name: "Record review decision" }).count(),
+          profileButtonCount: await page.getByRole("button", { name: "Save profile" }).count(),
+          writes,
+        }),
+      ),
+    });
+    await expect(page.getByRole("alert")).toHaveText("Invalid or expired controls session.");
+    await expect(page.getByRole("heading", { name: "Sign in required" })).toBeVisible();
+    await expect(page.getByText("Verified GitHub account ID:", { exact: false })).toHaveCount(0);
+    await expect(page.getByText("Evidence for independent review", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Record review decision" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Save profile" })).toHaveCount(0);
+    expect(requests).toEqual(["GET /controls/session"]);
+    expect(writes).toHaveLength(0);
+  });
+}
+
+test("protected session canonical owner keeps account receipts without a self-review action", async ({ page }) => {
+  const writes = await controls(page, ["reviewer"], Date.now() + 600000, "1", "1");
+  await page.goto("/account");
+  await expect(page.getByRole("heading", { name: `Receipt ${id}`, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save profile" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Record review decision" })).toHaveCount(0);
+  await page.getByRole("link", { name: "Administration", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Protected administration", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `Receipt ${id}`, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Record review decision" })).toHaveCount(0);
+  expect(writes).toHaveLength(0);
+});
+
 test("anonymous account stays protected even in prototype mode", async ({ page }) => {
   await page.route("**/controls/session", (r) =>
     r.fulfill({ status: 401, json: { error: "Authentication required" } }),

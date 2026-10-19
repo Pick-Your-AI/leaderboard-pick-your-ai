@@ -9,6 +9,7 @@ export * from "./rest-snapshot.js";
 export * from "./project-snapshots.js";
 export * from "./project-context.js";
 export * from "./timeline-history.js";
+export * from "./issue-field-history.js";
 export * from "./physical-diff.js";
 export * from "./documentation.js";
 export * from "./research.js";
@@ -253,3 +254,10 @@ export async function paginateGraphql<T>(
   }
   throw new Error("GraphQL pagination exceeded maxPages");
 }
+
+export {
+  readGithubCommentSource,
+  readGithubCommentIdentity,
+  type GithubCommentKind,
+  type GithubCommentSource,
+} from "./comment-identity.js";

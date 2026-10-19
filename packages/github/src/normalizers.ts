@@ -20,6 +20,7 @@ import {
   type PublicEvidenceAction,
 } from "@pick-your-ai/contracts";
 import { GithubReadClient } from "./client.js";
+import { readGithubCommentSource, readGithubCommentIdentity } from "./comment-identity.js";
 import { consistentReviewCohortIdentities, reviewParentMatches, reviewSourceMatches } from "./review-cohort.js";
 import {
   hasGithubRestSnapshotPrefix,
@@ -39,6 +40,7 @@ import {
   type GithubReleaseMembership,
 } from "./release-recognition.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
+import { readIssueFieldEvent, issueFieldHistoryRevision } from "./issue-field-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
   readPublicSubjectProjectSnapshot,
@@ -310,6 +312,8 @@ export interface GithubEvidenceEnvelope {
     | "project_snapshot"
     | "thread_resolution"
     | "comment"
+    | "pull_request_conversation_comment"
+    | "pull_request_review_comment"
     | "revert";
   observedAt: string;
   /** Exact evidenced transition time only. A delivery/observation/updated_at time is not a substitute. */
@@ -554,7 +558,10 @@ export function normalizeGithubObservation(
     return out;
   }
   const payload = envelope.payload;
-  const observedAction = envelope.action ?? text(payload.action) ?? "snapshot";
+  const prComment = ["pull_request_conversation_comment", "pull_request_review_comment"].includes(envelope.family);
+  const observedAction = prComment
+    ? envelope.family + "_snapshot"
+    : (envelope.action ?? text(payload.action) ?? "snapshot");
   const sourceAction = envelope.family === "triage" ? canonicalTriageAction(observedAction) : observedAction;
   const definitionKind =
     envelope.family === "triage" && sourceAction.startsWith("label_")
@@ -595,7 +602,7 @@ export function normalizeGithubObservation(
           : envelope.family === "project_snapshot" ||
               (envelope.family === "field_change" && envelope.action?.startsWith("project"))
             ? "project"
-            : envelope.family === "discussion" || envelope.family === "comment" || definitionKind !== null
+            : envelope.family === "discussion" || envelope.family === "comment" || prComment || definitionKind !== null
               ? "other"
               : "issue";
   const id = definitionKind
@@ -610,14 +617,20 @@ export function normalizeGithubObservation(
     out.reasons.push("repository_scope_mismatch");
     return out;
   }
-  const publicUrl =
-    url(resource.html_url ?? resource.url, repository.slug, kind === "project") ??
-    url(payload.subject_url, repository.slug, kind === "project");
+  const commentIdentity = prComment ? readGithubCommentIdentity(repository.slug, resource) : null;
+  if (prComment && commentIdentity?.kind !== envelope.family) {
+    out.reasons.push("comment_source_identity_unverified");
+    return out;
+  }
+  const publicUrl = prComment
+    ? commentIdentity!.sourceUrl
+    : (url(resource.html_url ?? resource.url, repository.slug, kind === "project") ??
+      url(payload.subject_url, repository.slug, kind === "project"));
   if (!id || !publicUrl) {
     out.reasons.push("missing_public_artifact_identity");
     return out;
   }
-  const at = time(envelope.occurredAt);
+  const at = prComment ? null : time(envelope.occurredAt);
   const history =
     envelope.publicHistory?.approvedPublic === true
       ? publicEvidenceHistorySchema.parse(envelope.publicHistory.history)
@@ -689,7 +702,7 @@ export function normalizeGithubObservation(
     return parsed;
   };
   const author = register(resource.user ?? resource.author);
-  const sender = register(sourceActor(payload), payload.execution_mode === "automated");
+  const sender = prComment ? null : register(sourceActor(payload), payload.execution_mode === "automated");
   out.observations.push({
     id: observationId,
     source: proof.source,
@@ -860,6 +873,8 @@ export function normalizeGithubObservation(
     if (sourceAction === "closed")
       emit("issue_closure_stewardship", sender, "triager", at, transitionUnit, { rawState: "closed" });
     // Closed, assignee and closer never manufacture implementing contributors.
+  } else if (prComment) {
+    out.reasons.push("pr_comment_snapshot_does_not_prove_submitted_review_or_accepted_answer");
   } else if (envelope.family === "comment") {
     emit("issue_answers", author, "author", time(resource.created_at), `${id}:comment-evidence`, {
       state: author && time(resource.created_at) ? "pending" : "unknown",
@@ -1566,6 +1581,8 @@ export interface NormalizedProjectContext {
 }
 
 export interface CollectionNormalizerInput {
+  /** Ephemeral host identity shared only within one native-history normalization batch. */
+  issueFieldHistoryBatch?: object;
   /** Trusted host selects the current subject revision at its frozen cutoff. */
   selectedCurrentState?: boolean;
   repository: { id: number; slug: string; allowedProjectIds?: readonly string[] };
@@ -1575,8 +1592,9 @@ export interface CollectionNormalizerInput {
   policyVersion: string;
   fact: {
     subjectId: string;
-    /** Native issue/PR identity retained by the trusted Project-history collector. */
+    /** Native issue/PR identity retained by the trusted typed-history collector. */
     historySubjectId?: string;
+    issueFieldId?: string;
     projectSubjectId?: string;
     sourceRevision: string;
     sourceUrl: string;
@@ -1678,6 +1696,56 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       return none("hydrated_source_revision_unverified");
     let repositoryClient: GithubReadClient | undefined;
     const client = () => (repositoryClient ??= options.client.forRepository(input.repository.id));
+    if (input.family === "issue_field_history") {
+      const match = input.fact.sourceUrl.match(
+        new RegExp("^https://github\\.com/" + input.repository.slug.replaceAll(".", "\\.") + "/issues/([1-9]\\d*)$"),
+      );
+      if (
+        !match ||
+        input.fact.evidence !== "observed_transition" ||
+        typeof input.fact.historySubjectId !== "string" ||
+        !input.fact.historySubjectId ||
+        typeof input.fact.issueFieldId !== "string" ||
+        !input.fact.issueFieldId
+      )
+        return none("issue_field_collected_binding_unverified");
+      const record = await readIssueFieldEvent({
+        client: options.client,
+        source: options.source,
+        repository: input.repository,
+        number: Number(match[1]),
+        subjectId: input.fact.historySubjectId,
+        eventId: input.fact.subjectId,
+        issueFieldId: input.fact.issueFieldId,
+        scanId: input.factKey,
+        ...(input.issueFieldHistoryBatch ? { issueFieldHistoryBatch: input.issueFieldHistoryBatch } : {}),
+        ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
+      });
+      if (issueFieldHistoryRevision(record) !== input.fact.sourceRevision)
+        return none("issue_field_revision_unverified");
+      const nativeActorId = positive(record.event.actor?.databaseId) ? String(record.event.actor.databaseId) : null;
+      if (input.fact.actorId !== nativeActorId || input.fact.occurredAt !== time(record.event.createdAt))
+        return none("issue_field_collected_attribution_unverified");
+      return normalizeGithubObservation({
+        repository: { ...input.repository, visibility: "public" },
+        proof: {
+          verified: true,
+          source: "github_graphql",
+          eventId: record.event.id,
+          revision: input.fact.sourceRevision,
+          isSynthetic: options.isSynthetic === true,
+        },
+        family: "field_change",
+        action: "issue_field_changed",
+        observedAt: input.observedAt,
+        occurredAt: record.event.createdAt,
+        payload: {
+          issue: { id: record.subject.id, url: record.subject.url },
+          sender: record.event.actor,
+          change: record.change,
+        },
+      });
+    }
     if (input.family === "relationships" || input.family === "project_history") {
       const match = input.fact.sourceUrl.match(
         new RegExp(`^https://github\\.com/${input.repository.slug.replaceAll(".", "\\.")}/(issues|pull)/([1-9]\\d*)$`),
@@ -1917,6 +1985,11 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           `/repos/${input.repository.slug}/pulls/${pull[1]}`,
           options.assertAuthorized,
         );
+      } else if (input.family === "comments" && pull) {
+        const comment = readGithubCommentSource(input.repository.slug, input.fact.sourceUrl);
+        if (!comment || comment.kind === "issue_comment") return none("comment_source_identity_unverified");
+        family = comment.kind;
+        endpoint = comment.apiPath;
       } else if (input.family === "comments" && issue && /^issuecomment-\d+$/.test(fragment ?? "")) {
         family = "comment";
         endpoint = `/repos/${input.repository.slug}/issues/comments/${fragment!.slice("issuecomment-".length)}`;
@@ -1949,6 +2022,11 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         return revoked;
       }
       if (!object(payload)) return none("missing_hydrated_source_object");
+      if (["pull_request_conversation_comment", "pull_request_review_comment"].includes(family)) {
+        const comment = readGithubCommentIdentity(input.repository.slug, payload);
+        if (!comment || comment.kind !== family || comment.sourceUrl !== input.fact.sourceUrl)
+          return none("comment_source_identity_unverified");
+      }
       if (family === "review" && pull) {
         const parentApiUrl = `https://api.github.com/repos/${input.repository.slug}/pulls/${pull[1]}`;
         if (
