@@ -290,7 +290,7 @@ export async function createPipeline(options) {
   const identityNormalizationSignatures = [...new Set(frozenNormalizationSignatures)];
   const verifyConfig = options.verifyConfiguration ?? (async () => false);
   const discoveryAuthorityBinding = Object.freeze({
-    configurationHash: digest(config),
+    configurationHash: policyDigest(c.metrics.stableJSON(config)),
     configurationVersion: config.version,
     dataMode,
   });

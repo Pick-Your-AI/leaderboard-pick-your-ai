@@ -52,8 +52,11 @@ export function encryptBackup({
   }
   if (!watermarks || typeof watermarks !== "object" || Array.isArray(watermarks))
     throw new Error("Source watermarks are required");
+  // An unpooled allocation also isolates the snapshot from the caller's backing ArrayBuffer.
+  const capturedDump = Buffer.alloc(databaseDump.length);
+  capturedDump.set(databaseDump);
   const payload = Buffer.from(
-    JSON.stringify({ databaseDump: databaseDump.toString("base64"), configuration, policyVersions, watermarks }),
+    JSON.stringify({ databaseDump: capturedDump.toString("base64"), configuration, policyVersions, watermarks }),
   );
   if (payload.length > maxBytes * 2) throw new Error("Backup payload exceeds serialization bound");
   const metadata = {
@@ -61,7 +64,7 @@ export function encryptBackup({
     createdAt,
     expiresAt,
     sourceCutoff,
-    dumpSha256: digest(databaseDump),
+    dumpSha256: digest(capturedDump),
     payloadSha256: digest(payload),
   };
   const iv = randomBytes(12);

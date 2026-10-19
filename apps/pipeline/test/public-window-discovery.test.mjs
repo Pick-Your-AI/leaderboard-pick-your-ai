@@ -59,6 +59,53 @@ async function namedHarness(t, periods = ["7d", "30d"], extra = {}) {
   });
 }
 
+for (const [optionalField, propertyState] of [
+  ["policyLink", "omitted"],
+  ["policyLink", "null"],
+  ["policyLink", "explicit undefined"],
+  ["recognitionBindings", "explicit undefined"],
+])
+  test(`discovery accepts an approved configuration with ${propertyState} optional ${optionalField}`, async (t) => {
+    const h = await namedHarness(t, ["30d"], {
+      configure(config) {
+        const owner = optionalField === "policyLink" ? config.policies[0] : config;
+        if (propertyState === "omitted") delete owner[optionalField];
+        else owner[optionalField] = propertyState === "null" ? null : undefined;
+      },
+    });
+    const configured = optionalField === "policyLink" ? h.config.policies[0] : h.config;
+    assert.equal(Object.hasOwn(configured, optionalField), propertyState !== "omitted");
+    assert.equal(configured[optionalField], propertyState === "null" ? null : undefined);
+    assert.equal(
+      h.discoveryAuthority.read({
+        configurationHash: "0".repeat(64),
+        configurationVersion: h.config.version,
+        dataMode: "synthetic",
+      }),
+      null,
+      "the synthetic grant must not approve an unrelated binding",
+    );
+    const published = await h.runtime.runOnce({ cutoff });
+    assert.equal(published.state, "published");
+    assert.equal(published.publications.length, 1);
+    const publication = published.publications[0];
+    const bounds = components.metrics.resolveMetricWindow("30d", cutoff);
+    const retained = {
+      scope: canonicalPublicScope({ ...filter, start: bounds.from, end: bounds.to }),
+      snapshotId: publication.snapshotId,
+    };
+    const before = await h.runtime.app.inject(board(retained));
+    assert.equal(before.statusCode, 200, before.body);
+    assert.equal(before.json().snapshotId, publication.snapshotId);
+    const discovered = await menu(h.runtime);
+    assert.equal(discovered.windows.length, 1);
+    assert.equal(discovered.windows[0].snapshotId, publication.snapshotId);
+    assert.deepEqual(discovered.windows[0].scope, retained.scope);
+    const after = await h.runtime.app.inject(board(discovered.windows[0]));
+    assert.equal(after.statusCode, 200, after.body);
+    assert.equal(after.json().snapshotId, publication.snapshotId);
+  });
+
 test("all seven confirmed choices share one captured transaction and coalesced aliases share one materialization", async (t) => {
   const h = await namedHarness(t, publicWindowPeriods);
   const published = await h.runtime.runOnce({ cutoff });
@@ -157,6 +204,7 @@ test("discovery preserves every filter dimension and never infers a label from a
   const bounds = components.metrics.resolveMetricWindow("30d", cutoff);
   const scope = canonicalPublicScope({ ...filter, start: bounds.from, end: bounds.to });
   const legacy = await harness(t, {
+    discoveryAuthority: true,
     configure: (config) => {
       config.scopes = [scope];
     },
