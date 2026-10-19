@@ -68,6 +68,7 @@ import {
   type Directory,
   type CategoryTotal,
   type Diagnostic,
+  type DisabledMetric,
   type Evidence,
   type Health,
   type Metadata,
@@ -250,9 +251,29 @@ function Meta({ value, selected }: { value: Metadata; selected: Selection }) {
         Permalink to this snapshot
       </a>
       {value.disabledMetrics.length > 0 && (
-        <p>Disabled measures: {value.disabledMetrics.map((item) => `${item.id}: ${item.reason}`).join("; ")}</p>
+        <section aria-label="Disabled measures">
+          <h3>Disabled measures</h3>
+          {value.disabledMetrics.map((item) => (
+            <DisabledMetricPolicy key={item.id} value={item} />
+          ))}
+        </section>
       )}
     </section>
+  );
+}
+function DisabledMetricPolicy({ value }: { value: DisabledMetric }) {
+  return (
+    <div>
+      <p>
+        <strong>{value.id}</strong>: This measure is currently disabled. Values are unavailable, not zero.
+      </p>
+      <p>Historical policy version: {value.policyVersion ?? "Unavailable"}.</p>
+      {value.policyLink ? (
+        <Source href={value.policyLink}>Historical policy source</Source>
+      ) : (
+        <p>Historical policy link unavailable.</p>
+      )}
+    </div>
   );
 }
 function Filters({
@@ -666,7 +687,7 @@ export function RemoteApp() {
       if (/^\/leaderboards\/[^/]+$/.test(path) || path === "/live" || /^\/projects\/[^/]+$/.test(path))
         return {
           kind: "board",
-          value: board(await request(parsed.base, "boards", boardQuery, controller.signal), exact),
+          value: board(await request(parsed.base, "boards", boardQuery, controller.signal, exact), exact),
         };
       return { kind: "unavailable" };
     };
@@ -962,15 +983,21 @@ export function RemoteApp() {
         {state.status === "error" && (
           <section className="notice notice-error" role="alert">
             <h2>
-              {state.error.status === 404
-                ? "Public record unavailable"
-                : state.error.status === 410
-                  ? "Selection expired or revoked"
-                  : state.error.status === 429
-                    ? "Requests temporarily limited"
-                    : "Public read unavailable"}
+              {state.error.disabledMetric
+                ? "Measure disabled"
+                : state.error.status === 404
+                  ? "Public record unavailable"
+                  : state.error.status === 410
+                    ? "Selection expired or revoked"
+                    : state.error.status === 429
+                      ? "Requests temporarily limited"
+                      : "Public read unavailable"}
             </h2>
-            <p>{state.error.code}</p>
+            {state.error.disabledMetric ? (
+              <DisabledMetricPolicy value={state.error.disabledMetric} />
+            ) : (
+              <p>{state.error.code}</p>
+            )}
             {state.error.status === 429 && <p>Wait before retrying this selection.</p>}
             {previousSnapshot && <LastVerifiedSnapshot value={previousSnapshot} />}
             <p>No fixture data or stored personal content is shown after this failure.</p>
