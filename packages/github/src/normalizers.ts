@@ -8,6 +8,7 @@ import {
 import { createHash } from "node:crypto";
 import {
   compareSourceInstants,
+  sourceEventSchema,
   publicDocumentationReasons,
   serviceAccountClassificationSchema,
   type ServiceAccountClassification,
@@ -1368,6 +1369,17 @@ export function applyRecognitionReceipt(
   ) {
     throw new Error("Independent verified recognition receipt is required");
   }
+  // An accepted answer cannot precede its known source occurrence. Preserve
+  // unknown clocks and the separate accepted-at ranking rule; a collection or
+  // revision time is not a substitute for the original source event.
+  if (
+    receipt.metricId === "issue_answers" &&
+    receipt.decision === "accepted" &&
+    typeof target.occurredAt === "string" &&
+    sourceEventSchema.shape.occurredAt.safeParse(target.occurredAt).success &&
+    compareSourceInstants(target.occurredAt, receipt.acceptedAt) > 0
+  )
+    throw new Error("Answer acceptance cannot predate its known source occurrence");
   // A generic receipt cannot turn a PR, closing action or synthetic fixture into
   // a confirmed report. The issue proof must identify this exact source fact.
   if (
