@@ -252,10 +252,23 @@ test("ordinary undated links stay unchanged and all seven presets retain exact c
     expect(value.snapshotId).toBe(expected.snapshotId);
     expect(raw).toBe(api.responses.filter((response) => response.url.pathname.endsWith("/exports")).at(-1)!.body);
     api.holdWindows();
-    api.calls.length = 0;
-    api.fixture.calls.reads.length = 0;
+    let entryDocuments = 0;
+    await page.route(
+      (url) => url.pathname === "/start",
+      async (route) => {
+        expect(route.request().isNavigationRequest()).toBe(true);
+        expect(route.request().frame()).toBe(page.mainFrame());
+        entryDocuments++;
+        // Start observing before the new document can run, after the old page's export revalidation.
+        api.calls.length = 0;
+        api.fixture.calls.reads.length = 0;
+        await route.continue();
+      },
+      { times: 1 },
+    );
     await page.getByRole("link", { name: "PickYour.AI Credits", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Browse public contribution evidence", exact: true })).toBeVisible();
+    expect(entryDocuments).toBe(1);
     await expect.poll(() => api.calls.length).toBeGreaterThan(0);
     expect(api.calls.every((url) => url.pathname.endsWith("/windows"))).toBe(true);
     expect(api.fixture.calls.reads).toEqual([]);
