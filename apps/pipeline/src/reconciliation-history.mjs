@@ -1,6 +1,6 @@
 import { githubRestSnapshotSemanticRevision } from "@pick-your-ai/github";
 
-const restPattern = "^gh-rest-v1:([a-f0-9]{64})\\.([a-f0-9]{32})$";
+const restPattern = "^(gh-rest-v1|gh-rest-comment-v2):([a-f0-9]{64})\\.([a-f0-9]{32})$";
 const snapshotPattern = "^[a-f0-9]{64}\\.[a-f0-9]{32}$";
 const planPattern = "^rc1:[a-f0-9]{64}:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}:[0-9]{4}:[0-9]{4}$";
 const restFamilies = ["issues", "pull_requests", "comments", "releases"];
@@ -42,7 +42,8 @@ export async function readImportedHistory(db, repositoryIds, observationCutoff) 
               < substring(fact.first_run_id FROM 112 FOR 4)::integer
             ELSE false END AS planned,
           fact.first_run_id LIKE 'rc1:%' AS reserved_plan,
-          fact.family = ANY($5::text[]) AS rest_family,
+          (fact.family = ANY($5::text[]) AND
+            (fact.source_revision NOT LIKE 'gh-rest-comment-v2:%' OR fact.family='comments')) AS rest_family,
           fact.family = ANY($6::text[]) AS snapshot_family,
           fact.source_revision ~ $7 AS snapshot_revision
         FROM leaderboard_ingestion.source_facts AS fact
@@ -51,7 +52,7 @@ export async function readImportedHistory(db, repositoryIds, observationCutoff) 
       ), classified AS (
         SELECT source.*,
           (rest_revision OR (planned AND snapshot_family AND snapshot_revision)) AS semantic_accounting,
-          CASE WHEN rest_revision THEN substring(source_revision FROM 1 FOR 75)
+          CASE WHEN rest_revision THEN split_part(source_revision, '.', 1)
             WHEN snapshot_family AND snapshot_revision THEN substring(source_revision FROM 1 FOR 64)
             ELSE NULL END AS semantic_revision
         FROM source
