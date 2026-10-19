@@ -1041,7 +1041,7 @@ export function evidence(value: unknown, selected?: Selection): Evidence {
       (data.observedAt !== undefined && data.observedAt !== metadata.observedAt))
   )
     throw new ReadFailure(502, "invalid_api_response");
-  if (!["observed", "pending", "accepted", "unknown"].includes(String(activityState)))
+  if (typeof activityState !== "string" || !["observed", "pending", "accepted", "unknown"].includes(activityState))
     throw new ReadFailure(502, "invalid_api_response");
   return {
     ...(metadata === undefined ? {} : { evidenceMetadata: metadata }),
@@ -1212,7 +1212,7 @@ export interface Health extends Metadata {
 }
 export function health(value: unknown, selected: Selection): Health {
   const data = object(value);
-  if (!["recently_reconciled", "stale_or_degraded"].includes(String(data.status)))
+  if (typeof data.status !== "string" || !["recently_reconciled", "stale_or_degraded"].includes(data.status))
     throw new ReadFailure(502, "invalid_api_response");
   return {
     ...metadata(value, selected),
@@ -1285,7 +1285,8 @@ function activityContract(value: unknown, selected: Selection) {
   if (
     data.groupingVersion !== "actor-repository-state-utc-hour-v1" ||
     data.previewLimit !== 5 ||
-    !["not_supplied", "per_proof"].includes(String(data.correctionHistory))
+    typeof data.correctionHistory !== "string" ||
+    !["not_supplied", "per_proof"].includes(data.correctionHistory)
   )
     throw new ReadFailure(502, "invalid_activity_response");
   return data;
@@ -1293,7 +1294,7 @@ function activityContract(value: unknown, selected: Selection) {
 function activityGroup(value: unknown, selected: Selection): ActivityGroup {
   const data = object(value);
   const state = data.activityState;
-  if (!["observed", "pending", "accepted", "unknown"].includes(String(state)))
+  if (typeof state !== "string" || !["observed", "pending", "accepted", "unknown"].includes(state))
     throw new ReadFailure(502, "invalid_activity_response");
   const result: ActivityGroup = {
     groupId: activityDigest(data.groupId),
