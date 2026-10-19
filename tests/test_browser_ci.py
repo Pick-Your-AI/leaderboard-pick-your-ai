@@ -51,7 +51,8 @@ class BrowserCiContractTests(unittest.TestCase):
             "npx --no-install playwright install --with-deps chromium",
             "npm run build",
             "npm run typecheck",
-            "npm run test:browser",
+            "npm run test:browser -- --shard=${{ matrix.shard }}/2",
+            'test "$SHARD_RESULT" = success',
         ])
         for script in ("build", "typecheck", "test:browser"):
             self.assertIn(script, package["scripts"])
