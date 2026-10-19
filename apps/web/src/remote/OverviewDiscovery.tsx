@@ -75,7 +75,7 @@ export function EditorialRotation({ items }: { items: ReturnType<typeof spotligh
           {item.category}
         </h3>
         {item.bio && <p>{item.bio}</p>}
-        <p>{item.selectionExplanation}</p>
+        <p style={{ whiteSpace: "pre-wrap" }}>{item.selectionExplanation}</p>
         <p>
           Selected <time dateTime={item.selectedAt}>{item.selectedAt}</time>.
         </p>

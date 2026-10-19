@@ -19,6 +19,13 @@ import { actorFilterLabels, publicScopeKey, type MetricDefinition, type MetricRe
 import { startLiveUpdates, type LiveState } from "@pick-your-ai/service/live-client";
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
 import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
+import { ActivityBurstGroups, CompactActivityFeed } from "./ActivityBursts.tsx";
+import {
+  activityBurstDetail,
+  activityBursts,
+  type ActivityBurstDetail,
+  type ActivityBursts,
+} from "./activity-bursts.ts";
 import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
 import {
   OverviewAcceptedWork,
@@ -84,6 +91,8 @@ type Data =
   | { kind: "board"; value: Board }
   | { kind: "activity"; value: Activity }
   | { kind: "activity-detail"; value: ActivityDetail }
+  | { kind: "activity-bursts"; value: ActivityBursts }
+  | { kind: "activity-burst-detail"; value: ActivityBurstDetail }
   | { kind: "directory"; value: Directory }
   | { kind: "profile"; value: Profile }
   | { kind: "evidence"; value: Evidence & Metadata }
@@ -670,6 +679,29 @@ export function RemoteApp() {
         const id = decode(contribution[1]!);
         return { kind: "evidence", value: await readProof(parsed.base, id, exact, controller.signal) };
       }
+      if (path === "/activity/bursts" || (path === "/activity" && exact.cursor === null))
+        return {
+          kind: "activity-bursts",
+          value: activityBursts(
+            await request(parsed.base, "activity-bursts", portfolioParameters(exact), controller.signal),
+            exact,
+          ),
+        };
+      const activityBurst = /^\/activity\/bursts\/([a-f0-9]{64})$/.exec(path);
+      if (activityBurst) {
+        const value = activityBurstDetail(
+          await request(
+            parsed.base,
+            `activity-bursts/${activityBurst[1]}`,
+            portfolioParameters(exact),
+            controller.signal,
+          ),
+          exact,
+        );
+        if (value.burst.burstId !== activityBurst[1]) throw new ReadFailure(502, "api_activity_burst_mismatch");
+        return { kind: "activity-burst-detail", value };
+      }
+      // Existing /activity?cursor=... bookmarks retain the original v1 group cursor contract.
       if (path === "/activity")
         return {
           kind: "activity",
@@ -1185,7 +1217,10 @@ export function RemoteApp() {
               )}
             </>
           )}
-          {(data?.kind === "directory" || data?.kind === "profile" || data?.kind === "activity") && (
+          {(data?.kind === "directory" ||
+            data?.kind === "profile" ||
+            data?.kind === "activity" ||
+            data?.kind === "activity-bursts") && (
             <>
               <form
                 className="remote-filters"
@@ -1231,6 +1266,8 @@ export function RemoteApp() {
           )}
           {data?.kind === "activity" && <ActivityFeed value={data.value} selected={pinned} />}
           {data?.kind === "activity-detail" && <ActivityProofs value={data.value} selected={pinned} />}
+          {data?.kind === "activity-bursts" && <CompactActivityFeed value={data.value} selected={pinned} />}
+          {data?.kind === "activity-burst-detail" && <ActivityBurstGroups value={data.value} selected={pinned} />}
           {data?.kind === "directory" && (
             <>
               <p>
