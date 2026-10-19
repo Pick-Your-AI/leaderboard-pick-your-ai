@@ -318,6 +318,327 @@ test("authenticated acceptance records a validated private locale target and exa
   assert.equal((await h.call("/controls/public")).data.claims.length, 0);
 });
 
+test("release review acceptance binds an authenticated private target and exact reviewed request", async (t) => {
+  const h = await harness(t);
+  const owner = await h.login("1");
+  const reviewer = await h.login("2");
+  const stranger = await h.login("6");
+  const claim = fixture({
+    locator: "https://github.com/synthetic-example/demo/pull/91",
+    category: "deployment_work",
+    scope: "repository:37:release:84",
+  });
+  const release = {
+    targetFactId: "synthetic-release-change:91",
+    releaseId: 84,
+    pullRequestNumber: 91,
+    proofHash: "e".repeat(64),
+    policyVersion: "test-1",
+  };
+  const submitWithTarget = await h.call("/controls/requests", {
+    user: owner,
+    method: "POST",
+    input: { ...claim, releaseInclusion: release },
+  });
+  assert.equal(submitWithTarget.status, 400, "a claimant cannot predeclare trusted acceptance");
+  const submitted = await h.call("/controls/requests", { user: owner, method: "POST", input: claim });
+  assert.equal(submitted.status, 201);
+  const path = `/controls/requests/${submitted.data.id}/review`;
+  const acceptance = {
+    version: submitted.data.version,
+    decision: "accept",
+    reason: "Reviewed the exact collected immutable inclusion",
+    conflict: false,
+    policyVersion: "test-1",
+    sourceReviewedPublic: true,
+    sourceUseReview: syntheticSourceUseReviewInput(),
+    releaseInclusion: release,
+  };
+  const before = h.store.read();
+  for (const invalid of [
+    null,
+    [],
+    {},
+    { ...release, rawProof: "private proof payload" },
+    { ...release, releaseId: "84" },
+    { ...release, releaseId: 0 },
+    { ...release, pullRequestNumber: Number.MAX_SAFE_INTEGER + 1 },
+    { ...release, pullRequestNumber: 91.5 },
+    { ...release, proofHash: "main" },
+    { ...release, proofHash: "E".repeat(64) },
+    { ...release, policyVersion: "" },
+    { ...release, policyVersion: "synthetic-mismatched-policy" },
+    { ...release, targetFactId: {} },
+  ]) {
+    const rejected = await h.call(path, {
+      user: reviewer,
+      method: "POST",
+      input: { ...acceptance, releaseInclusion: invalid },
+    });
+    assert.equal(rejected.status, 400, JSON.stringify(invalid));
+    assert.deepEqual(h.store.read(), before);
+  }
+  for (const decision of ["reject", "rollback", "merge"]) {
+    assert.equal(
+      (await h.call(path, { user: reviewer, method: "POST", input: { ...acceptance, decision } })).status,
+      400,
+    );
+    assert.deepEqual(h.store.read(), before);
+  }
+  const localization = {
+    targetFactId: "synthetic-locale:fr",
+    sourceRevision: "c".repeat(40),
+    locale: "fr",
+    category: "documentation",
+    policyVersion: "synthetic-locales-v1",
+  };
+  assert.equal(
+    (await h.call(path, { user: reviewer, method: "POST", input: { ...acceptance, localization } })).status,
+    400,
+  );
+  assert.equal((await h.call(path, { method: "POST", input: acceptance })).status, 401);
+  assert.equal((await h.call(path, { user: owner, method: "POST", input: acceptance })).status, 403);
+  assert.equal((await h.call(path, { user: stranger, method: "POST", input: acceptance })).status, 404);
+  assert.equal(
+    (await h.call(path, { user: reviewer, method: "POST", input: acceptance, headers: { "x-csrf-token": "wrong" } }))
+      .status,
+    403,
+  );
+  assert.deepEqual(h.store.read(), before);
+  const accepted = await h.call(path, { user: reviewer, method: "POST", input: acceptance });
+  assert.equal(accepted.status, 200);
+  const stored = h.store.read();
+  const request = stored.requests[submitted.data.id];
+  const decision = request.history.at(-1);
+  assert.equal(request.status, "accepted");
+  assert.equal(decision.actor, reviewer.actorId);
+  assert.equal(decision.receipt, request.id);
+  assert.equal(decision.version, request.version);
+  assert.deepEqual(decision.releaseInclusion, release);
+  assert.deepEqual(decision.evidenceRequest, {
+    owner: owner.actorId,
+    locator: claim.locator,
+    category: claim.category,
+    scope: claim.scope,
+  });
+  assert.deepEqual(
+    stored.audit.filter((entry) => entry.id === decision.id),
+    [decision],
+  );
+  assert.deepEqual(
+    (await h.call(`/controls/requests/${request.id}`, { user: owner })).data.history.at(-1).releaseInclusion,
+    release,
+  );
+  assert.equal((await h.call(`/controls/requests/${request.id}`, { user: stranger })).status, 404);
+  const visible = JSON.stringify((await h.call("/controls/public")).data);
+  assert.equal(visible.includes(release.targetFactId), false);
+  assert.equal(visible.includes(release.proofHash), false);
+  assert.equal(visible.includes("releaseInclusion"), false);
+  assert.equal((await h.call(path, { user: reviewer, method: "POST", input: acceptance })).status, 409);
+  assert.deepEqual(h.store.read(), stored, "a stale acceptance cannot create another target audit");
+});
+
+test("release review consent changes require a new exact acceptance while repeated consent is idempotent", async (t) => {
+  const h = await harness(t);
+  const owner = await h.login("1");
+  const reviewer = await h.login("2");
+  const collaborator = await h.login("3");
+  const submitted = await h.call("/controls/requests", {
+    user: owner,
+    method: "POST",
+    input: fixture({ collaborators: [collaborator.actorId] }),
+  });
+  const release = {
+    targetFactId: "synthetic-release-change:91",
+    releaseId: 84,
+    pullRequestNumber: 91,
+    proofHash: "e".repeat(64),
+    policyVersion: "test-1",
+  };
+  const path = `/controls/requests/${submitted.data.id}`;
+  const accept = (version, user = reviewer) =>
+    h.call(path + "/review", {
+      user,
+      method: "POST",
+      input: {
+        version,
+        decision: "accept",
+        reason: "Reviewed current attribution and exact inclusion",
+        conflict: false,
+        policyVersion: "test-1",
+        sourceReviewedPublic: true,
+        sourceUseReview: syntheticSourceUseReviewInput(),
+        releaseInclusion: release,
+      },
+    });
+  assert.equal((await accept(submitted.data.version, collaborator)).status, 403);
+  assert.equal(
+    (await accept(submitted.data.version)).status,
+    409,
+    "pending participant consent cannot authorize acceptance",
+  );
+  const initialConsent = await h.call(path + "/consent", {
+    user: collaborator,
+    method: "POST",
+    input: await participantAcceptance(h, collaborator, submitted.data),
+  });
+  assert.equal(initialConsent.status, 200);
+  assert.equal(initialConsent.data.status, "pending", "affirmative consent still requires independent review");
+  let accepted = await accept(initialConsent.data.version);
+  assert.equal(accepted.status, 200);
+  const previous = h.store.read().requests[submitted.data.id].history.at(-1);
+  const declined = await h.call(path + "/consent", {
+    user: collaborator,
+    method: "POST",
+    input: { version: accepted.data.version, consent: false },
+  });
+  assert.equal(declined.status, 200);
+  assert.equal(declined.data.status, "pending");
+  const pending = h.store.read().requests[submitted.data.id];
+  assert.equal(pending.policyVersion, undefined);
+  assert.equal(pending.history.at(-1).reviewRequired, true);
+  assert.deepEqual(
+    pending.history.find((entry) => entry.id === previous.id),
+    previous,
+  );
+  assert.equal((await h.call("/controls/public")).data.claims.length, 0);
+  assert.equal((await accept(declined.data.version)).status, 409, "a declined participant cannot be accepted");
+  assert.deepEqual(h.store.read().requests[submitted.data.id], pending);
+  const renewed = await h.call(path + "/consent", {
+    user: collaborator,
+    method: "POST",
+    input: await participantAcceptance(h, collaborator, declined.data),
+  });
+  assert.equal(renewed.status, 200);
+  assert.equal(renewed.data.status, "pending", "renewed consent cannot restore the old source-target acceptance");
+  assert.equal((await h.call("/controls/public")).data.claims.length, 0);
+  const renewedRequest = h.store.read().requests[submitted.data.id];
+  assert.equal(renewedRequest.policyVersion, undefined);
+  assert.deepEqual(
+    renewedRequest.history.find((entry) => entry.id === previous.id),
+    previous,
+  );
+  accepted = await accept(renewed.data.version);
+  assert.equal(accepted.status, 200);
+  const beforeRepeat = h.store.read();
+  const repeated = await h.call(path + "/consent", {
+    user: collaborator,
+    method: "POST",
+    input: await participantAcceptance(h, collaborator, accepted.data),
+  });
+  assert.equal(repeated.status, 200);
+  assert.deepEqual(repeated.data, accepted.data);
+  // Publication revision can advance on a no-op, but the exact reviewed
+  // request version/history/attribution remains byte-for-byte unchanged.
+  assert.deepEqual(h.store.read().requests[submitted.data.id], beforeRepeat.requests[submitted.data.id]);
+  assert.deepEqual(h.store.read().audit, beforeRepeat.audit);
+});
+
+for (const action of ["amend", "withdraw", "appeal", "rollback"]) {
+  test(`release review ${action} revokes acceptance and preserves the original private audit`, async (t) => {
+    const h = await harness(t);
+    const owner = await h.login("1");
+    const reviewer = await h.login("2");
+    const otherReviewer = await h.login("3");
+    const claim = fixture();
+    const submitted = await h.call("/controls/requests", { user: owner, method: "POST", input: claim });
+    const release = {
+      targetFactId: "synthetic-release-change:91",
+      releaseId: 84,
+      pullRequestNumber: 91,
+      proofHash: "e".repeat(64),
+      policyVersion: "test-1",
+    };
+    const path = `/controls/requests/${submitted.data.id}`;
+    const accepted = await h.call(path + "/review", {
+      user: reviewer,
+      method: "POST",
+      input: {
+        version: submitted.data.version,
+        decision: "accept",
+        reason: "Reviewed exact source product",
+        conflict: false,
+        policyVersion: "test-1",
+        sourceReviewedPublic: true,
+        sourceUseReview: syntheticSourceUseReviewInput(),
+        releaseInclusion: release,
+      },
+    });
+    assert.equal(accepted.status, 200);
+    const original = h.store.read().requests[submitted.data.id].history.at(-1);
+    const input = {
+      version: accepted.data.version,
+      ...(action === "withdraw" ? {} : { reason: "Synthetic source evidence or decision changed" }),
+      ...(action === "rollback" ? { decision: "rollback", conflict: false } : {}),
+      ...(action === "amend"
+        ? {
+            locator: claim.locator,
+            category: claim.category,
+            scope: "A revised source scope",
+            detail: "Revised private evidence",
+            collaborators: [],
+            consent: true,
+            intake: syntheticEvidenceIntakeInput([]),
+          }
+        : {}),
+    };
+    const revoked = await h.call(path + (action === "rollback" ? "/review" : `/${action}`), {
+      user: action === "rollback" ? otherReviewer : owner,
+      method: "POST",
+      input,
+    });
+    assert.equal(revoked.status, 200);
+    const current = h.store.read();
+    const request = current.requests[submitted.data.id];
+    assert.equal(request.status, action === "appeal" ? "appealed" : action === "withdraw" ? "withdrawn" : "pending");
+    assert.notEqual(request.version, original.version);
+    assert.deepEqual(
+      request.history.find((event) => event.id === original.id),
+      original,
+    );
+    assert.deepEqual(
+      current.audit.find((event) => event.id === original.id),
+      original,
+    );
+    assert.equal((await h.call("/controls/public")).data.claims.length, 0);
+  });
+}
+
+test("release review failed publication leaves no target authority or accepted request", async (t) => {
+  const h = await harness(t, {
+    transactionalPublisher: () => {
+      throw new Error("Synthetic publication outage");
+    },
+  });
+  const owner = await h.login("1");
+  const reviewer = await h.login("2");
+  const submitted = await h.call("/controls/requests", { user: owner, method: "POST", input: fixture() });
+  const before = h.store.read();
+  const accepted = await h.call(`/controls/requests/${submitted.data.id}/review`, {
+    user: reviewer,
+    method: "POST",
+    input: {
+      version: submitted.data.version,
+      decision: "accept",
+      reason: "Reviewed exact inclusion",
+      conflict: false,
+      policyVersion: "test-1",
+      sourceReviewedPublic: true,
+      sourceUseReview: syntheticSourceUseReviewInput(),
+      releaseInclusion: {
+        targetFactId: "synthetic-release-change:91",
+        releaseId: 84,
+        pullRequestNumber: 91,
+        proofHash: "e".repeat(64),
+        policyVersion: "test-1",
+      },
+    },
+  });
+  assert.equal(accepted.status, 500);
+  assert.deepEqual(h.store.read(), before);
+  assert.equal((await h.call("/controls/public")).data.claims.length, 0);
+});
+
 test("OAuth requires browser-bound one-use state, exact callback shape and PKCE", async (t) => {
   const h = await harness(t);
   const started = await h.begin();

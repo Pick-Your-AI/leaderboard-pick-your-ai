@@ -1,3 +1,4 @@
+import { publicMaintenanceClassificationReasons, publicDocumentationRecognitionReasons } from "@pick-your-ai/contracts";
 import React, { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { publicLink, ReadFailure, uiHref, type Evidence, type Selection } from "./client.ts";
@@ -21,6 +22,37 @@ function Time({ value, unknown }: { value: string | null; unknown: string }) {
 /** Only the strict public metadata projection, shared by drawer, route and activity proofs. */
 export function Receipt({ value, selected }: { value: Evidence; selected: Selection }) {
   const metadata = value.evidenceMetadata;
+  const maintenance = value.contribution.metricIds.includes("maintenance");
+  let maintenanceKinds: string[] | null = [];
+  try {
+    maintenanceKinds = publicMaintenanceClassificationReasons(value.contribution)
+      .filter((reason) => reason.startsWith("maintenance_kind:"))
+      .map(
+        (reason) =>
+          ({
+            dependency_maintenance: "Dependency maintenance",
+            build_fix: "Build fix",
+            accepted_bug_fix: "Accepted bug fix",
+          })[reason.slice("maintenance_kind:".length) as "dependency_maintenance" | "build_fix" | "accepted_bug_fix"],
+      );
+  } catch {
+    maintenanceKinds = null;
+  }
+  const documentation = value.contribution.metricIds.includes("documentation");
+  let authoredNotes: boolean | null = false;
+  try {
+    authoredNotes = publicDocumentationRecognitionReasons(value.contribution).includes(
+      "documentation_purpose:release_notes",
+    );
+  } catch {
+    authoredNotes = null;
+  }
+  const visibleReasons = value.contribution.reasonCodes.filter(
+    (reason) =>
+      !reason.startsWith("maintenance_kind:") &&
+      !reason.startsWith("maintenance_classification_policy:") &&
+      !reason.startsWith("documentation_purpose:"),
+  );
   return (
     <dl className="receipt" data-evidence-body>
       <dt>Contribution</dt>
@@ -95,7 +127,36 @@ export function Receipt({ value, selected }: { value: Evidence; selected: Select
         )}
       </dd>
       <dt>Eligibility reasons</dt>
-      <dd>{value.contribution.reasonCodes.join(", ") || "No additional reason code supplied"}</dd>
+      <dd>{visibleReasons.join(", ") || "No additional reason code supplied"}</dd>
+      {maintenance && (
+        <>
+          <dt>Reviewed maintenance kinds</dt>
+          <dd>
+            {maintenanceKinds === null ? (
+              "Classification unavailable: inconsistent public proof."
+            ) : maintenanceKinds.length ? (
+              <>
+                {maintenanceKinds.join(", ")}. Positive reviewed facets describe the same contribution; they do not add
+                counted units. Omitted kinds remain unknown.
+              </>
+            ) : (
+              "Not established; omitted kinds remain unknown."
+            )}
+          </dd>
+        </>
+      )}
+      {documentation && (
+        <>
+          <dt>Reviewed documentation purpose</dt>
+          <dd>
+            {authoredNotes === null
+              ? "Purpose unavailable: inconsistent public proof."
+              : authoredNotes
+                ? "Authored release notes. This describes the same documentation contribution; it does not establish release publication or coordination."
+                : "Purpose not established; omission remains unknown."}
+          </dd>
+        </>
+      )}
       <dt>Exclusion and uncertainty limits</dt>
       <dd>
         Only the published qualification and reason codes above are available. Generated, imported or reverted
