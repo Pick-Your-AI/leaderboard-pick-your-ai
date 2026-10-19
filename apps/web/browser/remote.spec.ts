@@ -816,7 +816,7 @@ test("API follow keeps a removed actor's update held until the pointer leaves th
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(page.getByText("Update held: snapshot api-2 is available.")).toBeVisible();
     await expect(provenance).toContainText("Snapshot api-1");
-    await survivor.hover();
+    await page.getByRole("columnheader", { name: "Rank", exact: true }).hover();
     await expect(actor).toBeFocused();
 
     api.suppress();
