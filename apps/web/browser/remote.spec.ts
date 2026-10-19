@@ -743,6 +743,58 @@ test("successful same-selection background recheck preserves keyboard DOM; suppr
   }
 });
 
+test("API follow releases a removed actor's obsolete focus hold after a privacy recheck", async ({
+  page,
+}, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.addInitScript(() =>
+    Object.defineProperty(window, "EventSource", { value: undefined, configurable: true }),
+  );
+  const api = await service(page);
+  try {
+    await page.goto("/leaderboards/pr_merged?ui=api");
+    const follow = page.getByRole("checkbox", { name: /Follow while/ });
+    const provenance = page.getByRole("region", { name: "Snapshot provenance" });
+    const actor = page.getByRole("link", { name: "Synthetic API A", exact: true });
+    await expect(actor).toBeVisible();
+    await expect(follow).not.toBeChecked();
+    await follow.check();
+    await page.mouse.move(0, 0);
+    await actor.focus();
+
+    api.next();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByText("Update held: snapshot api-2 is available.")).toBeVisible();
+    await expect(provenance).toContainText("Snapshot api-1");
+    await expect(actor).toBeFocused();
+    await expect(follow).toBeChecked();
+
+    api.suppress();
+    // A click would move focus before removal and conceal an obsolete hold.
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(actor).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Synthetic API B", exact: true })).toBeVisible();
+    await testInfo.attach("removed-focus-follow-observation.json", {
+      body: JSON.stringify({
+        activeElement: await page.evaluate(() => ({
+          tag: document.activeElement?.tagName,
+          text: document.activeElement === document.body ? null : document.activeElement?.textContent,
+        })),
+        followChecked: await follow.isChecked(),
+        provenance: await provenance.innerText(),
+        suppressedActorCount: await actor.count(),
+      }),
+      contentType: "application/json",
+    });
+    await expect(provenance).toContainText("Snapshot api-2");
+    await expect(provenance).toContainText("privacy-2");
+    await expect(follow).toBeChecked();
+    await expect(actor).toHaveCount(0);
+  } finally {
+    await api.close();
+  }
+});
+
 test("new heads remain held until applied; unsupported query is rejected before any provider read", async ({
   page,
 }) => {
