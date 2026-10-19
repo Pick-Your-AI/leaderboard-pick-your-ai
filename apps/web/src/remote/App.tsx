@@ -1,6 +1,14 @@
 import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
 import { FirstContributionsEntry } from "./OverviewDiscovery.tsx";
 import { PublicScopeControls, PublicScopeProvenance } from "./PublicScope.tsx";
+import { Programs } from "./Programs.tsx";
+import {
+  programDirectoryAsset,
+  programRoute,
+  readProgramDirectory,
+  type ProgramDirectory,
+  type ProgramRecord,
+} from "./program-directory.ts";
 import { selectionScope } from "./public-scope.ts";
 import { ContributorParticipation } from "./Participation.tsx";
 import { ContributorOrganizationHistory } from "./ParticipationHistory.tsx";
@@ -20,7 +28,10 @@ import {
 } from "./Overview.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
-import { RankComparisonControls, RankMovementValue } from "./RankComparison.tsx";
+import { RankComparisonControls } from "./RankComparison.tsx";
+import { BoardTable } from "./BoardTable.tsx";
+import { PublishedWindowPicker } from "./PublishedWindows.tsx";
+import { windowStartHref } from "./published-windows.ts";
 import { TimeZoneOptions, WindowBounds } from "../components/DisplayTimeZone.tsx";
 import { LastVerifiedSnapshot, type SnapshotReference } from "./LastVerifiedSnapshot.tsx";
 import {
@@ -66,6 +77,7 @@ import {
 
 type Data =
   | { kind: "catalog" }
+  | { kind: "programs"; directory: ProgramDirectory; program: ProgramRecord | null }
   | { kind: "method"; metricId: string }
   | { kind: "health"; value: Health }
   | { kind: "board"; value: Board }
@@ -135,25 +147,27 @@ const name = (actor: Profile["actor"], actorId: string) => actor.displayName ?? 
 const title = (path: string) =>
   path === "/"
     ? "Public contribution evidence"
-    : path.startsWith("/contributions/")
-      ? "Contribution evidence"
-      : path.startsWith("/contributors/")
-        ? "Contributor portfolio"
-        : path.startsWith("/methodology")
-          ? "Methodology"
-          : path === "/leaderboards"
-            ? "Measures"
-            : path === "/contributors"
-              ? "Contributor directory"
-              : path === "/activity" || path.startsWith("/activity/")
-                ? "Public activity"
-                : path === "/coverage" || path === "/health"
-                  ? "Source coverage and health"
-                  : path === "/live"
-                    ? "Live board"
-                    : path === "/corrections"
-                      ? "Corrections and privacy"
-                      : "Contribution board";
+    : path === "/programs" || path.startsWith("/programs/")
+      ? "Program directory"
+      : path.startsWith("/contributions/")
+        ? "Contribution evidence"
+        : path.startsWith("/contributors/")
+          ? "Contributor portfolio"
+          : path.startsWith("/methodology")
+            ? "Methodology"
+            : path === "/leaderboards"
+              ? "Measures"
+              : path === "/contributors"
+                ? "Contributor directory"
+                : path === "/activity" || path.startsWith("/activity/")
+                  ? "Public activity"
+                  : path === "/coverage" || path === "/health"
+                    ? "Source coverage and health"
+                    : path === "/live"
+                      ? "Live board"
+                      : path === "/corrections"
+                        ? "Corrections and privacy"
+                        : "Contribution board";
 function Source({ href, children }: { href: string | null | undefined; children: React.ReactNode }) {
   const safe = publicLink(href);
   return safe ? (
@@ -403,6 +417,7 @@ export function RemoteApp() {
   const [state, setState] = useState<State>({ status: "loading" });
   const [overviewActivity, setOverviewActivity] = useState<OverviewActivityState>({ status: "loading" });
   const [checking, setChecking] = useState(false);
+  const [windowsOpen, setWindowsOpen] = useState(false);
   const [live, setLive] = useState<{ base: string; scope: string; value: LiveState } | null>(null);
   const [nonce, setNonce] = useState(0),
     [heldPin, setHeldPin] = useState<string | null>(null);
@@ -470,6 +485,7 @@ export function RemoteApp() {
     try {
       const selected = selection(url.search, { comparison: rankComparisonPath(url.pathname) });
       validateCatalogRoute(url.pathname, url.search);
+      const program = programRoute(url.pathname);
       if (
         selected.proof &&
         (!selected.snapshot ||
@@ -501,7 +517,7 @@ export function RemoteApp() {
       }
       const base = apiBase(import.meta.env.VITE_PUBLIC_API_BASE || "/api/v1");
       const liveScope =
-        isCatalogPath(url.pathname) || /^\/methodology\/[^/]+$/.test(url.pathname)
+        program !== false || isCatalogPath(url.pathname) || /^\/methodology\/[^/]+$/.test(url.pathname)
           ? null
           : liveParameters(base, selected).toString();
       return { selected, base, liveScope, error: null };
@@ -515,6 +531,16 @@ export function RemoteApp() {
     }
   }, [url]);
   const { selected } = parsed;
+  const startHref = useMemo(() => {
+    if (parsed.error) return null;
+    try {
+      return windowStartHref(selected);
+    } catch (error) {
+      // A bounded new-entry link must never substitute broader filters or break the current reader.
+      if (error instanceof ReadFailure) return null;
+      throw error;
+    }
+  }, [selected, parsed.error]);
   const refresh = useCallback(() => {
     active.current?.abort();
     activeExport.current?.abort();
@@ -583,6 +609,14 @@ export function RemoteApp() {
     const boardQuery = parameters(exact, { board: true, cursor: selected.cursor });
     const load = async (): Promise<Data> => {
       const path = url.pathname;
+      const programId = programRoute(path);
+      if (programId !== false) {
+        const asset = programDirectoryAsset(import.meta.env.BASE_URL, location.origin);
+        const directory = await readProgramDirectory(asset, selected.organization, controller.signal);
+        const program = programId === null ? null : directory.programs.find((entry) => entry.id === programId);
+        if (program === undefined) throw new ReadFailure(404, "unknown_program");
+        return { kind: "programs", directory, program };
+      }
       if (isCatalogPath(path)) return { kind: "catalog" };
       if (/^\/methodology\/[^/]+$/.test(path)) return { kind: "method", metricId: exact.metric };
       if (path === "/" || path === "/health" || path === "/coverage")
@@ -790,7 +824,9 @@ export function RemoteApp() {
     <div
       className="remote-app"
       onClick={(event) => {
-        const target = (event.target as Element).closest<HTMLAnchorElement>("a[data-api-nav], a[data-api-proof]");
+        const target = (event.target as Element).closest<HTMLAnchorElement>(
+          "a[data-api-nav], a[data-api-proof], a[data-window-entry]",
+        );
         if (
           !target ||
           event.defaultPrevented ||
@@ -801,10 +837,14 @@ export function RemoteApp() {
           event.altKey
         )
           return;
-        // The display has its own bounded page lifecycle. A normal same-tab
-        // navigation tears down this reader and its in-flight requests first.
-        if (new URL(target.href).pathname === "/live") {
+        // The display and date-window entry have their own bounded page lifecycle.
+        // Normal same-tab navigation tears down this reader and its requests first.
+        if (target.hasAttribute("data-window-entry") || new URL(target.href).pathname === "/live") {
           preserveDisplayedPage();
+          if (target.hasAttribute("data-window-entry")) {
+            active.current?.abort();
+            activeExport.current?.abort();
+          }
           return;
         }
         event.preventDefault();
@@ -827,14 +867,26 @@ export function RemoteApp() {
       </a>
       <header className="app-header">
         <div className="header-inner">
-          <a data-api-nav href={uiHref("/", pinned)} className="wordmark">
-            PickYour.AI Credits
-          </a>
+          {startHref ? (
+            <a data-window-entry href={startHref} className="wordmark">
+              PickYour.AI Credits
+            </a>
+          ) : (
+            <span className="wordmark">PickYour.AI Credits</span>
+          )}
           <nav aria-label="Primary">
             <ul>
+              {startHref && (
+                <li>
+                  <a data-window-entry href={startHref}>
+                    Browse
+                  </a>
+                </li>
+              )}
               {[
                 ["/", "Overview"],
                 ["/leaderboards", "Measures"],
+                ["/programs", "Programs"],
                 ["/contributors", "Contributors"],
                 ["/activity", "Activity"],
                 ["/methodology", "Methodology"],
@@ -864,6 +916,21 @@ export function RemoteApp() {
           <p>Evidence-backed public reads. Unknown values and unavailable scopes remain explicit.</p>
         </header>
         <Filters key={`${url.pathname}${url.search}`} selected={selected} path={url.pathname} navigate={navigate} />
+        {!parsed.error && (isCatalogPath(url.pathname) || rankComparisonPath(url.pathname)) && (
+          <details className="method" open={windowsOpen} onToggle={(event) => setWindowsOpen(event.currentTarget.open)}>
+            <summary>Choose a published date window</summary>
+            {windowsOpen && (
+              <PublishedWindowPicker
+                base={parsed.base}
+                selected={selected}
+                path={
+                  isCatalogPath(url.pathname) ? `/leaderboards/${encodeURIComponent(selected.metric)}` : url.pathname
+                }
+                navigate={navigate}
+              />
+            )}
+          </details>
+        )}
         <label>
           Display timezone
           <select
@@ -975,6 +1042,9 @@ export function RemoteApp() {
               navigate={navigate}
             />
           )}
+          {data?.kind === "programs" && state.status === "ready" && (
+            <Programs directory={data.directory} program={data.program} registry={state.registry} selected={selected} />
+          )}
           {data?.kind === "method" && state.status === "ready" && (
             <>
               <Methods metric={registryMetric(state.registry, data.metricId)} registry={state.registry} />
@@ -1055,74 +1125,21 @@ export function RemoteApp() {
                         ? `Approved ${data.value.ranking.direction} ordering. Ties retain the API’s dense ranks.`
                         : "No ranking policy is supplied."}
                   </p>
-                  <div className="table-region" role="region" aria-label="Published contributions" tabIndex={0}>
-                    <table className="board-table" role="table">
-                      <caption>
-                        {data.value.metric.name} · {data.value.metric.definition.unit} · {data.value.totalRows}{" "}
-                        published rows; this page has {data.value.rows.length}
-                      </caption>
-                      <thead role="rowgroup">
-                        <tr role="row">
-                          <th scope="col" role="columnheader">
-                            Rank
-                          </th>
-                          {data.value.comparison && (
-                            <th scope="col" role="columnheader">
-                              Rank movement
-                            </th>
-                          )}
-                          <th scope="col" role="columnheader">
-                            Contributor
-                          </th>
-                          <th scope="col" role="columnheader">
-                            Value and state
-                          </th>
-                          <th scope="col" role="columnheader">
-                            Evidence
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody role="rowgroup">
-                        {data.value.rows.map((row) => (
-                          <tr key={row.actorId} role="row">
-                            <td role="cell" data-label="Rank">
-                              {row.rank === null ? "Unranked" : row.rank}
-                            </td>
-                            {data.value.comparison && (
-                              <td role="cell" data-label="Rank movement">
-                                <RankMovementValue value={row.movement} />
-                              </td>
-                            )}
-                            <th role="rowheader" scope="row">
-                              <a data-api-nav href={uiHref(`/contributors/${encodeURIComponent(row.actorId)}`, pinned)}>
-                                {name(row.actor, row.actorId)}
-                              </a>
-                            </th>
-                            <td role="cell" data-label="Value">
-                              <Value
-                                result={row.result}
-                                pending={row.pending}
-                                diagnostic={data.value.diagnostics.find(
-                                  (item) => item.actorId === row.actorId && item.metricId === row.result.metricId,
-                                )}
-                              />
-                            </td>
-                            <td role="cell" data-label="Evidence">
-                              {row.evidenceIds.length
-                                ? row.evidenceIds.map((id) => (
-                                    <p key={id}>
-                                      <a data-api-proof href={proofHref(url.pathname, pinned, id)}>
-                                        {id}
-                                      </a>
-                                    </p>
-                                  ))
-                                : "No evidence IDs supplied"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <BoardTable
+                    key={uiHref(url.pathname, pinned, { cursor: selected.cursor })}
+                    board={data.value}
+                    selected={pinned}
+                    path={url.pathname}
+                    renderValue={(row) => (
+                      <Value
+                        result={row.result}
+                        pending={row.pending}
+                        diagnostic={data.value.diagnostics.find(
+                          (item) => item.actorId === row.actorId && item.metricId === row.result.metricId,
+                        )}
+                      />
+                    )}
+                  />
                   {data.value.rows.length === 0 && (
                     <p>
                       No public rows are available in this selection. An empty page does not establish zero activity.
