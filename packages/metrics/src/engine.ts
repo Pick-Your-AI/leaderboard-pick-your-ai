@@ -389,7 +389,12 @@ const uncertaintyReasons = new Set([
   "conflicting_policy_unit",
 ]);
 const hasUncertainty = (prepared: Prepared) => prepared.audit.some((entry) => uncertaintyReasons.has(entry.reason));
-function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): Prepared {
+function prepare(
+  input: FrozenInput,
+  policy: MetricPolicy,
+  scope: MetricScope,
+  requireKnownWorkstreams = false,
+): Prepared {
   const cutoff = instant(input.cutoff);
   if (instant(scope.to) > cutoff) throw new Error("Scope cannot exceed the frozen cutoff");
   required(input.datasetId, "Dataset ID");
@@ -550,6 +555,7 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
       else if (scope.workstreams.length && !scope.workstreams.some((id) => context.workstreams.includes(id)))
         reason =
           context.workstreamsKnown === false ||
+          (requireKnownWorkstreams && context.workstreamsKnown !== true) ||
           (context.workstreamScope !== undefined &&
             scope.workstreams.some((id) => !context.workstreamScope!.includes(id)))
             ? "unknown_membership_context"
@@ -743,7 +749,9 @@ export function selectAcceptedActivityFacts(
     throw new Error("Accepted activity requires an explicit qualified or reviewed canonical source policy");
   const scope = canonicalScope(requestedScope);
   if (scope.context !== "event") throw new Error("Activity breadth requires event-time context");
-  const prepared = prepare(input, { ...policy, dateBasis: "occurredAt" }, scope);
+  // Breadth treats omitted historical mapping markers as unknown, including
+  // negative filter matches. Existing board/portfolio compatibility is unchanged.
+  const prepared = prepare(input, { ...policy, dateBasis: "occurredAt" }, scope, true);
   const facts: MetricFact[] = [];
   for (const fact of prepared.facts) {
     const reason = !policy.rankedStates.includes(fact.state as never)
