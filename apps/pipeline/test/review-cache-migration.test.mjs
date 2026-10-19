@@ -9,7 +9,7 @@ import { syntheticRepositoryClient } from "../../../packages/github/test/synthet
 import { ago, clock, components, harness, publicScope } from "./harness.mjs";
 import { insertOperatorDelivery } from "./operator-harness.mjs";
 
-const version = "review-source-identity/v2";
+const version = "review-source-identity/v3";
 const slug = "synthetic-org/synthetic-repo";
 const parentUrl = `https://github.com/${slug}/pull/10`;
 const parentApi = `https://api.github.com/repos/${slug}/pulls/10`;
@@ -105,7 +105,14 @@ async function reviewHarness(t, extra = {}) {
             {
               subjectId: item.node_id,
               sourceRevision:
-                request.family === "issues" ? item.updated_at : components.github.githubReviewRevision(item),
+                request.family === "issues"
+                  ? item.updated_at
+                  : extra.sequenceObservation
+                    ? components.github.githubSnapshotRevision(
+                        components.github.githubReviewRevision(item),
+                        request.runId,
+                      )
+                    : components.github.githubReviewRevision(item),
               sourceUrl: item.html_url,
               evidence: "current_state",
               actorId: null,
@@ -119,13 +126,18 @@ async function reviewHarness(t, extra = {}) {
     configure(config) {
       const issuePolicy = config.policies[0];
       config.repositories[0].families = extra.includeIssue ? ["issues", "reviews"] : ["reviews"];
-      config.policies = ["prs_reviewed", "review_rounds", "review_feedback"].map((metricId) => {
+      config.policies = [
+        "prs_reviewed",
+        "review_rounds",
+        "review_feedback",
+        ...(extra.sequenceObservation ? ["first_reviews"] : []),
+      ].map((metricId) => {
         const policy = {
           ...config.policies[0].policy,
           metricId,
           unit: components.metrics.getMetricDefinition(metricId).definition.unit,
           roles: ["reviewer"],
-          groupBy: metricId === "review_rounds" ? "canonical" : "actor_artifact",
+          groupBy: ["first_reviews", "review_rounds"].includes(metricId) ? "canonical" : "actor_artifact",
           rank: metricId !== "review_feedback",
         };
         return { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-policy" };
@@ -398,31 +410,43 @@ test("legacy review authority and cache generations are denied across actual Pos
     });
 });
 
-test("version-one review authority is retained unchanged and withheld until a complete sequence is recomputed", async (t) => {
-  const h = await reviewHarness(t);
-  const first = (await h.runtime.runOnce()).publications[0];
-  const legacy = await retainLegacyReview(h, first, "exact", "review-source-identity/v1");
-  const hydrations = h.state.hydrations;
-  await restart(h, async (runtime) => {
-    await assertDenied(runtime, first.snapshotId);
-    const rebuilt = (await runtime.runOnce()).publications[0];
-    assert.notEqual(rebuilt.snapshotId, first.snapshotId);
-    assert.ok(h.state.hydrations > hydrations);
-    await assertDenied(runtime, first.snapshotId, { current: false });
-    await assertMetrics(runtime, { prs_reviewed: 1, review_rounds: 1, review_feedback: 1 });
-    const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY policy_signature")).rows;
-    assert.equal(rows.length, 2);
-    const retained = rows.find((row) => row.policy_signature === legacy.signature);
-    assert.deepEqual(retained.document, legacy.document);
-    assert.equal(retained.document_hash, legacy.documentHash);
-    const current = rows.find((row) => row.policy_signature !== legacy.signature);
-    assert.equal(current.document.reviewSourceNormalizationVersion, version);
-    const firstFacts = current.document.facts.filter((fact) => fact.metricId === "first_reviews");
-    assert.equal(firstFacts.length, 1);
-    assert.equal(firstFacts[0].actorId, "303");
-    assert.equal(firstFacts[0].occurredAt, h.state.review.submitted_at);
+for (const oldVersion of ["review-source-identity/v1", "review-source-identity/v2"])
+  test(`${oldVersion} authority is retained unchanged and withheld until a scan-bound sequence is recomputed`, async (t) => {
+    const h = await reviewHarness(t, { sequenceObservation: true });
+    const first = (await h.runtime.runOnce()).publications[0];
+    await assertMetrics(h.runtime, { first_reviews: 1 });
+    const legacy = await retainLegacyReview(h, first, "exact", oldVersion);
+    const hydrations = h.state.hydrations;
+    await restart(h, async (runtime) => {
+      await assertDenied(runtime, first.snapshotId);
+      assert.equal(
+        (await runtime.app.inject(`/api/v1/boards?metric=first_reviews&snapshot=${first.snapshotId}`)).statusCode,
+        410,
+      );
+      assert.equal(
+        (await runtime.app.inject(`/api/v1/contributors/303?metric=first_reviews&snapshot=${first.snapshotId}`))
+          .statusCode,
+        410,
+      );
+      const rebuilt = (await runtime.runOnce()).publications[0];
+      assert.notEqual(rebuilt.snapshotId, first.snapshotId);
+      assert.ok(h.state.hydrations > hydrations);
+      await assertDenied(runtime, first.snapshotId, { current: false });
+      await assertMetrics(runtime, { prs_reviewed: 1, review_rounds: 1, review_feedback: 1, first_reviews: 1 });
+      const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY policy_signature"))
+        .rows;
+      assert.equal(rows.length, 2);
+      const retained = rows.find((row) => row.policy_signature === legacy.signature);
+      assert.deepEqual(retained.document, legacy.document);
+      assert.equal(retained.document_hash, legacy.documentHash);
+      const current = rows.find((row) => row.policy_signature !== legacy.signature);
+      assert.equal(current.document.reviewSourceNormalizationVersion, version);
+      const firstFacts = current.document.facts.filter((fact) => fact.metricId === "first_reviews");
+      assert.equal(firstFacts.length, 1);
+      assert.equal(firstFacts[0].actorId, "303");
+      assert.equal(firstFacts[0].occurredAt, h.state.review.submitted_at);
+    });
   });
-});
 
 test("retained nonreview publications keep their cache generation, public exports and private comparison across restart", async (t) => {
   const h = await harness(t, { authorizePolicyPreview: async () => true });

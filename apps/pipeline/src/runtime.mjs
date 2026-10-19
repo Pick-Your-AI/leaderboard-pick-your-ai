@@ -36,6 +36,7 @@ import { normalizationDocumentVersion, privateAttribution } from "./private-attr
 import {
   defaultDeliveryNormalizationVersion,
   discussionSourceNormalizationVersion,
+  githubSnapshotRevision,
   reviewSourceNormalizationVersion,
 } from "@pick-your-ai/github";
 import {
@@ -1245,6 +1246,39 @@ export async function createPipeline(options) {
         ),
     );
   async function normalizeStored(repositoryIds, cutoff, dispatch) {
+    // A first-review sequence depends on the whole cohort, not just the review's
+    // mutable fields. Only a source observation bound to the latest completed
+    // review scan may supply that sequence to this publication. Retained caches
+    // remain immutable inputs to historical snapshots and other review metrics.
+    const reviewRuns = (
+      await db.query(
+        `SELECT run_id,repository_id FROM (
+          SELECT run_id,repository_id,
+            DENSE_RANK() OVER (PARTITION BY repository_id ORDER BY last_success_at DESC) AS recency
+          FROM leaderboard_ingestion.collection_runs
+          WHERE repository_id=ANY($1::bigint[]) AND family='reviews'
+          AND state='complete' AND last_success_at <= $2
+        ) AS completed WHERE recency=1 ORDER BY repository_id,run_id LIMIT 10001`,
+        [repositoryIds, cutoff],
+      )
+    ).rows;
+    if (reviewRuns.length > 10000) fail("frozen_dataset_budget_exceeded");
+    const reviewScans = new Map();
+    for (const run of reviewRuns) {
+      const id = String(run.repository_id);
+      reviewScans.set(id, reviewScans.has(id) ? null : run.run_id);
+    }
+    const sequenceObserved = (row) => {
+      if (row.family !== "reviews") return false;
+      const runId = reviewScans.get(String(row.repository_id));
+      const fingerprint = /^([a-f0-9]{64})\.[a-f0-9]{32}$/.exec(row.source_revision)?.[1];
+      return (
+        typeof runId === "string" &&
+        row.first_run_id === runId &&
+        !!fingerprint &&
+        row.source_revision === githubSnapshotRevision(fingerprint, runId)
+      );
+    };
     // Current association is selected from one completed whole-repository scan.
     // A partial later run cannot replace it, and subjects absent from the latest
     // complete inventory cannot inherit older membership rows.
@@ -1408,7 +1442,12 @@ export async function createPipeline(options) {
         ) {
           normalizedProjectContext(cached.document, row, repository, projectWorkstreamMappings);
           await retainSourceArtifacts(db, row.fact_key, cached.document);
-          outputs.push({ document: cached.document, source: sourceBinding(row), family: row.family });
+          outputs.push({
+            document: cached.document,
+            source: sourceBinding(row),
+            family: row.family,
+            reviewSequenceObserved: sequenceObserved(row),
+          });
           continue;
         }
       }
@@ -1568,7 +1607,12 @@ export async function createPipeline(options) {
         );
         await retainSourceArtifacts(tx, row.fact_key, document);
       });
-      outputs.push({ document, source: sourceBinding(row), family: row.family });
+      outputs.push({
+        document,
+        source: sourceBinding(row),
+        family: row.family,
+        reviewSequenceObserved: sequenceObserved(row),
+      });
     }
     return outputs;
   }
@@ -1812,8 +1856,20 @@ export async function createPipeline(options) {
     const hasDefaultDeliverySources = normalized.some(
       (entry) => entry.document.defaultDeliveryNormalizationVersion === defaultDeliveryNormalizationVersion,
     );
-    let outputs = normalized.map((entry) => entry.document);
-    const actorSources = new Map(normalized.map((entry) => [entry.document, entry.source]));
+    let outputs = normalized.map((entry) => {
+      if (entry.family !== "reviews" || entry.reviewSequenceObserved) return entry.document;
+      const withheld = new Set(
+        entry.document.facts.filter((fact) => fact.metricId === "first_reviews").map((fact) => fact.id),
+      );
+      if (!withheld.size) return entry.document;
+      return {
+        ...entry.document,
+        facts: entry.document.facts.filter((fact) => !withheld.has(fact.id)),
+        evidence: entry.document.evidence.filter((entry) => !withheld.has(entry.contribution.contributionId)),
+        reasons: [...entry.document.reasons, "first_review_sequence_observation_unversioned"],
+      };
+    });
+    const actorSources = new Map(outputs.map((output, index) => [output, normalized[index].source]));
     // Only persisted provider normalizations can restore identity; recognition overlays are transient.
     const normalizationSources = normalized
       .map((entry) => ({ factKey: entry.source.factKey, documentHash: digest(entry.document) }))

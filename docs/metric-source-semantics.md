@@ -124,11 +124,22 @@ not promote a later review, and a dismissed observation receives no first-review
 credit. A special event-action string cannot substitute for this sequence.
 
 The [review cache migration](review-cache-migration.md) advances to
-`review-source-identity/v2`. The original unversioned controls remain, and a new
-integrity-valid version-one fixture verifies actual PGlite/SQLite reopen,
-withholding of obsolete public/private authority, rehydration, and preservation
-of old source/cache hashes. It is a constructed migration fixture, not a run of
-the old runtime. No source, snapshot or old normalization is deleted.
+`review-source-identity/v3`. The original unversioned controls remain, and
+integrity-valid version-one and version-two fixtures verify actual PGlite/SQLite
+reopen, withholding of obsolete public/private authority, a fresh scan-bound
+observation, and preservation of old source/cache hashes. These are constructed
+migration fixtures, not runs of the old runtimes. No source, snapshot or old
+normalization is deleted.
+
+The pipeline separately binds first-review sequence admission to the latest
+completed review observation scan at the frozen cutoff. Native collection
+already supplies these per-scan revisions. Custom collectors can use the same
+`githubSnapshotRevision(githubReviewRevision(review), request.runId)` contract;
+a stable individual-review revision cannot establish current cohort authority.
+The dedicated persistence regression covers discovery of earlier reviews,
+later arrivals, preserved historical pins and normalizations, and exclusion of
+unbound first-review facts and profile evidence while other review metrics stay
+available. This does not promote any metric's UI maturity or public enablement.
 
 ## Reproduce the focused suite
 
