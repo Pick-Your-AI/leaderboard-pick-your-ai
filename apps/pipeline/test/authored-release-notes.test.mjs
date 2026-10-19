@@ -362,7 +362,13 @@ test("authored notes publication: current and pinned purposes survive real store
     markerFreeConfig: true,
     dataMode: "public",
     payloads: [s.envelope.payload.pull_request],
-    normalizerFactory: () => async () => structuredClone(s.input),
+    normalizerFactory:
+      () =>
+      async ({ observedAt }) => {
+        const output = components.github.normalizeGithubObservation({ ...s.envelope, observedAt }, s.pathPolicy);
+        assert.ok(output.physicalContext, "the stock adapter retains its source-bound physical receipt");
+        return output;
+      },
     defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
     configure(config) {
       config.repositories[0].families = ["pull_requests"];
@@ -471,8 +477,16 @@ for (const selectedRelease of [false, true])
         payloads: [s.envelope.payload.pull_request],
         authorizePolicyPreview: async () => true,
         defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
-        normalizerFactory: () => async () =>
-          normalizeGithubObservation(s.envelope, interpretPurpose ? s.pathPolicy : oldPolicy),
+        normalizerFactory:
+          () =>
+          async ({ observedAt }) => {
+            const output = normalizeGithubObservation(
+              { ...s.envelope, observedAt },
+              interpretPurpose ? s.pathPolicy : oldPolicy,
+            );
+            assert.ok(output.physicalContext, "both policy generations retain their source-bound physical receipt");
+            return output;
+          },
         configure(config) {
           config.repositories[0].families = ["pull_requests"];
           config.documentationPolicies = [s.pathPolicy];
