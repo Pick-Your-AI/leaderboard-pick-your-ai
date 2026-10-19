@@ -850,6 +850,67 @@ export function selectAcceptedActivityFacts(
   };
 }
 
+/** Private collaboration admission over all retained acceptance history before the
+ * selected end. Pair formation applies the requested start after both proofs are
+ * known; source occurrence time is never substituted for acceptance time.
+ */
+export function selectAcceptedCollaborationFacts(
+  input: FrozenInput,
+  policy: MetricPolicy,
+  requestedScope: MetricScope,
+): { scope: MetricScope; facts: MetricFact[]; audit: AuditEntry[] } {
+  for (const values of [
+    policy.roles,
+    policy.sources,
+    policy.rankedStates,
+    requestedScope.roles,
+    requestedScope.repos,
+    requestedScope.projects,
+    requestedScope.workstreams,
+  ]) {
+    if (!Array.isArray(values)) throw new Error("Collaboration policy and scope lists must be arrays");
+    for (let index = 0; index < values.length; index++)
+      if (!Object.hasOwn(values, index)) throw new Error("Collaboration policy and scope lists must be dense");
+  }
+  validateMetricPolicy(policy);
+  const scope = canonicalScope(requestedScope);
+  if (scope.actors !== "user" || scope.context !== "event")
+    throw new Error("Collaborations require the user and event-context selection");
+  if (
+    policy.aggregation !== "count" ||
+    policy.groupBy !== "canonical" ||
+    !["qualified", "reviewed"].includes(policy.rankedStates[0]!)
+  )
+    throw new Error("Collaborations require accepted canonical count source policies");
+  const prepared = prepare(
+    input,
+    { ...policy, dateBasis: "acceptedAt", rank: false },
+    { ...scope, from: null, period: "all" },
+    false,
+  );
+  const actors = new Map(input.actors.map((actor) => [actor.id, actor]));
+  const facts: MetricFact[] = [];
+  const audit = [...prepared.audit];
+  for (const fact of prepared.facts) {
+    const actor = fact.actorId === null ? undefined : actors.get(fact.actorId);
+    let reason: string | null = null;
+    if (fact.state !== policy.rankedStates[0]) reason = "collaboration_evidence_class";
+    else if (actor?.kind !== "user" || actor.publicState !== "visible" || actor.executionMode === "automated")
+      reason = "collaboration_actor_unavailable";
+    else if (!["author", "coauthor", "reviewer"].includes(fact.role)) reason = "collaboration_role_ineligible";
+    else if (typeof fact.occurredAt !== "string") reason = "collaboration_source_time_unknown";
+    else if (compareSourceInstants(fact.acceptedAt!, fact.occurredAt) < 0)
+      reason = "collaboration_acceptance_before_source";
+    else if (compareSourceInstants(fact.observedAt, fact.occurredAt) < 0)
+      reason = "collaboration_observation_before_source";
+    else if (typeof fact.artifactId !== "string" || !fact.artifactId.trim())
+      reason = "collaboration_artifact_identity_unknown";
+    if (reason) audit.push({ factIds: [fact.id], actorId: fact.actorId, reason });
+    else facts.push(fact);
+  }
+  return { scope, facts, audit };
+}
+
 export function aggregateMetric(
   input: FrozenInput,
   policy: MetricPolicy,
