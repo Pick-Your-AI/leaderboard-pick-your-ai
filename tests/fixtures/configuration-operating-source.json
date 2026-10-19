@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "synthetic-configuration-operating-source/v1",
+  "qualification": "Synthetic local provider observations; not a GitHub installation, permission grant or human policy approval.",
+  "installation": {
+    "id": 1,
+    "repositoryIds": [2],
+    "permissions": { "issues": "read", "pull_requests": "read", "organization_projects": "read" }
+  },
+  "repository": { "id": 2, "full_name": "synthetic-org/synthetic-repo", "private": false },
+  "issues": [
+    {
+      "id": 1001,
+      "node_id": "SYNTHETIC_ISSUE_1",
+      "number": 1,
+      "title": "Synthetic source canary",
+      "user": { "id": 101 },
+      "state": "open"
+    }
+  ],
+  "pullRequests": [
+    {
+      "id": 2001,
+      "node_id": "SYNTHETIC_PR_1",
+      "number": 3,
+      "title": "Synthetic pull request canary",
+      "user": { "id": 102 },
+      "state": "open",
+      "draft": false
+    }
+  ],
+  "project": {
+    "id": "PVT_synthetic",
+    "public": true,
+    "fields": [{ "id": "PVTSSF_synthetic", "dataType": "SINGLE_SELECT", "name": "Status" }]
+  },
+  "policy": {
+    "version": "synthetic-policy-v1",
+    "link": "https://github.com/synthetic-org/synthetic-repo/issues/100",
+    "testedMetricIds": ["issues_opened", "pr_opened"]
+  },
+  "roster": { "201": ["operator"], "202": ["operator"], "303": [] }
+}
