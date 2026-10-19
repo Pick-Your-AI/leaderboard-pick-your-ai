@@ -445,6 +445,9 @@ export function createGithubCollectionSource({
         family: request.family,
         cursor: request.cursor,
         limit: request.limit,
+        mode: request.mode,
+        since: request.since,
+        until: request.until,
       };
       try {
         return await adapter.readPage(captured);
