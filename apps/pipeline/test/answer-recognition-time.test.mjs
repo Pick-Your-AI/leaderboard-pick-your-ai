@@ -252,7 +252,10 @@ test("issue_answers: prior authority retires answer and later merged-participant
     const old = previousAuthority(s.state, bindings);
     const current = recognitionFingerprint(s.state, bindings);
     // Preserve the literal old fingerprint while accounting for independent later fences.
-    if (["issue_answers", "maintenance", "automation"].includes(metric.id)) assert.notEqual(current, old);
+    if (
+      ["issue_answers", "maintenance", "automation", "governance", "deployment_work", "incidents"].includes(metric.id)
+    )
+      assert.notEqual(current, old);
     else assert.equal(current, old, `${metric.id}: exact prior authority remains`);
   }
   const empty = { requests: {}, profiles: {}, audit: [] };

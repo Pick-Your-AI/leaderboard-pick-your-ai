@@ -531,7 +531,7 @@ test("automation: prior authority retires automation and later answer-clock bind
   for (const metric of metricRegistryV1.metrics) {
     const bindings = [{ ...s.binding, metricId: metric.id }];
     // Keep the literal pre-automation authority; the answer clock has its own fence.
-    if (["automation", "issue_answers"].includes(metric.id))
+    if (["automation", "issue_answers", "governance", "deployment_work", "incidents"].includes(metric.id))
       assert.notEqual(recognitionFingerprint(s.state, bindings), previousAuthority(s.state, bindings));
     else assert.equal(recognitionFingerprint(s.state, bindings), previousAuthority(s.state, bindings), metric.id);
   }

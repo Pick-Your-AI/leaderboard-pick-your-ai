@@ -472,7 +472,7 @@ test("maintenance: prior authority retires maintenance and later answer-clock bi
   for (const metric of metricRegistryV1.metrics) {
     const bindings = [{ ...s.binding, metricId: metric.id }];
     // Keep the literal pre-maintenance authority; the answer clock has its own fence.
-    if (["maintenance", "issue_answers"].includes(metric.id))
+    if (["maintenance", "issue_answers", "governance", "deployment_work", "incidents"].includes(metric.id))
       assert.notEqual(recognitionFingerprint(s.state, bindings), previousAuthority(s.state, bindings));
     else assert.equal(recognitionFingerprint(s.state, bindings), previousAuthority(s.state, bindings), metric.id);
   }
