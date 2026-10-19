@@ -259,7 +259,7 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
       const interval = domain.freshnessIntervalSeconds;
       require(Number.isSafeInteger(interval) && interval >= 1 && interval <= 366 * 86400);
       occurredAt = new Date(instant(detail.checkedAt)).toISOString();
-      choice(detail.outcome, ["available", "changed", "unavailable", "unknown"]);
+      choice(detail.outcome, ["available", "changed", "unavailable", "unknown", "contradicted"]);
       unit = [id(detail.canonicalSourceId), id(detail.claimId), Math.floor(instant(occurredAt) / (interval * 1000))];
       break;
     }

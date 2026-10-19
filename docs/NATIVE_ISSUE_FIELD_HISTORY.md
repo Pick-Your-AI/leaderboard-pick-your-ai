@@ -127,6 +127,18 @@ the eventual event falls outside the requested range. History counts remain
 unknown. This bounded history traversal does not claim a selective upstream
 change feed or complete historical coverage.
 
+A configured native family can participate in full reconciliation audits with an
+explicit null lower bound. It remains outside the planner's recent families:
+`issues`, `comments`, `project_history`, and `relationships`. Direct bounded
+native requests use their own time-window validation and filtering.
+
+Reserved reconciliation-plan requests also retain their raw captured mode and
+bounds for canonical-plan validation. The collector keeps its normalized native
+window separate from those raw fields, so UTC normalization cannot erase an
+invalid reserved-plan spelling. Canonical native audits remain supported;
+noncanonical reserved audits and bounded native reconciliations are rejected
+before source I/O.
+
 ## Supported historical value profiles
 
 GitHub independently declares `previousValue` and `newValue` as nullable strings
@@ -193,6 +205,9 @@ and final discovery admission. A failed controls-store write does not erase the
 SQL denial. Fresh administrative source approval is required for a later build;
 old pinned publications remain denied under their original approval binding.
 The established Project denial keys and checks remain separate.
+The final discovery statement also retains correction receipts, their
+fingerprint validation, and the final configuration and epoch fences alongside
+the native and Project denial checks.
 
 ## Code and validation boundaries
 
@@ -211,7 +226,8 @@ Focused synthetic coverage is split across:
   attribution binding, scalar/option profiles, revision integrity, no-op handling,
   and actual normalizer batch freshness.
 - `apps/pipeline/test/issue-field-source.test.mjs`: collector and durable fact
-  admission boundaries, captured time ranges, and filtering before pagination.
+  admission boundaries, captured time ranges, reserved-plan validation, and
+  filtering before pagination.
 - `apps/pipeline/test/issue-field-privacy.test.mjs`: runtime denial, SQL retention,
   restart, cached outputs, and final public admission.
 
@@ -220,5 +236,6 @@ a private in-memory repository checkpoint seam. Runtime and storage tests use
 the existing pipeline harness and SQL implementation. These tests establish
 software behavior under controlled source responses; they are not evidence of
 a real installation's field visibility, supported payload prevalence, or
-historical completeness. The existing `timeline-history.ts` reader and #347's
-generic reconciliation-window policy remain separate from this native adapter.
+historical completeness. The existing `timeline-history.ts` reader and generic
+reconciliation-window policy retain their own contracts alongside this native
+adapter.

@@ -2,6 +2,7 @@ import { GithubClientError } from "../../../packages/github/dist/client.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "../../../packages/github/dist/timeline-history.js";
 import { readIssueFieldHistory, issueFieldHistoryRevision } from "../../../packages/github/dist/issue-field-history.js";
 import { assertPublicProjects } from "../../../packages/github/dist/project-snapshots.js";
+import { githubRestSnapshotRevision, isGithubRestSnapshotFamily } from "../../../packages/github/dist/rest-snapshot.js";
 import {
   readPublicSubjectProjectSnapshot,
   projectSubjectSnapshotRevision,
@@ -12,6 +13,7 @@ import {
   githubSnapshotRevision,
   githubTimelineRevision,
 } from "../../../packages/github/dist/normalizers.js";
+import { parseReconciliationRunId } from "./reconciliation-plan.mjs";
 
 /** Conservative scope-loss codes emitted by the trusted Project adapters. */
 export function isProjectSourceScopeFailure(error, family) {
@@ -69,6 +71,32 @@ const at = (value) => {
     : null;
 };
 
+// These APIs expose an actual updated/event-time lower bound. Parent updated
+// order, commit author dates and current Project positions are not change feeds.
+export const githubRecentSourceFamilies = Object.freeze(["issues", "comments", "project_history", "relationships"]);
+const sourceWindow = (request) => {
+  if (request.since == null) return null;
+  const since = at(request.since),
+    until = at(request.until);
+  if (since === null || until === null || since >= until) throw new Error("invalid_source_window");
+  if (!githubRecentSourceFamilies.includes(request.family)) throw new Error("source_recent_window_unsupported");
+  // REST `since` is strictly after the supplied second. Read one extra whole
+  // second, then apply the exact inclusive boundary to the returned observations.
+  const apiSince = new Date(Math.floor(Date.parse(since) / 1000) * 1000 - 1000).toISOString().replace(".000Z", "Z");
+  if (at(apiSince) === null) throw new Error("invalid_source_window");
+  return { since, until, apiSince };
+};
+const recentRoute = (route, window) => {
+  const [path, query] = route.split("?");
+  const parameters = new URLSearchParams(query);
+  parameters.set("since", window.apiSince);
+  parameters.set("sort", "updated");
+  parameters.set("direction", "asc");
+  return path + "?" + parameters.toString();
+};
+const sourceSubjectId = (value) =>
+  value?.node_id ?? value?.sha ?? (Number.isSafeInteger(value?.id) ? String(value.id) : null);
+
 /** Read-only REST source with complete, bounded review fanout. */
 export function createGithubCollectionSource({
   client: readClient,
@@ -78,6 +106,7 @@ export function createGithubCollectionSource({
   maxPages = 100,
   onUnavailable,
   assertAuthorized = () => {},
+  useRestSnapshotRevisions = () => false,
 }) {
   if (
     !readClient?.scanRest ||
@@ -87,7 +116,8 @@ export function createGithubCollectionSource({
     !sourceId ||
     !Number.isInteger(maxPages) ||
     maxPages < 1 ||
-    maxPages > 1000
+    maxPages > 1000 ||
+    typeof useRestSnapshotRevisions !== "function"
   )
     throw new Error("invalid_github_collection_source");
   const approved = new Map(repositories.map((repository) => [repository.id, repository]));
@@ -115,7 +145,7 @@ export function createGithubCollectionSource({
   }
   const adapter = {
     probeRepository,
-    async readPage(request) {
+    async readPage(request, issueFieldWindow) {
       const repository = approved.get(request.repositoryId),
         route = routes[request.family];
       if (
@@ -132,6 +162,19 @@ export function createGithubCollectionSource({
           ].includes(request.family))
       )
         throw new Error("source_family_adapter_unavailable");
+      const planned = parseReconciliationRunId(request.runId);
+      const window = request.family === "issue_field_history" ? null : sourceWindow(request);
+      if (
+        planned &&
+        (at(request.until) === null ||
+          at(request.until) !== request.until ||
+          (request.mode === "audit"
+            ? request.since !== null
+            : request.mode === "reconcile"
+              ? !window || window.since !== request.since
+              : true))
+      )
+        throw new Error("reconciliation_source_plan_invalid");
       const client = readClient.forRepository(repository.id);
       assertAuthorized();
       let verification;
@@ -149,6 +192,13 @@ export function createGithubCollectionSource({
       if (request.cursor !== null && !/^(0|[1-9]\d{0,4})$/.test(request.cursor))
         throw new Error("invalid_source_cursor");
       const offset = request.cursor === null ? 0 : Number(request.cursor);
+      let restSnapshots = Boolean(planned);
+      if (!restSnapshots && isGithubRestSnapshotFamily(request.family)) {
+        assertAuthorized();
+        restSnapshots = await useRestSnapshotRevisions({ repositoryId: repository.id, family: request.family });
+        assertAuthorized();
+        if (typeof restSnapshots !== "boolean") throw new Error("invalid_rest_snapshot_policy");
+      }
       if (["project_current", "project_history"].includes(request.family))
         await assertPublicProjects({
           client,
@@ -270,7 +320,10 @@ export function createGithubCollectionSource({
         values = values.filter((value) => {
           const occurredAt = at(value.created_at);
           if (occurredAt === null) throw new Error("issue_field_event_invalid_response");
-          return occurredAt <= request.until && (request.since === null || occurredAt >= request.since);
+          return (
+            occurredAt <= issueFieldWindow.until &&
+            (issueFieldWindow.since === null || occurredAt >= issueFieldWindow.since)
+          );
         });
       } else if (["project_history", "relationships"].includes(request.family)) {
         if (
@@ -318,6 +371,7 @@ export function createGithubCollectionSource({
             subjectId: subject.node_id,
             family: request.family,
             scanId: request.runId,
+            ...(window ? { since: window.apiSince } : {}),
             maxPages,
             assertAuthorized,
           });
@@ -385,7 +439,7 @@ export function createGithubCollectionSource({
                 nodes { id url updatedAt createdAt answerChosenAt
                   author { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }
                   answerChosenBy { __typename ... on User { id databaseId } ... on Bot { id databaseId } }
-                  answer { id isAnswer author { __typename ... on User { id databaseId } ... on Bot { id databaseId } } }
+                  answer { id isAnswer createdAt author { __typename ... on User { id databaseId } ... on Bot { id databaseId } } }
                 }
                 pageInfo { hasNextPage endCursor }
               }
@@ -426,9 +480,20 @@ export function createGithubCollectionSource({
           if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
         }
       } else {
-        values = await scan(request.family, route, (body) =>
+        values = await scan(request.family, window ? recentRoute(route, window) : route, (body) =>
           request.family === "issues" ? body.filter((item) => !item.pull_request) : body,
         );
+      }
+      if (isGithubRestSnapshotFamily(request.family)) {
+        const seen = new Set();
+        for (const value of values) {
+          const subjectId = sourceSubjectId(value);
+          if (typeof subjectId !== "string") throw new Error("source_identity_or_revision_unverified");
+          // Reordered provider pages can repeat an object at another revision
+          // while omitting a different object. Revisions are not inventory IDs.
+          if (seen.has(subjectId)) throw new Error("source_inventory_identity_ambiguous");
+          seen.add(subjectId);
+        }
       }
       if (request.family === "timelines")
         values = values.map((value) => ({
@@ -436,13 +501,26 @@ export function createGithubCollectionSource({
           node_id: Number.isSafeInteger(value.id) && value.id > 0 ? String(value.id) : null,
           html_url: value.issue?.html_url,
         }));
+      if (window) {
+        const history = ["project_history", "relationships"].includes(request.family);
+        values = values.filter((value) => {
+          const timestamp = at(history ? value.created_at : value.updated_at);
+          if (timestamp === null) throw new Error("source_window_timestamp_unverified");
+          // Current objects have no historical as-of representation. Retain an
+          // observation newer than the event cutoff; never turn it into a past
+          // transition or silently drop it as proof of complete source coverage.
+          return timestamp >= window.since && (!history || timestamp <= window.until);
+        });
+      }
       assertAuthorized();
       if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
       const expectedCount = projectSubjectCount ?? values.length;
       if (offset > expectedCount) throw new Error("invalid_source_cursor");
       const selected = projectSubjectCount === null ? values.slice(offset, offset + request.limit) : values;
       const facts = selected.map((value) => {
-        const subjectId = value.node_id ?? value.sha ?? (Number.isSafeInteger(value.id) ? String(value.id) : null);
+        const subjectId = sourceSubjectId(value);
+        const nativeRevision =
+          value.sha ?? at(value.updated_at) ?? at(value.submitted_at) ?? at(value.published_at) ?? at(value.created_at);
         const revision = ["project_history", "relationships", "issue_field_history"].includes(request.family)
           ? value.source_revision
           : request.family === "timelines"
@@ -451,11 +529,9 @@ export function createGithubCollectionSource({
               ? githubSnapshotRevision(githubReviewRevision(value), request.runId)
               : ["discussions", "project_current"].includes(request.family)
                 ? githubSnapshotRevision(value.source_revision, request.runId)
-                : (value.sha ??
-                  at(value.updated_at) ??
-                  at(value.submitted_at) ??
-                  at(value.published_at) ??
-                  at(value.created_at));
+                : restSnapshots && isGithubRestSnapshotFamily(request.family) && nativeRevision
+                  ? githubRestSnapshotRevision(request.family, value, request.runId)
+                  : nativeRevision;
         if (
           typeof subjectId !== "string" ||
           !revision ||
@@ -516,18 +592,23 @@ export function createGithubCollectionSource({
         family: request.family,
         cursor: request.cursor,
         limit: request.limit,
+        mode: request.mode,
+        since: request.since,
+        until: request.until,
       };
+      let issueFieldWindow = null;
       if (captured.family === "issue_field_history") {
-        const since = request.since;
+        const since = captured.since;
         const from = since === null ? null : at(since);
-        const until = at(request.until);
+        const until = at(captured.until);
         if (until === null || (since !== null && from === null) || (from !== null && from >= until))
           throw new Error("invalid_issue_field_window");
-        captured.since = from;
-        captured.until = until;
+        // Reserved plans still validate the original canonical fields. Native
+        // direct reads compare normalized instants without rewriting that proof.
+        issueFieldWindow = { since: from, until };
       }
       try {
-        return await adapter.readPage(captured);
+        return await adapter.readPage(captured, issueFieldWindow);
       } catch (error) {
         const repository = approved.get(captured.repositoryId);
         if (repository && isProjectSourceScopeFailure(error, captured.family))

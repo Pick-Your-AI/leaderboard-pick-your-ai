@@ -244,7 +244,7 @@ for (const change of ["suppression", "approval"])
         work({
           query: async (sql, params) => {
             const result = await tx.query(sql, params);
-            if (!changed && sql.includes("UNION SELECT artifact_id AS subject_id")) {
+            if (!changed && sql.startsWith("SELECT subject_id\n  FROM leaderboard_ingestion.object_suppressions")) {
               changed = true;
               if (change === "approval") approved = false;
               else
@@ -269,7 +269,23 @@ for (const change of ["suppression", "approval"])
       );
   });
 
-test("delayed older confirmation cannot roll a newer confirmed head back", async (t) => {
+// Bound choreography waits so a missing interception fails and releases its
+// publication instead of stranding the test process in harness cleanup.
+async function confirmationStep(promise, label) {
+  let timeout;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`confirmation fixture timed out: ${label}`)), 30_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+test("delayed older confirmation cannot roll a newer confirmed head back", { timeout: 60_000 }, async (t) => {
   const h = await harness(t);
   let entered, release;
   const reached = new Promise((resolve) => {
@@ -299,15 +315,15 @@ test("delayed older confirmation cannot roll a newer confirmed head back", async
     return result;
   };
   const firstRun = h.runtime.runOnce();
-  await reached;
-  const newer = await createPipeline(h.options);
-  t.after(() => newer.stop());
   try {
+    await confirmationStep(reached, "older publication committed");
+    const newer = await createPipeline(h.options);
+    t.after(() => newer.stop());
     const second = (await newer.runOnce({ cutoff: clock() })).publications[0];
     assert.equal(second.revision, 2);
     assert.equal((await getBoard(newer)).snapshotId, second.snapshotId);
     release();
-    const first = (await firstRun).publications[0];
+    const first = (await confirmationStep(firstRun, "older confirmation resumed")).publications[0];
     assert.equal(first.revision, 1);
     assert.equal((await getBoard(h.runtime)).snapshotId, second.snapshotId);
     const pinned = await getBoard(h.runtime, `&snapshot=${first.snapshotId}`);
@@ -315,60 +331,68 @@ test("delayed older confirmation cannot roll a newer confirmed head back", async
     assert.equal(pinned.head.snapshotId, second.snapshotId);
   } finally {
     release();
-    await firstRun;
+    await confirmationStep(firstRun, "older publication cleanup");
   }
 });
 
-test("a confirmation advancing during a read retries instead of advertising the stale head", async (t) => {
-  const h = await harness(t);
-  const first = (await h.runtime.runOnce()).publications[0];
-  let entered, release;
-  const reached = new Promise((resolve) => {
-    entered = resolve;
-  });
-  const resume = new Promise((resolve) => {
-    release = resolve;
-  });
-  const transaction = h.db.transaction;
-  let paused = false,
-    advanceOnRead = false,
-    advanced = false,
-    pending;
-  h.db.transaction = async (work) => {
-    let publishing = false;
-    const result = await transaction((tx) =>
-      work({
-        query: async (sql, params) => {
-          const result = await tx.query(sql, params);
-          if (sql.includes("INSERT INTO leaderboard_pipeline.snapshots")) publishing = true;
-          if (advanceOnRead && !advanced && sql.includes("UNION SELECT artifact_id AS subject_id")) {
-            advanced = true;
-            release();
-            await pending;
-          }
-          return result;
-        },
-      }),
-    );
-    if (publishing && !paused) {
-      paused = true;
-      entered();
-      await resume;
+test(
+  "a confirmation advancing during a read retries instead of advertising the stale head",
+  { timeout: 60_000 },
+  async (t) => {
+    const h = await harness(t);
+    const first = (await h.runtime.runOnce()).publications[0];
+    let entered, release;
+    const reached = new Promise((resolve) => {
+      entered = resolve;
+    });
+    const resume = new Promise((resolve) => {
+      release = resolve;
+    });
+    const transaction = h.db.transaction;
+    let paused = false,
+      advanceOnRead = false,
+      advanced = false,
+      pending;
+    h.db.transaction = async (work) => {
+      let publishing = false;
+      const result = await transaction((tx) =>
+        work({
+          query: async (sql, params) => {
+            const result = await tx.query(sql, params);
+            if (sql.includes("INSERT INTO leaderboard_pipeline.snapshots")) publishing = true;
+            if (
+              advanceOnRead &&
+              !advanced &&
+              sql.startsWith("SELECT subject_id\n  FROM leaderboard_ingestion.object_suppressions")
+            ) {
+              advanced = true;
+              release();
+              await confirmationStep(pending, "new confirmation during read");
+            }
+            return result;
+          },
+        }),
+      );
+      if (publishing && !paused) {
+        paused = true;
+        entered();
+        await resume;
+      }
+      return result;
+    };
+    pending = h.runtime.runOnce({ cutoff: clock() });
+    try {
+      await confirmationStep(reached, "new publication committed");
+      advanceOnRead = true;
+      const board = await getBoard(h.runtime);
+      assert.equal(advanced, true);
+      const second = (await confirmationStep(pending, "new confirmation resumed")).publications[0];
+      assert.equal(board.snapshotId, second.snapshotId);
+      assert.equal(board.head.revision, 2);
+      assert.equal((await getBoard(h.runtime, `&snapshot=${first.snapshotId}`)).head.snapshotId, second.snapshotId);
+    } finally {
+      release();
+      await confirmationStep(pending, "new publication cleanup");
     }
-    return result;
-  };
-  pending = h.runtime.runOnce({ cutoff: clock() });
-  await reached;
-  try {
-    advanceOnRead = true;
-    const board = await getBoard(h.runtime);
-    const second = (await pending).publications[0];
-    assert.equal(advanced, true);
-    assert.equal(board.snapshotId, second.snapshotId);
-    assert.equal(board.head.revision, 2);
-    assert.equal((await getBoard(h.runtime, `&snapshot=${first.snapshotId}`)).head.snapshotId, second.snapshotId);
-  } finally {
-    release();
-    await pending;
-  }
-});
+  },
+);

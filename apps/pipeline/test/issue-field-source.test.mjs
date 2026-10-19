@@ -10,10 +10,12 @@ import {
 } from "../../../packages/github/test/issue-field-fixture.mjs";
 import {
   createGithubCollectionSource,
+  githubRecentSourceFamilies,
   isIssueFieldSourceScopeFailure,
   isProjectSourceScopeFailure,
 } from "../src/github-source.mjs";
 import { components, harness } from "./harness.mjs";
+import { reconciliationRunId } from "../src/reconciliation-plan.mjs";
 
 const request = {
   repositoryId: repository.id,
@@ -25,6 +27,7 @@ const request = {
   cursor: null,
   limit: 100,
 };
+const reservedNativeRunId = reconciliationRunId("a".repeat(64), "00000000-0000-4000-8000-000000000079", 0, 1);
 const cutoffIds = ["before", "lower", "inside", "upper", "after"].map((name) => "E_SYNTHETIC_CUTOFF_" + name);
 const cutoffWindow = { since: "2026-10-01T12:00:00.1Z", until: "2026-10-01T12:00:00.12Z" };
 const cutoffEvents = (
@@ -509,6 +512,61 @@ test("native history uses inclusive UTC boundaries and paginates the filtered ev
       assert.deepEqual(empty.facts, []);
       assert.equal(empty.nextCursor, null);
       assert.equal(empty.expectedCount, null);
+      assert.deepEqual(unavailable, []);
+    });
+});
+
+test("native direct windows and reserved audits keep separate timestamp contracts", async () => {
+  const h = issueFieldFixture(cutoffEvents());
+  const { source, unavailable } = collector(h);
+  assert.deepEqual(githubRecentSourceFamilies, ["issues", "comments", "project_history", "relationships"]);
+  const direct = await source.readPage({ ...request, ...cutoffWindow, mode: "reconcile" });
+  assert.deepEqual(
+    direct.facts.map((fact) => fact.subjectId),
+    cutoffIds.slice(1, 4),
+  );
+  assert.equal(direct.expectedCount, null);
+  const audit = await source.readPage({
+    ...request,
+    runId: reservedNativeRunId,
+    mode: "audit",
+    until: "2026-10-01T12:00:00.120Z",
+  });
+  assert.deepEqual(
+    audit.facts.map((fact) => fact.subjectId),
+    cutoffIds.slice(0, 4),
+  );
+  assert.deepEqual(audit.facts.slice(1), direct.facts);
+  assert.equal(audit.expectedCount, null);
+  assert.equal(audit.nextCursor, null);
+  assert.deepEqual(unavailable, []);
+});
+
+test("native reserved plans reject noncanonical audits and recent mode before source I/O", async (t) => {
+  for (const [label, changes] of [
+    ["fractional upper alias", { until: "2026-10-01T12:00:00.12Z" }],
+    ["whole second upper alias", { until: "2026-10-02T00:00:00Z" }],
+    [
+      "canonical bounded recent mode",
+      { mode: "reconcile", since: "2026-10-01T12:00:00.100Z", until: "2026-10-01T12:00:00.120Z" },
+    ],
+  ])
+    await t.test(label, async () => {
+      const h = issueFieldFixture(cutoffEvents());
+      const { source, unavailable } = collector(h);
+      const audit = { ...request, runId: reservedNativeRunId, mode: "audit" };
+      await assert.rejects(source.readPage({ ...audit, ...changes }), {
+        message: "reconciliation_source_plan_invalid",
+      });
+      assert.deepEqual(h.calls, []);
+      assert.deepEqual(scans(h), []);
+      assert.deepEqual(unavailable, []);
+      const recovered = await source.readPage(audit);
+      assert.deepEqual(
+        recovered.facts.map((fact) => fact.subjectId),
+        cutoffIds,
+      );
+      assert.equal(recovered.expectedCount, null);
       assert.deepEqual(unavailable, []);
     });
 });

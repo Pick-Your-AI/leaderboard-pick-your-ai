@@ -6,6 +6,22 @@ import { nominateSpotlight, decideSpotlight, projectSpotlights } from "./editori
 import { createConfigurationManager } from "./configuration.mjs";
 import { createPolicyComparisonManager } from "./policy-comparison.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "./localization-review.mjs";
+import { hasRequiredParticipantConsent, hasReviewedParticipantConsent } from "./evidence-consent.mjs";
+import {
+  createEvidenceIntake,
+  createSourceUseReview,
+  evidenceIntakeEligibility,
+  evidenceTerms,
+  hasConsentedEvidenceIntake,
+  hasCurrentEvidenceConsent,
+  hasReviewedEvidenceIntake,
+  isEvidenceParticipant,
+  parseEvidenceIntake,
+  parseSourceUseReview,
+  participantConsent,
+  projectEvidenceInvitation,
+  protectedEvidenceRequest,
+} from "./evidence-intake.mjs";
 
 const random = () => randomBytes(32).toString("base64url");
 const hash = (value) => createHash("sha256").update(value).digest("base64url");
@@ -349,6 +365,11 @@ export function createControlsServer({
         send(200, { actorId: session.actorId, csrf: session.csrf, roles: session.roles, expires: session.expires });
         return;
       }
+      if (req.method === "GET" && path === "/controls/evidence-terms") {
+        requireThat([...url.searchParams].length === 0, 400, "Unexpected evidence terms query");
+        send(200, { terms: evidenceTerms() });
+        return;
+      }
       if (req.method === "POST" && path === "/controls/logout") {
         exactKeys(await inputBody(), []);
         store.transaction((s) => {
@@ -421,7 +442,7 @@ export function createControlsServer({
       }
       if (req.method === "POST" && path === "/controls/requests") {
         const input = await inputBody();
-        exactKeys(input, ["kind", "locator", "category", "collaborators", "consent", "detail", "scope"]);
+        exactKeys(input, ["kind", "locator", "category", "collaborators", "consent", "detail", "scope", "intake"]);
         requireThat(kinds.includes(input.kind));
         const detail = text(input.detail);
         const receipt = store.transaction((s) => {
@@ -449,23 +470,38 @@ export function createControlsServer({
             requireThat(input.consent === true && categories.includes(input.category));
             requireThat(Array.isArray(input.collaborators) && input.collaborators.length <= 20);
             const ids = [...new Set(input.collaborators.map(actorId))];
-            requireThat(!ids.includes(session.actorId));
+            requireThat(ids.length === input.collaborators.length && !ids.includes(session.actorId));
+            const intake = parseEvidenceIntake(input.intake, ids);
+            requireThat(
+              intake,
+              400,
+              "Current evidence terms, source-use declaration, roles and requested dates required",
+            );
             Object.assign(request, {
               locator: locator(input.locator),
               category: input.category,
               scope: text(input.scope, 300),
               collaborators: Object.fromEntries(ids.map((id) => [id, "pending"])),
             });
+            request.intake = createEvidenceIntake(request, intake, timestamp);
           } else {
             requireThat(
               input.collaborators === undefined &&
                 input.consent === undefined &&
                 input.category === undefined &&
-                input.scope === undefined,
+                input.scope === undefined &&
+                input.intake === undefined,
             );
             if (input.locator !== undefined) request.locator = locator(input.locator);
           }
-          record(s, request, session.actorId, "submitted", timestamp);
+          record(
+            s,
+            request,
+            session.actorId,
+            "submitted",
+            timestamp,
+            request.kind === "evidence" ? { consent: request.intake.submitterConsent } : {},
+          );
           s.requests[id] = request;
           return { id, status: "pending", version: 1 };
         });
@@ -473,26 +509,18 @@ export function createControlsServer({
         return;
       }
       if (req.method === "GET" && path === "/controls/requests") {
-        send(200, { requests: Object.values(store.read().requests).filter((r) => canSee(r, session)) });
+        send(200, {
+          requests: Object.values(store.read().requests)
+            .filter((r) => canSee(r, session))
+            .map(protectedEvidenceRequest),
+        });
         return;
       }
       if (req.method === "GET" && path === "/controls/invitations") {
         send(200, {
           invitations: Object.values(store.read().requests)
-            .filter(
-              (r) =>
-                r.kind === "evidence" &&
-                Object.hasOwn(r.collaborators, session.actorId) &&
-                !["withdrawn", "merged"].includes(r.status),
-            )
-            .map((r) => ({
-              id: r.id,
-              version: r.version,
-              locator: r.locator,
-              category: r.category,
-              scope: r.scope,
-              consent: r.collaborators[session.actorId],
-            })),
+            .filter((r) => isEvidenceParticipant(r, session.actorId) && !["withdrawn", "merged"].includes(r.status))
+            .map((r) => projectEvidenceInvitation(r, session.actorId)),
         });
         return;
       }
@@ -502,7 +530,7 @@ export function createControlsServer({
         const existing = store.read().requests[id];
         if (req.method === "GET" && !action) {
           requireThat(existing && canSee(existing, session), 404, "Not found");
-          send(200, existing);
+          send(200, protectedEvidenceRequest(existing));
           return;
         }
         requireThat(req.method === "POST" && action, 405, "Method not allowed");
@@ -513,12 +541,7 @@ export function createControlsServer({
             requireThat(request, 404, "Not found");
             // Authorize visibility before checking version/state so another
             // person's known receipt cannot become a private-state oracle.
-            if (action === "consent")
-              requireThat(
-                request.kind === "evidence" && Object.hasOwn(request.collaborators || {}, session.actorId),
-                404,
-                "Not found",
-              );
+            if (action === "consent") requireThat(isEvidenceParticipant(request, session.actorId), 404, "Not found");
             else if (action === "review") requireThat(canSee(request, session), 404, "Not found");
             else requireThat(request.owner === session.actorId, 404, "Not found");
             requireThat(
@@ -528,7 +551,17 @@ export function createControlsServer({
             );
             const timestamp = now();
             if (action === "amend") {
-              exactKeys(input, ["version", "reason", "locator", "category", "scope", "detail", "collaborators"]);
+              exactKeys(input, [
+                "version",
+                "reason",
+                "locator",
+                "category",
+                "scope",
+                "detail",
+                "collaborators",
+                "consent",
+                "intake",
+              ]);
               requireThat(request.owner === session.actorId, 404, "Not found");
               requireThat(
                 request.kind === "evidence" && !["withdrawn", "merged"].includes(request.status),
@@ -541,43 +574,81 @@ export function createControlsServer({
                   input.collaborators.length <= 20,
               );
               const ids = [...new Set(input.collaborators.map(actorId))];
-              requireThat(!ids.includes(session.actorId));
+              requireThat(ids.length === input.collaborators.length && !ids.includes(session.actorId));
+              requireThat(input.consent === true, 400, "Explicit consent to the amended claim required");
+              const intake = parseEvidenceIntake(input.intake, ids);
+              requireThat(
+                intake,
+                400,
+                "Current evidence terms, source-use declaration, roles and requested dates required",
+              );
+              requireThat(
+                request.intake?.claimRevision !== Number.MAX_SAFE_INTEGER,
+                409,
+                "Evidence claim revision exhausted",
+              );
               const previous = {
                 locator: request.locator,
                 category: request.category,
                 scope: request.scope,
                 detail: request.detail,
                 collaborators: request.collaborators,
+                ...(request.intake ? { intake: request.intake } : {}),
               };
               request.locator = locator(input.locator);
               request.category = input.category;
               request.scope = text(input.scope, 300);
               request.detail = text(input.detail);
               request.collaborators = Object.fromEntries(
-                ids.map((id) => [id, previous.collaborators[id] === "declined" ? "declined" : "pending"]),
+                ids.map((id) => [id, previous.collaborators?.[id] === "declined" ? "declined" : "pending"]),
               );
+              request.intake = createEvidenceIntake(request, intake, timestamp, previous.intake);
               request.status = "pending";
               delete request.policyVersion;
-              record(s, request, session.actorId, "amended", timestamp, { reason: text(input.reason), previous });
+              record(s, request, session.actorId, "amended", timestamp, {
+                reason: text(input.reason),
+                previous,
+                consent: request.intake.submitterConsent,
+              });
             } else if (action === "consent") {
-              exactKeys(input, ["version", "consent"]);
-              requireThat(
-                request.kind === "evidence" && Object.hasOwn(request.collaborators, session.actorId),
-                404,
-                "Not found",
-              );
+              exactKeys(input, ["version", "consent", "claimDigest", "termsVersion", "termsDigest"]);
+              requireThat(isEvidenceParticipant(request, session.actorId), 404, "Not found");
               requireThat(typeof input.consent === "boolean" && !["withdrawn", "merged"].includes(request.status));
+              const supported = evidenceIntakeEligibility(request).state !== "updated_intake_required";
+              if (input.consent) {
+                requireThat(supported, 409, "Owner must amend evidence with current intake before consent");
+                requireThat(
+                  input.claimDigest === request.intake.claimDigest &&
+                    input.termsVersion === request.intake.termsVersion &&
+                    input.termsDigest === request.intake.termsDigest,
+                  409,
+                  "Claim or terms changed; reload before consenting",
+                );
+              } else {
+                requireThat(
+                  input.claimDigest === undefined &&
+                    input.termsVersion === undefined &&
+                    input.termsDigest === undefined,
+                );
+              }
               const nextConsent = input.consent ? "accepted" : "declined";
-              const localeReviewRequired =
+              const consentChanged = request.collaborators[session.actorId] !== nextConsent;
+              const reviewRequired =
                 request.status === "accepted" &&
-                request.history.findLast((entry) => entry.action === "accepted")?.localization !== undefined;
-              // Exact locale acceptance binds the reviewed request version. A
-              // changed attribution must become reviewable, not remain accepted
-              // with a stale decision that blocks every subsequent publication.
-              if (localeReviewRequired && request.collaborators[session.actorId] === nextConsent)
+                (consentChanged || !hasReviewedParticipantConsent(request) || !hasReviewedEvidenceIntake(request));
+              // Changed consent suspends the whole reviewed claim. An old
+              // acceptance cannot authorize a newly consenting participant or
+              // survive a required participant's withdrawal.
+              if (
+                !consentChanged &&
+                !reviewRequired &&
+                hasCurrentEvidenceConsent(request, session.actorId, nextConsent)
+              )
                 return { id: request.id, status: request.status, version: request.version };
               request.collaborators[session.actorId] = nextConsent;
-              if (localeReviewRequired) {
+              const consent = supported ? participantConsent(request, session.actorId, nextConsent, timestamp) : null;
+              if (consent) request.intake.participantConsents[session.actorId] = consent;
+              if (reviewRequired) {
                 request.status = "pending";
                 delete request.policyVersion;
               }
@@ -587,7 +658,10 @@ export function createControlsServer({
                 session.actorId,
                 input.consent ? "attribution-accepted" : "attribution-declined",
                 timestamp,
-                ...(localeReviewRequired ? [{ reviewRequired: true, previousStatus: "accepted" }] : []),
+                {
+                  ...(consent ? { consent } : {}),
+                  ...(reviewRequired ? { reviewRequired: true, previousStatus: "accepted" } : {}),
+                },
               );
             } else if (action === "withdraw") {
               exactKeys(input, ["version"]);
@@ -611,6 +685,7 @@ export function createControlsServer({
                 "sourceReviewedPublic",
                 "duplicateOf",
                 "localization",
+                "sourceUseReview",
               ]);
               requireThat(session.roles.includes(roleNeeded(request)), 403, "Reviewer role required");
               requireThat(
@@ -621,6 +696,7 @@ export function createControlsServer({
               requireThat(input.conflict === false, 403, "Declare conflicts and route to an independent reviewer");
               requireThat(["accept", "reject", "rollback", "merge"].includes(input.decision));
               requireThat(input.decision === "accept" || input.localization === undefined);
+              requireThat(input.decision === "accept" || input.sourceUseReview === undefined);
               requireThat(!["withdrawn", "merged", "applied"].includes(request.status), 409, "Request is terminal");
               if (request.status === "appealed" || input.decision === "rollback") {
                 requireThat(
@@ -643,11 +719,25 @@ export function createControlsServer({
                 );
                 requireThat(input.sourceReviewedPublic === true, 400, "Public source review required");
                 requireThat(
+                  hasRequiredParticipantConsent(request),
+                  409,
+                  "Every listed collaborator must consent before independent acceptance",
+                );
+                requireThat(
+                  hasConsentedEvidenceIntake(request),
+                  409,
+                  "Current claim-scoped intake and consent required",
+                );
+                const sourceUse = parseSourceUseReview(input.sourceUseReview);
+                requireThat(sourceUse, 400, "Independent source-use review and reviewed references required");
+                requireThat(
                   !Object.values(s.requests).some(
                     (other) =>
                       other.id !== id &&
                       other.kind === "evidence" &&
                       other.status === "accepted" &&
+                      hasReviewedParticipantConsent(other) &&
+                      hasReviewedEvidenceIntake(other) &&
                       other.owner === request.owner &&
                       other.locator === request.locator &&
                       other.category === request.category &&
@@ -671,8 +761,21 @@ export function createControlsServer({
                 record(s, request, session.actorId, "accepted", timestamp, {
                   reason,
                   policyVersion: request.policyVersion,
+                  sourceReviewedPublic: true,
+                  conflict: false,
+                  sourceUseReview: createSourceUseReview(request, sourceUse, {
+                    actorId: session.actorId,
+                    roleVersion: session.roleVersion,
+                    at: timestamp,
+                    policyVersion,
+                  }),
                   ...(localization ? { localization, evidenceRequest: localizationReviewRequest(request) } : {}),
                 });
+                requireThat(
+                  hasReviewedEvidenceIntake(request),
+                  409,
+                  "Current scoped intake and attributable source-use review required",
+                );
               } else if (input.decision === "reject") {
                 requireThat(["pending", "appealed"].includes(request.status), 409, "Already reviewed");
                 request.status = "rejected";
@@ -693,6 +796,11 @@ export function createControlsServer({
                     canonical.kind === "evidence" &&
                     canonical.id !== id &&
                     canonical.status === "accepted",
+                );
+                requireThat(
+                  hasReviewedParticipantConsent(canonical) && hasReviewedEvidenceIntake(canonical),
+                  409,
+                  "Canonical evidence requires current consent and source-use review",
                 );
                 requireThat(
                   canonical.owner === request.owner &&

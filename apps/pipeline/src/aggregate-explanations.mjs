@@ -1,5 +1,6 @@
 import { captureRankEvidence, retainedRankHistory } from "./rank-history.mjs";
 import { createHash } from "node:crypto";
+import { reversionAuthorityVersion } from "./reversion-effectiveness.mjs";
 
 // Local fail-closed bounds, not a production retention or capacity commitment.
 // Records have the retained snapshot's lifecycle, never the optional preview TTL.
@@ -42,6 +43,26 @@ const hash = (value) => {
 const sorted = (values) => [...new Set(values)].sort();
 const same = (left, right) => stable(left) === stable(right);
 const finite = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0;
+
+function reversionAuthorization(authorization) {
+  if (!Object.hasOwn(authorization, "reversionAuthority") && !Object.hasOwn(authorization, "reversionRecordsHash"))
+    return {};
+  const authority = authorization.reversionAuthority;
+  check(
+    authority &&
+      Object.keys(authority).sort().join(",") === "digest,hashes,version" &&
+      authority.version === reversionAuthorityVersion &&
+      Array.isArray(authority.hashes) &&
+      authority.hashes.length <= 10000 &&
+      same(authority.hashes, sorted(authority.hashes)),
+  );
+  authority.hashes.forEach(hash);
+  check(hash(authority.digest) === aggregateExplanationHash([reversionAuthorityVersion, authority.hashes]));
+  return {
+    reversionAuthority: structuredClone(authority),
+    reversionRecordsHash: hash(authorization.reversionRecordsHash),
+  };
+}
 
 function identityAuthorization(authorization) {
   if (authorization.identityEvidence === undefined) return {};
@@ -345,6 +366,7 @@ export function buildAggregateExplanation(capture, binding) {
       dataMode: authorization.dataMode,
       controlsConfigurationRevision: authorization.controlsConfigurationRevision,
       ...identityAuthorization(authorization),
+      ...reversionAuthorization(authorization),
       sources: authorization.sources.map((source) => ({
         repositoryId: token(source.repositoryId),
         generation: token(source.generation),
@@ -406,6 +428,7 @@ export class AggregateExplanationStore {
           aggregateExplanationHash(document) === row.digest,
       );
       check(document.computationVersion === aggregateExplanationLimitsV1.computationVersion);
+      reversionAuthorization(document.authorization);
       for (const metric of document.metrics) {
         for (const row of metric.rows)
           validateArithmetic(row, metric.aggregation, metric.minimumSamples, metric.ranked);
