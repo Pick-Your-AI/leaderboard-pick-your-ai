@@ -32,6 +32,11 @@ import {
   isIssueFieldSourceScopeFailure,
 } from "./github-source.mjs";
 import { githubCommentsContext, expandedGithubCommentsRun, startGithubCommentsRun } from "./comments-inventory.mjs";
+import {
+  githubContentEditsContext,
+  createGithubContentEditAdmission,
+  startGithubContentEditRun,
+} from "./content-edit-inventory.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
 import {
   defaultDeliveryNormalizationVersion,
@@ -732,6 +737,7 @@ export async function createPipeline(options) {
     };
     return transaction ? read(transaction) : db.transaction(read);
   }
+  const contentEditAdmission = createGithubContentEditAdmission();
   const defaultSource = options.githubClient
     ? createGithubCollectionSource({
         client: options.githubClient,
@@ -741,6 +747,7 @@ export async function createPipeline(options) {
         assertAuthorized: () => assertRunConfiguration(),
         onUnavailable: (repo, reason) => denyRepository(repo, reason, utc(now())),
         includePullRequestReviewComments: ({ runId }) => expandedGithubCommentsRun(runId),
+        includeContentEditMetadata: (request) => contentEditAdmission.allows(request),
         async useRestSnapshotRevisions({ repositoryId, family }) {
           if (reconciliationPolicy) return true;
           // Keep immutable observation identities after an approved policy change
@@ -761,6 +768,10 @@ export async function createPipeline(options) {
     defaultSource !== null &&
     collectionSource === defaultSource &&
     config.repositories.some((repository) => repository.families.includes("comments"));
+  const defaultContentEditInventory =
+    defaultSource !== null &&
+    collectionSource === defaultSource &&
+    config.repositories.some((repository) => repository.families.includes("content_edits"));
   const probeSource = options.probeRepository ?? defaultSource?.probeRepository;
   const collection = new c.ingestion.CollectionStore(db);
   const scanContinuations = new ScanContinuationStore(db);
@@ -869,9 +880,12 @@ export async function createPipeline(options) {
   const scanContext = (mode, sources, revision, fingerprint) => ({
     key: digest(["bounded-scan/v1", config, dataMode, mode]),
     contextHash: digest(
-      githubCommentsContext(
-        [revision, recognitionBindings.length ? fingerprint : null, sources],
-        defaultCommentsInventory,
+      githubContentEditsContext(
+        githubCommentsContext(
+          [revision, recognitionBindings.length ? fingerprint : null, sources],
+          defaultCommentsInventory,
+        ),
+        defaultContentEditInventory,
       ),
     ),
   });
@@ -2867,7 +2881,15 @@ export async function createPipeline(options) {
     cursorSecret: options.cursorSecret,
     now: () => Date.parse(now()),
   });
-  async function runOnceInternal({ cutoff, mode = "reconcile", maxPages = 100, dispatch = null } = {}) {
+  async function runOnceInternal(options) {
+    contentEditAdmission.clear();
+    try {
+      return await runOnceSelected(options);
+    } finally {
+      contentEditAdmission.clear();
+    }
+  }
+  async function runOnceSelected({ cutoff, mode = "reconcile", maxPages = 100, dispatch = null } = {}) {
     const implicitCutoff = cutoff === undefined;
     cutoff = utc(implicitCutoff ? now() : cutoff);
     if (stopped) fail("pipeline_stopped");
@@ -2917,6 +2939,7 @@ export async function createPipeline(options) {
           : null,
       );
       cutoff = scan.cutoff;
+      if (defaultContentEditInventory && scan.plan) contentEditAdmission.setPlanned(scan, scan.plan);
     }
     const publicationWindows = resolveDiscoverablePublicationWindows(
       config.scopes,
@@ -2950,10 +2973,14 @@ export async function createPipeline(options) {
         // For explicit/dispatch runs, retain an existing old operation literally;
         // otherwise atomically materialize and pin the expanded inventory ID.
         const selectedRequest =
-          !scan?.plan && defaultCommentsInventory && request.family === "comments"
-            ? await startGithubCommentsRun(db, collection, request, assertRunConfiguration)
-            : request;
+          !scan?.plan && defaultContentEditInventory && request.family === "content_edits"
+            ? await startGithubContentEditRun(db, collection, request, assertRunConfiguration)
+            : !scan?.plan && defaultCommentsInventory && request.family === "comments"
+              ? await startGithubCommentsRun(db, collection, request, assertRunConfiguration)
+              : request;
         const { runId, family } = selectedRequest;
+        if (!scan?.plan && defaultContentEditInventory && family === "content_edits")
+          contentEditAdmission.recordSelected(selectedRequest);
         if (!scan?.plan && selectedRequest === request) await collection.start(request);
         const collectionStarted = performance.now();
         let status = "progress";

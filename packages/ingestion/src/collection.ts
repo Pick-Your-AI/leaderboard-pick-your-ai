@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { SqlDatabase, SqlSession } from "./store.js";
+import { collectionContentEditMetadata, type ContentEditMetadata } from "./content-edit-metadata.js";
 
 export const sourceFamilies = [
   "issues",
@@ -33,6 +34,8 @@ export interface SourceFact {
   issueFieldId?: string;
   /** Native issue/PR identity for a complete current Project membership snapshot. */
   projectSubjectId?: string;
+  /** Private native-parent metadata, never transition or recognition evidence. */
+  contentEditMetadata?: ContentEditMetadata;
   sourceRevision: string;
   sourceUrl: string;
   /** Snapshot state never establishes a transition's actor or occurrence time. */
@@ -85,7 +88,8 @@ function validateScanRequest(request: ScanRequest): void {
   if (!sourceFamilies.includes(request.family) || !["backfill", "reconcile", "audit"].includes(request.mode))
     throw new Error("invalid_scan_scope");
 }
-function normalizeFact(value: SourceFact): SourceFact {
+function normalizeFact(value: SourceFact, family: SourceFamily): SourceFact {
+  const contentEditMetadata = collectionContentEditMetadata(value, family);
   id(value.subjectId);
   if (value.historySubjectId !== undefined) id(value.historySubjectId);
   if (value.issueFieldId !== undefined) {
@@ -122,7 +126,7 @@ function normalizeFact(value: SourceFact): SourceFact {
   if (value.evidence === "current_state" && (value.actorId !== null || value.occurredAt !== null))
     throw new Error("snapshot_attribution_forbidden");
   // Pick fields explicitly. Repository text and adapter extras are never retained or executed.
-  return {
+  const normalized: SourceFact = {
     subjectId: value.subjectId,
     ...(value.historySubjectId !== undefined ? { historySubjectId: value.historySubjectId } : {}),
     ...(value.issueFieldId !== undefined ? { issueFieldId: value.issueFieldId } : {}),
@@ -133,7 +137,16 @@ function normalizeFact(value: SourceFact): SourceFact {
     actorId: value.actorId,
     occurredAt: value.occurredAt,
     state: value.state,
+    ...(contentEditMetadata !== undefined ? { contentEditMetadata } : {}),
   };
+  // Check the captured value, including legacy inherited/accessor properties, without rereading the input.
+  if (
+    contentEditMetadata === undefined &&
+    typeof normalized.sourceRevision === "string" &&
+    normalized.sourceRevision.startsWith("gh-content-edit-")
+  )
+    throw new TypeError("invalid_content_edit_metadata");
+  return normalized;
 }
 
 export async function assertRepositoryAvailable(
@@ -320,7 +333,9 @@ export class CollectionStore {
         throw new Error("nonadvancing_source_page");
       if (page.expectedCount !== null && (!Number.isSafeInteger(page.expectedCount) || page.expectedCount < 0))
         throw new Error("invalid_source_count");
-      const facts = page.facts.map(normalizeFact);
+      const facts = page.facts.map((fact) => normalizeFact(fact, request.family));
+      if (page.expectedCount !== null && facts.some((fact) => fact.contentEditMetadata !== undefined))
+        throw new Error("content_edit_history_count_unknown");
       if (
         facts.some(
           (fact) =>
