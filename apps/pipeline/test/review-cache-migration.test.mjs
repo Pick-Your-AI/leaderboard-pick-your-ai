@@ -29,7 +29,10 @@ const projectSignature = (config, version) =>
   ]);
 const legacySignature = (config) => projectSignature(config, "project-membership-context/v1");
 const currentSignature = (config) =>
-  comparisonHash(["github-issue-transfer-admission/v1", projectSignature(config, "project-membership-context/v2")]);
+  comparisonHash([
+    "pipeline-issue-transfer/v1",
+    comparisonHash(["github-issue-transfer-admission/v1", projectSignature(config, "project-membership-context/v2")]),
+  ]);
 
 test("pre-transfer versioned review caches keep frozen public and private authority after restart", async (t) => {
   const h = await reviewHarness(t);

@@ -36,7 +36,10 @@ const projectSignature = (config, version) =>
   ]);
 const legacySignature = (config) => projectSignature(config, "project-membership-context/v1");
 const currentSignature = (config) =>
-  comparisonHash(["github-issue-transfer-admission/v1", projectSignature(config, "project-membership-context/v2")]);
+  comparisonHash([
+    "pipeline-issue-transfer/v1",
+    comparisonHash(["github-issue-transfer-admission/v1", projectSignature(config, "project-membership-context/v2")]),
+  ]);
 
 async function deliveryHarness(t, family, extra = {}) {
   const sourceFamily = { commit: "commits", pull_request: "pull_requests", issue: "issues" }[family];

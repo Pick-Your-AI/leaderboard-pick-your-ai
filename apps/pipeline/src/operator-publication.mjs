@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { webhookDispatchVersion } from "./webhook-dispatch.mjs";
+import { lockIssueTransferSources } from "./issue-transfer-authority.mjs";
 
 const normalizationVersionFields = [
   "reviewSourceNormalizationVersion",
@@ -32,6 +33,7 @@ export function createOperatorPublicationVerifier({
   recognitionCurrent,
   configurationCurrent,
   withAuthorizedInputs,
+  publicationNormalizationBinding,
 }) {
   const configurationHash = digest(config);
   // The dispatcher intentionally hashes ordered configuration bytes. Its
@@ -58,13 +60,11 @@ export function createOperatorPublicationVerifier({
       binding.publications.some((item) => !scopes.has(item.scopeKey))
     )
       return null;
-    const access = (
-      await tx.query(
-        `SELECT repository_id,installation_id,state,generation FROM leaderboard_ingestion.repository_access
-         WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR SHARE`,
-        [config.repositories.map((repo) => repo.id)],
-      )
-    ).rows;
+    // This entry is also safe when invoked directly. Outer operator readers
+    // acquire the same gates before their first source access or outbox row.
+    const access = (await lockIssueTransferSources(tx, config.repositories)).filter((row) =>
+      config.repositories.some((repo) => String(repo.id) === String(row.repository_id)),
+    );
     if (
       access.length !== config.repositories.length ||
       !config.repositories.every((repo) =>
@@ -130,6 +130,32 @@ export function createOperatorPublicationVerifier({
       const normalizationVersions = {};
       for (const field of normalizationVersionFields)
         if (confirmation[field] !== undefined) normalizationVersions[field] = confirmation[field];
+      const proof = aggregateExplanations.verify(expected.snapshotId, {
+        scopeKey: expected.scopeKey,
+        revision: expected.revision,
+        computationVersion,
+        configurationHash,
+        digest: confirmation.aggregateExplanationHash,
+      });
+      bytes += Buffer.byteLength(JSON.stringify(proof));
+      if (bytes > operatorPublicationProofBytes) return null;
+      let transferContent = {};
+      if (proof.document.authorization.issueTransferEvidence !== undefined) {
+        if (typeof publicationNormalizationBinding !== "function") return null;
+        const normalization = await publicationNormalizationBinding(
+          tx,
+          scopes.get(expected.scopeKey),
+          expected,
+          proof.document,
+          { maxFrozenBytes: operatorPublicationProofBytes - bytes },
+        );
+        if (normalization.obsolete || !normalization.issueTransferContent) return null;
+        bytes += normalization.frozenInputBytes;
+        if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > operatorPublicationProofBytes) return null;
+        // These are the hash-verified frozen repository IDs and original graph
+        // capture, not a dependency set reconstructed from today's config.
+        transferContent = normalization.issueTransferContent;
+      }
       // Public documents omit the event cutoff and optional normalization
       // versions used to derive their content ID. Reconstruct every hashed field;
       // the private source guard below still checks actual retained evidence.
@@ -154,13 +180,13 @@ export function createOperatorPublicationVerifier({
         repositoryIds: config.repositories
           .filter((repo) => document.scope.repository === null || String(repo.id) === document.scope.repository)
           .map((repo) => repo.id),
+        ...transferContent,
         ...(Object.hasOwn(document, "reversionAuthority") ? { reversionAuthority: document.reversionAuthority } : {}),
         ...(Object.hasOwn(document, "reversionRecordsHash")
           ? { reversionRecordsHash: document.reversionRecordsHash }
           : {}),
       };
       if (digest(content) !== expected.snapshotId) return null;
-      const proof = aggregateExplanations.read(expected.snapshotId);
       // Identical content may reuse the first immutable arithmetic explanation
       // after a later observation freeze. A future explanation cannot authorize
       // an earlier frozen operation, and the current source/cache fence remains.
@@ -171,8 +197,6 @@ export function createOperatorPublicationVerifier({
         proof.document.cutoff > binding.observationCutoff
       )
         return null;
-      bytes += Buffer.byteLength(JSON.stringify(proof));
-      if (bytes > operatorPublicationProofBytes) return null;
       proofs.push({ expected, proof, normalizationVersions });
     }
     const authorizations = [

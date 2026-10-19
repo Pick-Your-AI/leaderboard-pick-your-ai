@@ -44,11 +44,14 @@ async function retainedContexts(t, count, bindSources) {
   assert.equal(
     seed.policy_signature,
     comparisonHash([
-      "github-issue-transfer-admission/v1",
+      "pipeline-issue-transfer/v1",
       comparisonHash([
-        "project-membership-context/v2",
-        comparisonHash(["verified-default-branch-merge-pins/v1", attributionSignature]),
-        [],
+        "github-issue-transfer-admission/v1",
+        comparisonHash([
+          "project-membership-context/v2",
+          comparisonHash(["verified-default-branch-merge-pins/v1", attributionSignature]),
+          [],
+        ]),
       ]),
     ]),
   );
@@ -89,6 +92,7 @@ async function retainedContexts(t, count, bindSources) {
         [seed.policy_signature],
       )
     ).rows.map((row) => ({ factKey: row.fact_key, documentHash: row.document_hash }));
+  else delete frozen.identityAuthorization.identityEvidence.normalizationSources;
   const replaceFrozen = (document) =>
     h.db.query(
       "UPDATE leaderboard_pipeline.frozen_inputs SET document=$2::jsonb,document_hash=$3 WHERE snapshot_id=$1",

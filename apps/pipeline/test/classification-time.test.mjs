@@ -81,6 +81,7 @@ async function retainedClassification(t, kind, bindSources = false) {
       factKey: row.fact_key,
       documentHash: row.fact_key === source.fact_key ? documentHash : row.document_hash,
     }));
+  else delete binding.normalizationSources;
   const saveFrozen = () =>
     h.db.query(
       "UPDATE leaderboard_pipeline.frozen_inputs SET document=$2::jsonb,document_hash=$3 WHERE snapshot_id=$1",

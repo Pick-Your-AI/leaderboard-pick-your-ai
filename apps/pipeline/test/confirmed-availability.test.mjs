@@ -244,7 +244,14 @@ for (const change of ["suppression", "approval"])
         work({
           query: async (sql, params) => {
             const result = await tx.query(sql, params);
-            if (!changed && sql.startsWith("SELECT subject_id\n  FROM leaderboard_ingestion.object_suppressions")) {
+            if (
+              !changed &&
+              sql
+                .replace(/\s+/g, " ")
+                .startsWith(
+                  "SELECT subject_id FROM leaderboard_ingestion.object_suppressions WHERE repository_id=ANY($1::bigint[])",
+                )
+            ) {
               changed = true;
               if (change === "approval") approved = false;
               else
@@ -363,7 +370,11 @@ test(
             if (
               advanceOnRead &&
               !advanced &&
-              sql.startsWith("SELECT subject_id\n  FROM leaderboard_ingestion.object_suppressions")
+              sql
+                .replace(/\s+/g, " ")
+                .startsWith(
+                  "SELECT subject_id FROM leaderboard_ingestion.object_suppressions WHERE repository_id=ANY($1::bigint[])",
+                )
             ) {
               advanced = true;
               release();
