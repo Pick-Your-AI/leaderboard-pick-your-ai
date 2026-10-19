@@ -1,6 +1,41 @@
 # Recognition backend and sharing boundaries
 
-Refs #69, #70, #123, #124, #128. These engineering implementations do not close evidence review, accessible journey, production source or launch gates.
+Refs #68, #69, #70, #123, #124, #128. These engineering implementations do not close evidence review, accessible journey, production source or launch gates.
+
+## Confirmed bug source admission (#68)
+
+The generic private receipt path for `confirmed_bugs` requires an
+`issues_opened` source fact and exactly one issue proof identifying the same
+artifact, repository and contributor. A PR, issue-closing action, missing proof
+or contradictory proof cannot substitute for that report. The pipeline checks
+this boundary before invoking its receipt adapter; direct normalizer callers
+receive the same source check. Existing independent reviewer, current audit,
+configured policy and contributor-withdrawal requirements remain in force.
+
+An explicit `isSynthetic: true` excludes the input. When the pipeline combines
+observations, its private `syntheticFactIds` provenance excludes the specific
+target even though the combined object has no global synthetic flag. An
+unrelated synthetic observation does not exclude a separately evidenced report.
+Absence of a synthetic marker is not proof of factual correctness, permitted
+source use, spam/duplicate screening or an actual confirmation.
+
+The authority fingerprint includes `confirmed-bug-source-admission/v1` only
+when the configuration contains a `confirmed_bugs` binding. Publications made
+under the earlier generic authority are withheld on current and pinned reads,
+private previews and aggregate explanations, including after database reopen.
+The whole snapshot is retired for a mixed configuration even if no confirmed
+bug request was accepted. Configurations without that binding retain their exact
+prior authority bytes, including the existing data-quality and reproduction
+markers. Recalculation under the current approved configuration can publish a
+newly authorized result; it does not rewrite historical source facts.
+
+The metric remains `definition_only`. This bounded source-admission correction
+does not supply a specialist confirmation protocol, verify an actual bug, infer
+severity or credit implementation to a reporter/closer. Reporter and reproduction
+contributor attribution, spam/duplicate exclusions, independently reviewed real
+examples, complete backfill and public-policy/rollout acceptance remain separate
+issue criteria. All automated fixtures are fictional; marker-free fixtures only
+exercise the actual public-mode permission boundary in disposable storage.
 
 ## Editorial selection (#69)
 
