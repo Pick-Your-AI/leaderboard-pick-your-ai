@@ -1,16 +1,20 @@
 import React from "react";
-import type { Receipt } from "./client.ts";
+import { evidenceSubmissionInput, type EvidenceTerms, type Receipt } from "./client.ts";
+import { EvidenceIntakeFields, useControlFormErrors } from "./EvidenceIntake.tsx";
 
 /** Uses the parent's session-generation guard and reloads the service receipt after a write. */
 export function Amendment({
   receipt,
   categories,
+  terms,
   run,
 }: {
   receipt: Receipt;
   categories: string[];
+  terms: EvidenceTerms | null;
   run: (path: string, input: unknown) => Promise<boolean>;
 }) {
+  const { errors, showErrors } = useControlFormErrors();
   return (
     <details>
       <summary>Amend evidence</summary>
@@ -23,47 +27,28 @@ export function Amendment({
         become public if independently accepted. Do not include private source content.
       </p>
       <form
+        noValidate
         onSubmit={async (event) => {
           event.preventDefault();
-          const data = new FormData(event.currentTarget);
+          const form = event.currentTarget;
+          const data = new FormData(form);
+          const evidence = evidenceSubmissionInput(data, terms, receipt.owner, categories);
+          showErrors(form, evidence.ok ? {} : evidence.errors);
+          if (!evidence.ok || !form.reportValidity()) return;
           await run(`/controls/requests/${receipt.id}/amend`, {
             version: receipt.version,
             reason: data.get("reason"),
-            locator: data.get("locator"),
-            category: data.get("category"),
-            scope: data.get("scope"),
-            detail: data.get("detail"),
-            collaborators: String(data.get("collaborators") ?? "")
-              .split(",")
-              .map((id) => id.trim())
-              .filter(Boolean),
+            ...evidence.value,
           });
         }}
       >
-        <label className="control-field">
-          Amended public GitHub source URL
-          <input name="locator" type="url" required defaultValue={receipt.locator} />
-        </label>
-        <label className="control-field">
-          Amended category
-          <select name="category" defaultValue={receipt.category}>
-            {categories.map((category) => (
-              <option key={category}>{category}</option>
-            ))}
-          </select>
-        </label>
-        <label className="control-field">
-          Amended contribution scope
-          <input name="scope" required maxLength={300} defaultValue={receipt.scope} />
-        </label>
-        <label className="control-field">
-          Amended evidence details
-          <textarea name="detail" required maxLength={2000} defaultValue={receipt.detail} />
-        </label>
-        <label className="control-field">
-          Amended collaborator GitHub numeric IDs, comma separated
-          <input name="collaborators" defaultValue={Object.keys(receipt.collaborators ?? {}).join(", ")} />
-        </label>
+        <EvidenceIntakeFields
+          actorId={receipt.owner}
+          terms={terms}
+          categories={categories}
+          receipt={receipt}
+          errors={errors}
+        />
         <label className="control-field">
           Private amendment reason
           <textarea name="reason" required maxLength={2000} />
@@ -71,7 +56,7 @@ export function Amendment({
         <label>
           <input type="checkbox" required /> Replace this evidence and return it to pending review
         </label>
-        <button>Submit evidence amendment</button>
+        <button disabled={!terms}>Submit evidence amendment</button>
       </form>
     </details>
   );

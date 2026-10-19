@@ -39,12 +39,14 @@ export interface MetricFact {
     workstreams: string[];
     workstreamsKnown?: boolean;
     projectScope?: string[];
+    workstreamScope?: string[];
   } | null;
   currentContext: {
     projects: string[];
     workstreams: string[];
     workstreamsKnown?: boolean;
     projectScope?: string[];
+    workstreamScope?: string[];
   } | null;
   quantity?: number;
   /** Literal source state, never an inferred classification. */
@@ -440,10 +442,13 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
         !Array.isArray(context.workstreams) ||
         (context.workstreamsKnown !== undefined && typeof context.workstreamsKnown !== "boolean") ||
         (context.projectScope !== undefined && !Array.isArray(context.projectScope)) ||
-        [context.projects, context.workstreams, context.projectScope ?? []].some(
+        (context.workstreamScope !== undefined && !Array.isArray(context.workstreamScope)) ||
+        [context.projects, context.workstreams, context.projectScope ?? [], context.workstreamScope ?? []].some(
           (ids) => ids.some((id) => typeof id !== "string" || !id.trim()) || new Set(ids).size !== ids.length,
         ) ||
-        (context.projectScope !== undefined && context.projects.some((id) => !context.projectScope!.includes(id)))
+        (context.projectScope !== undefined && context.projects.some((id) => !context.projectScope!.includes(id))) ||
+        (context.workstreamScope !== undefined &&
+          context.workstreams.some((id) => !context.workstreamScope!.includes(id)))
       )
         throw new Error("Invalid membership context");
     }
@@ -543,7 +548,12 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
             ? "unknown_membership_context"
             : "project_filter";
       else if (scope.workstreams.length && !scope.workstreams.some((id) => context.workstreams.includes(id)))
-        reason = context.workstreamsKnown === false ? "unknown_membership_context" : "workstream_filter";
+        reason =
+          context.workstreamsKnown === false ||
+          (context.workstreamScope !== undefined &&
+            scope.workstreams.some((id) => !context.workstreamScope!.includes(id)))
+            ? "unknown_membership_context"
+            : "workstream_filter";
     }
     if (
       !reason &&

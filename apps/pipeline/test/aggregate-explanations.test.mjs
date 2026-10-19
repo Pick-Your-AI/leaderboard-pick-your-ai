@@ -11,6 +11,7 @@ import {
 } from "../src/aggregate-explanations.mjs";
 import { harness, components, clock, ago, boardUrl, fixtureId } from "./harness.mjs";
 import { comparisonLimitsV1 } from "../../controls/src/policy-comparison.mjs";
+import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-intake.mjs";
 
 const metricPolicy = (metricId, aggregation, patch = {}) => ({
   metricId,
@@ -691,6 +692,7 @@ test("required private explanations revoke when reviewed recognition changes", a
       history: [event],
     };
     state.audit.push(event);
+    attachSyntheticEvidenceState(state);
   });
   const runtime = await createPipeline({ ...h.options, config });
   t.after(() => runtime.stop());

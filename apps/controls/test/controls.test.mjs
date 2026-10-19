@@ -9,19 +9,40 @@ import { ControlStore } from "../src/store.mjs";
 import { createControlsServer } from "../src/server.mjs";
 import { githubOAuthProvider } from "../src/github.mjs";
 import { configurationOverlay } from "../src/configuration.mjs";
+import {
+  syntheticEvidenceIntakeInput,
+  syntheticSourceUseReviewInput,
+} from "../../../tests/fixtures/evidence-intake.mjs";
 
 // All identities and evidence in this file are fictional test examples.
 const origin = "https://controls.example.test";
-const fixture = (extra = {}) => ({
-  kind: "evidence",
-  locator: "https://github.com/synthetic-example/demo/issues/1",
-  category: "governance",
-  collaborators: [],
-  consent: true,
-  detail: "Synthetic private verification detail",
-  scope: "One synthetic reviewed change",
-  ...extra,
-});
+const fixture = (extra = {}) => {
+  const input = {
+    kind: "evidence",
+    locator: "https://github.com/synthetic-example/demo/issues/1",
+    category: "governance",
+    collaborators: [],
+    consent: true,
+    detail: "Synthetic private verification detail",
+    scope: "One synthetic reviewed change",
+    ...extra,
+  };
+  return { ...input, intake: syntheticEvidenceIntakeInput(input.collaborators) };
+};
+
+async function participantAcceptance(h, user, receipt) {
+  const response = await h.call("/controls/invitations", { user });
+  assert.equal(response.status, 200);
+  const invitation = response.data.invitations.find((entry) => entry.id === receipt.id);
+  assert.ok(invitation);
+  return {
+    version: receipt.version,
+    consent: true,
+    claimDigest: invitation.claimDigest,
+    termsVersion: invitation.terms.version,
+    termsDigest: invitation.terms.digest,
+  };
+}
 
 async function harness(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), "leaderboard-controls-test-"));
@@ -219,6 +240,7 @@ test("authenticated acceptance records a validated private locale target and exa
     conflict: false,
     policyVersion: "test-1",
     sourceReviewedPublic: true,
+    sourceUseReview: syntheticSourceUseReviewInput(),
     localization: target,
   };
   for (const localization of [
@@ -241,7 +263,13 @@ test("authenticated acceptance records a validated private locale target and exa
     assert.equal(h.store.read().requests[submitted.data.id].status, "pending");
   }
   assert.equal(
-    (await h.call(path, { user: reviewer, method: "POST", input: { ...acceptance, decision: "reject" } })).status,
+    (
+      await h.call(path, {
+        user: reviewer,
+        method: "POST",
+        input: { ...acceptance, decision: "reject", sourceUseReview: undefined },
+      })
+    ).status,
     400,
   );
   assert.equal((await h.call(path, { user: owner, method: "POST", input: acceptance })).status, 403);
@@ -278,6 +306,8 @@ test("authenticated acceptance records a validated private locale target and exa
       scope: "repository:2:locale:de:documentation",
       detail: "Updated evidence",
       collaborators: [],
+      consent: true,
+      intake: syntheticEvidenceIntakeInput([]),
     },
   });
   assert.equal(amended.status, 200);
@@ -404,6 +434,7 @@ test("role changes invalidate sessions and direct API calls cannot approve self 
     conflict: false,
     policyVersion: "test-1",
     sourceReviewedPublic: true,
+    sourceUseReview: syntheticSourceUseReviewInput(),
   };
   assert.equal(
     (await h.call(`/controls/requests/${receipt.id}/review`, { user, method: "POST", input: approve })).status,
@@ -490,28 +521,38 @@ test("independent acceptance, collaborator opt-in/decline, withdrawal and restar
   assert.equal(invitation.id, receipt.id);
   assert.equal(invitation.detail, undefined);
   receipt = (
+    await h.call(`/controls/requests/${receipt.id}/consent`, {
+      user: collaborator,
+      method: "POST",
+      input: await participantAcceptance(h, collaborator, receipt),
+    })
+  ).data;
+  receipt = (
     await h.call(`/controls/requests/${receipt.id}/review`, {
       user: reviewer,
       method: "POST",
       input: {
-        version: 1,
+        version: receipt.version,
         decision: "accept",
         conflict: false,
         reason: "Synthetic public artifact/role verified",
         sourceReviewedPublic: true,
+        sourceUseReview: syntheticSourceUseReviewInput(),
         policyVersion: "test-1",
       },
     })
   ).data;
   let published = (await h.call("/controls/public")).data;
-  assert.deepEqual(published.claims[0].collaborators, []);
+  assert.deepEqual(published.claims[0].collaborators, ["5"]);
+  const acceptedVersion = receipt.version;
   receipt = (
     await h.call(`/controls/requests/${receipt.id}/consent`, {
       user: collaborator,
       method: "POST",
-      input: { version: receipt.version, consent: true },
+      input: await participantAcceptance(h, collaborator, receipt),
     })
   ).data;
+  assert.equal(receipt.version, acceptedVersion);
   assert.deepEqual((await h.call("/controls/public")).data.claims[0].collaborators, ["5"]);
   receipt = (
     await h.call(`/controls/requests/${receipt.id}/consent`, {
@@ -520,10 +561,11 @@ test("independent acceptance, collaborator opt-in/decline, withdrawal and restar
       input: { version: receipt.version, consent: false },
     })
   ).data;
-  assert.deepEqual((await h.call("/controls/public")).data.claims[0].collaborators, []);
+  assert.equal(receipt.status, "pending");
+  assert.deepEqual((await h.call("/controls/public")).data.claims, []);
   const reopened = new ControlStore(h.filename);
   try {
-    assert.equal(reopened.publicSnapshot().claims[0].id, receipt.id);
+    assert.deepEqual(reopened.publicSnapshot().claims, []);
     assert.equal(reopened.read().requests[receipt.id].history.length, 4);
     assert.equal(
       (
@@ -553,6 +595,7 @@ test("appeals require another reviewer, optimistic versions prevent stale change
     conflict: false,
     reason: "Synthetic reviewed decision",
     sourceReviewedPublic: true,
+    ...(decision === "accept" ? { sourceUseReview: syntheticSourceUseReviewInput() } : {}),
     policyVersion: "test-1",
   });
   receipt = (
@@ -631,33 +674,37 @@ test("self profile controls and suppression atomically remove profile, authored 
     200,
   );
   for (const user of [owner, other]) {
-    const receipt = (
+    let receipt = (
       await h.call("/controls/requests", {
         user,
         method: "POST",
         input: fixture(user === other ? { collaborators: ["1"] } : {}),
       })
     ).data;
+    if (user === other)
+      receipt = (
+        await h.call(`/controls/requests/${receipt.id}/consent`, {
+          user: owner,
+          method: "POST",
+          input: await participantAcceptance(h, owner, receipt),
+        })
+      ).data;
     const accepted = (
       await h.call(`/controls/requests/${receipt.id}/review`, {
         user: reviewer,
         method: "POST",
         input: {
-          version: 1,
+          version: receipt.version,
           decision: "accept",
           conflict: false,
           reason: "Synthetic review",
           policyVersion: "test-1",
           sourceReviewedPublic: true,
+          sourceUseReview: syntheticSourceUseReviewInput(),
         },
       })
     ).data;
-    if (user === other)
-      await h.call(`/controls/requests/${receipt.id}/consent`, {
-        user: owner,
-        method: "POST",
-        input: { version: accepted.version, consent: true },
-      });
+    assert.equal(accepted.status, "accepted");
   }
   assert.equal((await h.call("/controls/public")).data.claims.length, 2);
   const receipt = await h.call("/controls/profile/suppression", {
@@ -719,6 +766,7 @@ test("duplicate acceptance is blocked and duplicate merge never awards another c
     conflict: false,
     reason: "Synthetic review",
     sourceReviewedPublic: true,
+    sourceUseReview: syntheticSourceUseReviewInput(),
     policyVersion: "test-1",
   };
   a = (await h.call(`/controls/requests/${a.id}/review`, { user: reviewer, method: "POST", input: approve })).data;
@@ -816,7 +864,7 @@ test("GitHub adapter rejects broad returned scopes and revokes even on identity 
   }
 });
 
-test("amendment suspends recognition, preserves prior audit and requires collaborator consent again", async (t) => {
+test("amendment preserves a participant decline and cannot turn it into accepted recognition", async (t) => {
   const h = await harness(t);
   const owner = await h.login("1");
   const reviewer = await h.login("2");
@@ -831,21 +879,21 @@ test("amendment suspends recognition, preserves prior audit and requires collabo
       input: { version: receipt.version, consent: false },
     })
   ).data;
-  receipt = (
-    await h.call(`/controls/requests/${receipt.id}/review`, {
-      user: reviewer,
-      method: "POST",
-      input: {
-        version: receipt.version,
-        decision: "accept",
-        conflict: false,
-        reason: "Synthetic source verified",
-        sourceReviewedPublic: true,
-        policyVersion: "test-1",
-      },
-    })
-  ).data;
-  assert.equal((await h.call("/controls/public")).data.claims.length, 1);
+  const blocked = await h.call(`/controls/requests/${receipt.id}/review`, {
+    user: reviewer,
+    method: "POST",
+    input: {
+      version: receipt.version,
+      decision: "accept",
+      conflict: false,
+      reason: "Synthetic source verified",
+      sourceReviewedPublic: true,
+      sourceUseReview: syntheticSourceUseReviewInput(),
+      policyVersion: "test-1",
+    },
+  });
+  assert.equal(blocked.status, 409);
+  assert.deepEqual((await h.call("/controls/public")).data.claims, []);
   const input = {
     version: receipt.version,
     reason: "Synthetic amendment",
@@ -854,6 +902,8 @@ test("amendment suspends recognition, preserves prior audit and requires collabo
     scope: "Revised synthetic change",
     detail: "Private amended detail",
     collaborators: ["5"],
+    consent: true,
+    intake: syntheticEvidenceIntakeInput(["5"]),
   };
   assert.equal(
     (await h.call(`/controls/requests/${receipt.id}/amend`, { user: reviewer, method: "POST", input })).status,
@@ -941,6 +991,7 @@ test("unapproved policy cannot qualify evidence, even for an otherwise eligible 
           conflict: false,
           reason: "Synthetic review",
           sourceReviewedPublic: true,
+          sourceUseReview: syntheticSourceUseReviewInput(),
           policyVersion: "test-1",
         },
       })
@@ -969,6 +1020,13 @@ test("synthetic accepted/rejected receipts cover governance, sanitized deploymen
           conflict: false,
           reason: `Synthetic ${category} ${decision} source and role review`,
           sourceReviewedPublic: true,
+          ...(decision === "accept"
+            ? {
+                sourceUseReview: syntheticSourceUseReviewInput({
+                  rationale: `Synthetic ${category} source-use review`,
+                }),
+              }
+            : {}),
           policyVersion: "test-1",
         },
       });
@@ -977,6 +1035,14 @@ test("synthetic accepted/rejected receipts cover governance, sanitized deploymen
       const stored = (await h.call(`/controls/requests/${receipt.id}`, { user: owner })).data;
       assert.equal(stored.history.at(-1).actor, "2");
       assert.equal(stored.history.at(-1).action, reviewed.data.status);
+      if (decision === "accept") {
+        assert.equal(stored.history.at(-1).sourceUseReview.reviewerId, "2");
+        assert.equal(stored.history.at(-1).sourceUseReview.disposition, "permitted");
+        assert.equal(stored.history.at(-1).sourceUseReview.rationale, `Synthetic ${category} source-use review`);
+        assert.equal(stored.intakeEligibility.state, "eligible");
+      } else {
+        assert.equal(stored.history.at(-1).sourceUseReview, undefined, "Rejection must not manufacture permission");
+      }
     }
   }
   assert.equal(h.store.publicSnapshot().claims.length, 4);
@@ -1994,6 +2060,7 @@ test("editorial HTTP workflow preserves session CSRF, independent approval, dura
         conflict: false,
         reason: "Verified synthetic source",
         sourceReviewedPublic: true,
+        sourceUseReview: syntheticSourceUseReviewInput(),
         policyVersion: "test-1",
       },
     })
