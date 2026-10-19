@@ -569,7 +569,7 @@ export function projectRead(
           metadata: metadata ?? null,
           classification: parsed.metricIds.includes("localization") ? classification : null,
           reproduction: parsed.metricIds.includes("reproductions") ? reproduction : null,
-          maintenance: parsed.metricIds.includes("maintenance") ? maintenance : null,
+          maintenance: maintenance.length ? maintenance : null,
           documentationPurpose: documentationPurpose.length
             ? {
                 reasons: documentationPurpose,
