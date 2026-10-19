@@ -211,7 +211,9 @@ test("unrelated disabled metrics preserve actual-service comparisons and explici
     ];
   });
   const parsed = board(h.board, h.selected);
-  assert.deepEqual(parsed.disabledMetrics, [{ id: unrelated, reason: "explicitly_disabled" }]);
+  assert.deepEqual(parsed.disabledMetrics, [
+    { id: unrelated, reason: "explicitly_disabled", policyVersion: "synthetic-policy-v1", policyLink: null },
+  ]);
   assert.equal(
     parsed.rows.some((row) => row.movement.state === "comparable"),
     true,

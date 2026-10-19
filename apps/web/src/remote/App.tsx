@@ -30,6 +30,8 @@ import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
 import { RankComparisonControls } from "./RankComparison.tsx";
 import { BoardTable } from "./BoardTable.tsx";
+import { PublishedWindowPicker } from "./PublishedWindows.tsx";
+import { windowStartHref } from "./published-windows.ts";
 import { TimeZoneOptions, WindowBounds } from "../components/DisplayTimeZone.tsx";
 import { LastVerifiedSnapshot, type SnapshotReference } from "./LastVerifiedSnapshot.tsx";
 import {
@@ -66,6 +68,7 @@ import {
   type Directory,
   type CategoryTotal,
   type Diagnostic,
+  type DisabledMetric,
   type Evidence,
   type Health,
   type Metadata,
@@ -248,9 +251,29 @@ function Meta({ value, selected }: { value: Metadata; selected: Selection }) {
         Permalink to this snapshot
       </a>
       {value.disabledMetrics.length > 0 && (
-        <p>Disabled measures: {value.disabledMetrics.map((item) => `${item.id}: ${item.reason}`).join("; ")}</p>
+        <section aria-label="Disabled measures">
+          <h3>Disabled measures</h3>
+          {value.disabledMetrics.map((item) => (
+            <DisabledMetricPolicy key={item.id} value={item} />
+          ))}
+        </section>
       )}
     </section>
+  );
+}
+function DisabledMetricPolicy({ value }: { value: DisabledMetric }) {
+  return (
+    <div>
+      <p>
+        <strong>{value.id}</strong>: This measure is currently disabled. Values are unavailable, not zero.
+      </p>
+      <p>Historical policy version: {value.policyVersion ?? "Unavailable"}.</p>
+      {value.policyLink ? (
+        <Source href={value.policyLink}>Historical policy source</Source>
+      ) : (
+        <p>Historical policy link unavailable.</p>
+      )}
+    </div>
   );
 }
 function Filters({
@@ -415,6 +438,7 @@ export function RemoteApp() {
   const [state, setState] = useState<State>({ status: "loading" });
   const [overviewActivity, setOverviewActivity] = useState<OverviewActivityState>({ status: "loading" });
   const [checking, setChecking] = useState(false);
+  const [windowsOpen, setWindowsOpen] = useState(false);
   const [live, setLive] = useState<{ base: string; scope: string; value: LiveState } | null>(null);
   const [nonce, setNonce] = useState(0),
     [heldPin, setHeldPin] = useState<string | null>(null);
@@ -528,6 +552,16 @@ export function RemoteApp() {
     }
   }, [url]);
   const { selected } = parsed;
+  const startHref = useMemo(() => {
+    if (parsed.error) return null;
+    try {
+      return windowStartHref(selected);
+    } catch (error) {
+      // A bounded new-entry link must never substitute broader filters or break the current reader.
+      if (error instanceof ReadFailure) return null;
+      throw error;
+    }
+  }, [selected, parsed.error]);
   const refresh = useCallback(() => {
     active.current?.abort();
     activeExport.current?.abort();
@@ -653,7 +687,7 @@ export function RemoteApp() {
       if (/^\/leaderboards\/[^/]+$/.test(path) || path === "/live" || /^\/projects\/[^/]+$/.test(path))
         return {
           kind: "board",
-          value: board(await request(parsed.base, "boards", boardQuery, controller.signal), exact),
+          value: board(await request(parsed.base, "boards", boardQuery, controller.signal, exact), exact),
         };
       return { kind: "unavailable" };
     };
@@ -811,7 +845,9 @@ export function RemoteApp() {
     <div
       className="remote-app"
       onClick={(event) => {
-        const target = (event.target as Element).closest<HTMLAnchorElement>("a[data-api-nav], a[data-api-proof]");
+        const target = (event.target as Element).closest<HTMLAnchorElement>(
+          "a[data-api-nav], a[data-api-proof], a[data-window-entry]",
+        );
         if (
           !target ||
           event.defaultPrevented ||
@@ -822,10 +858,14 @@ export function RemoteApp() {
           event.altKey
         )
           return;
-        // The display has its own bounded page lifecycle. A normal same-tab
-        // navigation tears down this reader and its in-flight requests first.
-        if (new URL(target.href).pathname === "/live") {
+        // The display and date-window entry have their own bounded page lifecycle.
+        // Normal same-tab navigation tears down this reader and its requests first.
+        if (target.hasAttribute("data-window-entry") || new URL(target.href).pathname === "/live") {
           preserveDisplayedPage();
+          if (target.hasAttribute("data-window-entry")) {
+            active.current?.abort();
+            activeExport.current?.abort();
+          }
           return;
         }
         event.preventDefault();
@@ -848,11 +888,22 @@ export function RemoteApp() {
       </a>
       <header className="app-header">
         <div className="header-inner">
-          <a data-api-nav href={uiHref("/", pinned)} className="wordmark">
-            PickYour.AI Credits
-          </a>
+          {startHref ? (
+            <a data-window-entry href={startHref} className="wordmark">
+              PickYour.AI Credits
+            </a>
+          ) : (
+            <span className="wordmark">PickYour.AI Credits</span>
+          )}
           <nav aria-label="Primary">
             <ul>
+              {startHref && (
+                <li>
+                  <a data-window-entry href={startHref}>
+                    Browse
+                  </a>
+                </li>
+              )}
               {[
                 ["/", "Overview"],
                 ["/leaderboards", "Measures"],
@@ -886,6 +937,21 @@ export function RemoteApp() {
           <p>Evidence-backed public reads. Unknown values and unavailable scopes remain explicit.</p>
         </header>
         <Filters key={`${url.pathname}${url.search}`} selected={selected} path={url.pathname} navigate={navigate} />
+        {!parsed.error && (isCatalogPath(url.pathname) || rankComparisonPath(url.pathname)) && (
+          <details className="method" open={windowsOpen} onToggle={(event) => setWindowsOpen(event.currentTarget.open)}>
+            <summary>Choose a published date window</summary>
+            {windowsOpen && (
+              <PublishedWindowPicker
+                base={parsed.base}
+                selected={selected}
+                path={
+                  isCatalogPath(url.pathname) ? `/leaderboards/${encodeURIComponent(selected.metric)}` : url.pathname
+                }
+                navigate={navigate}
+              />
+            )}
+          </details>
+        )}
         <label>
           Display timezone
           <select
@@ -917,15 +983,21 @@ export function RemoteApp() {
         {state.status === "error" && (
           <section className="notice notice-error" role="alert">
             <h2>
-              {state.error.status === 404
-                ? "Public record unavailable"
-                : state.error.status === 410
-                  ? "Selection expired or revoked"
-                  : state.error.status === 429
-                    ? "Requests temporarily limited"
-                    : "Public read unavailable"}
+              {state.error.disabledMetric
+                ? "Measure disabled"
+                : state.error.status === 404
+                  ? "Public record unavailable"
+                  : state.error.status === 410
+                    ? "Selection expired or revoked"
+                    : state.error.status === 429
+                      ? "Requests temporarily limited"
+                      : "Public read unavailable"}
             </h2>
-            <p>{state.error.code}</p>
+            {state.error.disabledMetric ? (
+              <DisabledMetricPolicy value={state.error.disabledMetric} />
+            ) : (
+              <p>{state.error.code}</p>
+            )}
             {state.error.status === 429 && <p>Wait before retrying this selection.</p>}
             {previousSnapshot && <LastVerifiedSnapshot value={previousSnapshot} />}
             <p>No fixture data or stored personal content is shown after this failure.</p>

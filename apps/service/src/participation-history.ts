@@ -217,9 +217,8 @@ export function validateParticipationHistoryRead(value: unknown): ParticipationH
     exact(entry, ["actorId", "reason"]);
     if (
       (entry.actorId !== null && !identity(entry.actorId)) ||
-      !["unknown_actor", "unknown_time", "unknown_qualification", "withheld", "conflicting"].includes(
-        String(entry.reason),
-      ) ||
+      typeof entry.reason !== "string" ||
+      !["unknown_actor", "unknown_time", "unknown_qualification", "withheld", "conflicting"].includes(entry.reason) ||
       (entry.reason === "unknown_actor" && entry.actorId !== null)
     )
       invalid();
