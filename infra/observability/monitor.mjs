@@ -68,9 +68,11 @@ export class OperationalMonitor {
     const key = `${sourceKey}:${code}`;
     // Coalesce simultaneous failures; an alert is recorded as delivered only after the sink acknowledges it.
     if (this.pending.has(key)) return this.pending.get(key);
-    if (this.pending.size >= this.maximumEntries)
-      return { state: "undelivered", sourceKey, code, reason: "destination_capacity_exceeded" };
     if (at - (this.alerts.get(key) ?? -Infinity) < this.alertCooldownMs) return { state: "throttled", sourceKey, code };
+    // Reserve one bounded slot per in-flight attempt or acknowledged cooldown identity.
+    const reserved = new Set([...this.alerts.keys(), ...this.pending.keys()]);
+    if (reserved.size >= this.maximumEntries)
+      return { state: "undelivered", sourceKey, code, reason: "destination_capacity_exceeded" };
     if (!this.sink) return { state: "undelivered", sourceKey, code, reason: "approved_alert_destination_missing" };
     const sending = (async () => {
       try {
@@ -96,13 +98,13 @@ export class OperationalMonitor {
     return sending;
   }
   purge() {
-    const cutoff = this.now() - this.retentionMs;
+    const now = this.now();
+    const cutoff = now - this.retentionMs;
     const before = this.entries.length;
     this.entries = this.entries.filter((entry) => entry.at >= cutoff).slice(-this.maximumEntries);
     for (const [key, value] of this.sources) if (value.at < cutoff) this.sources.delete(key);
     while (this.sources.size > this.maximumEntries) this.sources.delete(this.sources.keys().next().value);
-    for (const [key, at] of this.alerts) if (at < cutoff) this.alerts.delete(key);
-    while (this.alerts.size > this.maximumEntries) this.alerts.delete(this.alerts.keys().next().value);
+    for (const [key, at] of this.alerts) if (now - at >= this.alertCooldownMs) this.alerts.delete(key);
     return { removed: before - this.entries.length, retained: this.entries.length };
   }
   status(source, stage = "collection") {

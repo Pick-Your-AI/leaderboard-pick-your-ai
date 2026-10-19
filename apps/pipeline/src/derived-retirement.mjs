@@ -914,6 +914,11 @@ export class PipelineDerivedRetirementStore {
         const spec = sqliteStages[manifest.stage];
         check(spec);
         for (const record of manifest.records) {
+          if (manifest.stage === "preview_inputs")
+            check(
+              !db.prepare("SELECT 1 FROM policy_previews WHERE input_id=? LIMIT 1").get(record.keys[0]),
+              "derived_preview_reference_remaining",
+            );
           const current = db.prepare(`SELECT * FROM ${spec.table} WHERE ${spec.key}=?`).get(record.keys[0]);
           if (!current) {
             alreadyAbsent++;

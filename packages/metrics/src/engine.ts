@@ -77,8 +77,8 @@ export interface MetricPolicy {
   dateBasis: "occurredAt" | "acceptedAt";
   rankedStates: ("observed" | "qualified" | "reviewed")[];
   roles: Role[];
-  groupBy: "canonical" | "actor_artifact" | "actor_artifact_state_interval";
-  /** Required for state-interval grouping. No interval is silently chosen. */
+  groupBy: "canonical" | "actor_artifact" | "actor_artifact_state_interval" | "actor_artifact_interval";
+  /** Required for interval grouping. No interval is silently chosen. */
   groupingSeconds?: number;
   /** Registry policy pin is required for raw triage grouping. */
   groupingPolicyVersion?: string;
@@ -246,25 +246,39 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
     throw new Error("Explicit roles and known sources are required");
   if (!Number.isSafeInteger(policy.minimumSamples) || policy.minimumSamples < 1)
     throw new Error("Minimum sample size must be a positive integer");
-  if (!["canonical", "actor_artifact", "actor_artifact_state_interval"].includes(policy.groupBy))
+  if (
+    !["canonical", "actor_artifact", "actor_artifact_state_interval", "actor_artifact_interval"].includes(
+      policy.groupBy,
+    )
+  )
     throw new Error("Explicit grouping policy required");
   if (
-    policy.groupBy === "actor_artifact_state_interval" &&
+    ["actor_artifact_state_interval", "actor_artifact_interval"].includes(policy.groupBy) &&
     (!Number.isSafeInteger(policy.groupingSeconds) || policy.groupingSeconds! < 1)
   )
     throw new Error("State grouping requires an explicit positive interval");
   const grouping = getMetricGroupingPolicy(policy.metricId);
+  if (policy.groupBy === "actor_artifact_interval" && grouping?.group_by !== "actor_artifact_interval")
+    throw new Error("Definition days require their exact versioned grouping policy");
+  const supportedGroupingSelection =
+    !grouping ||
+    (policy.dateBasis === grouping.date_basis && policy.rankedStates[0] === grouping.state) ||
+    ("receipt_lenses" in grouping &&
+      grouping.receipt_lenses.some(
+        (pair) => pair.state === policy.rankedStates[0] && pair.date_basis === policy.dateBasis,
+      ));
   if (
     grouping &&
     (policy.groupingPolicyVersion !== grouping.version ||
       policy.groupBy !== grouping.group_by ||
       policy.groupingSeconds !== grouping.grouping_seconds ||
-      policy.dateBasis !== grouping.date_basis ||
-      policy.rankedStates[0] !== grouping.state ||
+      !supportedGroupingSelection ||
       policy.roles.length !== 1 ||
       policy.roles[0] !== "triager")
   )
-    throw new Error("Raw triage requires the exact versioned grouping policy, observed state and triager role");
+    throw new Error(
+      "Triage requires the exact versioned grouping policy, supported evidence/clock pair and triager role",
+    );
   if (policy.aggregation === "ratio" && policy.dateBasis !== "acceptedAt")
     throw new Error("PR ratios use decision time, supplied as acceptedAt for merged and closed-unmerged decisions");
   if (
@@ -588,6 +602,22 @@ function prepare(input: FrozenInput, policy: MetricPolicy, scope: MetricScope): 
           fact.rawState,
           Math.floor(instant(fact.occurredAt) / (policy.groupingSeconds! * 1000)),
         );
+      } else if (policy.groupBy === "actor_artifact_interval") {
+        // Definitions share a day across their facets, not across repositories,
+        // actors or metric kinds. Use the same explicitly selected clock as the
+        // window filter; observation/replay time never supplies a missing date.
+        const at = fact.state === "pending" ? fact.occurredAt : fact[policy.dateBasis];
+        if (!at) {
+          reject([fact], "unknown_effective_time");
+          continue;
+        }
+        group = key(
+          fact.metricId,
+          fact.repoId,
+          fact.actorId,
+          fact.artifactId,
+          Math.floor(instant(at) / (policy.groupingSeconds! * 1000)),
+        );
       }
     }
     const bucket = grouped.get(group) ?? [];
@@ -893,7 +923,9 @@ function compatibleScopes(before: RankComparisonInput, after: RankComparisonInpu
     before.scope.period === "custom"
   )
     return false;
-  if (instant(beforeTo) !== instant(before.cutoff) || instant(afterTo) !== instant(after.cutoff)) return false;
+  // A collection can observe facts after its event-window boundary. Retain that
+  // clock separately; it must cover, rather than equal, the selected window.
+  if (instant(beforeTo) > instant(before.cutoff) || instant(afterTo) > instant(after.cutoff)) return false;
   if (["month", "quarter", "year"].includes(before.scope.period)) return beforeFrom === afterFrom;
   return true; // Validated rolling/all-time bounds of the same named preset.
 }
@@ -922,12 +954,14 @@ export function compareRankMovement(
               ? "backfill_or_reconciliation"
               : instant(before.cutoff) > instant(after.cutoff)
                 ? "reversed_snapshots"
-                : null;
+                : instant(before.scope.to) > instant(after.scope.to)
+                  ? "reversed_snapshots"
+                  : null;
   const beforeEvidence = new Map(before.rows.flatMap((row) => row.evidence.map((item) => [item.id, item] as const)));
   const afterEvidence = new Map(after.rows.flatMap((row) => row.evidence.map((item) => [item.id, item] as const)));
   const lateHistory = [...afterEvidence.values()].some(
     (item) =>
-      !beforeEvidence.has(item.id) && item.effectiveAt !== null && instant(item.effectiveAt) < instant(before.cutoff),
+      !beforeEvidence.has(item.id) && item.effectiveAt !== null && instant(item.effectiveAt) < instant(before.scope.to),
   );
   const missingComparisonHistory = [...beforeEvidence.values(), ...afterEvidence.values()].some(
     (item) => !item.comparisonSignature,

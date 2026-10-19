@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { compareSourceInstants, sourceEventSchema } from "@pick-your-ai/contracts";
+import { validateAutomationSource, validateMaintenanceSource } from "@pick-your-ai/github";
 import { domainDateBasis, qualifyDomainRecognition } from "./domain-recognition.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
 
@@ -28,6 +30,17 @@ export function recognitionFingerprint(state, bindings = []) {
   if (bindings.some((binding) => binding.metricId === "data_quality")) authority.push("data-quality-recognition/v1");
   // Generic reproduction receipts had no scenario/environment/result boundary.
   if (bindings.some((binding) => binding.metricId === "reproductions")) authority.push("reproduction-recognition/v1");
+  // Earlier generic bug receipts admitted non-issue and explicitly synthetic sources.
+  if (bindings.some((binding) => binding.metricId === "confirmed_bugs"))
+    authority.push("confirmed-bug-source-admission/v1");
+  // Earlier answer receipts could precede their known source occurrence. Retire
+  // only configurations whose destination is affected by that missing bound.
+  if (bindings.some((binding) => binding.metricId === "issue_answers")) authority.push("issue-answer-source-time/v1");
+  // Prior maintenance receipts lacked merged-participant, clock and unit admission.
+  if (bindings.some((binding) => binding.metricId === "maintenance"))
+    authority.push("maintenance-merged-participant/v1");
+  // Tooling receipts independently require verified merged participation as well.
+  if (bindings.some((binding) => binding.metricId === "automation")) authority.push("automation-merged-participant/v1");
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
@@ -42,6 +55,7 @@ export function materializeRecognition(
 ) {
   let output = structuredClone(input);
   const domainUnits = new Set();
+  const mergedChangeUnits = new Set();
   const domainReasons = new Map();
   const decisionTime = (request) => {
     const at = request.history?.findLast((event) => event.action === "accepted")?.at;
@@ -95,13 +109,17 @@ export function materializeRecognition(
       });
       if (localeReasons.length !== 3) throw new Error("invalid_localization_binding");
     }
+    const requiredDateBasis =
+      binding.metricId === "maintenance" || binding.metricId === "automation"
+        ? "occurredAt"
+        : domainDateBasis(binding.metricId);
     if (
       !policies.some(
         (p) =>
           p.policy.metricId === binding.metricId &&
           p.policy.version === binding.policyVersion &&
-          (domainDateBasis(binding.metricId) !== null
-            ? p.policy.dateBasis === domainDateBasis(binding.metricId) &&
+          (requiredDateBasis !== null
+            ? p.policy.dateBasis === requiredDateBasis &&
               p.policy.groupBy === "canonical" &&
               p.policy.rankedStates?.length === 1 &&
               p.policy.rankedStates[0] === "qualified"
@@ -189,6 +207,43 @@ export function materializeRecognition(
     );
     if (!candidates.length) continue;
     if (candidates.length !== 1) throw new Error("ambiguous_recognition_target");
+    // Check after uniqueness: chronology must not silently select one of two
+    // matching facts. Unknown source time supplies no invented lower bound.
+    const sourceTime = candidates[0].occurredAt;
+    if (
+      binding.metricId === "issue_answers" &&
+      typeof sourceTime === "string" &&
+      sourceEventSchema.shape.occurredAt.safeParse(sourceTime).success &&
+      compareSourceInstants(sourceTime, acceptedAt) > 0
+    )
+      throw new Error("recognition_source_time_invalid");
+    if (binding.metricId === "confirmed_bugs") {
+      const target = candidates[0];
+      const evidence = input.evidence.filter((entry) => entry.contribution.contributionId === target.id);
+      const proof = evidence[0];
+      // Check before calling even a host-supplied receipt adapter. Combined
+      // inputs retain synthetic provenance per fact, not as one global flag.
+      if (
+        input.isSynthetic === true ||
+        (input.syntheticFactIds ?? []).includes(target.id) ||
+        binding.sourceMetricId !== "issues_opened" ||
+        !target.artifactId ||
+        evidence.length !== 1 ||
+        proof.artifact.kind !== "issue" ||
+        proof.artifact.stableId !== target.artifactId ||
+        proof.contribution.artifactId !== target.artifactId ||
+        proof.artifact.repositoryId !== target.repoId ||
+        proof.contribution.actorId !== target.actorId
+      )
+        throw new Error("recognition_source_unverified");
+    }
+    // Validate source authority before even a host-supplied receipt callback.
+    const mergedChange =
+      binding.metricId === "maintenance"
+        ? validateMaintenanceSource(input, candidates[0].id, acceptedAt)
+        : binding.metricId === "automation"
+          ? validateAutomationSource(input, candidates[0].id, acceptedAt)
+          : null;
     const domain = qualifyDomainRecognition({
       input,
       request,
@@ -202,6 +257,12 @@ export function materializeRecognition(
       const unit = JSON.stringify([request.owner, domain.changesetId]);
       if (domainUnits.has(unit)) continue;
       domainUnits.add(unit);
+    }
+    if (mergedChange) {
+      // Every repeated receipt still passes policy, audit and source validation.
+      // Deterministic accepted-time ordering retains the earliest valid authority.
+      if (mergedChangeUnits.has(mergedChange.unit)) continue;
+      mergedChangeUnits.add(mergedChange.unit);
     }
     const previousFacts = output.facts.length;
     const previousEvidence = output.evidence.length;

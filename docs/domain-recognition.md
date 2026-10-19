@@ -216,9 +216,9 @@ appeal and contributor suppression continue to remove accepted recognition.
 Bindings for `data_quality` additionally pin qualifier authority to
 `data-quality-recognition/v1`. Older generic correction publications lack that
 authority and are withheld on current and historical reads until recomputed from
-valid current evidence. Configurations without a `data_quality` binding retain
-their exact prior fingerprint bytes. A configuration containing both correction
-and other metric bindings retires its whole bound snapshot; the authority fence
+valid current evidence. At the data-quality introduction, configurations without
+a `data_quality` binding retained their exact preceding fingerprint bytes. A
+configuration containing both correction and other metric bindings retires its whole bound snapshot; the authority fence
 does not preserve individual metrics inside that mixed snapshot.
 
 Bindings for `reproductions` additionally pin `reproduction-recognition/v1`.

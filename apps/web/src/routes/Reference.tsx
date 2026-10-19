@@ -1,5 +1,7 @@
 import React from "react";
+import { prototypeNavigation } from "../lib/prototype-url.ts";
 import { PageHeader } from "../components/Layout.tsx";
+import { ReferenceScope } from "../components/ScopeBar.tsx";
 import { CoverageLabel, EmptyState, StateLabel, evidenceLabels } from "../components/status.tsx";
 import type { EvidenceState } from "../data/model.ts";
 import {
@@ -27,6 +29,7 @@ export function MethodologyPage() {
           score, and there are no streaks.
         </p>
       </PageHeader>
+      <ReferenceScope />
       <section className="section" aria-labelledby="principles">
         <h2 id="principles">Principles</h2>
         <ul>
@@ -111,6 +114,7 @@ export function MethodSheetPage({ metricId }: { metricId: string }) {
           <ScopedLink to={`/leaderboards/${metric.id}`}>Open the board</ScopedLink>
         </p>
       </PageHeader>
+      <ReferenceScope />
       <dl className="receipt">
         <dt>UI metadata version</dt>
         <dd>
@@ -140,12 +144,26 @@ export function MethodSheetPage({ metricId }: { metricId: string }) {
         <dd>{ui?.limitations.join(" ")}</dd>
         {grouping && (
           <>
-            <dt>Raw triage grouping policy</dt>
-            <dd>
-              {grouping.version}: one actor, artifact and exact raw source state per {grouping.grouping_seconds}-second
-              UTC interval anchored at {grouping.interval_origin}. Repeated state in that interval counts once. Missing
-              state or time is excluded as unknown. No semantic classifier.
-            </dd>
+            <dt>
+              {grouping.group_by === "actor_artifact_state_interval"
+                ? "Raw triage grouping policy"
+                : "Definition-day grouping policy"}
+            </dt>
+            {grouping.group_by === "actor_artifact_state_interval" ? (
+              <dd>
+                {grouping.version}: one actor, artifact and exact raw source state per {grouping.grouping_seconds}
+                -second UTC interval anchored at {grouping.interval_origin}. Repeated state in that interval counts
+                once. Missing state or time is excluded as unknown. No semantic classifier.
+              </dd>
+            ) : (
+              <dd>
+                {grouping.version}: one actor and stable definition per UTC calendar day within its repository and
+                definition kind. Creation, edits and reversals share one daily unit. Observed changes require their
+                source day. Independently qualified receipts use a separately selected proven source or acceptance day.
+                Receipt time never replaces missing raw history. Missing identity or the selected clock remains unknown;
+                grouping alone does not prove correctness or enable publication.
+              </dd>
+            )}
           </>
         )}
         <dt>What counts</dt>
@@ -197,6 +215,7 @@ export function MethodologyChangesPage() {
   return (
     <>
       <PageHeader eyebrow="Methodology" title="Policy changes" />
+      <ReferenceScope />
       <ol className="receipt-list">
         <li className="receipt-row">
           <div className="receipt-row-main">
@@ -227,6 +246,9 @@ export function CoveragePage() {
           true total is unknowable.
         </p>
       </PageHeader>
+      <ReferenceScope>
+        Scope travels with contribution links. The coverage inventory below lists every repository and source.
+      </ReferenceScope>
       <div className="table-region" role="region" aria-labelledby="coverage-caption" tabIndex={0}>
         <table className="data-table coverage-table">
           <caption id="coverage-caption">Coverage by repository and source</caption>
@@ -300,6 +322,10 @@ export function ProjectPage({ id }: { id: string }) {
       <PageHeader eyebrow="Program scope" title={project.name}>
         <p>{project.note}</p>
       </PageHeader>
+      <ReferenceScope>
+        Program details describe {project.name}. Board links select this program; other navigation carries the scope
+        above.
+      </ReferenceScope>
       <h2>Repositories</h2>
       <ul>
         {project.repoIds.map((repoId) => (
@@ -395,6 +421,9 @@ export function PrototypeGuidePage() {
           describe real people.
         </p>
       </PageHeader>
+      <ReferenceScope>
+        Primary navigation carries this selection. The walkthrough links below open their predefined example views.
+      </ReferenceScope>
       <section className="section" aria-labelledby="journeys">
         <h2 id="journeys">Journeys</h2>
         {journeys.map((journey) => (
@@ -413,11 +442,14 @@ export function PrototypeGuidePage() {
       <section className="section" aria-labelledby="required-states">
         <h2 id="required-states">Required states</h2>
         <ul>
-          {requiredStates.map(([label, href]) => (
-            <li key={label}>
-              <Link to={href}>{label}</Link> <span className="mono muted small">{href}</span>
-            </li>
-          ))}
+          {requiredStates.map(([label, path]) => {
+            const { href } = prototypeNavigation(path);
+            return (
+              <li key={label}>
+                <Link to={href}>{label}</Link> <span className="mono muted small">{href}</span>
+              </li>
+            );
+          })}
         </ul>
       </section>
       <section className="section" aria-labelledby="fixture">
@@ -436,6 +468,7 @@ export function NotFoundPage() {
   return (
     <>
       <PageHeader title="Page not found" />
+      <ReferenceScope>The overview and catalog links below carry this selection.</ReferenceScope>
       <EmptyState title="Nothing lives at this address">
         <ScopedLink to="/">Go to the overview</ScopedLink> or{" "}
         <ScopedLink to="/leaderboards">browse leaderboards</ScopedLink>.
