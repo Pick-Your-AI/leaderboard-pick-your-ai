@@ -66,6 +66,10 @@ Changes to research findings or imported builder contracts belong in the [resear
 
 Early contributors push branches named `contrib/<your-login>/<topic>` to this repository; other contributors work from a fork. Every pull request into `main` needs one approval from someone other than its author, and only maintainers merge. The [organization contributing rules](https://github.com/Pick-Your-AI/.github/blob/main/CONTRIBUTING.md) define roles, credentials and enforcement.
 
+### Access and roles
+
+As of 2026-10-19, repository access comes from the `Websites` team (Write) and its child team `Lead Maintainers` (Admin). The Lead Maintainers are @CompleteDotTech and @BunsDev, who are also the maintainers of the `Websites` team; @karutoil and @pushingsquares are team members with Write. [CODEOWNERS](.github/CODEOWNERS) routes review only and grants no access, and team membership does not waive the pull request approval and required checks above.
+
 ## Review and completion
 
 Request review from the affected metric, source, UI, security or operations roles. Acceptance requires the package's stated evidence, not only passing automated checks. Mark Done after the reviewed deliverable is merged and its gate is met. Public release additionally requires approved hosting, real deployment, independent anonymous readback, fresh source activity and a functioning correction receipt. Proposed operators and response commitments must be accepted before they are advertised.
