@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import {
+  publicDocumentationReasons,
+  publicDocumentationRecognitionReasons,
+  publicMaintenanceClassificationReasons,
+} from "@pick-your-ai/contracts";
 import { PublicReadError, type PortfolioEvidence, type PublicRead } from "./public-source.js";
 import { compareSourceInstants } from "./source-time.js";
 
@@ -56,6 +61,16 @@ export interface ActivityGroup {
 export interface ActivityIndex {
   groups: ActivityGroup[];
   proofs: Map<string, ActivityProof[]>;
+}
+
+function activityReasons(entry: PortfolioEvidence): string[] {
+  const reasons = [`public_${entry.activityState}_work`];
+  if (entry.activityState !== "accepted") return reasons;
+  const documentation = publicDocumentationRecognitionReasons(entry.contribution);
+  if (documentation.includes("documentation_purpose:release_notes"))
+    reasons.push(...publicDocumentationReasons(entry.contribution), ...documentation);
+  reasons.push(...publicMaintenanceClassificationReasons(entry.contribution));
+  return reasons;
 }
 
 /** Only call after projectRead: no inbox events, identity guesses or ranking rows enter this index. */
@@ -121,8 +136,8 @@ export function activityIndex(read: PublicRead, category: string | null): Activi
             ...entry.contribution,
             metricIds: [...new Set(entry.contribution.metricIds)].sort(),
             roles: [...new Set(entry.contribution.roles)].sort(),
-            // Legacy provider reason strings are not a public correction narrative.
-            reasonCodes: [`public_${entry.activityState}_work`],
+            // Retain bounded public explanations, never arbitrary legacy provider reasons.
+            reasonCodes: activityReasons(entry),
           },
           canonicalFactId: fact.id,
         })),

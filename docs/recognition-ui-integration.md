@@ -65,6 +65,25 @@ parser's ordinary CR-to-LF normalization still applies. Publisher objects,
 evidence identities, admission rules and the original HTML serialization are
 unchanged. This is an image-format fallback, not a correction to contributor data.
 
+## Grouped Activity explanations
+
+Grouped Activity proof retains the accepted authored-notes purpose and reviewed
+maintenance facets from the same validated public proof used by the shared
+Receipt. Only the existing bounded public explanation helpers supply these
+labels. The original contribution, artifact, actor, source revision, full-precision
+clocks and accepted state remain intact; multiple maintenance facets describe one
+contribution and add no counted units. Missing classifications remain unknown.
+Arbitrary legacy provider reasons and private reviewer strings stay absent.
+Current source and suppression checks run before grouped detail, including reads
+of a pinned snapshot.
+
+The [service-to-Activity regression](../apps/web/test/activity-proof-explanations.test.mjs)
+uses the actual service projection, response decoders and Activity/Receipt renderers
+with synthetic publication input. It covers authored purpose, all reviewed
+maintenance facets, unknown legacy classifications and withdrawal after current
+artifact suppression. It does not establish live publication or contributor and
+assistive-technology acceptance.
+
 ## Validation and remaining browser integration
 
 Client tests cover exact scope/pin binding, dropped pagination/search filters, mismatched actor/policy/snapshot rejection, unsafe URLs, bounded evidence, private-field omission and unapproved-policy failures without fallback. Web TypeScript validation passes.
