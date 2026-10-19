@@ -154,6 +154,10 @@ export function createOperatorPublicationVerifier({
         repositoryIds: config.repositories
           .filter((repo) => document.scope.repository === null || String(repo.id) === document.scope.repository)
           .map((repo) => repo.id),
+        ...(Object.hasOwn(document, "reversionAuthority") ? { reversionAuthority: document.reversionAuthority } : {}),
+        ...(Object.hasOwn(document, "reversionRecordsHash")
+          ? { reversionRecordsHash: document.reversionRecordsHash }
+          : {}),
       };
       // These fields are part of the content ID only when the original
       // publication captured them. Preserve legacy absence; never substitute

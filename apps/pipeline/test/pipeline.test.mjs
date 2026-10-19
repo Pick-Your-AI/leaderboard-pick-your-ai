@@ -5,6 +5,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createPipeline, createGithubCollectionSource } from "../src/index.mjs";
 import { harness, getBoard, components, clock, ago, fixtureId, publicScope, boardUrl } from "./harness.mjs";
+import {
+  attachSyntheticEvidenceState,
+  syntheticEvidenceIntakeInput,
+  syntheticSourceUseReviewInput,
+} from "../../../tests/fixtures/evidence-intake.mjs";
 
 test("unapproved configuration fails closed before collection or public publication", async (t) => {
   const h = await harness(t, { verifyConfiguration: async () => false });
@@ -793,6 +798,7 @@ test("accepted controls receipt materializes a separate lens and withdrawal fenc
       history: [event],
     };
     s.audit.push(event);
+    attachSyntheticEvidenceState(s);
   });
   const runtime = await createPipeline({
     ...h.options,
@@ -975,6 +981,7 @@ test("real controls HTTP acceptance and withdrawal feed pipeline recognition wit
     locator: "https://github.com/synthetic-org/synthetic-repo/issues/1",
     category: "governance",
     collaborators: [],
+    intake: syntheticEvidenceIntakeInput(),
     consent: true,
     detail: "Private synthetic review detail",
     scope: "repository:2",
@@ -987,6 +994,7 @@ test("real controls HTTP acceptance and withdrawal feed pipeline recognition wit
     conflict: false,
     policyVersion: policy.version,
     sourceReviewedPublic: true,
+    sourceUseReview: syntheticSourceUseReviewInput(),
   });
   assert.equal(reviewed.response.status, 200);
   const runtime = await createPipeline({ ...h.options, config });

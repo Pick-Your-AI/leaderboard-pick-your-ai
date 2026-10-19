@@ -5,6 +5,7 @@ import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
 import { normalizationDocumentVersion } from "../src/private-attribution.mjs";
 import { record as recordControlsDecision } from "../../controls/src/store.mjs";
 import { harness, components, ago, publicScope } from "./harness.mjs";
+import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-intake.mjs";
 
 const before = "a".repeat(40),
   after = "b".repeat(40),
@@ -135,6 +136,7 @@ function accept(h, locator = sourceUrl) {
       reason: "Private reviewer deliberation must remain private",
     });
     state.requests[request.id] = request;
+    attachSyntheticEvidenceState(state);
     decision = request.history.at(-1);
   });
   return decision;

@@ -53,6 +53,13 @@ export function normalizedProjectContext(output, row, repository, mappings) {
   const context = value?.context;
   const sourcePath = value?.sourceUrl?.slice?.("https://github.com/".length);
   const subject = typeof sourcePath === "string" ? sourcePath.split("/") : [];
+  const workstreamScope = [
+    ...new Set(
+      (mapping?.projects ?? []).flatMap((project) =>
+        project.fields.flatMap((field) => field.options.map((option) => option.workstreamId)),
+      ),
+    ),
+  ].sort();
   const mappedWorkstreams = new Set(
     (mapping?.projects ?? [])
       .filter((project) => Array.isArray(context?.projects) && context.projects.includes(project.projectId))
@@ -70,7 +77,7 @@ export function normalizedProjectContext(output, row, repository, mappings) {
       "mappingVersion",
       "context",
     ]) ||
-    value.schemaVersion !== "github-current-project-context/v1" ||
+    value.schemaVersion !== "github-current-project-context/v2" ||
     row.family !== "project_current" ||
     row.document.evidence !== "current_state" ||
     row.document.projectSubjectId !== row.subject_id ||
@@ -88,11 +95,13 @@ export function normalizedProjectContext(output, row, repository, mappings) {
     value.sourceRevision !== row.document.sourceRevision ||
     value.observedAt !== new Date(row.observed_at).toISOString() ||
     value.mappingVersion !== (mapping?.version ?? null) ||
-    !keys(context, ["projects", "workstreams", "workstreamsKnown", "projectScope"]) ||
+    !keys(context, ["projects", "workstreams", "workstreamsKnown", "projectScope", "workstreamScope"]) ||
     !sortedIds(allowed, 100) ||
     !allowed.length ||
     !sortedIds(context.projects, 100) ||
     !sortedIds(context.workstreams, 10000) ||
+    !sortedIds(context.workstreamScope, 10000) ||
+    JSON.stringify(context.workstreamScope) !== JSON.stringify(workstreamScope) ||
     !sortedIds(context.projectScope, 100) ||
     JSON.stringify(context.projectScope) !== JSON.stringify(allowed) ||
     context.projects.some((id) => !allowed.includes(id)) ||

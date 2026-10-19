@@ -36,6 +36,8 @@ export interface ProjectMembershipContext {
   projects: string[];
   workstreams: string[];
   workstreamsKnown: boolean;
+  /** Complete semantic scope proved by the approved mapping, including absent Projects. */
+  workstreamScope: string[];
 }
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -239,6 +241,13 @@ export function projectContextFromSnapshot(
   const current = canonicalSnapshot(snapshot);
   const configured =
     mapping === undefined ? undefined : validateProjectWorkstreamMapping(mapping, current.allowedProjectIds);
+  const workstreamScope = [
+    ...new Set(
+      (configured?.projects ?? []).flatMap((project) =>
+        project.fields.flatMap((field) => field.options.map((option) => option.workstreamId)),
+      ),
+    ),
+  ].sort(order);
   const projects = current.items.map((item) => item.projectId).sort(order);
   const workstreams = new Set<string>();
   let workstreamsKnown = true;
@@ -257,7 +266,7 @@ export function projectContextFromSnapshot(
       else workstreamsKnown = false;
     }
   }
-  return { projects, workstreams: [...workstreams].sort(order), workstreamsKnown };
+  return { projects, workstreams: [...workstreams].sort(order), workstreamsKnown, workstreamScope };
 }
 
 type Membership = Omit<PublicSubjectProjectItem, "fields">;

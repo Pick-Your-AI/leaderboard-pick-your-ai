@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { syntheticBrowserIntake, syntheticEvidenceTerms } from "./controls-intake-fixtures.ts";
 const id = "11111111-1111-1111-1111-111111111111";
 for (const conflict of [false, true]) {
   test(`evidence amendment ${conflict ? "preserves conflict without retry" : "binds current receipt and reloads pending state"}`, async ({
@@ -6,6 +7,12 @@ for (const conflict of [false, true]) {
   }) => {
     let version = 4;
     const writes: unknown[] = [];
+    const intake = syntheticBrowserIntake("1", ["2", "3"]);
+    intake.roles.submitter = "Synthetic mentor";
+    intake.roles.collaborators["2"] = "Synthetic learner";
+    intake.period = { kind: "interval", start: "2026-10-01", end: "2026-10-17" };
+    intake.sourceUseBasis = { state: "declared", statement: "Synthetic source-use statement for review" };
+    intake.participantConsents["3"]!.choice = "declined";
     await page.route("**/controls/**", async (route) => {
       const request = route.request();
       const path = new URL(request.url()).pathname;
@@ -17,6 +24,7 @@ for (const conflict of [false, true]) {
       }
       const responses: Record<string, unknown> = {
         "/controls/session": { actorId: "1", csrf: "a".repeat(43), roles: [], expires: Date.now() + 600000 },
+        "/controls/evidence-terms": { terms: syntheticEvidenceTerms },
         "/controls/profile": { bio: "", highlights: [], public: false, suppressed: false },
         "/controls/invitations": { invitations: [] },
         "/controls/spotlights/queue": { nominations: [] },
@@ -34,6 +42,8 @@ for (const conflict of [false, true]) {
               detail: "Evidence",
               collaborators: { "2": "accepted", "3": "declined" },
               history: [],
+              intake,
+              intakeEligibility: { state: "participant_consent_required" },
             },
           ],
         },
@@ -45,9 +55,20 @@ for (const conflict of [false, true]) {
     await expect(page.getByLabel("Amended contribution scope")).toHaveValue("Original scope");
     await expect(page.getByLabel("Amended collaborator GitHub numeric IDs, comma separated")).toHaveValue("2, 3");
     await expect(page.getByText(/a previous decline remains declined/)).toBeVisible();
+    const amendment = page.locator("details").filter({ has: page.getByText("Amend evidence", { exact: true }) });
+    await expect(amendment.getByLabel("Your proposed role", { exact: true })).toHaveValue("Synthetic mentor");
+    await expect(amendment.getByLabel("Contribution start date")).toHaveValue("2026-10-01");
+    await expect(amendment.getByLabel("Private source-use statement")).toHaveValue(
+      "Synthetic source-use statement for review",
+    );
+    const consent = amendment.getByLabel(
+      "I consent to public attribution of this claim under the displayed evidence terms if independently accepted",
+    );
+    await expect(consent).not.toBeChecked();
     await page.getByLabel("Amended contribution scope").fill("Revised scope");
     await page.getByLabel("Private amendment reason").fill("Correct the contribution scope");
     await page.getByLabel("Replace this evidence and return it to pending review").check();
+    await consent.check();
     await page.getByRole("button", { name: "Submit evidence amendment" }).click();
     if (conflict) {
       await expect(page.getByRole("alert")).toContainText("Reload before trying again");
@@ -70,6 +91,15 @@ for (const conflict of [false, true]) {
           scope: "Revised scope",
           detail: "Evidence",
           collaborators: ["2", "3"],
+          consent: true,
+          intake: {
+            schemaVersion: "evidence-intake/v1",
+            termsVersion: syntheticEvidenceTerms.version,
+            termsDigest: syntheticEvidenceTerms.digest,
+            sourceUseBasis: { state: "declared", statement: "Synthetic source-use statement for review" },
+            roles: { submitter: "Synthetic mentor", collaborators: { "2": "Synthetic learner", "3": null } },
+            period: { kind: "interval", start: "2026-10-01", end: "2026-10-17" },
+          },
         },
       },
     ]);
@@ -81,6 +111,7 @@ test("foreign and terminal evidence never offers an amendment", async ({ page })
     const path = new URL(route.request().url()).pathname;
     const responses: Record<string, unknown> = {
       "/controls/session": { actorId: "1", csrf: "a".repeat(43), roles: ["reviewer"], expires: Date.now() + 600000 },
+      "/controls/evidence-terms": { terms: syntheticEvidenceTerms },
       "/controls/profile": { bio: "", highlights: [], public: false, suppressed: false },
       "/controls/requests": {
         requests: [
