@@ -306,6 +306,10 @@ export async function createPipeline(options) {
     verifiedMergeNormalizationSignature,
     projectWorkstreamMappings,
   ]);
+  // Corrected typed-history actor admission must not reuse an old User cache
+  // or overwrite the document hash bound by an earlier frozen comparison.
+  // Wrap the complete source generation; unrelated families keep their keys.
+  const typedHistoryNormalizationSignature = digest(["typed-history-actor-classification/v1", normalizationSignature]);
   // Family-specific source rules have separate immutable cache generations.
   const reviewNormalizationSignature = digest([reviewSourceNormalizationVersion, normalizationSignature]);
   const discussionNormalizationSignature = digest([discussionSourceNormalizationVersion, normalizationSignature]);
@@ -321,6 +325,8 @@ export async function createPipeline(options) {
     previousProjectNormalizationSignature,
   ]);
   const frozenNormalizationSignatures = [
+    defaultDeliverySignature(typedHistoryNormalizationSignature),
+    typedHistoryNormalizationSignature,
     defaultDeliverySignature(normalizationSignature),
     defaultDeliverySignature(reviewNormalizationSignature),
     defaultDeliverySignature(discussionNormalizationSignature),
@@ -1313,12 +1319,15 @@ export async function createPipeline(options) {
     const issueFieldHistoryBatch = Object.freeze({});
     const outputs = [];
     for (const row of sourceRows) {
+      const typedHistory = ["relationships", "project_history", "issue_field_history"].includes(row.family);
       const baseSignature =
         row.family === "reviews"
           ? reviewNormalizationSignature
           : row.family === "discussions"
             ? discussionNormalizationSignature
-            : normalizationSignature;
+            : typedHistory
+              ? typedHistoryNormalizationSignature
+              : normalizationSignature;
       const deliverySignature = defaultDeliverySignature(baseSignature);
       const previousBaseSignature =
         row.family === "reviews"
@@ -1326,7 +1335,13 @@ export async function createPipeline(options) {
           : row.family === "discussions"
             ? previousDiscussionNormalizationSignature
             : previousProjectNormalizationSignature;
-      const previousDeliverySignature = defaultDeliverySignature(previousBaseSignature);
+      // Retained rows still require migration after active collection stops.
+      // Both the immediately preceding keys and older Project generation are
+      // historical hints only; none can supply freshly classified actor facts.
+      const previousBaseSignatures = typedHistory
+        ? [normalizationSignature, previousBaseSignature]
+        : [previousBaseSignature];
+      const previousDeliverySignatures = previousBaseSignatures.map(defaultDeliverySignature);
       if (
         row.family === "reviews" &&
         (options.normalizer || options.githubEnrich
@@ -1345,15 +1360,24 @@ export async function createPipeline(options) {
       const candidates = (
         await db.query(
           "SELECT policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=ANY($2::text[])",
-          [row.fact_key, [deliverySignature, baseSignature, previousDeliverySignature, previousBaseSignature]],
+          [row.fact_key, [deliverySignature, baseSignature, ...previousDeliverySignatures, ...previousBaseSignatures]],
         )
       ).rows;
       const deliveryCache = candidates.find((entry) => entry.policy_signature === deliverySignature);
       const cached = deliveryCache ?? candidates.find((entry) => entry.policy_signature === baseSignature);
-      const previousDeliveryCache = candidates.find((entry) => entry.policy_signature === previousDeliverySignature);
-      const previousCached =
-        previousDeliveryCache ?? candidates.find((entry) => entry.policy_signature === previousBaseSignature);
-      if (previousCached) {
+      const previousDeliveryCache = candidates.find((entry) =>
+        previousDeliverySignatures.includes(entry.policy_signature),
+      );
+      const previousCaches = typedHistory
+        ? candidates.filter(
+            (entry) =>
+              previousBaseSignatures.includes(entry.policy_signature) ||
+              previousDeliverySignatures.includes(entry.policy_signature),
+          )
+        : [
+            previousDeliveryCache ?? candidates.find((entry) => entry.policy_signature === previousBaseSignature),
+          ].filter(Boolean);
+      for (const previousCached of previousCaches) {
         if (digest(previousCached.document) !== previousCached.document_hash) fail("normalization_integrity_error");
         if (previousCached.document.isSynthetic !== (dataMode === "synthetic"))
           fail("normalization_data_mode_mismatch");
@@ -1369,7 +1393,7 @@ export async function createPipeline(options) {
         !!deliveryCache ||
         !!previousDeliveryCache ||
         hasDefaultDeliveryClaims(cached?.document) ||
-        hasDefaultDeliveryClaims(previousCached?.document);
+        previousCaches.some((entry) => hasDefaultDeliveryClaims(entry.document));
       let signature = defaultDelivery ? deliverySignature : baseSignature;
       if (defaultDelivery) assertDefaultDeliveryNormalizer();
       if (cached) {

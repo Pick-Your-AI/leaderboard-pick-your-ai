@@ -26,6 +26,7 @@ import {
 import { Amendment } from "./Amendment.tsx";
 import { Configuration, type ConfigurationState } from "./Configuration.tsx";
 import { Spotlights, type Nomination } from "./Spotlights.tsx";
+import { SpotlightRotation } from "./SpotlightRotation.tsx";
 import { LocaleReviewFields, localizationReviewInput } from "./LocaleReviewFields.tsx";
 
 type Run = (path: string, input: unknown) => Promise<boolean>;
@@ -585,6 +586,7 @@ export function ControlsApp() {
                   ))}
               </section>
               <Spotlights nominations={nominations} session={session} run={run} admin={admin} />
+              <SpotlightRotation nominations={nominations} session={session} run={run} admin={admin} />
               {admin && session.roles.includes("reviewer") && (
                 <PolicyComparison
                   session={session}

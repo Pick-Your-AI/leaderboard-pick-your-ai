@@ -1721,6 +1721,12 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         },
         family: isProject ? "field_change" : "relationship",
         observedAt: input.observedAt,
+        ...(options.reviewedServiceAccounts === undefined
+          ? {}
+          : { reviewedServiceAccounts: options.reviewedServiceAccounts }),
+        ...(options.authorizedClassifierIds === undefined
+          ? {}
+          : { authorizedClassifierIds: options.authorizedClassifierIds }),
         occurredAt: time(event.createdAt),
         action: isProject
           ? "project_status_changed"
