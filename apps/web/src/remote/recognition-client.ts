@@ -82,7 +82,11 @@ export function cardImageHref(
 export function achievements(value: unknown, selected: Selection, actorId: string) {
   const data = record(value);
   const meta = metadata(data, selected);
-  if (data.actorId !== actorId || !["accepted-evidence/v1", "accepted-evidence/v2"].includes(String(data.ruleVersion)))
+  if (
+    data.actorId !== actorId ||
+    (data.ruleVersion !== "accepted-evidence/v1" && data.ruleVersion !== "accepted-evidence/v2") ||
+    (data.ruleVersion === "accepted-evidence/v1" && selected.category !== null)
+  )
     fail();
   const suppliedAwards = list(data.achievements, data.ruleVersion === "accepted-evidence/v2" ? 100 : 2);
   const through = selected.end ?? meta.generatedAt;

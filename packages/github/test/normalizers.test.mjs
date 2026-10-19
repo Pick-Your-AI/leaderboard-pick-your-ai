@@ -297,10 +297,33 @@ test("label and milestone definition transitions require their own target identi
         payload: { issue: issue(), sender: fixture.merger, [otherField]: { id: 90 } },
       }),
     );
-    assert.equal(out.facts.length, 1, action);
-    assert.equal(out.facts[0].state, "unknown", action);
-    assert.equal(out.facts[0].rawState, undefined, action);
-    assert.ok(out.reasons.includes("unknown_metadata_target_identity"), action);
+    // An attached issue and the opposite definition kind cannot supply this
+    // definition's artifact identity, even for an unknown fact.
+    assert.equal(out.facts.length, 0, action);
+    assert.equal(out.evidence.length, 0, action);
+    assert.equal(out.observations.length, 0, action);
+    assert.ok(out.reasons.includes("missing_public_artifact_identity"), action);
+    const ownId = `SYNTHETIC_${targetField}_DEFINITION`;
+    const owned = normalizeGithubObservation(
+      envelope({
+        family: "triage",
+        action,
+        payload: {
+          issue: issue(),
+          sender: fixture.merger,
+          [otherField]: { id: 90 },
+          [targetField]: {
+            id: 90,
+            node_id: ownId,
+            html_url: `https://github.com/synthetic-owner/repository/${targetField === "label" ? "labels/bug" : "milestone/1"}`,
+          },
+        },
+      }),
+    );
+    assert.equal(owned.facts.length, 1, action);
+    assert.equal(owned.facts[0].state, "observed", action);
+    assert.equal(owned.facts[0].artifactId, ownId, action);
+    assert.equal(owned.evidence[0].artifact.stableId, ownId, action);
   }
 });
 

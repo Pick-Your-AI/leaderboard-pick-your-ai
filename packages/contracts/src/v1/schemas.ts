@@ -419,7 +419,7 @@ export const metricUiMetadataSchema = z
   })
   .strict();
 
-export const metricGroupingPolicySchema = z
+const rawTriageGroupingPolicySchema = z
   .object({
     version: z.literal("triage-raw-state/v1"),
     metric_id: z.literal("items_triaged"),
@@ -435,6 +435,34 @@ export const metricGroupingPolicySchema = z
     public_enabled: z.literal(false),
   })
   .strict();
+
+const definitionDayGroupingPolicySchema = z
+  .object({
+    version: z.literal("triage-definition-day/v1"),
+    metric_id: z.enum(["label_taxonomy", "milestone_definitions"]),
+    state: z.literal("observed"),
+    date_basis: z.literal("occurredAt"),
+    group_by: z.literal("actor_artifact_interval"),
+    grouping_seconds: z.literal(86400),
+    interval_origin: z.literal("1970-01-01T00:00:00Z"),
+    raw_state_rule: z.literal("facets_share_definition_unit"),
+    repeated_state_rule: z.literal("one_actor_definition_per_utc_day"),
+    missing_state_or_time: z.literal("exclude_unknown"),
+    semantic_classifier: z.literal("none"),
+    public_enabled: z.literal(false),
+    // The observed clock never falls back to receipt time. These are separate
+    // independently qualified lenses, not a Cartesian product or UI enablement.
+    receipt_lenses: z.tuple([
+      z.object({ state: z.literal("qualified"), date_basis: z.literal("occurredAt") }).strict(),
+      z.object({ state: z.literal("qualified"), date_basis: z.literal("acceptedAt") }).strict(),
+    ]),
+  })
+  .strict();
+
+export const metricGroupingPolicySchema = z.discriminatedUnion("group_by", [
+  rawTriageGroupingPolicySchema,
+  definitionDayGroupingPolicySchema,
+]);
 
 export const metricRegistrySchema = z
   .object({
@@ -525,12 +553,19 @@ export const metricRegistrySchema = z
         combinations.length
       )
         problem("Unsupported or deferred metrics cannot expose measured selections.", path);
-      if (entry.metric_id === "items_triaged" && selectable) {
+      if (["items_triaged", "label_taxonomy", "milestone_definitions"].includes(entry.metric_id) && selectable) {
         const grouping = registry.grouping_policies?.find((policy) => policy.metric_id === entry.metric_id);
         if (!grouping) problem("Triage selections require an explicit versioned grouping policy.", path);
         else if (
           entry.supported_combinations.some(
-            (pair) => pair.state !== grouping.state || pair.date_basis !== grouping.date_basis,
+            (pair) =>
+              !(pair.state === grouping.state && pair.date_basis === grouping.date_basis) &&
+              !(
+                "receipt_lenses" in grouping &&
+                grouping.receipt_lenses.some(
+                  (allowed) => pair.state === allowed.state && pair.date_basis === allowed.date_basis,
+                )
+              ),
           )
         )
           problem("Every triage selection must match its versioned grouping policy state and date basis.", path);

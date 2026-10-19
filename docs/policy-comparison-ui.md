@@ -49,3 +49,13 @@ approval, activation, release or rollback action. Designated policy approval,
 published release notes, reversible deployed rollout and the operational drill
 remain separate issue criteria. These implementation and test paths do not claim
 real-source permission, real reviewer acceptance, deployment or full issue closure.
+
+## Calculation evidence audit
+
+The confirmed private preview includes a separate audit inspector for the baseline and candidate calculations, even when their contributor totals are unchanged. It displays all of the engine's retained audit entries, including positive inclusion entries, grouping, conflicting-input, unconfirmed-acceptance, correction/exclusion and other calculation conditions. These entries support human review and do not establish intent, label a contributor as abusive, change eligibility or authorize a penalty. Existing published aggregation and correction rules remain authoritative.
+
+Reviewers can select the policy side and one recorded condition, page through 25 entries at a time, and inspect one entry's exact fact identities in pages of 25. The list identifies visible audit entries and the fact IDs attached to each entry, not complete source-event counts. A null actor remains unknown. An empty or privacy-redacted list is not evidence of complete history or absence of a problem.
+
+The client validates both audit arrays before displaying a result: exact entry fields, nullable actor identity, nonempty unique fact IDs, bounded condition codes, at most 10,000 entries and 10,000 attached identities per policy side. Unknown valid condition codes receive a neutral explanation without an inferred classification. The endpoint's existing frozen-input, policy, source authority, session, expiry and current-redaction checks remain in force. The browser does not restore audit state from storage; changing inputs, losing authority, hiding the tab, expiry or a refreshed result clears the old view. A new current privacy projection resets audit selection and expanded details.
+
+Synthetic tests use the actual captured input, metric engine and protected controls service. They cover repeated units, conflicting revisions, corrections, missing independent acceptance, unresolved actors, unchanged-policy inspection, pagination, privacy removal and malformed audit payloads. This is the protected audit inspection slice of LB-11.05; it does not provide a deployed moderation operation, new source anomaly classifier or whole-issue acceptance.
