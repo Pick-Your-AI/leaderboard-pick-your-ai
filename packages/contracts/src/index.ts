@@ -117,7 +117,11 @@ export {
   publicEvidenceMetadataSchema,
 } from "./v1/evidence-metadata.js";
 export type { PublicEvidenceAction, PublicEvidenceHistory, PublicEvidenceMetadata } from "./v1/evidence-metadata.js";
-export { publicDocumentationReasons, publicDocumentationRecognitionReasons } from "./documentation-reasons.js";
+export {
+  publicDocumentationReasons,
+  publicDocumentationRecognitionReasons,
+  documentationPurposeVersion,
+} from "./documentation-reasons.js";
 export { publicReproductionRecognitionReasons } from "./reproduction-reasons.js";
 
 export {
@@ -129,3 +133,10 @@ export {
   type PublicWindows,
   type PublicWindowResolver,
 } from "./public-windows.js";
+
+export {
+  maintenanceClassificationVersion,
+  maintenanceClassificationKinds,
+  publicMaintenanceClassificationReasons,
+  type MaintenanceClassificationKind,
+} from "./maintenance-reasons.js";
