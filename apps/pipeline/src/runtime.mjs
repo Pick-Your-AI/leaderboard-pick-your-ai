@@ -18,6 +18,7 @@ import { assertPipelineSourcesNotRetired } from "./derived-retirement.mjs";
 import { requireThat } from "../../controls/src/store.mjs";
 import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-metadata.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
+import { createMetadataEnrichment } from "./metadata-enrichment.mjs";
 import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
 import {
@@ -608,6 +609,8 @@ export async function createPipeline(options) {
   let workerPromise = null;
   let outboxController = null;
   let outboxPromise = null;
+  let enrichmentController = null;
+  let enrichmentPromise = null;
   let controlsServer = null;
   let authorized = false;
   let operation = Promise.resolve();
@@ -723,6 +726,38 @@ export async function createPipeline(options) {
     return true;
   }
   const configuredScope = (scope) => approvedPublicationScope(config.scopes, scope, c.metrics.resolveMetricWindow);
+  const metadataEnrichment = createMetadataEnrichment({
+    db,
+    ingestion: c.ingestion,
+    setting: options.metadataEnrichment,
+    config,
+    dataMode,
+    async capture() {
+      if (stopped || !(await approved())) fail("enrichment_authorization_changed");
+      const revision = restrictConfiguration(controlsStore.read()).revision;
+      const current = () => {
+        if (stopped || restrictConfiguration(controlsStore.read()).revision !== revision)
+          fail("enrichment_authorization_changed");
+        try {
+          assertPipelineSourcesNotRetired(
+            controlsStore,
+            config.repositories.map((repo) => repo.id),
+          );
+        } catch {
+          fail("enrichment_authorization_changed");
+        }
+      };
+      current();
+      return {
+        revision,
+        current,
+        async authorize(tx) {
+          if (!(await approved(tx))) fail("enrichment_authorization_changed");
+          current();
+        },
+      };
+    },
+  });
   const repositoriesFor = (scope) =>
     config.repositories.filter((repo) => scope.repository === null || String(repo.id) === scope.repository);
   async function receipt(tx, operationKey, kind, document) {
@@ -2532,6 +2567,11 @@ export async function createPipeline(options) {
           failureBackoffMs: 1000,
         });
       }
+      if (metadataEnrichment) {
+        if (!allowed) fail("metadata_enrichment_configuration_required");
+        enrichmentController = new AbortController();
+        enrichmentPromise = metadataEnrichment.run(enrichmentController.signal);
+      }
       if (controls) {
         if (!options.controlsAuthentication) fail("controls_authentication_required");
         controlsServer = c.controls.createControlsServer({
@@ -2561,10 +2601,14 @@ export async function createPipeline(options) {
     controller?.abort();
     workerController?.abort();
     outboxController?.abort();
+    enrichmentController?.abort();
+    metadataEnrichment?.stop();
     stopping = (async () => {
       if (runner) await runner;
       if (workerPromise) await workerPromise;
       if (outboxPromise) await outboxPromise;
+      if (enrichmentPromise) await enrichmentPromise;
+      if (metadataEnrichment) await metadataEnrichment.settled();
       await operation;
       await Promise.all([
         app.close(),
@@ -2603,6 +2647,11 @@ export async function createPipeline(options) {
     collection,
     inbox,
     outbox,
+    // Privileged host-only metadata state; neither this object nor metadata grants recognition.
+    enrichment: metadataEnrichment && {
+      processOne: metadataEnrichment.processOne,
+      readStates: metadataEnrichment.readStates,
+    },
     operations: operatorOperations,
     dispatchOnce,
     runOnce,
