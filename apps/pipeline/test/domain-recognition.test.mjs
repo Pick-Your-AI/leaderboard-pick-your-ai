@@ -640,8 +640,10 @@ test("reproductions: full 64-character source revisions bind all three reviewed 
     revision = "a".repeat(64);
   s.input = source((envelope) => {
     envelope.payload.pull_request.merge_commit_sha = revision;
+    envelope.integration.before = "b".repeat(64);
     envelope.integration.after = revision;
     envelope.integration.commitShas = [revision];
+    envelope.integration.diff.before = envelope.integration.before;
     envelope.integration.diff.after = revision;
   });
   s.candidate = s.input.facts.find((fact) => fact.metricId === "pr_merged");

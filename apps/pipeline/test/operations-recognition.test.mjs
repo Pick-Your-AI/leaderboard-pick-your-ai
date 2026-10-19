@@ -21,6 +21,7 @@ const mergedAt = "2026-10-07T10:00:00.000Z",
   cutoff = "2026-10-10T10:00:00.000Z";
 
 function source(kind = "merged", revision = after, author = fixture.author) {
+  const predecessor = revision.length === 64 ? "b".repeat(64) : before;
   const envelope = {
     repository: { id: 2, slug: "synthetic-owner/repository", visibility: "public", defaultBranch: "main" },
     proof: { verified: true, source: "github_rest", revision: mergedAt, isSynthetic: false },
@@ -38,14 +39,14 @@ function source(kind = "merged", revision = after, author = fixture.author) {
       },
     },
     integration: {
-      before,
+      before: predecessor,
       after: revision,
       targetBranch: "main",
       defaultBranch: "main",
       canonicalChangeId: "fictional-operations-change",
       commitShas: [revision],
       diff: {
-        before,
+        before: predecessor,
         after: revision,
         complete: true,
         files: [{ path: "operations/public.json", additions: 2, deletions: 1 }],

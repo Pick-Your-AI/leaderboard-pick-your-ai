@@ -15,7 +15,11 @@ import {
   validateMaintenanceClassificationBinding,
 } from "./maintenance-classification.mjs";
 import { qualifyDocumentationPurpose, validateDocumentationPurposeBinding } from "./documentation-purpose.mjs";
-import { domainDateBasis, qualifyDomainRecognition } from "./domain-recognition.mjs";
+import {
+  domainDateBasis,
+  qualifyDomainRecognition,
+  hasSparseDomainIdentifierAuthority,
+} from "./domain-recognition.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
 import { releaseReviewRequest, parseReleaseReviewTarget } from "../../controls/src/release-review.mjs";
 import { hasRequiredParticipantConsent, hasReviewedParticipantConsent } from "../../controls/src/evidence-consent.mjs";
@@ -87,6 +91,25 @@ export function recognitionFingerprint(state, bindings = []) {
   // Missing legacy intake cannot keep manual recognition current, even without collaborators.
   // No-manual-request automatic source authority keeps its existing exact format.
   if (requests.length) authority.push(evidenceIntakeAuthority());
+  // A validator-only upgrade cannot revoke a previously confirmed result. Fence
+  // only selected unsafe lists; valid and unrelated authority bytes stay exact.
+  if (
+    bindings.some((binding) =>
+      requests.some(
+        (request) =>
+          request.status === "accepted" &&
+          !state.profiles?.[request.owner]?.suppressed &&
+          binding.category === request.category &&
+          binding.scope === request.scope &&
+          binding.policyVersion === request.policyVersion &&
+          hasSparseDomainIdentifierAuthority(binding, request) &&
+          hasReviewedParticipantConsent(request) &&
+          hasConsentedEvidenceIntake(request) &&
+          hasReviewedEvidenceIntake(request),
+      ),
+    )
+  )
+    authority.push("domain-id-list-admission/v1");
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 

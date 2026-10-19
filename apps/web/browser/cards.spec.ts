@@ -149,6 +149,45 @@ test("SVG free-text abbreviation cannot split an admitted surrogate pair", async
   }
 });
 
+test("the actual SVG remains an XML image for admitted XML-forbidden label characters", async ({ page }) => {
+  const login = "before\u0000\u000b\ufffe\uffffafter <&> 😀";
+  const app = await service(page, { login });
+  try {
+    const response = await page.goto(path + "/image" + query);
+    expect(response?.status()).toBe(200);
+    const documentKind = await page.evaluate(() => ({
+      root: document.documentElement.localName,
+      namespace: document.documentElement.namespaceURI,
+      errors: document.querySelectorAll("parsererror").length,
+    }));
+    expect(documentKind).toEqual({ root: "svg", namespace: "http://www.w3.org/2000/svg", errors: 0 });
+    const description = await page.locator("svg desc").textContent();
+    expect(description).toContain("before\uFFFD\uFFFD\uFFFD\uFFFDafter <&> 😀");
+    expect(description).toContain("Archived snapshot: 2026-10-17T12:00:00.000Z");
+    expect(description).toContain("Dated evidence, not a live activity or productivity claim.");
+    await expect(page.locator("svg script, svg foreignObject, svg image, svg a")).toHaveCount(0);
+  } finally {
+    await app.close();
+  }
+});
+
+test("the SVG XML parser preserves permitted whitespace and supplementary label characters", async ({ page }) => {
+  const login = "A\tB\nC\rD \uD7FF\uE000\uFFFD\u007F\u0085\uFDD0\u{10000}\u{1FFFE}\u{10FFFF} e\u0301 👩‍💻";
+  const app = await service(page, { login });
+  try {
+    expect((await page.goto(path + "/image" + query))?.status()).toBe(200);
+    const documentKind = await page.evaluate(() => ({
+      root: document.documentElement.localName,
+      errors: document.querySelectorAll("parsererror").length,
+    }));
+    expect(documentKind).toEqual({ root: "svg", errors: 0 });
+    // XML 1.0 normalizes a literal CR to LF when parsing; the serializer retains it.
+    expect(await page.locator("svg desc").textContent()).toContain(login.replace(/\r/g, "\n"));
+  } finally {
+    await app.close();
+  }
+});
+
 test("the actual passive SVG keeps every measure-context line inside its measured canvas", async ({ page }) => {
   const app = await service(page);
   try {

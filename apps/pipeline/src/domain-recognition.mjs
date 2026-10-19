@@ -66,7 +66,10 @@ const id = (value) => {
 };
 const ids = (value, maximum = 32) => {
   require(Array.isArray(value) && value.length > 0 && value.length <= maximum);
-  value.forEach(id);
+  for (let index = 0; index < value.length; index++) {
+    require(Object.hasOwn(value, index));
+    id(value[index]);
+  }
   require(new Set(value).size === value.length);
   return [...value].sort();
 };
@@ -199,6 +202,67 @@ function requireOperationRecord(value, record) {
       path[3] === "blob" &&
       path.slice(1).every((part) => part.length > 0),
   );
+}
+
+// Only list shapes newly rejected above need a saved-authority fence. Explicit
+// undefined shares both legacy recognition/configuration hashes with a hole.
+const sparseIdAuthority = (value) => {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 32) return false;
+  for (let index = 0; index < value.length; index++)
+    if (!Object.hasOwn(value, index) || value[index] === undefined) return true;
+  return false;
+};
+
+// Keep this limited to lists consumed by the selected metric and request. An
+// unused roster, another request's record or unrelated binding retains its exact
+// prior authority. No public proof detail is added to the fingerprint marker.
+export function hasSparseDomainIdentifierAuthority(binding, request) {
+  const domain = binding?.domainEvidence;
+  if (domain?.version !== "domain-evidence/v1" || !Array.isArray(domain.records) || domain.records.length > 1000)
+    return false;
+  const records = domain.records.filter((record) => record?.requestId === request.id);
+  if (records.length !== 1) return false;
+  const record = records[0];
+  const decision = request.history?.findLast((event) => event.action === "accepted");
+  if (
+    !Number.isSafeInteger(record.requestVersion) ||
+    record.requestVersion < 1 ||
+    record.requestVersion !== request.version ||
+    record.requestVersion !== decision?.version ||
+    record.decisionId !== decision?.id
+  )
+    return false;
+  const metric = binding.metricId;
+  if (
+    [
+      "catalog_proposals",
+      "pricebook_proposals",
+      "compatibility_proposals",
+      "evidence_manifests",
+      "data_quality",
+      "reproductions",
+    ].includes(metric) &&
+    sparseIdAuthority(domain.ownerIds)
+  )
+    return true;
+  if (metric === "compatibility_proposals" && sparseIdAuthority(domain.contractReviewerIds)) return true;
+  if (metric === "security" && sparseIdAuthority(domain.disclosureReviewerIds)) return true;
+  const detail = record.details;
+  if (
+    [
+      "catalog_proposals",
+      "pricebook_proposals",
+      "negative_findings",
+      "assumptions_resolved",
+      "market_research",
+      "usability",
+      "evidence_manifests",
+    ].includes(metric) &&
+    sparseIdAuthority(detail?.sourceIds)
+  )
+    return true;
+  if (metric === "pricebook_proposals" && sparseIdAuthority(detail?.units)) return true;
+  return metric === "accessibility" && sparseIdAuthority(detail?.criteria);
 }
 
 /**
