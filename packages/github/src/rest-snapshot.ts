@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 export type GithubRestSnapshotFamily = "issues" | "pull_requests" | "comments" | "releases";
 
 const prefix = "gh-rest-v1:";
-const revisionPattern = /^gh-rest-v1:([a-f0-9]{64})\.([a-f0-9]{32})$/;
+const inlinePrefix = "gh-rest-comment-v2:";
+const revisionPattern = /^(gh-rest-v1:|gh-rest-comment-v2:)([a-f0-9]{64})\.([a-f0-9]{32})$/;
 const invalid = (): never => {
   throw new TypeError("invalid_github_rest_snapshot");
 };
@@ -135,14 +136,46 @@ export function githubRestSnapshotFingerprint(family: GithubRestSnapshotFamily, 
     .digest("hex");
 }
 
+// The old v1 projection is intentionally unchanged, including custom inline
+// observations already stored under it. Expanded native inline dependencies
+// belong to a different marker and never reinterpret a retained v1 revision.
+function inlineCommentFingerprint(payload: unknown): string {
+  if (!object(payload) || typeof payload.pull_request_url !== "string" || payload.pull_request_url.length === 0)
+    return invalid();
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        inlinePrefix,
+        githubRestSnapshotFingerprint("comments", payload),
+        field(payload, "pull_request_url"),
+        field(payload, "pull_request_review_id", integer),
+        field(payload, "in_reply_to_id", integer),
+        field(payload, "commit_id"),
+        field(payload, "original_commit_id"),
+        field(payload, "path"),
+        field(payload, "diff_hunk"),
+        field(payload, "line", integer),
+        field(payload, "original_line", integer),
+        field(payload, "side"),
+        field(payload, "start_line", integer),
+        field(payload, "start_side"),
+        field(payload, "subject_type"),
+      ]),
+    )
+    .digest("hex");
+}
+
 /** A fresh immutable observation preserves current-state A → B → A after a restart. */
 export function githubRestSnapshotRevision(family: GithubRestSnapshotFamily, payload: unknown, scanId: string): string {
   if (typeof scanId !== "string" || !/^[A-Za-z0-9_=.:\-]{1,128}$/.test(scanId)) return invalid();
+  const inline = family === "comments" && object(payload) && Object.hasOwn(payload, "pull_request_url");
+  const version = inline ? inlinePrefix : prefix;
+  const fingerprint = inline ? inlineCommentFingerprint(payload) : githubRestSnapshotFingerprint(family, payload);
   const observation = createHash("sha256")
-    .update(JSON.stringify([prefix, scanId]))
+    .update(JSON.stringify([version, scanId]))
     .digest("hex")
     .slice(0, 32);
-  return `${prefix}${githubRestSnapshotFingerprint(family, payload)}.${observation}`;
+  return `${version}${fingerprint}.${observation}`;
 }
 
 /** Reserved markers must never fall through to legacy timestamp verification. */
@@ -153,7 +186,7 @@ export function hasGithubRestSnapshotPrefix(revision: string): boolean {
 /** Semantic identity excludes the observation suffix; legacy revisions are not rewritten. */
 export function githubRestSnapshotSemanticRevision(revision: string): string | null {
   const match = typeof revision === "string" ? revisionPattern.exec(revision) : null;
-  return match ? `${prefix}${match[1]}` : null;
+  return match ? `${match[1]}${match[2]}` : null;
 }
 
 export function verifyGithubRestSnapshotRevision(family: string, payload: unknown, revision: string): boolean {
@@ -161,6 +194,8 @@ export function verifyGithubRestSnapshotRevision(family: string, payload: unknow
   const semantic = githubRestSnapshotSemanticRevision(revision);
   if (semantic === null) return false;
   try {
+    if (semantic.startsWith(inlinePrefix))
+      return family === "comments" && semantic === `${inlinePrefix}${inlineCommentFingerprint(payload)}`;
     return semantic === `${prefix}${githubRestSnapshotFingerprint(family, payload)}`;
   } catch {
     return false;
