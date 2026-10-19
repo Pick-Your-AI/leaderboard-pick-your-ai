@@ -241,6 +241,9 @@ export function hasSparseDomainIdentifierAuthority(binding, request) {
       "evidence_manifests",
       "data_quality",
       "reproductions",
+      "governance",
+      "deployment_work",
+      "incidents",
     ].includes(metric) &&
     sparseIdAuthority(domain.ownerIds)
   )
