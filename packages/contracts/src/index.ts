@@ -22,11 +22,35 @@ export {
   type PublicScope,
 } from "./public-scope.js";
 export { compareSourceInstants } from "./v1/source-time.js";
+export { publicArtifactIdSchema } from "./artifact-identity.js";
+export {
+  achievementMilestoneVersion,
+  achievementScopeMeaning,
+  coContributionMeaning,
+  achievementProofSchema,
+  achievementMilestoneSchema,
+  coContributionSchema,
+  achievementMilestonesPageSchema,
+  type AchievementProof,
+  type AchievementMilestone,
+  type CoContribution,
+} from "./v1/achievements.js";
 export {
   publicParticipationSchema,
   participationWeekDenominator,
   type PublicParticipation,
 } from "./v1/participation.js";
+export {
+  participationHistoryVersion,
+  participationHistoryResponseByteLimit,
+  participationHistoryBasisSchema,
+  participationHistoryUnknownReasonSchema,
+  publicParticipationHistorySchema,
+  participationHistoryPeriod,
+  type ParticipationHistoryBasis,
+  type ParticipationHistoryUnknownReason,
+  type PublicParticipationHistory,
+} from "./v1/participation-history.js";
 
 export {
   actorIdentityStateSchema,

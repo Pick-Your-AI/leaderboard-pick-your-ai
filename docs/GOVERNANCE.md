@@ -28,7 +28,7 @@ Distinct contribution roles can share an artifact, but a repeated event or impor
 
 ## Decision register
 
-The dedicated repository boundary has been selected. The [metric and recognition decision](metric-recognition-policy.md) and its [definition review](metric-definition-review.md) specify this project's policy choices; review and merge record their acceptance. Each register entry retains its unresolved source, role or operating evidence. Hosting, the public subdomain, source installation, budgets and release approvals are not implied by this repository publication.
+The dedicated repository boundary has been selected. The [metric and recognition decision](metric-recognition-policy.md) and its [definition review](metric-definition-review.md) specify this project's policy choices; review and merge record their acceptance. The [hosting architecture](hosting-architecture.md) selects the runtime, ingress and persistence boundaries with a dated cost model. Each register entry retains its unresolved source, role or operating evidence. Paid provisioning, actual DNS/TLS, source installation, operating ownership and release acceptance remain separate from this repository publication.
 
 The [release-phase decision](release-decision.md) defines transition evidence and proposed evaluation targets. Its adoption does not establish that a phase has passed or turn a proposed role into a named operational commitment.
 
@@ -50,9 +50,11 @@ The [release-phase decision](release-decision.md) defines transition evidence an
 - LB-02.01
 - LB-20.01
 
-**Status:** Repository boundary adopted; runtime architecture approval remains open
+**Status:** Repository boundary adopted; hosting-topology/v1 specifies the engineering architecture for review and merge
 
-**Decision:** Use Pick-Your-AI/pick-your-ai-leaderboard for the dedicated contributor recognition project. leaderboard.pickyour.ai is the configured target used by local plans and environment examples. The configured value does not establish a user approval receipt for DNS, deployment or data transmission. Hosting, spending, operations ownership and launch acceptance remain unresolved. Product name, collector installation and runtime implementation remain governed by their delivery packages.
+**Decision:** Use Pick-Your-AI/pick-your-ai-leaderboard and the configured leaderboard.pickyour.ai origin. hosting-topology/v1 selects a direct nginx ingress, one Node.js 24 runtime with private persistent SQLite/checkpoint state and dedicated managed PostgreSQL 17 per isolated environment, preserving the existing website's static cPanel contract and the 48 KiB public request-target capacity. The gateway and protected host remain implementation work. Review and merge accept the engineering topology; actual operating ownership, billing, source installation, DNS/TLS, measured drain/recovery and release acceptance remain open.
+
+**Decision record:** docs/hosting-architecture.md
 
 **Id:** DEC-02
 
@@ -128,7 +130,7 @@ The [release-phase decision](release-decision.md) defines transition evidence an
 
 **Question:** How is the service hosted and paid for?
 
-**Recommended:** Separate runtime and managed PostgreSQL with static frontend; compare existing approved capacity before vendor selection; set budget ceiling
+**Recommended:** DigitalOcean Droplet with direct configurable HTTPS ingress and managed PostgreSQL per separate VPC environment; preserve single-process SQLite/checkpoint coordination
 
 ### Alternatives
 
@@ -141,7 +143,11 @@ The [release-phase decision](release-decision.md) defines transition evidence an
 
 - LB-20.01
 
-**Status:** Unselected; no spend or provisioning authorized by concept
+**Status:** Planning provider and cost controls specified; actual billing and operating acceptance remain required
+
+**Decision:** hosting-topology/v1 selects Frankfurt DigitalOcean: two Basic Regular 2 vCPU/4 GiB/80 GiB VMs, two Standard Basic Regular PostgreSQL 17 databases with 1 vCPU/1 GiB/10 GiB each, daily VM images and independently retained encrypted application exports. The 2026-10-19 compute/storage subtotal is USD 78.30 monthly; daily images add USD 14.40 and a provisional independent-export allowance adds USD 20, totaling USD 112.70 within a USD 200 all-in engineering planning ceiling. The Render alternative is not selected because its documented Cloudflare edge conflicts with the supported maximum-scope URL budget unless a provider-specific exception is established. Actual quote, owners, full ingress readback, connection sizing, coordinated recovery and release evidence remain required; no purchase, live service, accepted operator or achieved SLA is asserted.
+
+**Decision record:** docs/hosting-architecture.md
 
 **Id:** DEC-06
 

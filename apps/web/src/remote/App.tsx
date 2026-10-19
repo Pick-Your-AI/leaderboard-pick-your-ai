@@ -1,7 +1,9 @@
 import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
+import { FirstContributionsEntry } from "./OverviewDiscovery.tsx";
 import { PublicScopeControls, PublicScopeProvenance } from "./PublicScope.tsx";
 import { selectionScope } from "./public-scope.ts";
 import { ContributorParticipation } from "./Participation.tsx";
+import { ContributorOrganizationHistory } from "./ParticipationHistory.tsx";
 import { EvidenceDrawer, EvidenceProof, Receipt } from "./Evidence.tsx";
 import { isProofTransition, proofHref, readProof, withoutProof } from "./proof.ts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -10,6 +12,12 @@ import { startLiveUpdates, type LiveState } from "@pick-your-ai/service/live-cli
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
 import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
 import { RegistryCatalog, RegistryMetadata } from "./Registry.tsx";
+import {
+  OverviewAcceptedWork,
+  OverviewNavigation,
+  overviewActivitySelection,
+  type OverviewActivityState,
+} from "./Overview.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
 import { RankComparisonControls, RankMovementValue } from "./RankComparison.tsx";
@@ -393,6 +401,7 @@ export function RemoteApp() {
     document.title = `${title(url.pathname)} · PickYour.AI Credits`;
   }, [url.pathname]);
   const [state, setState] = useState<State>({ status: "loading" });
+  const [overviewActivity, setOverviewActivity] = useState<OverviewActivityState>({ status: "loading" });
   const [checking, setChecking] = useState(false);
   const [live, setLive] = useState<{ base: string; scope: string; value: LiveState } | null>(null);
   const [nonce, setNonce] = useState(0),
@@ -422,6 +431,7 @@ export function RemoteApp() {
       history.pushState(null, "", href);
       active.current?.abort();
       activeExport.current?.abort();
+      setOverviewActivity({ status: "loading" });
       setState({ status: "loading" });
       setHeldPin(null);
       setFollow(false);
@@ -438,6 +448,7 @@ export function RemoteApp() {
       const drawerOnly = isProofTransition(urlRef.current, next);
       active.current?.abort();
       activeExport.current?.abort();
+      setOverviewActivity({ status: "loading" });
       if (!drawerOnly) {
         setState({ status: "loading" });
         setHeldPin(null);
@@ -507,6 +518,7 @@ export function RemoteApp() {
   const refresh = useCallback(() => {
     active.current?.abort();
     activeExport.current?.abort();
+    setOverviewActivity({ status: "loading" });
     setChecking(true);
     setNonce((value) => value + 1);
   }, []);
@@ -543,6 +555,7 @@ export function RemoteApp() {
       else {
         active.current?.abort();
         activeExport.current?.abort();
+        setOverviewActivity({ status: "loading" });
         setState({ status: "loading" });
       }
     };
@@ -558,6 +571,7 @@ export function RemoteApp() {
   useEffect(() => {
     const controller = new AbortController();
     active.current = controller;
+    setOverviewActivity({ status: "loading" });
     if (parsed.error) {
       setChecking(false);
       setState({ status: "error", error: parsed.error });
@@ -647,10 +661,39 @@ export function RemoteApp() {
         else displayedPage.current = null;
         setState({ status: "ready", registry, data });
         if ("value" in data && !selected.snapshot && !heldPin) setHeldPin(data.value.snapshotId);
+        else if (data.kind === "health" && url.pathname === "/" && document.visibilityState === "visible") {
+          // Health is already useful. Wait for implicit pin stabilization, then
+          // read one optional activity page under this reader's cancellation fence.
+          const scope = overviewActivitySelection({ ...selected, snapshot: data.value.snapshotId });
+          void request(parsed.base, "activity", portfolioParameters(scope), controller.signal)
+            .then((body) => {
+              if (controller.signal.aborted || document.visibilityState !== "visible") return;
+              const value = activity(body, scope);
+              if (
+                (
+                  [
+                    "snapshotId",
+                    "revision",
+                    "generatedAt",
+                    "metricDefinitionVersion",
+                    "computationVersion",
+                    "policyVersion",
+                  ] as const
+                ).some((key) => value[key] !== data.value[key])
+              )
+                throw new ReadFailure(502, "overview_activity_metadata_mismatch");
+              setOverviewActivity({ status: "ready", value });
+            })
+            .catch(() => {
+              if (!controller.signal.aborted && document.visibilityState === "visible")
+                setOverviewActivity({ status: "unavailable" });
+            });
+        }
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
           activeExport.current?.abort();
+          setOverviewActivity({ status: "loading" });
           setChecking(false);
           setState({
             status: "error",
@@ -674,6 +717,7 @@ export function RemoteApp() {
     if (pending) {
       active.current?.abort();
       activeExport.current?.abort();
+      setOverviewActivity({ status: "loading" });
       setState({ status: "loading" });
       setHeldPin(pending);
       setAnnouncement(`Applying snapshot ${pending}.`);
@@ -733,6 +777,7 @@ export function RemoteApp() {
     } catch (error) {
       if (!controller.signal.aborted) {
         active.current?.abort();
+        setOverviewActivity({ status: "loading" });
         setState({
           status: "error",
           error: error instanceof ReadFailure ? error : new ReadFailure(503, "export_unavailable"),
@@ -914,6 +959,13 @@ export function RemoteApp() {
             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusInside(false);
           }}
         >
+          {data?.kind === "health" && url.pathname === "/" && state.status === "ready" && (
+            <>
+              <OverviewNavigation registry={state.registry} selected={pinned} />
+              <FirstContributionsEntry selected={pinned} />
+              <OverviewAcceptedWork state={overviewActivity} selected={pinned} />
+            </>
+          )}
           {data?.kind === "catalog" && state.status === "ready" && (
             <RegistryCatalog
               key={`${url.pathname}${url.search}`}
@@ -1196,6 +1248,14 @@ export function RemoteApp() {
                 ))}
               </ul>
               <ContributorParticipation value={data.value.activitySummary} selected={pinned} metrics={catalogEntries} />
+              <ContributorOrganizationHistory
+                key={`${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
+                base={parsed.base}
+                selected={selected}
+                parent={data.value}
+                actorId={data.value.actorId}
+                metrics={catalogEntries}
+              />
               <ContributorRecognition
                 key={`${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
                 base={parsed.base}
