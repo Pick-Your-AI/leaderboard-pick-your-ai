@@ -20,7 +20,11 @@ import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createGithubCollectionSource, isProjectSourceScopeFailure } from "./github-source.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
-import { defaultDeliveryNormalizationVersion, reviewSourceNormalizationVersion } from "@pick-your-ai/github";
+import {
+  defaultDeliveryNormalizationVersion,
+  discussionSourceNormalizationVersion,
+  reviewSourceNormalizationVersion,
+} from "@pick-your-ai/github";
 import {
   canonicalProjectWorkstreamMappings,
   normalizedProjectContext,
@@ -272,12 +276,15 @@ export async function createPipeline(options) {
     verifiedMergeNormalizationSignature,
     projectWorkstreamMappings,
   ]);
-  // Review identity changes have a separate immutable cache generation.
+  // Family-specific source rules have separate immutable cache generations.
   const reviewNormalizationSignature = digest([reviewSourceNormalizationVersion, normalizationSignature]);
+  const discussionNormalizationSignature = digest([discussionSourceNormalizationVersion, normalizationSignature]);
   const defaultDeliverySignature = (signature) => digest([defaultDeliveryNormalizationVersion, signature]);
   const frozenNormalizationSignatures = [
     defaultDeliverySignature(normalizationSignature),
     defaultDeliverySignature(reviewNormalizationSignature),
+    defaultDeliverySignature(discussionNormalizationSignature),
+    discussionNormalizationSignature,
     reviewNormalizationSignature,
     normalizationSignature,
     verifiedMergeNormalizationSignature,
@@ -396,6 +403,10 @@ export async function createPipeline(options) {
     row.family !== "reviews" ||
     (digest(row.document) === row.document_hash &&
       row.document.reviewSourceNormalizationVersion === reviewSourceNormalizationVersion);
+  const discussionEvidenceCurrent = (row) =>
+    row.family !== "discussions" ||
+    (digest(row.document) === row.document_hash &&
+      row.document.discussionSourceNormalizationVersion === discussionSourceNormalizationVersion);
   const defaultDeliveryEvidenceCurrent = (row) =>
     !hasDefaultDeliveryClaims(row.document) ||
     (digest(row.document) === row.document_hash &&
@@ -411,14 +422,14 @@ export async function createPipeline(options) {
     )
       fail("default_delivery_normalizer_version_unverified");
   };
-  async function legacyInputHasReviews(tx, authorization, cutoff = null) {
+  async function legacyInputHasFamily(tx, authorization, family, cutoff = null) {
     return (
       (
         await tx.query(
           `SELECT 1 FROM leaderboard_ingestion.source_facts
-         WHERE repository_id=ANY($1::bigint[]) AND family='reviews'
-           AND ($2::timestamptz IS NULL OR observed_at <= $2) LIMIT 1`,
-          [authorization.sources.map((source) => source.repositoryId), cutoff],
+         WHERE repository_id=ANY($1::bigint[]) AND family=$2
+           AND ($3::timestamptz IS NULL OR observed_at <= $3) LIMIT 1`,
+          [authorization.sources.map((source) => source.repositoryId), family, cutoff],
         )
       ).rows.length !== 0
     );
@@ -431,7 +442,15 @@ export async function createPipeline(options) {
     // The integrity-checked explanation records all policy-matching input
     // references. Its actual delivery claims also cover enriched non-PR sources.
     const defaultDelivery = explanation.references.some((entry) => defaultDeliveryMetrics.has(entry.metricId));
-    const kind = defaultDelivery ? "default_delivery" : "review";
+    const needsReview = await legacyInputHasFamily(tx, authorization, "reviews", explanation.cutoff);
+    const needsDiscussion = await legacyInputHasFamily(tx, authorization, "discussions", explanation.cutoff);
+    const kind = defaultDelivery
+      ? "default_delivery"
+      : needsReview
+        ? "review"
+        : needsDiscussion
+          ? "discussion"
+          : "review";
     if (
       canonical(authorization.sources.map((entry) => entry.repositoryId).sort()) !==
       canonical(
@@ -441,18 +460,20 @@ export async function createPipeline(options) {
       )
     )
       fail(`public_${kind}_source_scope_mismatch`);
-    const needsReview = await legacyInputHasReviews(tx, authorization, explanation.cutoff);
-    if (!needsReview && !defaultDelivery) return { review: false, defaultDelivery: false };
+    if (!needsReview && !needsDiscussion && !defaultDelivery)
+      return { review: false, discussion: false, defaultDelivery: false };
     const rows = await readNormalizationEvidence(tx, authorization);
     if (rows === null) return { obsolete: kind };
     if (needsReview && !rows.every(reviewEvidenceCurrent)) return { obsolete: "review" };
+    if (needsDiscussion && !rows.every(discussionEvidenceCurrent)) return { obsolete: "discussion" };
     if (
       defaultDelivery &&
       (!rows.some((row) => hasDefaultDeliveryClaims(row.document)) || !rows.every(defaultDeliveryEvidenceCurrent))
     )
       return { obsolete: "default_delivery" };
     const review = rows.some((row) => row.family === "reviews");
-    if (!review && !defaultDelivery) return { review: false, defaultDelivery: false };
+    const discussion = rows.some((row) => row.family === "discussions");
+    if (!review && !discussion && !defaultDelivery) return { review: false, discussion: false, defaultDelivery: false };
     const retained = (
       await tx.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
         publication.snapshotId,
@@ -471,7 +492,7 @@ export async function createPipeline(options) {
       canonical(retained.document.identityAuthorization?.identityEvidence) !== canonical(authorization.identityEvidence)
     )
       fail(`public_${kind}_frozen_input_integrity_error`);
-    return { review, defaultDelivery };
+    return { review, discussion, defaultDelivery };
   }
   // Source read locks span the final reviewer reauthentication and synchronous
   // private result transaction. No source/network permission is granted here.
@@ -511,13 +532,23 @@ export async function createPipeline(options) {
         const binding = authorization.identityEvidence;
         const rows = await readNormalizationEvidence(tx, authorization);
         if (rows === null) {
-          requireThat(!(await legacyInputHasReviews(tx, authorization)), 409, "Frozen review evidence unavailable");
+          requireThat(
+            !(await legacyInputHasFamily(tx, authorization, "reviews")),
+            409,
+            "Frozen review evidence unavailable",
+          );
+          requireThat(
+            !(await legacyInputHasFamily(tx, authorization, "discussions")),
+            409,
+            "Frozen Discussion evidence unavailable",
+          );
           // Authorization without an evidence binding cannot prove that the
           // complete legacy capture was free of enriched delivery claims.
           // Replaying and recapturing creates an independently verifiable input.
           requireThat(false, 409, "Frozen normalization evidence unavailable");
         }
         requireThat(rows.every(reviewEvidenceCurrent), 409, "Frozen review normalization obsolete");
+        requireThat(rows.every(discussionEvidenceCurrent), 409, "Frozen Discussion normalization obsolete");
         requireThat(rows.every(defaultDeliveryEvidenceCurrent), 409, "Frozen default delivery normalization obsolete");
         const normalizationSources = binding.normalizationSources;
         // Hash-only legacy captures did not bind source ordering. They retain
@@ -1037,7 +1068,12 @@ export async function createPipeline(options) {
     if (unlabeled.length) fail("cross_mode_or_unproven_source_data");
     const outputs = [];
     for (const row of sourceRows) {
-      const baseSignature = row.family === "reviews" ? reviewNormalizationSignature : normalizationSignature;
+      const baseSignature =
+        row.family === "reviews"
+          ? reviewNormalizationSignature
+          : row.family === "discussions"
+            ? discussionNormalizationSignature
+            : normalizationSignature;
       const deliverySignature = defaultDeliverySignature(baseSignature);
       if (
         row.family === "reviews" &&
@@ -1046,6 +1082,13 @@ export async function createPipeline(options) {
           : c.github.reviewSourceNormalizationVersion) !== reviewSourceNormalizationVersion
       )
         fail("review_normalizer_version_unverified");
+      if (
+        row.family === "discussions" &&
+        (options.normalizer || options.githubEnrich
+          ? options.discussionSourceNormalizationVersion
+          : c.github.discussionSourceNormalizationVersion) !== discussionSourceNormalizationVersion
+      )
+        fail("discussion_normalizer_version_unverified");
       const repository = config.repositories.find((repo) => String(repo.id) === String(row.repository_id));
       const candidates = (
         await db.query(
@@ -1084,6 +1127,11 @@ export async function createPipeline(options) {
             (cached.policy_signature === deliverySignature &&
               cached.document.defaultDeliveryNormalizationVersion === defaultDeliveryNormalizationVersion)) &&
           reviewEvidenceCurrent({
+            family: row.family,
+            document: cached.document,
+            document_hash: cached.document_hash,
+          }) &&
+          discussionEvidenceCurrent({
             family: row.family,
             document: cached.document,
             document_hash: cached.document_hash,
@@ -1221,6 +1269,7 @@ export async function createPipeline(options) {
       const document = {
         ...(defaultDelivery ? { defaultDeliveryNormalizationVersion } : {}),
         ...(row.family === "reviews" ? { reviewSourceNormalizationVersion } : {}),
+        ...(row.family === "discussions" ? { discussionSourceNormalizationVersion } : {}),
         ...(row.family === "project_history" ? { projectHistoryNormalizationVersion: "collected-subject/v2" } : {}),
         ...(row.family === "project_current" && row.document.projectSubjectId !== undefined
           ? { projectContextNormalizationVersion: "subject-membership/v1" }
@@ -1285,6 +1334,8 @@ export async function createPipeline(options) {
     confirmation.revision === revision &&
     (confirmation.reviewSourceNormalizationVersion === undefined ||
       confirmation.reviewSourceNormalizationVersion === reviewSourceNormalizationVersion) &&
+    (confirmation.discussionSourceNormalizationVersion === undefined ||
+      confirmation.discussionSourceNormalizationVersion === discussionSourceNormalizationVersion) &&
     (confirmation.defaultDeliveryNormalizationVersion === undefined ||
       confirmation.defaultDeliveryNormalizationVersion === defaultDeliveryNormalizationVersion) &&
     typeof confirmation.aggregateExplanationHash === "string" &&
@@ -1314,6 +1365,9 @@ export async function createPipeline(options) {
       if (comparisonInput) publication.comparisonInput = policyComparisons.capture(state, comparisonInput);
       state.pipelinePublications ||= {};
       const confirmation = {
+        ...(publication.discussionSourceNormalizationVersion === undefined
+          ? {}
+          : { discussionSourceNormalizationVersion: publication.discussionSourceNormalizationVersion }),
         ...(publication.defaultDeliveryNormalizationVersion === undefined
           ? {}
           : { defaultDeliveryNormalizationVersion: publication.defaultDeliveryNormalizationVersion }),
@@ -1433,10 +1487,16 @@ export async function createPipeline(options) {
           // A corrected wrapped cache may now contribute no delivery references.
           // Keep the already confirmed content-version fields when acknowledging
           // that immutable operation; empty output cannot erase its identity.
-          for (const field of ["reviewSourceNormalizationVersion", "defaultDeliveryNormalizationVersion"])
+          for (const field of [
+            "reviewSourceNormalizationVersion",
+            "discussionSourceNormalizationVersion",
+            "defaultDeliveryNormalizationVersion",
+          ])
             if (priorConfirmation[field] !== undefined) priorPublication[field] = priorConfirmation[field];
           if (normalizationBinding.review)
             priorPublication.reviewSourceNormalizationVersion = reviewSourceNormalizationVersion;
+          if (normalizationBinding.discussion)
+            priorPublication.discussionSourceNormalizationVersion = discussionSourceNormalizationVersion;
           if (normalizationBinding.defaultDelivery)
             priorPublication.defaultDeliveryNormalizationVersion = defaultDeliveryNormalizationVersion;
           confirmPublication(scope, priorPublication);
@@ -1469,6 +1529,7 @@ export async function createPipeline(options) {
       dispatch,
     );
     const hasReviewSources = normalized.some((entry) => entry.family === "reviews");
+    const hasDiscussionSources = normalized.some((entry) => entry.family === "discussions");
     const hasDefaultDeliverySources = normalized.some(
       (entry) => entry.document.defaultDeliveryNormalizationVersion === defaultDeliveryNormalizationVersion,
     );
@@ -1753,6 +1814,7 @@ export async function createPipeline(options) {
       }
     }
     const content = {
+      ...(hasDiscussionSources ? { discussionSourceNormalizationVersion } : {}),
       ...(hasDefaultDeliverySources ? { defaultDeliveryNormalizationVersion } : {}),
       ...(hasReviewSources ? { reviewSourceNormalizationVersion } : {}),
       approvedPublic: true,
@@ -1798,7 +1860,9 @@ export async function createPipeline(options) {
           normalizationHashes,
           // Versioned source semantics bind exact pairs even without renames;
           // hash-only historical captures can otherwise be ambiguous across families.
-          ...(identity.hasRenames || hasReviewSources || hasDefaultDeliverySources ? { normalizationSources } : {}),
+          ...(identity.hasRenames || hasReviewSources || hasDiscussionSources || hasDefaultDeliverySources
+            ? { normalizationSources }
+            : {}),
         },
         sources: generations.map((row) => ({
           repositoryId: String(row.repository_id),
@@ -1959,6 +2023,7 @@ export async function createPipeline(options) {
       // PostgreSQL can commit while controls change. Confirm publication only in
       // the same synchronous SQLite boundary used by configuration activation.
       if (hasReviewSources) publication.reviewSourceNormalizationVersion = reviewSourceNormalizationVersion;
+      if (hasDiscussionSources) publication.discussionSourceNormalizationVersion = discussionSourceNormalizationVersion;
       if (hasDefaultDeliverySources)
         publication.defaultDeliveryNormalizationVersion = defaultDeliveryNormalizationVersion;
       confirmPublication(scope, publication, comparisonInputFor(publication));

@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { webhookDispatchVersion } from "./webhook-dispatch.mjs";
 
-const normalizationVersionFields = ["reviewSourceNormalizationVersion", "defaultDeliveryNormalizationVersion"];
+const normalizationVersionFields = [
+  "reviewSourceNormalizationVersion",
+  "discussionSourceNormalizationVersion",
+  "defaultDeliveryNormalizationVersion",
+];
 
 const unavailable = () => {
   throw new Error("operator_publication_unavailable");

@@ -49,17 +49,45 @@ async function versionedReplay(t, mode) {
     html_url: `https://github.com/${slug}/pull/10#pullrequestreview-51`,
     pull_request_url: `https://api.github.com/repos/${slug}/pulls/10`,
   };
-  const hasDelivery = mode !== "review";
-  const hasReview = mode !== "default";
+  const hasDiscussion = ["discussion", "discussion-default", "all"].includes(mode);
+  const hasDelivery = !["review", "discussion"].includes(mode);
+  const hasReview = ["review", "both", "all"].includes(mode);
+  const discussion = {
+    id: "D_SYNTHETIC_OPERATOR_TIME",
+    url: `https://github.com/${slug}/discussions/4`,
+    createdAt: ago(4),
+    updatedAt: at,
+    author: {
+      id: "U_SYNTHETIC_DISCUSSION_404",
+      databaseId: 404,
+      login: "synthetic-discussion-author",
+      __typename: "User",
+    },
+    answerChosenAt: at,
+    answerChosenBy: null,
+    answer: {
+      id: "DC_SYNTHETIC_OPERATOR_TIME",
+      createdAt: ago(3),
+      isAnswer: true,
+      author: { id: "U_SYNTHETIC_ANSWER_505", databaseId: 505, login: "synthetic-answer-author", __typename: "User" },
+    },
+  };
   const h = await operatorHarness(t, {
     webhookDispatch: true,
     // A caller-supplied review envelope must declare the existing review contract.
     ...(hasReview ? { reviewSourceNormalizationVersion: components.github.reviewSourceNormalizationVersion } : {}),
+    ...(hasDiscussion
+      ? { discussionSourceNormalizationVersion: components.github.discussionSourceNormalizationVersion }
+      : {}),
     payloads: [issue],
     source: {
       async readPage(request) {
-        assert.ok(request.family === "issues" || (hasReview && request.family === "reviews"));
-        const item = request.family === "issues" ? issue : review;
+        assert.ok(
+          request.family === "issues" ||
+            (hasReview && request.family === "reviews") ||
+            (hasDiscussion && request.family === "discussions"),
+        );
+        const item = request.family === "issues" ? issue : request.family === "reviews" ? review : discussion;
         return {
           repositoryId: 2,
           visibility: "public",
@@ -68,10 +96,14 @@ async function versionedReplay(t, mode) {
           expectedCount: 1,
           facts: [
             {
-              subjectId: item.node_id,
+              subjectId: item.node_id ?? item.id,
               sourceRevision:
-                request.family === "issues" ? item.updated_at : components.github.githubReviewRevision(item),
-              sourceUrl: item.html_url,
+                request.family === "issues"
+                  ? item.updated_at
+                  : request.family === "reviews"
+                    ? components.github.githubReviewRevision(item)
+                    : components.github.githubDiscussionRevision(item),
+              sourceUrl: item.html_url ?? item.url,
               evidence: "current_state",
               actorId: null,
               occurredAt: null,
@@ -82,6 +114,42 @@ async function versionedReplay(t, mode) {
       },
     },
     githubEnrich: async (input) => {
+      if (input.family === "discussions") {
+        assert.equal(input.fact.subjectId, discussion.id);
+        return {
+          repository: { id: 2, slug, visibility: "public", defaultBranch: "main" },
+          proof: {
+            verified: true,
+            source: "github_graphql",
+            revision: input.fact.sourceRevision,
+            eventId: "synthetic-operator-discussion",
+            isSynthetic: true,
+          },
+          family: "discussion",
+          occurredAt: at,
+          observedAt: input.observedAt,
+          payload: structuredClone(discussion),
+          discussionAnswerSelection: { verified: true },
+          ...(hasDelivery
+            ? {
+                integration: {
+                  before,
+                  after,
+                  canonicalChangeId: "synthetic-operator-discussion-delivery",
+                  defaultBranch: "main",
+                  targetBranch: "main",
+                  commitShas: [after],
+                  diff: {
+                    before,
+                    after,
+                    complete: true,
+                    files: [{ path: "src/change.ts", additions: 7, deletions: 2 }],
+                  },
+                },
+              }
+            : {}),
+        };
+      }
       const isReview = input.family === "reviews";
       assert.equal(input.fact.subjectId, isReview ? review.node_id : issue.node_id);
       return {
@@ -118,7 +186,7 @@ async function versionedReplay(t, mode) {
         ...(isReview
           ? { reviewParticipation: { verified: true, firstSubmittedAt: at, roundFirstSubmittedAt: at } }
           : {}),
-        ...(!isReview && hasDelivery
+        ...(!isReview && hasDelivery && !hasDiscussion
           ? {
               integration: {
                 before,
@@ -134,22 +202,29 @@ async function versionedReplay(t, mode) {
       };
     },
     configure(config) {
-      config.repositories[0].families = hasReview ? ["issues", "reviews"] : ["issues"];
+      config.repositories[0].families = [
+        "issues",
+        ...(hasReview ? ["reviews"] : []),
+        ...(hasDiscussion ? ["discussions"] : []),
+      ];
       const issuePolicy = config.policies[0];
       const original = issuePolicy.policy;
-      config.policies = [...(hasDelivery ? ["pr_lines_changed"] : []), ...(hasReview ? ["review_feedback"] : [])].map(
-        (metricId) => {
-          const policy = {
-            ...original,
-            metricId,
-            unit: components.metrics.getMetricDefinition(metricId).definition.unit,
-            aggregation: metricId === "pr_lines_changed" ? "sum" : "count",
-            roles: [metricId === "pr_lines_changed" ? "author" : "reviewer"],
-            rank: false,
-          };
-          return { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-policy" };
-        },
-      );
+      config.policies = [
+        ...(hasDelivery ? ["pr_lines_changed"] : []),
+        ...(hasReview ? ["review_feedback"] : []),
+        ...(hasDiscussion ? ["discussion_answers"] : []),
+      ].map((metricId) => {
+        const policy = {
+          ...original,
+          metricId,
+          unit: components.metrics.getMetricDefinition(metricId).definition.unit,
+          aggregation: metricId === "pr_lines_changed" ? "sum" : "count",
+          roles: [metricId === "review_feedback" ? "reviewer" : "author"],
+          ...(metricId === "discussion_answers" ? { sources: ["github_graphql"] } : {}),
+          rank: false,
+        };
+        return { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "synthetic-policy" };
+      });
       // The actual issues-only dispatcher requires this original approved policy.
       config.policies.push(issuePolicy);
     },
@@ -176,11 +251,17 @@ async function versionedReplay(t, mode) {
     confirmation.reviewSourceNormalizationVersion,
     hasReview ? components.github.reviewSourceNormalizationVersion : undefined,
   );
-  for (const field of versionFields) assert.equal(Object.hasOwn(row.document, field), false);
+  assert.equal(
+    confirmation.discussionSourceNormalizationVersion,
+    hasDiscussion ? components.github.discussionSourceNormalizationVersion : undefined,
+  );
+  for (const field of [...versionFields, "discussionSourceNormalizationVersion"])
+    assert.equal(Object.hasOwn(row.document, field), false);
   const explanation = new AggregateExplanationStore(h.controlsStore).read(publication.snapshotId);
   assert.ok(
     explanation.document.references.some(
-      (ref) => ref.metricId === (hasDelivery ? "pr_lines_changed" : "review_feedback"),
+      (ref) =>
+        ref.metricId === (hasDelivery ? "pr_lines_changed" : hasReview ? "review_feedback" : "discussion_answers"),
     ),
   );
   return { h: { ...h, sourceFamily: "issues" }, receipt, publication, document: row.document, confirmation };
@@ -372,3 +453,107 @@ test("health response rechecks version metadata after its awaited observer", asy
     });
   }
 });
+
+for (const mode of ["discussion", "discussion-default", "all"]) {
+  test(`operator replay preserves ${mode} source versions through publication and real database reopen`, async (t) => {
+    const { h, receipt, publication } = await versionedReplay(t, mode);
+    const value = await readReplay(h.runtime, receipt);
+    assert.equal(value.status, "published", value.reason);
+    assert.equal(value.reason, "verified_publication");
+    assert.deepEqual(
+      value.publications.map((entry) => [entry.snapshotId, entry.revision]),
+      [[publication.snapshotId, publication.revision]],
+    );
+    assert.doesNotMatch(
+      JSON.stringify(value),
+      /discussionSourceNormalizationVersion|defaultDeliveryNormalizationVersion|reviewSourceNormalizationVersion|normalizationHashes|normalizationSources/,
+    );
+    const normalizations = (
+      await h.db.query(
+        `SELECT n.* FROM leaderboard_pipeline.normalizations n JOIN leaderboard_ingestion.source_facts f USING(fact_key) WHERE f.family='discussions'`,
+      )
+    ).rows;
+    assert.equal(normalizations.length, 1);
+    assert.equal(
+      normalizations[0].document.discussionSourceNormalizationVersion,
+      components.github.discussionSourceNormalizationVersion,
+    );
+    if (mode !== "discussion") {
+      assert.equal(normalizations[0].document.defaultDeliveryNormalizationVersion, version);
+      assert.ok(
+        normalizations[0].document.facts.some((fact) => fact.metricId === "pr_lines_changed"),
+        "the same Discussion normalization carries the actual enriched delivery evidence",
+      );
+    }
+    assert.equal((await h.runtime.operations.readHealth(2, operatorAllow)).publication.state, "verified");
+    await restart(h, async (runtime) => {
+      assert.equal((await readReplay(runtime, receipt)).status, "published");
+      assert.equal((await runtime.operations.readHealth(2, operatorAllow)).publication.state, "verified");
+    });
+  });
+}
+
+test("adding a Discussion marker cannot retarget an unversioned operator content identity", async (t) => {
+  const { h, receipt } = await publishedOperatorReplay(t);
+  const initial = await readReplay(h.runtime, receipt);
+  assert.equal(initial.status, "published");
+  const id = initial.publications[0].snapshotId;
+  assert.equal(h.controlsStore.read().pipelinePublications[id].discussionSourceNormalizationVersion, undefined);
+  h.controlsStore.transaction((state) => {
+    state.pipelinePublications[id].discussionSourceNormalizationVersion =
+      components.github.discussionSourceNormalizationVersion;
+  });
+  assertWithheld(await readReplay(h.runtime, receipt));
+});
+
+for (const kind of ["replay", "health"])
+  for (const boundary of ["observer", "transaction"]) {
+    test(`operator ${kind} retains Discussion version absence after the real ${boundary} boundary`, async (t) => {
+      const { h, receipt } = await publishedOperatorReplay(t);
+      const initial = await readReplay(h.runtime, receipt);
+      assert.equal(initial.status, "published");
+      const id = initial.publications[0].snapshotId;
+      const original = structuredClone(h.controlsStore.read().pipelinePublications[id]);
+      const mutate = () =>
+        h.controlsStore.transaction((state) => {
+          state.pipelinePublications[id].discussionSourceNormalizationVersion =
+            components.github.discussionSourceNormalizationVersion;
+        });
+      let calls = 0;
+      const observe =
+        boundary === "observer"
+          ? async (_data, beforeSend) => {
+              beforeSend();
+              await Promise.resolve();
+              calls++;
+              mutate();
+            }
+          : undefined;
+      const transaction = h.db.transaction;
+      if (boundary === "transaction")
+        h.db.transaction = async (work) => {
+          const value = await transaction(work);
+          await Promise.resolve();
+          calls++;
+          mutate();
+          return value;
+        };
+      try {
+        await assert.rejects(
+          () =>
+            kind === "replay"
+              ? readReplay(h.runtime, receipt, observe)
+              : h.runtime.operations.readHealth(2, operatorAllow, observe),
+          kind === "replay" ? /operation_publication_changed/ : /operation_health_changed/,
+        );
+        assert.equal(calls, 1);
+      } finally {
+        h.db.transaction = transaction;
+        h.controlsStore.transaction((state) => {
+          state.pipelinePublications[id] = original;
+        });
+      }
+      assert.equal((await readReplay(h.runtime, receipt)).status, "published");
+      assert.equal((await h.runtime.operations.readHealth(2, operatorAllow)).publication.state, "verified");
+    });
+  }

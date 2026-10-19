@@ -1175,7 +1175,7 @@ test("Discussion authors and answer selectors remain distinct with explicit sele
     author: fixture.author,
     answerChosenAt: at,
     answerChosenBy: fixture.merger,
-    answer: { id: "DC_synthetic", isAnswer: true, author: fixture.reviewer },
+    answer: { id: "DC_synthetic", createdAt: at, isAnswer: true, author: fixture.reviewer },
   };
   const base = envelope({ family: "discussion", action: "snapshot", payload: discussion });
   const unselected = normalizeGithubObservation(base);
