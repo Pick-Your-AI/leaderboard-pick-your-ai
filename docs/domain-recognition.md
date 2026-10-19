@@ -85,7 +85,7 @@ executable schemas are in `apps/pipeline/src/domain-recognition.mjs`.
 | `pricebook_proposals` | Pricebook/version/as-of, currency, units, conditions hash, sources and factual/owner review | Pricebook/version/as-of | Acceptance |
 | `compatibility_proposals` | Proposal/version, contract version, explicit research #40 acceptance/narrowing and central plus owner review | Proposal/version | Acceptance |
 | `primary_sources` | Available canonical source/claim mapping; primary source, publisher statement or independent measurement identified | Canonical source/claim | Acceptance |
-| `freshness_checks` | Canonical source/claim, check time and available/changed/unavailable/unknown outcome | Source/claim/policy interval | Check |
+| `freshness_checks` | Canonical source/claim, check time and available/changed/unavailable/unknown/contradicted outcome | Source/claim/policy interval | Check |
 | `reproduced_measurements` | Experiment/run, pinned conditions and result hashes, independent real measurement | Experiment/run | Acceptance |
 | `negative_findings` | Bounded finding/version, limitation/disproved/unknown outcome and sources | Finding identity | Acceptance |
 | `rights_reviews` | Artifact, rights question, terms revision and allowed/excluded/unknown conclusion | Artifact/question | Acceptance |
@@ -233,8 +233,14 @@ Public evidence carries its immutable source link and fixed, bounded explanation
 codes for the metric, clock, reviewed outcome/method and contribution class.
 Private request text, receipt IDs, source-ID lists, conditions hashes, participant
 material and configuration records are not added to the public payload. Errors
-also omit this private detail. Negative or unavailable freshness checks remain
-valid documented work; they do not create verified-source claims. Unknown rights
+also omit this private detail. Evidence-reviewed freshness effort may report
+`changed`, `unavailable` or `contradicted`, as well as `available` or `unknown`.
+These outcomes describe the reviewed check and preserve its uncertainty; they do
+not grant verified-source or accepted-fact credit. The separate `primary_sources`
+qualifier still requires an available source and its own reviewed evidence class.
+Changing the outcome or receipt within the same source/claim/policy interval
+does not create another freshness unit. All existing reviewer, immutable-pin,
+source-use and current private-eligibility requirements still apply. Unknown rights
 or assumption conclusions retain that uncertainty. Research and catalog evidence
 explicitly distinguishes reviewed artifacts from issue completion and production
 publication.

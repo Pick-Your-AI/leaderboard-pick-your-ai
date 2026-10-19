@@ -71,6 +71,17 @@ function cursor(value: string | null): void {
   if (value !== null && (typeof value !== "string" || !/^[A-Za-z0-9_=.:/-]{1,1024}$/.test(value)))
     throw new Error("invalid_collection_cursor");
 }
+function validateScanRequest(request: ScanRequest): void {
+  id(request.runId);
+  repository(request.repositoryId);
+  timestamp(request.until);
+  if (request.since !== null) {
+    timestamp(request.since);
+    if (request.since >= request.until) throw new Error("invalid_scan_window");
+  }
+  if (!sourceFamilies.includes(request.family) || !["backfill", "reconcile", "audit"].includes(request.mode))
+    throw new Error("invalid_scan_scope");
+}
 function normalizeFact(value: SourceFact): SourceFact {
   id(value.subjectId);
   if (value.historySubjectId !== undefined) id(value.historySubjectId);
@@ -223,47 +234,43 @@ export class CollectionStore {
   }
 
   async start(request: ScanRequest): Promise<void> {
-    id(request.runId);
-    repository(request.repositoryId);
-    timestamp(request.until);
-    if (request.since !== null) {
-      timestamp(request.since);
-      if (request.since >= request.until) throw new Error("invalid_scan_window");
-    }
-    if (!sourceFamilies.includes(request.family) || !["backfill", "reconcile", "audit"].includes(request.mode))
-      throw new Error("invalid_scan_scope");
-    await this.db.transaction(async (tx) => {
-      const access = await tx.query(
-        "SELECT generation FROM leaderboard_ingestion.repository_access WHERE repository_id = $1 AND state = 'public' FOR SHARE",
-        [request.repositoryId],
-      );
-      if (!access.rows[0]) throw new Error("repository_unverified");
-      await tx.query(
-        `INSERT INTO leaderboard_ingestion.collection_runs
+    validateScanRequest(request);
+    await this.db.transaction((tx) => this.startInTransaction(tx, request));
+  }
+
+  /** Materialize a whole authorized plan in its caller's existing transaction. */
+  async startInTransaction(tx: SqlSession, request: ScanRequest): Promise<void> {
+    validateScanRequest(request);
+    const access = await tx.query(
+      "SELECT generation FROM leaderboard_ingestion.repository_access WHERE repository_id = $1 AND state = 'public' FOR SHARE",
+      [request.repositoryId],
+    );
+    if (!access.rows[0]) throw new Error("repository_unverified");
+    await tx.query(
+      `INSERT INTO leaderboard_ingestion.collection_runs
         (run_id, repository_id, family, mode, since_at, until_at, access_generation) VALUES ($1,$2,$3,$4,$5,$6,$7)
         ON CONFLICT (run_id) DO NOTHING`,
-        [
-          request.runId,
-          request.repositoryId,
-          request.family,
-          request.mode,
-          request.since,
-          request.until,
-          access.rows[0].generation,
-        ],
-      );
-      const prior = (
-        await tx.query("SELECT * FROM leaderboard_ingestion.collection_runs WHERE run_id = $1", [request.runId])
-      ).rows[0]!;
-      if (
-        String(prior.repository_id) !== String(request.repositoryId) ||
-        prior.family !== request.family ||
-        prior.mode !== request.mode ||
-        new Date(prior.until_at as string).toISOString() !== request.until ||
-        (prior.since_at === null ? null : new Date(prior.since_at as string).toISOString()) !== request.since
-      )
-        throw new Error("scan_id_conflict");
-    });
+      [
+        request.runId,
+        request.repositoryId,
+        request.family,
+        request.mode,
+        request.since,
+        request.until,
+        access.rows[0].generation,
+      ],
+    );
+    const prior = (
+      await tx.query("SELECT * FROM leaderboard_ingestion.collection_runs WHERE run_id = $1", [request.runId])
+    ).rows[0]!;
+    if (
+      String(prior.repository_id) !== String(request.repositoryId) ||
+      prior.family !== request.family ||
+      prior.mode !== request.mode ||
+      new Date(prior.until_at as string).toISOString() !== request.until ||
+      (prior.since_at === null ? null : new Date(prior.since_at as string).toISOString()) !== request.since
+    )
+      throw new Error("scan_id_conflict");
   }
 
   /** One network page per call. Concurrent workers converge through the locked checkpoint. */

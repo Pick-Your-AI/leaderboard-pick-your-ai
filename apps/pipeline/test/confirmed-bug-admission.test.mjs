@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { normalizeGithubObservation, applyRecognitionReceipt } from "@pick-your-ai/github";
 import { getMetricDefinition, getMetricUi, metricRegistryV1, selectMetricView } from "@pick-your-ai/metrics";
 import { materializeRecognition, recognitionFingerprint } from "../src/recognition-adapter.mjs";
+import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-intake.mjs";
 
 const fixture = JSON.parse(
   readFileSync(new URL("../../../packages/github/test/fixtures/engineering.json", import.meta.url), "utf8"),
@@ -14,7 +15,7 @@ const fixture = JSON.parse(
 const acceptedAt = "2026-10-09T10:00:00.000Z";
 const cutoff = "2026-10-10T10:00:00.000Z";
 
-function scenario({ family = "issue", synthetic = false, markerFree = false } = {}) {
+function scenario({ family = "issue", synthetic = false, markerFree = false, collaborators = {} } = {}) {
   const data = markerFree ? JSON.parse(JSON.stringify(fixture).replace(/synthetic/gi, "fixture")) : fixture;
   const slug = markerFree ? "example-org/example-repo" : "synthetic-owner/repository";
   const sourceMetricId = family === "issue" ? "issues_opened" : "pr_merged";
@@ -57,6 +58,7 @@ function scenario({ family = "issue", synthetic = false, markerFree = false } = 
   assert.ok(evidence);
   const decision = {
     id: "private-review-receipt",
+    version: 2,
     action: "accepted",
     actor: "202",
     at: Date.parse(acceptedAt),
@@ -64,6 +66,7 @@ function scenario({ family = "issue", synthetic = false, markerFree = false } = 
   };
   const request = {
     id: "private-claim",
+    version: 2,
     kind: "evidence",
     status: "accepted",
     owner: candidate.actorId,
@@ -71,10 +74,14 @@ function scenario({ family = "issue", synthetic = false, markerFree = false } = 
     scope: "repository:2:confirmed-report",
     policyVersion: decision.policyVersion,
     locator: evidence.artifact.publicUrl,
-    collaborators: {},
+    collaborators: structuredClone(collaborators),
     history: [decision],
   };
-  const state = { requests: { [request.id]: request }, profiles: {}, audit: [structuredClone(decision)] };
+  const state = attachSyntheticEvidenceState({
+    requests: { [request.id]: request },
+    profiles: {},
+    audit: [structuredClone(decision)],
+  });
   const binding = {
     category: request.category,
     scope: request.scope,
@@ -237,9 +244,8 @@ test("confirmed_bugs: independent review, audit and withdrawal controls remain r
   const s = scenario();
   assert.throws(() => applyRecognitionReceipt(s.input, { ...s.receipt, reviewerId: "101" }, ["101"]), /Independent/);
   assert.throws(() => applyRecognitionReceipt(s.input, s.receipt, []), /Independent/);
-  s.request.collaborators["202"] = "accepted";
-  assert.throws(() => s.run(), /recognition_decision_unverified/);
-  s.request.collaborators = {};
+  const conflict = scenario({ collaborators: { 202: "accepted" } });
+  assert.throws(() => conflict.run(), /recognition_decision_unverified/);
   s.state.audit = [];
   assert.throws(() => s.run(), /recognition_decision_unverified/);
   s.state.audit = [s.decision];
@@ -287,12 +293,18 @@ function previousAuthority(state, bindings) {
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
-test("confirmed_bugs: prior authority retires bug and later answer-clock bindings, including mixed snapshots", () => {
+test("confirmed_bugs: configuration fences preserve automatic sources while manual intake retires old claim authority", () => {
   const s = scenario();
+  const empty = { requests: {}, profiles: {}, audit: [] };
   for (const metric of metricRegistryV1.metrics) {
     const bindings = [{ ...s.binding, metricId: metric.id }];
-    const prior = previousAuthority(s.state, bindings);
-    const current = recognitionFingerprint(s.state, bindings);
+    assert.notEqual(
+      recognitionFingerprint(s.state, bindings),
+      previousAuthority(s.state, bindings),
+      `${metric.id}: manual intake retires prior claim authority`,
+    );
+    const prior = previousAuthority(empty, bindings);
+    const current = recognitionFingerprint(empty, bindings);
     // Keep the literal historical oracle above: the later answer-clock fence
     // independently retires that destination without changing the old format.
     if (["confirmed_bugs", "issue_answers"].includes(metric.id)) assert.notEqual(current, prior);
@@ -301,7 +313,6 @@ test("confirmed_bugs: prior authority retires bug and later answer-clock binding
   const other = { ...s.binding, metricId: "accepted_findings" };
   const mixed = [other, s.binding];
   // No accepted confirmed-bug request is needed for the configuration fence.
-  const empty = { requests: {}, profiles: {}, audit: [] };
   assert.notEqual(recognitionFingerprint(empty, mixed), previousAuthority(empty, mixed));
   assert.equal(recognitionFingerprint(empty, [other]), previousAuthority(empty, [other]));
 });

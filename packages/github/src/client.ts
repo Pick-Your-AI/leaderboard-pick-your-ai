@@ -409,6 +409,11 @@ export class GithubReadClient {
         if (query) headers.set("Content-Type", "application/json");
         // Recheck after checkpoint, quota, concurrency and token awaits, on every retry.
         await authorize();
+        // A sibling can establish a pause while token or durable authority work awaits.
+        if ((this.shared.pauses.get(source) ?? 0) > this.options.now()) {
+          attempt -= 1;
+          continue;
+        }
         response = await this.options.fetch(url, {
           method: query ? "POST" : "GET",
           headers,

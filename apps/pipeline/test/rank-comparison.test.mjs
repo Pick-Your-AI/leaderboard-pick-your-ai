@@ -5,6 +5,7 @@ import { createPipeline } from "../src/index.mjs";
 import { aggregateExplanationHash } from "../src/aggregate-explanations.mjs";
 import { retainedRankHistory } from "../src/rank-history.mjs";
 import { harness, components, clock, ago, boardUrl } from "./harness.mjs";
+import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-intake.mjs";
 
 async function twoSnapshots(t, extra = {}, beforePublish) {
   const scope = {
@@ -78,6 +79,7 @@ const recognitionPair = (t) =>
           history: [event],
         };
         state.audit.push(event);
+        attachSyntheticEvidenceState(state);
       });
     },
   );
@@ -170,10 +172,7 @@ for (const changed of ["withdrawal", "audit"])
             if (sql.includes("SELECT selected.document")) reads++;
             if (sql.startsWith("SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access"))
               finalFence = true;
-            if (
-              finalFence &&
-              sql.includes("UNION SELECT artifact_id AS subject_id FROM leaderboard_pipeline.corrections")
-            ) {
+            if (finalFence && sql.startsWith("SELECT subject_id\n  FROM leaderboard_ingestion.object_suppressions")) {
               finalChecks++;
               assert.equal(reads, 2, "recognition edit must follow both individually authorized snapshot reads");
               h.controlsStore.transaction((state) => {

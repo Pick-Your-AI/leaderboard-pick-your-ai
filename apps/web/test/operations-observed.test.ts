@@ -147,6 +147,27 @@ function observedHealth(): OperatorHealthResponse {
   };
   return value;
 }
+
+test("a recent completed window with a reconciliation gap retains its earlier watermark and unknown state", () => {
+  const value = health();
+  value.collector.state = "unknown";
+  Object.assign(value.collector.families[0]!, {
+    state: "unknown",
+    reason: "reconciliation_gap",
+    reconciledThrough: old,
+  });
+  assert.deepEqual(checkedOperatorHealth(value, authority), value);
+  for (const invalid of [
+    { state: "quiet" },
+    { lastSuccessAt: null },
+    { reconciledThrough: null },
+    { lastAttemptAt: old },
+  ]) {
+    const changed = clone(value);
+    Object.assign(changed.collector.families[0]!, invalid);
+    assert.throws(() => checkedOperatorHealth(changed, authority));
+  }
+});
 function replay(
   status: OperatorReplayResultResponse["status"] = "published",
   reason?: OperatorReplayResultResponse["reason"],
