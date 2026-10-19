@@ -15,6 +15,10 @@ import {
 } from "../../../packages/github/dist/normalizers.js";
 import { parseReconciliationRunId } from "./reconciliation-plan.mjs";
 import { readGithubCommentIdentity } from "../../../packages/github/dist/comment-identity.js";
+import {
+  readGithubContentEditParents,
+  githubContentEditRevision,
+} from "../../../packages/github/dist/content-edit-history.js";
 
 /** Conservative scope-loss codes emitted by the trusted Project adapters. */
 export function isProjectSourceScopeFailure(error, family) {
@@ -109,6 +113,7 @@ export function createGithubCollectionSource({
   assertAuthorized = () => {},
   useRestSnapshotRevisions = () => false,
   includePullRequestReviewComments = () => false,
+  includeContentEditMetadata = () => false,
 }) {
   if (
     !readClient?.scanRest ||
@@ -120,7 +125,8 @@ export function createGithubCollectionSource({
     maxPages < 1 ||
     maxPages > 1000 ||
     typeof useRestSnapshotRevisions !== "function" ||
-    typeof includePullRequestReviewComments !== "function"
+    typeof includePullRequestReviewComments !== "function" ||
+    typeof includeContentEditMetadata !== "function"
   )
     throw new Error("invalid_github_collection_source");
   const approved = new Map(repositories.map((repository) => [repository.id, repository]));
@@ -162,9 +168,18 @@ export function createGithubCollectionSource({
             "project_history",
             "relationships",
             "issue_field_history",
+            "content_edits",
           ].includes(request.family))
       )
         throw new Error("source_family_adapter_unavailable");
+      if (
+        request.family === "content_edits" &&
+        (!["audit", "backfill"].includes(request.mode) ||
+          request.since !== null ||
+          at(request.until) === null ||
+          at(request.until) !== request.until)
+      )
+        throw new Error("source_content_edit_window_unsupported");
       const planned = parseReconciliationRunId(request.runId);
       const window = request.family === "issue_field_history" ? null : sourceWindow(request);
       if (
@@ -178,6 +193,13 @@ export function createGithubCollectionSource({
               : true))
       )
         throw new Error("reconciliation_source_plan_invalid");
+      if (request.family === "content_edits") {
+        assertAuthorized();
+        const admitted = includeContentEditMetadata(Object.freeze({ ...request }));
+        assertAuthorized();
+        if (typeof admitted !== "boolean") throw new Error("invalid_content_edit_inventory_policy");
+        if (!admitted) throw new Error("source_content_edit_inventory_unavailable");
+      }
       const expandedComments =
         request.family === "comments" ? includePullRequestReviewComments({ runId: request.runId }) : false;
       if (typeof expandedComments !== "boolean") throw new Error("invalid_comments_inventory_policy");
@@ -227,7 +249,17 @@ export function createGithubCollectionSource({
         });
       let values;
       let projectSubjectCount = null;
-      if (request.family === "issue_field_history") {
+      if (request.family === "content_edits") {
+        const inventory = await readGithubContentEditParents({
+          client,
+          source: sourceId,
+          repository: { id: repository.id, slug: repository.slug },
+          scanId: request.runId,
+          maxPages,
+          assertAuthorized,
+        });
+        values = inventory.snapshots;
+      } else if (request.family === "issue_field_history") {
         if (!client.scanGraphql) throw new Error("issue_field_source_unavailable");
         const inventorySubjects = (items, limit) => {
           if (!Array.isArray(items) || items.length > limit)
@@ -543,6 +575,17 @@ export function createGithubCollectionSource({
       if (offset > expectedCount) throw new Error("invalid_source_cursor");
       const selected = projectSubjectCount === null ? values.slice(offset, offset + request.limit) : values;
       const facts = selected.map((value) => {
+        if (request.family === "content_edits")
+          return {
+            subjectId: value.parent.id,
+            sourceRevision: githubContentEditRevision(value, request.runId),
+            sourceUrl: value.parent.url,
+            evidence: "current_state",
+            actorId: null,
+            occurredAt: null,
+            state: "present",
+            contentEditMetadata: value,
+          };
         const subjectId = sourceSubjectId(value);
         const nativeRevision =
           value.sha ?? at(value.updated_at) ?? at(value.submitted_at) ?? at(value.published_at) ?? at(value.created_at);
@@ -601,8 +644,9 @@ export function createGithubCollectionSource({
         isSynthetic,
         facts,
         nextCursor: next < expectedCount ? String(next) : null,
-        // Visibility can omit organization-only issue-field events entirely.
-        expectedCount: request.family === "issue_field_history" ? null : expectedCount,
+        // Native field visibility can omit events. Content parent counts do not
+        // establish how many historical edits GitHub has retained or redacted.
+        expectedCount: ["issue_field_history", "content_edits"].includes(request.family) ? null : expectedCount,
       };
     },
   };

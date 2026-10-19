@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createPipeline } from "../src/index.mjs";
 import { aggregateExplanationHash } from "../src/aggregate-explanations.mjs";
 import { retainedRankHistory } from "../src/rank-history.mjs";
+import { correctionStateQuery } from "../src/reversion-store.mjs";
 import { harness, components, clock, ago, boardUrl } from "./harness.mjs";
 import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-intake.mjs";
 
@@ -163,22 +164,31 @@ for (const changed of ["withdrawal", "audit"])
     const transaction = h.db.transaction.bind(h.db);
     let reads = 0,
       finalChecks = 0,
-      finalFence = false;
+      authorityQueries = 0;
+    const authorityReadTrace = [];
     h.db.transaction = (work) =>
       transaction((tx) =>
         work({
           query: async (sql, params) => {
             const result = await tx.query(sql, params);
             if (sql.includes("SELECT selected.document")) reads++;
-            if (sql.startsWith("SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access"))
-              finalFence = true;
-            if (finalFence && sql.startsWith("SELECT subject_id\n  FROM leaderboard_ingestion.object_suppressions")) {
-              finalChecks++;
-              assert.equal(reads, 2, "recognition edit must follow both individually authorized snapshot reads");
-              h.controlsStore.transaction((state) => {
-                if (changed === "withdrawal") state.requests.claim.status = "withdrawn";
-                else state.audit.find((event) => event.id === "synthetic-paired-recognition-receipt").actor = "303";
-              });
+            // Match the standalone final authority query, not nested transfer or embedded CTE reads.
+            if (sql === correctionStateQuery) {
+              authorityQueries++;
+              authorityReadTrace.push(reads);
+              if (authorityQueries === 3) {
+                assert.deepEqual(
+                  authorityReadTrace,
+                  [1, 2, 2],
+                  "recognition edit must occur at the shared final fence",
+                );
+                finalChecks++;
+                assert.equal(reads, 2, "recognition edit must follow both individually authorized snapshot reads");
+                h.controlsStore.transaction((state) => {
+                  if (changed === "withdrawal") state.requests.claim.status = "withdrawn";
+                  else state.audit.find((event) => event.id === "synthetic-paired-recognition-receipt").actor = "303";
+                });
+              }
             }
             return result;
           },
@@ -191,6 +201,8 @@ for (const changed of ["withdrawal", "audit"])
     safe(response);
     assert.equal(reads, 2);
     assert.equal(finalChecks, 1);
+    assert.equal(authorityQueries, 3);
+    assert.deepEqual(authorityReadTrace, [1, 2, 2]);
     assert.equal(h.controlsStore.read().revision, revision, "recognition edits must be fenced without a revision bump");
   });
 

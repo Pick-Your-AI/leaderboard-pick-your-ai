@@ -1,17 +1,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizeGithubObservation, applyRecognitionReceipt } from "../dist/index.js";
+import { aggregateMetric } from "@pick-your-ai/metrics";
+import { attachSyntheticEvidenceIntake } from "../../../tests/fixtures/evidence-intake.mjs";
 import {
   authoredNotesEnvelope,
   authoredNotesPathPolicy,
   authoredNotesScenario,
   authoredNotesReceipt,
+  materializeAuthoredNotes,
   notesCandidate,
   notesPurpose,
   notesMergeTime,
   notesReviewTime,
   notesRevision,
   notesDomainReasons,
+  notesCutoff,
 } from "../../../tests/fixtures/authored-release-notes.mjs";
 
 const docs = (input) => input.evidence.filter((entry) => entry.contribution.metricIds.includes("documentation"));
@@ -181,3 +185,156 @@ test("authored notes direct receipt: receipt aliases and caller changesets canno
   assert.equal(a.actorId, b.actorId);
   assert.equal(a.occurredAt, notesMergeTime);
 });
+
+function documentationTotal(s, output) {
+  const from = "2026-10-01T00:00:00.000Z";
+  const result = aggregateMetric(
+    {
+      datasetId: "fixture-direct-documentation",
+      cutoff: notesCutoff,
+      backfillRevision: "v1",
+      repositoryIds: ["2"],
+      actors: output.actors,
+      facts: output.facts,
+      coverage: [
+        {
+          schemaVersion: "leaderboard/v1",
+          state: "complete",
+          source: "github_rest",
+          scopeId: "2",
+          windowStart: from,
+          windowEnd: notesCutoff,
+          knownStart: from,
+          lastSuccessfulSync: notesCutoff,
+          sourceWatermark: notesCutoff,
+          missingPages: 0,
+          permissionsMissing: [],
+          sourceErrors: [],
+        },
+      ],
+    },
+    s.policies[0].policy,
+    {
+      timezone: "UTC",
+      from,
+      to: notesCutoff,
+      repos: [],
+      projects: [],
+      workstreams: [],
+      roles: [],
+      actors: "all",
+      context: "event",
+    },
+  );
+  return result.rows.find((row) => row.actorId === s.target.actorId)?.value;
+}
+
+function directDocumentationReceipt(s, purpose, order, changesetId) {
+  const receipt = {
+    ...authoredNotesReceipt(s),
+    id: "fixture-direct-review-" + order,
+    acceptedAt: order === 0 ? notesReviewTime : "2026-10-09T11:00:00.000Z",
+    ...(changesetId === undefined ? {} : { changesetId }),
+  };
+  if (purpose === "generic") delete receipt.documentationPurpose;
+  return receipt;
+}
+
+function legacyGenericDocumentation(s) {
+  const unselected = structuredClone(s.input);
+  const source = unselected.evidence.find((entry) => entry.contribution.contributionId === s.target.id);
+  source.contribution.reasonCodes = source.contribution.reasonCodes.filter((reason) => reason !== notesCandidate);
+  // The unchanged unselected path materializes the exact prior generic identity.
+  // Old code retained the original candidate proof without using it for the unit.
+  const output = applyRecognitionReceipt(
+    unselected,
+    directDocumentationReceipt(s, "generic", 0),
+    s.binding.reviewerIds,
+  );
+  output.evidence.find((entry) => entry.contribution.contributionId === s.target.id).contribution.reasonCodes = [
+    ...s.evidence.contribution.reasonCodes,
+  ];
+  return output;
+}
+
+for (const order of [
+  ["generic", "purpose"],
+  ["purpose", "generic"],
+])
+  for (const aliases of [false, true])
+    test(`authored notes direct transition: ${order.join(" then ")} preserves one unit with caller aliases ${aliases}`, () => {
+      const s = authoredNotesScenario();
+      const receipts = order.map((purpose, index) =>
+        directDocumentationReceipt(s, purpose, index, aliases ? "unrelated-caller-unit-" + index : undefined),
+      );
+      for (const receipt of receipts)
+        assert.equal(documentationTotal(s, applyRecognitionReceipt(s.input, receipt, s.binding.reviewerIds)), 1);
+      let output = s.input;
+      for (const receipt of receipts) output = applyRecognitionReceipt(output, receipt, s.binding.reviewerIds);
+      // The direct API retains conflicting reviews. The metric engine must keep
+      // its existing fail-closed behavior instead of counting them as two units.
+      assert.equal(documentationTotal(s, output), null);
+      const facts = output.facts.filter((fact) => fact.metricId === "documentation" && fact.state === "qualified");
+      assert.equal(new Set(facts.map((fact) => fact.canonicalKey)).size, 1);
+      assert.ok(facts.every((fact) => fact.artifactId === s.target.artifactId && fact.occurredAt === notesMergeTime));
+    });
+
+test("authored notes direct transition: repeated generic reviews remain one contribution without adding a purpose", () => {
+  const s = authoredNotesScenario();
+  assert.equal(
+    documentationTotal(
+      s,
+      applyRecognitionReceipt(s.input, directDocumentationReceipt(s, "generic", 0), s.binding.reviewerIds),
+    ),
+    1,
+  );
+  let output = s.input;
+  for (const index of [0, 1])
+    output = applyRecognitionReceipt(output, directDocumentationReceipt(s, "generic", index), s.binding.reviewerIds);
+  assert.equal(documentationTotal(s, output), null);
+  const facts = output.facts.filter((fact) => fact.metricId === "documentation" && fact.state === "qualified");
+  assert.equal(new Set(facts.map((fact) => fact.canonicalKey)).size, 1);
+  assert.ok(docs(output).every((entry) => !entry.contribution.reasonCodes.includes(notesPurpose)));
+});
+
+for (const purpose of ["generic", "purpose"])
+  test(`authored notes direct transition: retained legacy generic then ${purpose} requires rebuilding the overlay`, () => {
+    const s = authoredNotesScenario();
+    const legacy = legacyGenericDocumentation(s);
+    const original = structuredClone(legacy);
+    assert.equal(documentationTotal(s, legacy), 1);
+    assert.throws(
+      () => applyRecognitionReceipt(legacy, directDocumentationReceipt(s, purpose, 1), s.binding.reviewerIds),
+      /documentation_recognition_requires_renormalization/,
+    );
+    assert.deepEqual(legacy, original);
+  });
+
+for (const category of ["example", "guide"])
+  test(`authored notes direct transition: separately reviewed ${category} on the same PR remains a different unit`, () => {
+    const s = authoredNotesScenario();
+    const reviewedCategory = structuredClone(s);
+    delete reviewedCategory.binding.documentationPurpose;
+    reviewedCategory.record.details.category = category;
+    reviewedCategory.request.detail = "Reviewed authored " + category + " work on this documentation PR.";
+    attachSyntheticEvidenceIntake(reviewedCategory.request);
+    reviewedCategory.state.audit = [structuredClone(reviewedCategory.decision)];
+    // Obtain the unit from actual domain qualification and receipt materialization,
+    // including current private review and intake checks, not a copied hash formula.
+    let categoryReceipt;
+    let output = materializeAuthoredNotes(reviewedCategory, (input, receipt, reviewers) => {
+      categoryReceipt = receipt;
+      return applyRecognitionReceipt(input, receipt, reviewers);
+    });
+    assert.equal(documentationTotal(s, output), 1);
+    output = applyRecognitionReceipt(output, directDocumentationReceipt(s, "purpose", 1), s.binding.reviewerIds);
+    assert.equal(documentationTotal(s, output), 2);
+    const facts = output.facts.filter((fact) => fact.metricId === "documentation" && fact.state === "qualified");
+    assert.equal(new Set(facts.map((fact) => fact.canonicalKey)).size, 2);
+    const legacyAndCategory = applyRecognitionReceipt(
+      legacyGenericDocumentation(s),
+      categoryReceipt,
+      s.binding.reviewerIds,
+    );
+    assert.equal(documentationTotal(s, legacyAndCategory), 2);
+  });

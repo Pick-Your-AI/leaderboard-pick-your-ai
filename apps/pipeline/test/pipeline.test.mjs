@@ -1332,8 +1332,9 @@ test("normalizer-derived suppression uses an exclusive repository gate without a
       const statements = [];
       const result = await work({
         query: async (sql, params) => {
-          statements.push(sql);
+          statements.push(sql.replace(/\s+/g, " ").trim());
           if (sql.includes("INSERT INTO leaderboard_ingestion.object_suppressions")) {
+            assert.match(statements[0], /^SELECT pg_advisory_xact_lock\(/);
             assert.ok(statements.some((statement) => /repository_access.*FOR UPDATE/.test(statement)));
             assert.equal(
               statements.some((statement) => /FOR SHARE/.test(statement)),
