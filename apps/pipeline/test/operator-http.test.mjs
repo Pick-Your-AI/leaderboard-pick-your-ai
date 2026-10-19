@@ -2,15 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
 import { components } from "./harness.mjs";
-import { operatorSettings, publishedOperatorReplay } from "./operator-harness.mjs";
+import {
+  operatorHarness,
+  operatorSettings,
+  publishedOperatorReplay,
+  queueOperatorReplay,
+} from "./operator-harness.mjs";
 
 const origin = "https://controls.synthetic.invalid";
-async function http(t, { serialize = () => {} } = {}) {
+async function http(t, { serialize = () => {}, queued = false } = {}) {
   let current = true,
     grantReads = 0,
     grantHook = () => {};
   const grant = { allowed: true, policyVersion: "synthetic-operator-policy", revision: "grant-1" };
-  const { h, receipt } = await publishedOperatorReplay(t, { operatorDiagnostics: operatorSettings(() => current) });
+  const options = { operatorDiagnostics: operatorSettings(() => current) };
+  const pending = queued ? await operatorHarness(t, options) : null;
+  const { h, receipt } = pending
+    ? { h: pending, receipt: await queueOperatorReplay(pending) }
+    : await publishedOperatorReplay(t, options);
   let depth = 0;
   const transaction = h.db.transaction;
   h.db.transaction = (work) =>
@@ -78,6 +87,12 @@ async function http(t, { serialize = () => {} } = {}) {
     },
     revokeConfiguration() {
       current = false;
+    },
+    changeConfigurationRevision() {
+      h.controlsStore.transaction((state) => {
+        state.configuration ??= { revision: 0, active: null, proposals: {}, history: [] };
+        state.configuration.revision++;
+      });
     },
     suppress() {
       h.controlsStore.transaction((state) => {
@@ -244,4 +259,57 @@ test("configuration, privacy and session changes during JSON serialization withh
     }
   }
   assert.equal(serializations, 6);
+});
+
+test("actual HTTP queued diagnostics retain the currentness fence through final grant and serialization", async (t) => {
+  let serializationChange = null;
+  const h = await http(t, {
+    queued: true,
+    serialize(value) {
+      assert.equal(value.depth, 1, "the source transaction must still span queued-result serialization");
+      if (serializationChange) value[serializationChange]();
+    },
+  });
+  const path = `2/replays/${h.receipt.id}`;
+  const before = (
+    await h.db.query("SELECT receipt_id,audit::text FROM leaderboard_ingestion.replay_receipts ORDER BY receipt_id")
+  ).rows;
+  const githubBefore = { ...h.githubReads };
+  const original = await h.call(path);
+  assert.equal(original.status, 200);
+  assert.equal(original.data.status, "queued");
+  assert.deepEqual(original.data.publications, []);
+  for (const phase of ["entry", "final grant", "serialization"]) {
+    for (const change of ["revokeConfiguration", "changeConfigurationRevision"]) {
+      if (phase === "entry" && change === "changeConfigurationRevision") continue;
+      await t.test(`${change} during ${phase} withholds the queued response`, async () => {
+        h.reset();
+        serializationChange = null;
+        if (phase === "entry") h[change]();
+        else if (phase === "serialization") serializationChange = change;
+        else
+          h.setGrantHook(async (value) => {
+            if (value.grantReads === 4) {
+              assert.equal(value.depth, 1);
+              await Promise.resolve();
+              value[change]();
+            }
+          });
+        const response = await h.call(path);
+        assert.equal(response.status, 409);
+        assert.equal(JSON.stringify(response.data).includes(h.receipt.id), false);
+        noPrivate(response.data);
+        assert.equal(h.depth, 0);
+      });
+    }
+  }
+  h.reset();
+  serializationChange = null;
+  assert.deepEqual((await h.call(path)).data, original.data);
+  assert.deepEqual(
+    (await h.db.query("SELECT receipt_id,audit::text FROM leaderboard_ingestion.replay_receipts ORDER BY receipt_id"))
+      .rows,
+    before,
+  );
+  assert.deepEqual(h.githubReads, githubBefore);
 });

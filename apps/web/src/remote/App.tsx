@@ -2,6 +2,7 @@ import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
 import { PublicScopeControls, PublicScopeProvenance } from "./PublicScope.tsx";
 import { selectionScope } from "./public-scope.ts";
 import { ContributorParticipation } from "./Participation.tsx";
+import { ContributorOrganizationHistory } from "./ParticipationHistory.tsx";
 import { EvidenceDrawer, EvidenceProof, Receipt } from "./Evidence.tsx";
 import { isProofTransition, proofHref, readProof, withoutProof } from "./proof.ts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1196,6 +1197,14 @@ export function RemoteApp() {
                 ))}
               </ul>
               <ContributorParticipation value={data.value.activitySummary} selected={pinned} metrics={catalogEntries} />
+              <ContributorOrganizationHistory
+                key={`${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
+                base={parsed.base}
+                selected={selected}
+                parent={data.value}
+                actorId={data.value.actorId}
+                metrics={catalogEntries}
+              />
               <ContributorRecognition
                 key={`${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
                 base={parsed.base}
