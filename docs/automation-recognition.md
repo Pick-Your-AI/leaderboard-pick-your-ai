@@ -12,7 +12,7 @@ An open or closed-unmerged PR, a pending coauthor, an issue report, a release pu
 
 The receipt still requires an independently authorized reviewer. The reviewer is recorded as the accepting person, separately from the change contributor. A bot or service-account contributor keeps its source identity and execution mode. Neither the category nor a successful CI job establishes that work was performed manually. Source classification and workflow observations do not automatically create a tooling acceptance receipt.
 
-The direct GitHub receipt normalizer and the pipeline use the same source predicate. The pipeline applies it before calling a host-supplied receipt callback, after the existing protected review and exact audit checks. Raw observations are retained unchanged.
+The direct GitHub receipt normalizer and the pipeline use the same source predicate. The pipeline applies it before calling a host-supplied receipt callback, after the existing protected review and exact audit checks. Raw observations are retained unchanged. Before that admission, publication reconciles contributor records from every original normalized source observation with the existing identity rules. Consistent repeated observations and qualified later login changes yield one admitted actor; conflicting identity, kind, classification or same-run/time aliases still fail under their original source bindings. Automated-execution evidence continues to accumulate.
 
 ## Merge clock and category unit
 
@@ -42,7 +42,7 @@ Current and pinned publications, evidence, exports, private previews and explana
 
 ## Verification and remaining work
 
-The source cases are shared by `packages/github/test/maintenance-source.test.mjs` and `packages/github/test/automation-source.test.mjs`; each category is independently exercised. `apps/pipeline/test/automation-recognition.test.mjs` covers the protected callback boundary, source periods, category/unit conservation and durable public/private authority across reopen and repair. Existing maintenance and confirmed-bug tests retain their independent category fences.
+The source cases are shared by `packages/github/test/maintenance-source.test.mjs` and `packages/github/test/automation-source.test.mjs`; each category is independently exercised. `apps/pipeline/test/automation-recognition.test.mjs` covers the protected callback boundary, source periods, category/unit conservation and durable public/private authority across reopen and repair. Existing maintenance and confirmed-bug tests retain their independent category fences. `apps/pipeline/test/merged-change-runtime-actors.test.mjs` additionally sends separate PR observations through the actual collector, normalizer and publication stores for both categories, including repeated authors, unclaimed work, verified renames and identity conflicts.
 
 These tests use fictional observations and disposable databases. The PR records the exact original failing and corrected source executions. Build the workspace before running the tests, and apply the repository's formatting, type, planning and generated-document checks.
 
