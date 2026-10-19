@@ -655,7 +655,7 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
   if (!selected.snapshot || identity(data.snapshotId) !== selected.snapshot)
     throw new ReadFailure(502, "api_snapshot_mismatch");
   integer(data.revision);
-  string(data.generatedAt);
+  timestamp(data.generatedAt);
   identity(data.metricDefinitionVersion);
   identity(data.computationVersion);
   identity(data.policyVersion);
@@ -704,7 +704,7 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
       throw new ReadFailure(502, "invalid_export_response");
     evidenceIds.add(id);
     if (entry.repositoryId !== null) identity(entry.repositoryId);
-    if (entry.occurredAt !== null) string(entry.occurredAt);
+    if (entry.occurredAt !== null) timestamp(entry.occurredAt);
     if (entry.sourceRevision !== null) string(entry.sourceRevision);
     if (entry.sourceRevisionUrl !== null && publicLink(string(entry.sourceRevisionUrl)) === null)
       throw new ReadFailure(502, "invalid_export_response");
@@ -726,7 +726,7 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
       throw new ReadFailure(502, "invalid_export_response");
     pendingIds.add(id);
     if (entry.repositoryId !== null) identity(entry.repositoryId);
-    if (entry.occurredAt !== null) string(entry.occurredAt);
+    if (entry.occurredAt !== null) timestamp(entry.occurredAt);
     if (entry.sourceRevision !== null) string(entry.sourceRevision);
     if (entry.sourceRevisionUrl !== null && publicLink(string(entry.sourceRevisionUrl)) === null)
       throw new ReadFailure(502, "invalid_export_response");

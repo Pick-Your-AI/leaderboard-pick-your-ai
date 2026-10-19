@@ -27,6 +27,7 @@ const legacySignature = (config) =>
     ]),
     [],
   ]);
+const currentSignature = (config) => comparisonHash(["github-issue-transfer-admission/v1", legacySignature(config)]);
 
 test("pre-transfer versioned review caches keep frozen public and private authority after restart", async (t) => {
   const h = await reviewHarness(t);
@@ -378,7 +379,7 @@ test("legacy review authority and cache generations are denied across actual Pos
         assert.deepEqual(rows.find((row) => row.policy_signature === legacy.signature).document, legacy.document);
         assert.equal(rows.find((row) => row.policy_signature === legacy.signature).document_hash, legacy.documentHash);
         const current = rows.find((row) => row.policy_signature !== legacy.signature);
-        assert.equal(current.policy_signature, comparisonHash([version, legacy.signature]));
+        assert.equal(current.policy_signature, comparisonHash([version, currentSignature(h.config)]));
         assert.equal(current.document.reviewSourceNormalizationVersion, version);
         assert.equal(
           current.document.facts.some((fact) => ["prs_reviewed", "review_rounds"].includes(fact.metricId)),
@@ -412,7 +413,7 @@ test("retained nonreview publications keep their cache generation, public export
   const before = await Promise.all(paths("issues_opened").map(async (path) => (await h.runtime.app.inject(path)).body));
   const privateBefore = await h.runtime.previewPolicy(previewRequest(h, publication.snapshotId));
   const normalizations = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY fact_key")).rows;
-  assert.ok(normalizations.every((row) => row.policy_signature === legacySignature(h.config)));
+  assert.ok(normalizations.every((row) => row.policy_signature === currentSignature(h.config)));
   assert.ok(normalizations.every((row) => row.document.reviewSourceNormalizationVersion === undefined));
   await restart(h, async (runtime) => {
     const after = await Promise.all(paths("issues_opened").map(async (path) => (await runtime.app.inject(path)).body));

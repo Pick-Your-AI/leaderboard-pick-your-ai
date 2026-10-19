@@ -25,6 +25,7 @@ const legacySignature = (config) =>
     ]),
     [],
   ]);
+const currentSignature = (config) => comparisonHash(["github-issue-transfer-admission/v1", legacySignature(config)]);
 
 test("pre-transfer versioned Discussion caches keep frozen public and private authority after restart", async (t) => {
   const h = await discussionHarness(t);
@@ -343,7 +344,7 @@ for (const bindingMode of ["exact", "hash-only", "unbound"]) {
       assert.deepEqual(rows.find((row) => row.policy_signature === legacy.signature).document, legacy.document);
       assert.equal(rows.find((row) => row.policy_signature === legacy.signature).document_hash, legacy.documentHash);
       const current = rows.find((row) => row.policy_signature !== legacy.signature);
-      assert.equal(current.policy_signature, comparisonHash([version, legacy.signature]));
+      assert.equal(current.policy_signature, comparisonHash([version, currentSignature(h.config)]));
       assert.equal(current.document.discussionSourceNormalizationVersion, version);
       assert.equal(
         current.document.facts.some((fact) => fact.metricId === "discussion_answers"),
@@ -382,7 +383,7 @@ test("unrelated issue publications retain their original bytes, cache generation
   assert.ok(
     caches.every(
       (row) =>
-        row.policy_signature === legacySignature(h.config) &&
+        row.policy_signature === currentSignature(h.config) &&
         row.document.discussionSourceNormalizationVersion === undefined,
     ),
   );

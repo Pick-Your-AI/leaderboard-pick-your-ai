@@ -55,7 +55,7 @@ export function discoveryTestAuthority({ now = Date.now } = {}) {
 export async function harness(t, extra = {}) {
   const slug = extra.markerFreeConfig ? "example-org/example-repo" : "synthetic-org/synthetic-repo";
   const directory = await mkdtemp(join(tmpdir(), "leaderboard-pipeline-"));
-  let engine = new PGlite(join(directory, "postgres"));
+  let engine = new PGlite(extra.memoryDatabase ? undefined : join(directory, "postgres"));
   const query = async (connection, sql, params) => {
     const result = await connection.query(sql, params);
     if (
@@ -252,6 +252,7 @@ export async function harness(t, extra = {}) {
     runtime,
     discoveryAuthority,
     async reopenDatabase() {
+      if (extra.memoryDatabase) throw new Error("An in-memory test database cannot prove persisted reopen");
       await engine.close();
       engine = new PGlite(join(directory, "postgres"));
     },

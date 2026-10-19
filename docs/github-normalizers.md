@@ -113,6 +113,14 @@ Frozen reads also retain the pre-transfer Review, Discussion and default-deliver
 cache generations, including delivery wrappers on enriched source families.
 Their source-version, exact source-binding and document-hash checks still apply.
 Reprocessing adds the current generation without changing the retained record.
+An integrity-valid, same-policy pre-transfer cache also retains its delivery
+classification when recalculation produces no delivery facts. Only the
+classification crosses that boundary; the current normalizer rehydrates the
+source, and the new cache keeps the current delivery version. This applies to
+enriched source families as well as commits and pull requests. The
+[classification migration cases](../apps/pipeline/test/transfer-delivery-classification-migration.test.mjs)
+verify an actual database reopen, preservation of the old cache and frozen input,
+and rejection of a corrupt historical classification record.
 
 GitHub's native GraphQL
 [`TransferredEvent`](https://docs.github.com/en/graphql/reference/issues#transferredevent)
