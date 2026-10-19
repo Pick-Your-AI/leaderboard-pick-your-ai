@@ -2,10 +2,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createService } from "../dist/app.js";
+import { currentRankingPresentationPolicy } from "../../../packages/contracts/dist/index.js";
 import { readFixture, at } from "../../../tests/fixtures/pending-metric.mjs";
 
-function fixture() {
-  const input = readFixture();
+function fixture(actorCount = 2) {
+  const input = readFixture(actorCount);
   input.selected.portfolioEvidence = [
     ...input.selected.evidence.map((entry) => ({
       ...structuredClone(entry),
@@ -249,8 +250,10 @@ test("discarding a suppressed counterpart cannot reattribute its proof to anothe
 });
 
 test("a conflicting comparison baseline withholds movement without discarding valid current totals", async (t) => {
-  const previous = fixture();
-  const current = fixture();
+  const previous = fixture(5);
+  const current = fixture(5);
+  for (const read of [previous, current])
+    read.selected.rankingPresentationPolicy = structuredClone(currentRankingPresentationPolicy);
   Object.assign(current.selected.snapshot, { snapshotId: "synthetic-pending-2", revision: 2 });
   Object.assign(current.head, { snapshotId: "synthetic-pending-2", revision: 2 });
   previous.head = structuredClone(current.head);
@@ -269,6 +272,7 @@ test("a conflicting comparison baseline withholds movement without discarding va
   const url = "/api/v1/boards?metric=pr_merged&snapshot=synthetic-pending-2&compare=synthetic-pending-1";
   const matched = await app.inject(url);
   assert.equal(matched.statusCode, 200);
+  assert.equal(matched.json().rankingPresentation.state, "ranked");
   assert.ok(matched.json().rows.every((row) => row.movement.reason === "insufficient_evidence_history"));
   previous.selected.portfolioEvidence[0].contribution.actorId = "102";
   const response = await app.inject(url);

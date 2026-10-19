@@ -16,8 +16,8 @@ export const policy = {
   minimumSamples: 1,
   rank: true,
 };
-export function normalized() {
-  const actors = [101, 102].map((n) => ({
+export function normalized(actorCount = 2) {
+  const actors = Array.from({ length: actorCount }, (_, index) => 101 + index).map((n) => ({
     id: String(n),
     login: `synthetic-pending-${n}`,
     kind: "user",
@@ -79,8 +79,8 @@ export function normalized() {
   }));
   return { actors, facts, evidence, reasons: [], isSynthetic: true };
 }
-export function readFixture() {
-  const input = normalized();
+export function readFixture(actorCount = 2) {
+  const input = normalized(actorCount);
   const coverage = {
     schemaVersion: "leaderboard/v1",
     state: "partial",

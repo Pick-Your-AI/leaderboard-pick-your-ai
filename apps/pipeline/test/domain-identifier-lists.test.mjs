@@ -448,7 +448,13 @@ test("legacy sparse-list publication retires after reopen and undefined refresh,
     dataMode: "public",
     payloads: [payload],
     defaultDeliveryNormalizationVersion,
-    normalizerFactory: () => async () => structuredClone(retained),
+    normalizerFactory: () => async () => {
+      const output = structuredClone(retained);
+      // This historical/custom adapter has no physical receipt contract. Its
+      // deliberately stripped merge candidate cannot substantiate a stock one.
+      delete output.physicalContext;
+      return output;
+    },
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {
@@ -466,8 +472,14 @@ test("legacy sparse-list publication retires after reopen and undefined refresh,
     state.requests = s.state.requests;
     state.audit = s.state.audit;
   });
+  const assertNoPhysicalReceipt = async () => {
+    const saved = (await h.db.query("SELECT document FROM leaderboard_pipeline.normalizations")).rows;
+    assert.ok(saved.length > 0);
+    assert.ok(saved.every(({ document }) => !Object.hasOwn(document, "physicalContext")));
+  };
   const publication = await h.runtime.runOnce({ cutoff });
   assert.equal(publication.state, "published");
+  await assertNoPhysicalReceipt();
   const snapshotId = publication.publications[0].snapshotId;
   const currentFingerprint = recognitionFingerprint(h.controlsStore.read(), h.options.config.recognitionBindings);
   const oldFingerprint = legacyFingerprint(h.controlsStore.read(), h.options.config.recognitionBindings);
@@ -538,6 +550,7 @@ test("legacy sparse-list publication retires after reopen and undefined refresh,
   t.after(() => repaired.stop());
   const result = await repaired.runOnce({ cutoff });
   assert.equal(result.state, "published");
+  await assertNoPhysicalReceipt();
   assert.equal(receiptCalls, 1);
   const newId = result.publications[0].snapshotId;
   assert.equal((await read(repaired, newId)).selected.rows[0].result.value, 1);

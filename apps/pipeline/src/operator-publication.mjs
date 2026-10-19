@@ -159,6 +159,11 @@ export function createOperatorPublicationVerifier({
           ? { reversionRecordsHash: document.reversionRecordsHash }
           : {}),
       };
+      // These fields are part of the content ID only when the original
+      // publication captured them. Preserve legacy absence; never substitute
+      // a current presentation policy or synthesize a missing physical receipt.
+      for (const field of ["rankingPresentationPolicy", "physicalContexts", "physicalEvidence"])
+        if (Object.hasOwn(document, field)) content[field] = document[field];
       if (digest(content) !== expected.snapshotId) return null;
       const proof = aggregateExplanations.read(expected.snapshotId);
       // Identical content may reuse the first immutable arithmetic explanation

@@ -57,12 +57,14 @@ function rewriteCSV(raw, mutate) {
   return rows.map((record) => record.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(",") + "\r\n").join("");
 }
 
-for (const [name, filters, version] of scopes) {
+for (const [name, filters, legacyVersion] of scopes) {
   test(`comparison retains actual engine movement and both complete ${name} scopes in board, JSON and CSV`, async (t) => {
     const h = await documents(t, filters);
     assert.equal(h.board.comparison.snapshotId, h.beforeId);
     assert.deepEqual(h.board.comparison.scope, h.previousScope);
-    assert.equal(h.json.exportSchemaVersion, version);
+    assert.equal(h.json.exportSchemaVersion, "public-export/v4");
+    assert.ok(["public-export/v2", "public-export/v3"].includes(legacyVersion));
+    assert.equal(h.json.rankingPresentation.state, "ranked");
     const parsed = board(h.board, h.selected);
     assert.deepEqual(parsed.scope, h.scope);
     assert.deepEqual(parsed.comparison.scope, h.previousScope);
