@@ -288,6 +288,29 @@ The [release-phase decision](release-decision.md) defines transition evidence an
 
 **Decision record:** docs/release-decision.md
 
+**Id:** DEC-12
+
+**Question:** How are dependency maintenance, build fixes and accepted bug fixes represented without count inflation?
+
+**Recommended:** Optional independently reviewed positive evidence facets under maintenance-classification/v1, attached to the existing conserved merged PR/contributor unit; omission remains unknown
+
+### Alternatives
+
+- Keep generic maintenance with unknown subtypes
+- Add separately governed subtype metrics only after a later explicit scope decision
+
+**Decision role:** Project engineering scope authority and affected metric/source reviewers
+
+### Before
+
+- LB-07.05
+
+**Status:** Decision specified; review and merge adopt the bounded classification policy, not runtime source or reviewer grants
+
+**Decision:** maintenance-classification/v1 uses the current authenticated category:other intake, an explicitly selected binding and closed private source/detail/reference record. Independent review qualifies positive dependency_maintenance, build_fix and accepted_bug_fix facets; all remain one existing maintenance PR/actor unit with the merge clock. No titles, labels, paths or green-CI inference, automatic causality, human-effort estimate, new metric or source activation is introduced. Current consent, audit, amendment and fixed public projection remain required; omitted kinds stay unknown and all 98 meanings remain intact.
+
+**Decision record:** docs/maintenance-classification.md
+
 ## Related policies
 
 [Contribution workflow](../CONTRIBUTING.md) · [Metric catalog](METRICS.md) · [Release gates](OPERATIONS_PLAN.md) · [Structured decision register](../planning/decision-register.json)
