@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import type { AchievementProof } from "@pick-your-ai/contracts";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { request, ReadFailure, uiHref, type Selection } from "./client.ts";
+import { EditorialRotation } from "./OverviewDiscovery.tsx";
 import {
   achievements,
   cardHref,
@@ -295,21 +296,7 @@ export function EditorialSpotlights({
         ) : !state.value.length ? (
           <p>No currently approved, opted-in spotlights are available.</p>
         ) : (
-          <ul>
-            {state.value.map((item) => (
-              <li key={item.id}>
-                <h3>{item.category}</h3>
-                {item.bio && <p>{item.bio}</p>}
-                <p>{item.selectionExplanation}</p>
-                <p>
-                  Selected <time dateTime={item.selectedAt}>{item.selectedAt}</time>.
-                </p>
-                <a href={item.sourceUrl} rel="noreferrer nofollow">
-                  Reviewed public evidence
-                </a>
-              </li>
-            ))}
-          </ul>
+          <EditorialRotation items={state.value} />
         )}
       </div>
     </section>

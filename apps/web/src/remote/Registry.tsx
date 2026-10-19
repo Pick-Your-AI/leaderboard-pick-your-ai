@@ -3,6 +3,7 @@ import type { MetricDefinition, MetricRegistry } from "@pick-your-ai/contracts";
 import { getMetricGroupingPolicy, getMetricUi, getRegistryDepartments } from "@pick-your-ai/metrics";
 import { uiHref, type Selection } from "./client.ts";
 import { discoverMetrics } from "./registry.ts";
+import { MetricCategoryNavigation } from "./MetricCategoryNavigation.tsx";
 
 const maturityLabels = {
   definition_only: "Definition only",
@@ -49,12 +50,26 @@ export function RegistryMetadata({ registry, metric }: { registry: MetricRegistr
         <dd>{ui.limitations.join(" ")}</dd>
         {grouping && (
           <>
-            <dt>Raw triage grouping</dt>
-            <dd>
-              {grouping.version}; exact raw source state per actor/artifact in {grouping.grouping_seconds}-second UTC
-              buckets anchored at {grouping.interval_origin}. Repeated identical state in one bucket counts once.
-              Missing state/time remains unknown. No semantic classifier.
-            </dd>
+            <dt>
+              {grouping.group_by === "actor_artifact_state_interval"
+                ? "Raw triage grouping"
+                : "Definition-day grouping"}
+            </dt>
+            {grouping.group_by === "actor_artifact_state_interval" ? (
+              <dd>
+                {grouping.version}; exact raw source state per actor/artifact in {grouping.grouping_seconds}-second UTC
+                buckets anchored at {grouping.interval_origin}. Repeated identical state in one bucket counts once.
+                Missing state/time remains unknown. No semantic classifier.
+              </dd>
+            ) : (
+              <dd>
+                {grouping.version}; one actor and stable definition per UTC calendar day within its repository and
+                definition kind. Creation, edits and reversals share the same daily unit. Observed changes use the
+                proven source day. Independently qualified receipts can use a separately selected source or acceptance
+                day; acceptance never supplies a missing raw event time. Missing identity or the selected clock stays
+                unknown. Grouping does not establish correctness or enable a view.
+              </dd>
+            )}
           </>
         )}
       </dl>
@@ -90,6 +105,7 @@ export function RegistryCatalog({
           : "; UI metadata unavailable"}
         . Board availability and current coverage are checked separately.
       </p>
+      <MetricCategoryNavigation departments={departments} selected={selected} path={path} />
       <form
         className="remote-filters"
         role="search"

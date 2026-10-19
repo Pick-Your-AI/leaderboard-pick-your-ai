@@ -245,13 +245,14 @@ function previousAuthority(state, bindings) {
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
-test("issue_answers: only answer destinations retire the exact previous configuration authority", () => {
+test("issue_answers: prior authority retires answer and later merged-participant bindings", () => {
   const s = scenario();
   for (const metric of metricRegistryV1.metrics) {
     const bindings = [{ ...s.binding, metricId: metric.id }];
     const old = previousAuthority(s.state, bindings);
     const current = recognitionFingerprint(s.state, bindings);
-    if (metric.id === "issue_answers") assert.notEqual(current, old);
+    // Preserve the literal old fingerprint while accounting for independent later fences.
+    if (["issue_answers", "maintenance", "automation"].includes(metric.id)) assert.notEqual(current, old);
     else assert.equal(current, old, `${metric.id}: exact prior authority remains`);
   }
   const empty = { requests: {}, profiles: {}, audit: [] };
