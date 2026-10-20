@@ -13,9 +13,17 @@ import {
   type Actor,
   type Contribution,
   type Coverage,
+  type RelationshipPair,
+  relationshipPairNormalizationVersion,
+  relationshipPairSchema,
 } from "@pick-your-ai/contracts";
 import { getMetricDefinition } from "./v1/index.js";
 import { getMetricGroupingPolicy } from "./ui.js";
+import {
+  conserveRelationshipPairs,
+  relationshipPairMetricIds,
+  relationshipPairMembership,
+} from "./relationship-pairs.js";
 
 export type EvidenceState = "observed" | "qualified" | "reviewed" | "pending" | "excluded" | "unknown";
 export type Role = Contribution["roles"][number];
@@ -62,6 +70,8 @@ export interface MetricFact {
   recognitionSourceFactId?: string;
   /** Private projection of a source-verified historical merged event, never the current REST base. */
   mergeTarget?: PrMergeTarget;
+  /** Private, source-validated pair identity; never inferred from public text. */
+  relationshipPair?: RelationshipPair;
   /** Private inclusion identity; the public projection exposes only selected evidence. */
   releaseInclusion?: {
     version: "release-inclusion-units/v1";
@@ -284,6 +294,17 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
   )
     throw new Error("Helpful feedback requires independent acceptance and versioned canonical author/thread units");
   if (
+    relationshipPairMetricIds.has(policy.metricId) &&
+    (policy.dateBasis !== "occurredAt" ||
+      policy.groupBy !== "canonical" ||
+      policy.rankedStates[0] !== "observed" ||
+      policy.roles.length !== 1 ||
+      policy.roles[0] !== "triager" ||
+      policy.groupingPolicyVersion !== relationshipPairNormalizationVersion ||
+      policy.groupingSeconds !== undefined)
+  )
+    throw new Error("Relationship pairs require the source clock, observed triager role and versioned canonical units");
+  if (
     !policy.roles.length ||
     policy.roles.some((role) => !knownRoles.includes(role) || role === "unknown") ||
     !policy.sources.length ||
@@ -434,6 +455,10 @@ const uncertaintyReasons = new Set([
   "conflicting_policy_unit",
   "unknown_merge_target",
   "conflicting_merge_target",
+  "relationship_pair_unverified",
+  "relationship_pair_repository_unavailable",
+  "ambiguous_relationship_pair",
+  "ambiguous_relationship_event",
 ]);
 const hasUncertainty = (prepared: Prepared) => prepared.audit.some((entry) => uncertaintyReasons.has(entry.reason));
 function validMembershipIdentifiers(ids: readonly unknown[]): boolean {
@@ -522,11 +547,47 @@ function prepare(
   for (const repo of input.repositoryIds) required(repo, "Allowed repository ID");
   const actors = new Map(input.actors.map((actor) => [actor.id, actor]));
   const audit: AuditEntry[] = [];
-  const reject = (facts: MetricFact[], reason: string) =>
-    audit.push({ factIds: unique(facts.map((fact) => fact.id)), actorId: facts[0]?.actorId ?? null, reason });
+  const rejectedRelationshipEvents: MetricFact[] = [];
+  const reject = (facts: MetricFact[], reason: string) => {
+    if (
+      [
+        "unreviewed_revision",
+        "conflicting_revision",
+        "unknown_canonical_identity",
+        "ambiguous_canonical_action",
+      ].includes(reason)
+    )
+      for (const fact of facts) rejectedRelationshipEvents.push(fact);
+    audit.push({
+      factIds: unique(facts.map((fact) => fact.id)),
+      actorId:
+        relationshipPairMetricIds.has(policy.metricId) && !facts.every((fact) => fact.actorId === facts[0]?.actorId)
+          ? null
+          : (facts[0]?.actorId ?? null),
+      reason,
+    });
+  };
   const versions = new Map<string, MetricFact[]>();
+  const pairPolicy = relationshipPairMetricIds.has(policy.metricId);
+  const requestedFactIds = new Set(
+    input.facts.filter((fact) => fact.metricId === policy.metricId).map((fact) => fact.id),
+  );
+  const relatedNativeEvents = new Set(
+    pairPolicy
+      ? input.facts
+          .filter((fact) => fact.metricId === policy.metricId)
+          .flatMap((fact) => {
+            const pair = relationshipPairSchema.safeParse(fact.relationshipPair);
+            return pair.success ? [pair.data.eventId] : [];
+          })
+      : [],
+  );
   for (const fact of input.facts) {
-    if (fact.metricId !== policy.metricId) continue;
+    if (fact.metricId !== policy.metricId) {
+      if (!pairPolicy || !relationshipPairMetricIds.has(fact.metricId)) continue;
+      const pair = relationshipPairSchema.safeParse(fact.relationshipPair);
+      if (!pair.success || !relatedNativeEvents.has(pair.data.eventId)) continue;
+    }
     for (const context of [fact.eventContext, fact.currentContext]) {
       if (context == null) continue;
       if (
@@ -594,7 +655,15 @@ function prepare(
     // Observation time describes collection, not a competing semantic fact.
     const semantic = (fact: MetricFact) => {
       const { observedAt, ...rest } = comparisonFact(fact);
-      return stableJSON(rest);
+      return stableJSON(
+        pairPolicy
+          ? {
+              ...rest,
+              eventContext: relationshipPairMembership(fact.eventContext),
+              currentContext: relationshipPairMembership(fact.currentContext),
+            }
+          : rest,
+      );
     };
     if (new Set(latest.map(semantic)).size !== 1) {
       reject(latest, "conflicting_revision");
@@ -656,12 +725,20 @@ function prepare(
     bucket.push(fact);
     canonical.set(fact.canonicalKey!, bucket);
   }
-  const facts: MetricFact[] = [];
+  const eventFacts: MetricFact[] = [];
   for (const bucket of canonical.values()) {
     // Adapter receipts may differ; semantic fields must agree, including corrections.
     const semantic = (fact: MetricFact) => {
       const { id, observedAt, ...rest } = comparisonFact(fact);
-      return stableJSON(rest);
+      return stableJSON(
+        pairPolicy
+          ? {
+              ...rest,
+              eventContext: relationshipPairMembership(fact.eventContext),
+              currentContext: relationshipPairMembership(fact.currentContext),
+            }
+          : rest,
+      );
     };
     if (new Set(bucket.map(semantic)).size !== 1) {
       reject(bucket, "ambiguous_canonical_action");
@@ -673,6 +750,20 @@ function prepare(
         bucket.filter((item) => item !== fact),
         "duplicate_observation",
       );
+    eventFacts.push(fact);
+  }
+  const conserved = pairPolicy
+    ? conserveRelationshipPairs(
+        eventFacts,
+        rejectedRelationshipEvents,
+        input.repositoryIds,
+        [...versions.values()].flat(),
+      )
+    : { facts: eventFacts, audit: [] };
+  for (const entry of conserved.audit) audit.push(entry);
+  const facts: MetricFact[] = [];
+  for (const fact of conserved.facts) {
+    if (fact.metricId !== policy.metricId) continue;
     const actor = fact.actorId === null ? undefined : actors.get(fact.actorId);
     let reason: string | null = null;
     if (!actor || actor.kind === "unknown") reason = "unknown_actor";
@@ -838,7 +929,12 @@ function prepare(
   }
   return {
     facts: retained.sort((a, b) => compare(a.id, b.id)),
-    audit: audit.sort((a, b) => compare(key(a.reason, a.factIds), key(b.reason, b.factIds))),
+    audit: audit
+      .filter((entry) => !pairPolicy || entry.factIds.some((id) => requestedFactIds.has(id)))
+      .map((entry) =>
+        pairPolicy ? { ...entry, factIds: entry.factIds.filter((id) => requestedFactIds.has(id)) } : entry,
+      )
+      .sort((a, b) => compare(key(a.reason, a.factIds), key(b.reason, b.factIds))),
   };
 }
 

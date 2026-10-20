@@ -7,6 +7,7 @@ const normalizationVersionFields = [
   "discussionSourceNormalizationVersion",
   "discussionFeedbackNormalizationVersion",
   "defaultDeliveryNormalizationVersion",
+  "relationshipPairNormalizationVersion",
   "fieldChangeNormalizationVersion",
 ];
 

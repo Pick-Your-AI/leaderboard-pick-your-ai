@@ -694,3 +694,68 @@ test("acknowledging a corrected empty-delivery cache preserves its confirmed ver
     await assertDenied(runtime, h.metric, first.snapshotId, false);
   });
 });
+
+test("default-delivery keeps the selected replacement after its host option is cleared", async (t) => {
+  let calls = 0;
+  const h = await deliveryHarness(t, "issue", {
+    memoryDatabase: true,
+    defaultDeliveryNormalizationVersion: version,
+    normalizerFactory: (options) => {
+      const builtin = components.github.createGithubEvidenceNormalizer({
+        client: options.githubClient,
+        source: options.sourceId,
+        allowedRepositoryIds: [2],
+        isSynthetic: true,
+        enrich: options.githubEnrich,
+      });
+      return async (input) => {
+        calls++;
+        return { ...(await builtin(input)), defaultDeliveryNormalizationVersion: version };
+      };
+    },
+  });
+  assert.equal((await h.runtime.runOnce()).state, "published");
+  await assertMetric(h.runtime, h.metric, h.expected);
+  const callsBefore = calls;
+  assert.ok(callsBefore > 0, "the selected replacement must actually normalize the first source");
+  const normalizations = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
+  const snapshots = (await h.db.query("SELECT snapshot_id,revision FROM leaderboard_pipeline.snapshots")).rows;
+
+  h.options.normalizer = undefined;
+  delete h.options.defaultDeliveryNormalizationVersion;
+  await assert.rejects(h.runtime.runOnce(), /default_delivery_normalizer_version_unverified/);
+  assert.equal(calls, callsBefore, "the cached source must fail its live declaration check before reuse");
+  assert.deepEqual((await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows, normalizations);
+  assert.deepEqual(
+    (await h.db.query("SELECT snapshot_id,revision FROM leaderboard_pipeline.snapshots")).rows,
+    snapshots,
+  );
+
+  h.options.defaultDeliveryNormalizationVersion = version;
+  h.state.revision = after + "-selected-replacement-recovery";
+  assert.equal(h.options.normalizer, undefined);
+  assert.equal((await h.runtime.runOnce()).state, "published");
+  // Recovery retires the retained scan; a fresh cycle observes the revised source.
+  assert.equal((await h.runtime.runOnce()).state, "published");
+  assert.ok(calls > callsBefore, "restoring the declaration must retain the originally selected replacement");
+  await assertMetric(h.runtime, h.metric, h.expected);
+});
+
+test("an older selected builtin cannot borrow a replacement assigned after creation", async (t) => {
+  const h = await deliveryHarness(t, "issue", {
+    memoryDatabase: true,
+    components: { ...components, github: { ...components.github, defaultDeliveryNormalizationVersion: undefined } },
+  });
+  assert.equal(h.options.normalizer, undefined);
+  let replacementCalls = 0;
+  h.options.normalizer = async () => {
+    replacementCalls++;
+    assert.fail("a later host option must not replace the selected builtin");
+  };
+  h.options.defaultDeliveryNormalizationVersion = version;
+
+  await assert.rejects(h.runtime.runOnce(), /default_delivery_normalizer_version_unverified/);
+  assert.equal(replacementCalls, 0);
+  assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.normalizations")).rows[0].n, 0);
+  assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 0);
+});
