@@ -129,7 +129,7 @@ test("API methods and discovery render supplied metadata without prototype recor
     for (const [metricId, label, version] of [
       ["project_field_updates", "Project item-day grouping", "project-field-day/v1"],
       ["public_moderation", "Public stewardship item-day grouping", "public-stewardship-day/v1"],
-    ]) {
+    ] as const) {
       const html = renderToStaticMarkup(
         React.createElement(RegistryMetadata, { registry, metric: registryMetric(registry, metricId) }),
       );
