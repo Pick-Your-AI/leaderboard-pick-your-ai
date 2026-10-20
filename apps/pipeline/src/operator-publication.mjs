@@ -6,6 +6,7 @@ const normalizationVersionFields = [
   "reviewSourceNormalizationVersion",
   "discussionSourceNormalizationVersion",
   "defaultDeliveryNormalizationVersion",
+  "relationshipPairNormalizationVersion",
 ];
 
 const unavailable = () => {

@@ -27,6 +27,14 @@ export {
   type PublicScope,
 } from "./public-scope.js";
 export { compareSourceInstants } from "./v1/source-time.js";
+export {
+  relationshipPairNormalizationVersion,
+  relationshipEndpointSchema,
+  relationshipPairSchema,
+  relationshipPairKey,
+  type RelationshipEndpoint,
+  type RelationshipPair,
+} from "./relationship-pair.js";
 export { publicArtifactIdSchema } from "./artifact-identity.js";
 export {
   publicProjectContextVersion,

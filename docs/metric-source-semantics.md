@@ -3,8 +3,8 @@
 This is a partial implementation of [LB-19.01 / issue #72](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/72).
 The new suite feeds synthetic GitHub source payloads through the actual normalizer
 and metric engine. It adds explicit actor, clock, source-proof and grouping
-checks for 18 metric IDs. The inventory separately maps 48 other IDs to existing
-meaningful source cases, with exact test names and their limits. Thirty-two
+checks for 18 metric IDs. The inventory separately maps 50 other IDs to existing
+meaningful source cases, with exact test names and their limits. Thirty
 IDs still require source implementation, additional cases or an active owner's
 integration. This does not certify all 98 public definitions.
 
@@ -69,17 +69,26 @@ the corresponding metric rather than marking its entire public definition done.
 
 ## Remaining acceptance and ownership
 
-The inventory now has 18 direct-suite entries, 48 existing-source mappings and
-32 explicit remaining dispositions. The references include specialized domain
+The inventory now has 18 direct-suite entries, 50 existing-source mappings and
+30 explicit remaining dispositions. The references include specialized domain
 receipt admission, localization, bug/answer recognition, typed history,
 participation history, physical diff eligibility, maintenance, automation and
 editorial consent. Each maps a literal positive and exclusion test; parameterized
 domain cases also name their metric input. These are bounded source-review
-references, not 48 new executions or a claim that every remaining facet is done.
+references, not 50 new executions or a claim that every remaining facet is done.
 The original 18/47/33 inventory and its semantic/cache executions remain attributed
 to the earlier source. The separately reviewed repository-net helper adds one
 reference backed by its own 20 synthetic source cases; this inventory update does
 not relabel those earlier runs.
+
+The dedicated [reference/closing source cases](../packages/metrics/test/reference-closing-source.test.js)
+add two further mappings for the conserved directed reference and typed closing
+pairs. Their literal inclusion and later-window/actor exclusion tests are linked
+separately for each metric. The [source-contract guide](relationship-pair-units.md)
+describes the synthetic typed endpoint bindings, first-known-history limit and
+retained-generation guards. These two mappings are separate from the eleven
+existing-test references proposed in [#444](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/444);
+that proposed reconciliation is not incorporated by these source counts.
 
 An inclusion and an exclusion may be asserted by the same named test. The
 milestone reference uses the body that actually constructs milestone no-ops and
@@ -92,7 +101,7 @@ as evidence for unknown in-scope active-week exclusion. Its calendar denominator
 is context, not a certified fully covered participation share or month projection.
 
 The remaining dispositions distinguish seven IDs with currently owned
-implementations, eleven other derivation/admission prerequisites, and fourteen
+implementations, eleven other derivation/admission prerequisites, and twelve
 IDs whose complete semantic cases
 are still being developed. The optional retained-line and commit-attributed
 lenses are not silently assigned to the adjacent physical-context PRs. A raw
