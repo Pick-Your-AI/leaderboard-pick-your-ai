@@ -41,6 +41,7 @@ import {
 } from "./Overview.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
+import { ContributionPolicies } from "./ContributionPolicies.tsx";
 import { ProjectGroups } from "./ProjectGroups.tsx";
 import { RankComparisonControls } from "./RankComparison.tsx";
 import { BoardTable } from "./BoardTable.tsx";
@@ -996,6 +997,7 @@ export function RemoteApp() {
           </h1>
           <p>Evidence-backed public reads. Unknown values and unavailable scopes remain explicit.</p>
         </header>
+        {(url.pathname === "/methodology" || url.pathname.startsWith("/methodology/")) && <ContributionPolicies />}
         {!parsed.error && <RequestedScope selected={selected} />}
         <Filters key={`${url.pathname}${url.search}`} selected={selected} path={url.pathname} navigate={navigate} />
         {!parsed.error && (isCatalogPath(url.pathname) || rankComparisonPath(url.pathname)) && (
@@ -1350,6 +1352,28 @@ export function RemoteApp() {
                 Stable actor {data.value.actorId}; account kind {data.value.actor.kind}; execution mode{" "}
                 {data.value.actor.executionMode}.
               </p>
+              {data.value.presentation && (
+                <section aria-labelledby="contributor-presentation-title">
+                  <h3 id="contributor-presentation-title">From this contributor</h3>
+                  {data.value.presentation.bio && (
+                    <p style={{ overflowWrap: "anywhere" }}>{data.value.presentation.bio}</p>
+                  )}
+                  {data.value.presentation.highlights.length > 0 && (
+                    <>
+                      <p>Contributor-provided links; these are not verified contribution evidence.</p>
+                      <ul>
+                        {data.value.presentation.highlights.map((url, index) => (
+                          <li key={`${index}:${url}`}>
+                            <a href={url} rel="noreferrer nofollow" style={{ overflowWrap: "anywhere" }}>
+                              {url}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </section>
+              )}
               <h3>Independent category artifact counts</h3>
               <CategoryCounts categories={data.value.categories} registry={catalogEntries} />
               <h3>Measure results</h3>
@@ -1373,7 +1397,7 @@ export function RemoteApp() {
               </ul>
               <ContributorParticipation value={data.value.activitySummary} selected={pinned} metrics={catalogEntries} />
               <ContributorOrganizationHistory
-                key={`${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
+                key={`history:${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
                 base={parsed.base}
                 selected={selected}
                 parent={data.value}
@@ -1381,7 +1405,7 @@ export function RemoteApp() {
                 metrics={catalogEntries}
               />
               <ContributorRecognition
-                key={`${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
+                key={`recognition:${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
                 base={parsed.base}
                 selected={selected}
                 snapshotId={data.value.snapshotId}
