@@ -27,8 +27,9 @@ the triggering run's source. The workflow begins triggering after this file is
 accepted onto the default branch. Existing PR checks alone do not execute this
 new event path.
 
-The upload has seven-day retention, refuses an empty output, and cannot overwrite
-an existing artifact. Hidden files, links and special files are rejected before
+The preparation rejects a missing or empty `index.html`; empty ancillary files
+are allowed. The upload has seven-day retention and cannot overwrite an existing
+artifact. Hidden files, links and special files are rejected before
 copying, so the explicit manifest covers the uploaded public file set. A failed
 build or provenance step prevents the upload. The pinned
 [`upload-artifact` action](https://github.com/actions/upload-artifact) also records

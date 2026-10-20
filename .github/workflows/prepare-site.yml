@@ -86,6 +86,8 @@ jobs:
           entries = []
           for path, relative in files:
               data = path.read_bytes()
+              if relative.as_posix() == "index.html" and not data:
+                  raise SystemExit("Web build has an empty index.html")
               target = output / "public" / relative
               target.parent.mkdir(parents=True, exist_ok=True)
               target.write_bytes(data)
