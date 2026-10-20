@@ -81,9 +81,7 @@ function cursor(value, operationHash, checkpointHash) {
       ["derived", "source"].includes(next.phase) &&
       ["batch", "discover"].includes(next.mode) &&
       (next.phase === "derived" ? next.derivedBatchId === null : typeof next.derivedBatchId === "string") &&
-      (next.mode === "discover"
-        ? next.phase === "derived" && next.lastBatchId === null
-        : next.scanAfter === null),
+      (next.mode === "discover" ? next.phase === "derived" && next.lastBatchId === null : next.scanAfter === null),
     "invalid_retirement_driver_cursor",
   );
   for (const key of ["lastBatchId", "scanAfter", "derivedBatchId"]) {

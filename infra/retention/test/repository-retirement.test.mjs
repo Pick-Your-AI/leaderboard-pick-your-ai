@@ -40,7 +40,9 @@ async function files(directory) {
     result[entry.name] = entry.isDirectory()
       ? await files(path)
       : entry.isFile()
-        ? createHash("sha256").update(await readFile(path)).digest("hex")
+        ? createHash("sha256")
+            .update(await readFile(path))
+            .digest("hex")
         : "nonregular";
   }
   return result;
