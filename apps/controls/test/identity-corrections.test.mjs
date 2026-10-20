@@ -1006,3 +1006,163 @@ for (const field of ["zero-authority-revision", "before-review", "after-current-
     assert.deepEqual(h.snapshot(), before);
   });
 }
+
+for (const [label, mutate, message] of [
+  [
+    "overlay deletion",
+    (database, decisionId) => {
+      const changed = database.prepare("DELETE FROM identity_correction_overlays WHERE decision_id=?").run(decisionId);
+      assert.equal(changed.changes, 1);
+    },
+    "Incomplete retained identity application",
+  ],
+  [
+    "revision increment",
+    (database) => {
+      const changed = database.prepare("UPDATE identity_correction_revision SET revision=revision+1 WHERE id=1").run();
+      assert.equal(changed.changes, 1);
+    },
+    "Private attribution revision changed",
+  ],
+  [
+    "valid receipt revision change",
+    (database, decisionId) => {
+      const row = database
+        .prepare("SELECT document FROM identity_correction_receipts WHERE decision_id=?")
+        .get(decisionId);
+      const receipt = JSON.parse(row.document);
+      receipt.authorityRevision++;
+      assert.ok(Number.isSafeInteger(receipt.authorityRevision) && receipt.authorityRevision > 0);
+      const changed = database
+        .prepare("UPDATE identity_correction_receipts SET document=? WHERE decision_id=?")
+        .run(JSON.stringify(receipt), decisionId);
+      assert.equal(changed.changes, 1);
+    },
+    "Retained identity application changed before commit",
+  ],
+]) {
+  for (const delivery of ["first", "retry"]) {
+    test("final authority " + label + " rolls back " + delivery + " application delivery", (t) => {
+      const a = authority();
+      let targetRead = -1;
+      let mutations = 0;
+      const h = fixture(t, a, {
+        readAuthority(context, read, count) {
+          const current = read(context);
+          if (count === targetRead) {
+            mutate(context.database, context.decisionId);
+            mutations++;
+          }
+          return current;
+        },
+      });
+      const original = delivery === "retry" ? h.consumer.apply(a.decision.decisionId) : null;
+      const before = h.snapshot();
+      targetRead = h.reads + 1;
+      assert.throws(() => h.consumer.apply(a.decision.decisionId), { status: 409, message });
+      assert.equal(mutations, 1, "the final callback changed the real tentative SQLite row");
+      assert.equal(h.store.db.isTransaction, false);
+      assert.deepEqual(h.snapshot(), before, "all private, source and public state rolls back together");
+
+      targetRead = -1;
+      const recovered = h.consumer.apply(a.decision.decisionId);
+      if (original) assert.deepEqual(recovered, original);
+      assert.equal(recovered.afterRevision, 1);
+      assert.equal(recovered.authorityRevision, a.revision);
+      assert.equal(recovered.appliedAt, at);
+      const clean = h.snapshot();
+      assert.equal(clean.overlays.length, 1);
+      assert.equal(clean.receipts.length, 1);
+      assert.deepEqual(JSON.parse(clean.receipts[0].document), recovered);
+      assert.deepEqual(clean.state, before.state);
+      assert.deepEqual(clean.publication, before.publication);
+      assert.deepEqual(clean.sources, before.sources);
+      h.reopen();
+      assert.deepEqual(h.consumer.apply(a.decision.decisionId), recovered);
+      assert.deepEqual(h.snapshot(), clean);
+      assert.equal(mutations, 1);
+    });
+  }
+}
+
+for (const delivery of ["first", "retry"]) {
+  test("the final clock cannot change the durable revision during " + delivery + " application delivery", (t) => {
+    const a = authority();
+    const h = fixture(t, a);
+    let clockCalls = 0;
+    let targetClock = -1;
+    let mutations = 0;
+    const consumer = createVerifiedIdentityCorrectionConsumer({
+      store: h.store,
+      readAuthority({ database, decisionId }) {
+        assert.equal(database, h.store.db);
+        assert.equal(database.isTransaction, true);
+        return JSON.parse(
+          database.prepare("SELECT document FROM protected_identity_authority WHERE decision_id=?").get(decisionId)
+            .document,
+        );
+      },
+      now() {
+        if (clockCalls++ === targetClock) {
+          assert.equal(h.store.db.isTransaction, true);
+          const changed = h.store.db
+            .prepare("UPDATE identity_correction_revision SET revision=revision+1 WHERE id=1")
+            .run();
+          assert.equal(changed.changes, 1);
+          mutations++;
+        }
+        return at;
+      },
+    });
+    const original = delivery === "retry" ? consumer.apply(a.decision.decisionId) : null;
+    const before = h.snapshot();
+    targetClock = clockCalls + 1;
+    assert.throws(() => consumer.apply(a.decision.decisionId), {
+      status: 409,
+      message: "Private attribution revision changed",
+    });
+    assert.equal(mutations, 1, "the final clock runs after the final authority reader");
+    assert.equal(h.store.db.isTransaction, false);
+    assert.deepEqual(h.snapshot(), before);
+
+    targetClock = -1;
+    const recovered = consumer.apply(a.decision.decisionId);
+    if (original) assert.deepEqual(recovered, original);
+    assert.equal(recovered.afterRevision, 1);
+    const clean = h.snapshot();
+    h.reopen();
+    assert.deepEqual(h.consumer.apply(a.decision.decisionId), recovered);
+    assert.deepEqual(h.snapshot(), clean);
+    assert.equal(mutations, 1);
+  });
+}
+
+test("final durable validation preserves the original receipt after later authority and attribution revisions", (t) => {
+  const a = authority();
+  const h = fixture(t, a);
+  const first = h.consumer.apply(a.decision.decisionId);
+  assert.equal(first.authorityRevision, 1);
+  assert.equal(first.appliedAt, at);
+  assert.equal(first.afterRevision, 1);
+
+  const unrelated = proposal("link");
+  unrelated.correctionId = "synthetic-final-guard-unrelated-correction";
+  const otherDecision = decision(unrelated);
+  otherDecision.decisionId = "synthetic-final-guard-unrelated-decision";
+  const other = authority(otherDecision);
+  other.authorization.attributionRevision = 1;
+  h.put(other);
+  assert.equal(h.consumer.apply(otherDecision.decisionId).afterRevision, 2);
+
+  a.revision = 7;
+  h.put(a);
+  h.setClock("2026-10-20T00:00:00.000000006Z");
+  const before = h.snapshot();
+  assert.equal(before.revision[0].revision, 2);
+  assert.deepEqual(h.consumer.apply(a.decision.decisionId), first);
+  assert.deepEqual(h.snapshot(), before);
+  h.reopen();
+  assert.deepEqual(h.consumer.apply(a.decision.decisionId), first);
+  assert.deepEqual(h.snapshot(), before);
+  assert.equal(h.reads, 8);
+});

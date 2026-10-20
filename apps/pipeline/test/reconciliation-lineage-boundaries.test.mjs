@@ -281,19 +281,21 @@ test("a frozen dispatch retry excludes later import and correction lineage while
   assert.equal(response.status, 202, await response.text());
   assert.equal(await h.runtime.inbox.complete(await h.runtime.inbox.claim()), true);
   const query = h.db.query.bind(h.db);
-  let stoppedAfterFreeze = false;
+  let stoppedAfterFreeze = 0;
   h.db.query = async (sql, params) => {
-    if (sql.includes("SELECT fact.* FROM leaderboard_ingestion.source_facts AS fact")) {
-      stoppedAfterFreeze = true;
+    // Match the source-row read for both direct and private-field-stripped projections.
+    if (sql.startsWith("SELECT fact.* FROM ") && sql.includes("FROM leaderboard_ingestion.source_facts")) {
+      stoppedAfterFreeze++;
       throw new Error("synthetic_stop_after_freeze");
     }
     return query(sql, params);
   };
   assert.equal(await h.runtime.dispatchOnce(), "retry_scheduled");
   h.db.query = query;
-  assert.equal(stoppedAfterFreeze, true);
+  assert.equal(stoppedAfterFreeze, 1);
   const eventKey = `github:delivery:${fixtureId(700)}`;
   const retained = (await query("SELECT * FROM leaderboard_ingestion.outbox WHERE event_key=$1", [eventKey])).rows[0];
+  assert.notEqual(retained.observation_cutoff, null);
   const observationCutoff = new Date(retained.observation_cutoff).toISOString();
   assert.ok(observationCutoff);
   assert.equal(retained.completion, null);

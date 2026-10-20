@@ -234,12 +234,20 @@ advanced the revision. Reusing a decision ID with different content, replacing
 its reviewed authorization revision/lifetime, or presenting a partial receipt
 fails. Modifying a returned object cannot change stored state or later retries.
 
+After the final protected-authority and clock callbacks, both paths recheck the
+exact current private revision and complete stored decision, authorization,
+receipt and overlay against their detached expected result. A missing or changed
+record rolls back the whole transaction. On retry this check preserves the
+original receipt and the current revision observed by that transaction, even when
+the latter is newer than the receipt's after-revision.
+
 The [synthetic SQLite suite](../apps/controls/test/identity-corrections.test.mjs)
 exercises all three accepted operations, closed authority/source/history scope,
 current revocation and precise expiry, source replacement, independent-connection
 write contention, failures at each durable write and deferred commit, throwing
-first/final readers, reopening and repeated delivery. These are local engineering
-controls; they are not real identity decisions or live propagation evidence.
+first/final readers, final-callback durable-state changes, reopening and repeated
+delivery. These are local engineering controls; they are not real identity
+decisions or live propagation evidence.
 
 ## Private cancellation of an accepted application
 

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { ControlError, exactKeys, requireThat } from "./store.mjs";
 import { stableJSON } from "./configuration.mjs";
 import { configurationOverlay } from "./overlay.mjs";
+import { copyParticipationHistoryJSON } from "../../pipeline/src/participation-history.mjs";
 
 // Local implementation limits, not an approved production retention commitment.
 export const comparisonLimitsV1 = Object.freeze({
@@ -73,6 +74,14 @@ function verifyDocument(row) {
   let document;
   try {
     document = JSON.parse(row.document);
+    if (document?.authorization?.pullRequestDecisionEvidence !== undefined) {
+      requireThat(
+        Buffer.byteLength(row.document) <= comparisonLimitsV1.inputBytes,
+        409,
+        "Private comparison integrity failure",
+      );
+      document = copyParticipationHistoryJSON(document);
+    }
   } catch {
     throw new ControlError(409, "Private comparison integrity failure");
   }
@@ -92,7 +101,17 @@ function currentSession(state, session, now) {
     "Reviewer session revoked",
   );
 }
+function assertDecisionHistoryInput(record) {
+  const capture = record.authorization.pullRequestDecisionEvidence;
+  requireThat(
+    capture === undefined ||
+      (typeof capture?.observationCutoff === "string" && capture.observationCutoff === record.input.cutoff),
+    409,
+    "Frozen decision-history cutoff changed",
+  );
+}
 function currentConfiguration(state, record) {
+  assertDecisionHistoryInput(record);
   const overlay = configurationOverlay(state);
   requireThat(
     overlay.revision === record.authorization.controlsConfigurationRevision &&
@@ -426,6 +445,7 @@ export class PolicyComparisonStore {
     return { document, resultHash: row.digest };
   }
   verifiedResult(id, record, restoreInput) {
+    assertDecisionHistoryInput(record);
     const saved = this.result(id);
     requireThat(saved.document.inputId === record.id, 409, "Private comparison integrity failure");
     const complete = [
@@ -460,6 +480,7 @@ export class PolicyComparisonStore {
     return saved;
   }
   compare(record, candidate, restoreInput) {
+    assertDecisionHistoryInput(record);
     requireThat(
       record.authorization.identityEvidence === undefined || typeof restoreInput === "function",
       409,

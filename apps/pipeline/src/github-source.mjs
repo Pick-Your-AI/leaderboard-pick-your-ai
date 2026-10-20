@@ -29,6 +29,7 @@ import { readGithubCommentEditInventory } from "../../../packages/github/dist/co
 import { githubCommentEditRevision } from "../../../packages/github/dist/comment-edit-history.js";
 import { minimizeDiscussionFeedback, discussionFeedbackRevision } from "@pick-your-ai/github";
 import { discussionFeedbackContentVersion, discussionFeedbackLimits } from "@pick-your-ai/contracts";
+import { captureDecisionObservation, decisionHistoryRepositories } from "./pull-request-decision-history.mjs";
 
 /** Conservative scope-loss codes emitted by the trusted Project adapters. */
 export function isProjectSourceScopeFailure(error, family) {
@@ -129,6 +130,8 @@ export function createGithubCollectionSource({
   includeContentEditMetadata = () => false,
   includeCommentEditMetadata = () => false,
   discussionFeedback = null,
+  pullRequestDecisionRepositoryIds,
+  decisionHistoryNow = () => new Date().toISOString(),
 }) {
   if (
     !readClient?.scanRest ||
@@ -142,7 +145,8 @@ export function createGithubCollectionSource({
     typeof useRestSnapshotRevisions !== "function" ||
     typeof includePullRequestReviewComments !== "function" ||
     typeof includeContentEditMetadata !== "function" ||
-    typeof includeCommentEditMetadata !== "function"
+    typeof includeCommentEditMetadata !== "function" ||
+    typeof decisionHistoryNow !== "function"
   )
     throw new Error("invalid_github_collection_source");
   if (
@@ -151,6 +155,7 @@ export function createGithubCollectionSource({
   )
     throw new Error("invalid_discussion_feedback_source");
   const approved = new Map(repositories.map((repository) => [repository.id, repository]));
+  const decisionRepositories = decisionHistoryRepositories(pullRequestDecisionRepositoryIds, repositories);
   async function probeRepository(repository) {
     const scope = approved.get(repository.id);
     if (!scope || scope.slug !== repository.slug || scope.installationId !== repository.installationId)
@@ -904,6 +909,27 @@ export function createGithubCollectionSource({
                 : "present",
         };
       });
+      if (request.family === "pull_requests" && decisionRepositories.includes(repository.id)) {
+        let bytes = 0;
+        // The complete REST inventory has already selected this outer page.
+        // Only its PRs receive one fresh native decision-history observation.
+        for (let index = 0; index < facts.length; index++) {
+          assertAuthorized();
+          facts[index].pullRequestDecisionHistory = await captureDecisionObservation({
+            client: readClient,
+            source: sourceId,
+            repository,
+            request,
+            fact: facts[index],
+            payload: selected[index],
+            now: decisionHistoryNow,
+            assertAuthorized,
+          });
+          assertAuthorized();
+          bytes += Buffer.byteLength(JSON.stringify(facts[index]));
+          if (bytes > 8_000_000) throw new Error("decision_history_page_budget_exceeded");
+        }
+      }
       const next = offset + facts.length;
       return {
         repositoryId: repository.id,
