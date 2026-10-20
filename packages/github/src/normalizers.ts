@@ -27,6 +27,10 @@ import {
   type AcceptedFeedbackThread,
   discussionFeedbackFields,
   parseDiscussionFeedbackSource,
+  supportsPullRequestMergeTarget,
+  validatePullRequestMergeTarget,
+  type PrMergeTarget,
+  type GithubPullRequestMergeTargetCapture,
 } from "@pick-your-ai/contracts";
 import {
   verifyDiscussionFeedbackObservation,
@@ -57,6 +61,12 @@ import {
   type GithubReleaseInclusionRecord,
 } from "./release-inclusion.js";
 import {
+  readPullRequestMergeTarget,
+  pullRequestMergeTargetSourceInstant,
+  githubPullRequestMergeTargetHash,
+  verifyGithubPullRequestMergeTargetCapture,
+} from "./pull-request-merge-target.js";
+import {
   validateReleaseChangesSource,
   type GithubReleaseReviewTarget,
   type GithubReleaseMembership,
@@ -75,6 +85,13 @@ import {
   verifyGithubContentEditRevision,
   type ContentEditMetadata,
 } from "./content-edit-history.js";
+import {
+  githubCommentEditAuthorization,
+  parseGithubCommentEditMetadata,
+  readGithubCommentEditMetadata,
+  verifyGithubCommentEditRevision,
+  type GithubCommentEditMetadata,
+} from "./comment-edit-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
   readPublicSubjectProjectSnapshot,
@@ -97,7 +114,7 @@ export const defaultDeliveryNormalizationVersion = "default-delivery-scope/v1";
 /** Cache generation for field changes compared as JSON values, not key order. */
 export const fieldChangeNormalizationVersion = "field-change-json-values/v1";
 
-function sameJsonFieldValue(before: unknown, after: unknown): boolean {
+function sameJsonValue(before: unknown, after: unknown): boolean {
   // Keep the existing JSON projection (including serialization errors). Compare
   // parsed values so object member order is irrelevant at every nesting level,
   // while array order, member presence and JSON scalar types remain significant.
@@ -250,6 +267,8 @@ export interface NormalizedGithubFact {
   recognitionSourceFactId?: string;
   /** Private accepted release membership and conserved work identity. */
   releaseInclusion?: GithubReleaseMembership;
+  /** Private projection bound to the separately retained native merge-event capture. */
+  mergeTarget?: PrMergeTarget;
 }
 export interface NormalizedGithubActor {
   id: string;
@@ -345,6 +364,8 @@ export interface NormalizedGithubResult {
   syntheticFactIds?: readonly string[];
   /** Private output of the bounded authorized release collector. */
   releaseInclusions?: readonly GithubReleaseInclusionRecord[];
+  /** Private merge-event proofs, including explicit unknown outcomes. */
+  pullRequestMergeTargets?: readonly GithubPullRequestMergeTargetCapture[];
   facts: NormalizedGithubFact[];
   actors: NormalizedGithubActor[];
   evidence: NormalizedPublicEvidence[];
@@ -1233,7 +1254,7 @@ export function normalizeGithubObservation(
       payload.change.after === undefined
     )
       out.reasons.push("unsupported_or_unproven_field_subtype");
-    else if (sameJsonFieldValue(payload.change.before, payload.change.after)) out.reasons.push("no_op_field_change");
+    else if (sameJsonValue(payload.change.before, payload.change.after)) out.reasons.push("no_op_field_change");
     else emit(metric, sender, "triager", at, transitionUnit, { rawState: sourceAction });
   } else if (envelope.family === "triage") {
     const mapping: Record<string, string> = {
@@ -1954,7 +1975,7 @@ export interface CollectionNormalizerInput {
     historySubjectId?: string;
     issueFieldId?: string;
     projectSubjectId?: string;
-    contentEditMetadata?: ContentEditMetadata;
+    contentEditMetadata?: ContentEditMetadata | GithubCommentEditMetadata;
     discussionFeedback?: DiscussionFeedbackObservation;
     sourceRevision: string;
     sourceUrl: string;
@@ -1966,7 +1987,7 @@ export interface CollectionNormalizerInput {
 }
 export interface GithubEvidenceNormalizerOptions {
   client: GithubReadClient;
-  /** Protected actual clock for new release lookups; original source observation stays unchanged. */
+  /** Protected actual clock for fresh source lookups; original source observation stays unchanged. */
   now?: () => string;
   /** Synchronous host authorization rechecked by the transport before every HTTP attempt. */
   assertAuthorized?: () => void;
@@ -1995,6 +2016,9 @@ export interface GithubEvidenceNormalizerOptions {
   projectWorkstreamMappings?: readonly (ProjectWorkstreamMapping & { repositoryId: number })[];
   /** Protected, finite selections; submitted notes cannot nominate release proof. */
   releaseInclusionTargets?: readonly { repositoryId: number; releaseId: number; pullRequestNumber: number }[];
+  /** Protected repository selection; retained PR facts supply the bounded subject inventory. */
+  pullRequestMergeTargetRepositoryIds?: readonly number[];
+  maxPullRequestMergeTargetPages?: number;
 }
 
 function detachedCollectionInput(input: CollectionNormalizerInput): CollectionNormalizerInput {
@@ -2025,6 +2049,21 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
     (releaseTargets.length > 0 && typeof options.assertAuthorized !== "function")
   )
     throw new Error("invalid_release_inclusion_targets");
+  const mergeTargetRepositoryIds = structuredClone(options.pullRequestMergeTargetRepositoryIds ?? []);
+  const mergeTargetSource = options.source;
+  const authorizeMergeTarget = options.assertAuthorized;
+  const maxMergeTargetPages = options.maxPullRequestMergeTargetPages ?? 10;
+  if (
+    !Array.isArray(mergeTargetRepositoryIds) ||
+    mergeTargetRepositoryIds.length > 1000 ||
+    Array.from(mergeTargetRepositoryIds).some((id) => !positive(id) || !options.allowedRepositoryIds.includes(id)) ||
+    new Set(mergeTargetRepositoryIds).size !== mergeTargetRepositoryIds.length ||
+    !Number.isSafeInteger(maxMergeTargetPages) ||
+    maxMergeTargetPages < 1 ||
+    maxMergeTargetPages > 100 ||
+    (mergeTargetRepositoryIds.length > 0 && typeof authorizeMergeTarget !== "function")
+  )
+    throw new Error("invalid_pull_request_merge_target_repositories");
   const projectMappings = structuredClone(options.projectWorkstreamMappings ?? []);
   if (
     !Array.isArray(projectMappings) ||
@@ -2053,7 +2092,10 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
   return async (input: CollectionNormalizerInput): Promise<NormalizedGithubResult> => {
     const reviewers = [...(options.authorizedReviewerIds ?? [])];
     const acceptance = options.acceptance;
-    if (acceptance) input = detachedCollectionInput(input);
+    const detachSource = Boolean(acceptance) || mergeTargetRepositoryIds.length > 0;
+    if (detachSource) input = detachedCollectionInput(input);
+    const collectMergeTarget =
+      input.family === "pull_requests" && mergeTargetRepositoryIds.includes(input.repository.id);
     const none = (reason: string) => ({ ...result(), isSynthetic: options.isSynthetic === true, reasons: [reason] });
     if (!options.allowedRepositoryIds.includes(input.repository.id))
       return none("repository_not_authorized_for_normalization");
@@ -2184,6 +2226,39 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         input.fact.state !== "present"
       )
         return none("content_edit_collected_binding_unverified");
+      if (input.fact.contentEditMetadata?.version === "github-comment-edit-metadata/v1") {
+        let metadata: GithubCommentEditMetadata;
+        try {
+          metadata = parseGithubCommentEditMetadata(input.fact.contentEditMetadata);
+        } catch {
+          return none("content_edit_collected_binding_unverified");
+        }
+        // Capture every caller-owned binding before the first asynchronous read.
+        const repository = { id: input.repository.id, slug: input.repository.slug };
+        const revision = input.fact.sourceRevision,
+          scanId = input.factKey;
+        if (
+          metadata.repository.id !== repository.id ||
+          metadata.repository.slug !== repository.slug ||
+          metadata.target.id !== input.fact.subjectId ||
+          metadata.target.url !== input.fact.sourceUrl
+        )
+          return none("content_edit_collected_binding_unverified");
+        if (!verifyGithubCommentEditRevision(metadata, revision)) return none("content_edit_revision_unverified");
+        const assertAuthorized = githubCommentEditAuthorization(options.assertAuthorized);
+        assertAuthorized();
+        const hydrated = await readGithubCommentEditMetadata({
+          client: options.client,
+          source: options.source,
+          repository,
+          target: metadata.target,
+          scanId,
+          assertAuthorized,
+        });
+        assertAuthorized();
+        if (!verifyGithubCommentEditRevision(hydrated, revision)) return none("content_edit_revision_unverified");
+        return none("content_edit_metadata_only");
+      }
       let metadata: ContentEditMetadata;
       try {
         metadata = parseGithubContentEditMetadata(input.fact.contentEditMetadata);
@@ -2425,8 +2500,12 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         currentContext: { projects: [snapshot.projectId], workstreams: [] },
       });
     }
-    const enriched = options.enrich ? await options.enrich(acceptance ? detachedCollectionInput(input) : input) : null;
+    const enrichedValue = options.enrich
+      ? await options.enrich(detachSource ? detachedCollectionInput(input) : input)
+      : null;
+    const enriched = collectMergeTarget ? structuredClone(enrichedValue) : enrichedValue;
     let normalized: NormalizedGithubResult;
+    let mergeTargetResource: Record<string, unknown> | undefined;
     if (enriched) {
       if (
         enriched.repository.id !== input.repository.id ||
@@ -2434,6 +2513,8 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         enriched.proof.revision !== input.fact.sourceRevision
       )
         return none("enrichment_scope_or_revision_mismatch");
+      if (collectMergeTarget && enriched.family === "pull_request" && object(enriched.payload))
+        mergeTargetResource = object(enriched.payload.pull_request) ? enriched.payload.pull_request : enriched.payload;
       normalized = normalizeGithubObservation(
         {
           ...enriched,
@@ -2569,9 +2650,15 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       const revisionMatches = hasGithubRestSnapshotPrefix(input.fact.sourceRevision)
         ? verifyGithubRestSnapshotRevision(input.family, payload, input.fact.sourceRevision) &&
           (!options.verifyRevision ||
-            (await options.verifyRevision(acceptance ? detachedCollectionInput(input) : input, payload)))
+            (await options.verifyRevision(
+              detachSource ? detachedCollectionInput(input) : input,
+              collectMergeTarget ? structuredClone(payload) : payload,
+            )))
         : options.verifyRevision
-          ? await options.verifyRevision(acceptance ? detachedCollectionInput(input) : input, payload)
+          ? await options.verifyRevision(
+              detachSource ? detachedCollectionInput(input) : input,
+              collectMergeTarget ? structuredClone(payload) : payload,
+            )
           : timeline
             ? input.fact.sourceRevision === githubTimelineRevision(payload)
             : family === "review"
@@ -2591,6 +2678,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
                       (time(value) !== null && time(value) === time(input.fact.sourceRevision)),
                   );
       if (!revisionMatches) return none("hydrated_source_revision_unverified");
+      if (collectMergeTarget && family === "pull_request") mergeTargetResource = structuredClone(payload);
       if (family === "issue" && "pull_request" in payload) return none("pull_request_is_not_an_issue_creation_unit");
       // Hydration proves immutable creation/submission fields. It does not prove
       // any current-state field editor, closer, resolver or body-edit history.
@@ -2704,6 +2792,85 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           : {}),
       });
     }
+    if (collectMergeTarget) {
+      // The profile is explicit even when this source contains no proved merge.
+      // Public input and the legacy rawState target text never supply authority.
+      normalized.pullRequestMergeTargets = [];
+      const resource = mergeTargetResource;
+      const mergedAt = resource && pullRequestMergeTargetSourceInstant(resource.merged_at ?? resource.mergedAt);
+      const mergedFact = normalized.facts.find((fact) => fact.metricId === "pr_merged");
+      if (mergedFact) {
+        if (
+          !resource ||
+          resource.merged !== true ||
+          typeof resource.node_id !== "string" ||
+          !/^[A-Za-z0-9_+=/\-]{1,256}$/.test(resource.node_id) ||
+          !positive(resource.number) ||
+          resource.node_id !== input.fact.subjectId ||
+          input.fact.sourceUrl !== `https://github.com/${input.repository.slug}/pull/${resource.number}` ||
+          resource.html_url !== input.fact.sourceUrl ||
+          mergedAt === null ||
+          mergedAt === undefined ||
+          mergedFact.artifactId !== resource.node_id ||
+          mergedFact.occurredAt !== mergedAt
+        ) {
+          normalized.reasons.push("merge_target_selected_source_unverified");
+        } else {
+          const readClock = () => {
+            const value = releaseNow();
+            if (pullRequestMergeTargetSourceInstant(value) !== value)
+              throw new Error("pull_request_merge_target_observation_clock_invalid");
+            return value;
+          };
+          const startedAt = readClock();
+          const selectedCommit = resource.merge_commit_sha;
+          const record = await readPullRequestMergeTarget({
+            client: client(),
+            source: mergeTargetSource,
+            repository: { ...input.repository },
+            pullRequest: { id: resource.node_id, number: resource.number, url: input.fact.sourceUrl },
+            sourceRevision: input.fact.sourceRevision,
+            mergedAt,
+            observedAt: startedAt,
+            expectedCommitOid: selectedCommit === undefined || selectedCommit === null ? null : String(selectedCommit),
+            scanId: stable(input.factKey, input.policyVersion, input.observedAt, startedAt),
+            assertAuthorized: authorizeMergeTarget!,
+            maxPages: maxMergeTargetPages,
+          });
+          const completedAt = readClock();
+          if (compareSourceInstants(completedAt, startedAt) < 0)
+            throw new Error("pull_request_merge_target_observation_clock_invalid");
+          const { proofHash: _startedHash, ...body } = record;
+          const completedBody = { ...body, observedAt: completedAt };
+          const capture = await verifyGithubPullRequestMergeTargetCapture({
+            ...completedBody,
+            proofHash: await githubPullRequestMergeTargetHash(completedBody),
+          });
+          authorizeMergeTarget!();
+          normalized.pullRequestMergeTargets = [capture];
+          if (capture.status === "known" && capture.event?.mergeRefName !== null && capture.event) {
+            const projection = validatePullRequestMergeTarget({
+              schemaVersion: "pr-merge-target/v1",
+              repositoryId: String(capture.repository.id),
+              pullRequestId: capture.pullRequest.id,
+              eventId: capture.event.id,
+              mergedAt: capture.mergedAt,
+              branch: capture.event.mergeRefName,
+              proofHash: capture.proofHash,
+            });
+            for (const fact of normalized.facts)
+              if (
+                supportsPullRequestMergeTarget(fact.metricId) &&
+                fact.artifactId === projection.pullRequestId &&
+                fact.repoId === projection.repositoryId &&
+                fact.occurredAt === projection.mergedAt &&
+                fact.state !== "pending"
+              )
+                fact.mergeTarget = { ...projection };
+          }
+        }
+      }
+    }
     if (input.family === "pull_requests" && normalized.isSynthetic !== true) {
       const candidates = releaseTargets.filter(
         (target) =>
@@ -2803,8 +2970,7 @@ export function groupTriageTransitions(
   const byId = new Map<string, TriageTransition>();
   for (const event of events) {
     const previous = byId.get(event.id);
-    if (previous && JSON.stringify(previous) !== JSON.stringify(event))
-      throw new Error("Conflicting triage source identity");
+    if (previous && !sameJsonValue(previous, event)) throw new Error("Conflicting triage source identity");
     byId.set(event.id, event);
   }
   for (const event of byId.values()) {

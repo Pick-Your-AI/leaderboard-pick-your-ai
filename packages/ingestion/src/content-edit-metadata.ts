@@ -23,6 +23,25 @@ export interface ContentEditMetadata {
     | { availability: "unavailable"; retainedTotalCount: null; records: null };
 }
 
+/** Separate private DTO for a published native comment or submitted review. */
+export interface CommentEditMetadata {
+  version: "github-comment-edit-metadata/v1";
+  repository: { id: number; slug: string };
+  target: {
+    kind: "issue_comment" | "pull_request_conversation_comment" | "pull_request_review" | "pull_request_review_comment";
+    id: string;
+    url: string;
+    parent: ContentEditMetadata["parent"];
+  };
+  publication: {
+    publishedAt: string;
+    reviewState: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "SUBMITTED" | null;
+    submittedAt: string | null;
+  };
+  includesCreatedEdit: boolean;
+  history: ContentEditMetadata["history"];
+}
+
 function invalid(): never {
   throw new TypeError("invalid_content_edit_metadata");
 }
@@ -162,8 +181,104 @@ export function parseContentEditMetadata(value: unknown): ContentEditMetadata {
   };
 }
 
+/** Copy the frozen comment DTO without evaluating accessors or retaining repository text. */
+export function parseCommentEditMetadata(value: unknown): CommentEditMetadata {
+  const entry = fields(value, ["version", "repository", "target", "publication", "includesCreatedEdit", "history"]);
+  if (entry.version !== "github-comment-edit-metadata/v1" || typeof entry.includesCreatedEdit !== "boolean")
+    return invalid();
+  const repository = fields(entry.repository, ["id", "slug"]);
+  const slug = repository.slug;
+  const match = typeof slug === "string" ? /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.exec(slug) : null;
+  if (
+    !match ||
+    match[0] !== slug ||
+    (slug as string).length > 256 ||
+    (slug as string).split("/").some((part) => part === "." || part === "..")
+  )
+    return invalid();
+  const selectedRepository = { id: integer(repository.id, 1), slug: slug as string };
+  const target = fields(entry.target, ["kind", "id", "url", "parent"]);
+  if (
+    ![
+      "issue_comment",
+      "pull_request_conversation_comment",
+      "pull_request_review",
+      "pull_request_review_comment",
+    ].includes(target.kind as string)
+  )
+    return invalid();
+  const kind = target.kind as CommentEditMetadata["target"]["kind"];
+  const parent = fields(target.parent, ["kind", "id", "number", "url"]);
+  const parentKind = kind === "issue_comment" ? "issue" : "pull_request";
+  const number = integer(parent.number, 1);
+  const parentUrl = `https://github.com/${selectedRepository.slug}/${parentKind === "issue" ? "issues" : "pull"}/${number}`;
+  if (parent.kind !== parentKind || parent.url !== parentUrl) return invalid();
+  const selectedParent: ContentEditMetadata["parent"] = {
+    kind: parentKind,
+    id: identifier(parent.id),
+    number,
+    url: parentUrl,
+  };
+  const fragment =
+    kind === "pull_request_review"
+      ? /^#pullrequestreview-[1-9][0-9]{0,19}$/
+      : kind === "pull_request_review_comment"
+        ? /^#(?:discussion_r|r)[1-9][0-9]{0,19}$/
+        : /^#issuecomment-[1-9][0-9]{0,19}$/;
+  if (typeof target.url !== "string" || !target.url.startsWith(parentUrl)) return invalid();
+  const suffix = target.url.slice(parentUrl.length);
+  const matchedFragment = fragment.exec(suffix);
+  if (!matchedFragment || matchedFragment[0] !== suffix) return invalid();
+  const selectedTarget: CommentEditMetadata["target"] = {
+    kind,
+    id: identifier(target.id),
+    url: target.url,
+    parent: selectedParent,
+  };
+  const publication = fields(entry.publication, ["publishedAt", "reviewState", "submittedAt"]);
+  const publishedAt = timestamp(publication.publishedAt);
+  let selectedPublication: CommentEditMetadata["publication"];
+  if (kind === "pull_request_review") {
+    if (!["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"].includes(publication.reviewState as string))
+      return invalid();
+    selectedPublication = {
+      publishedAt,
+      reviewState: publication.reviewState as CommentEditMetadata["publication"]["reviewState"],
+      submittedAt: timestamp(publication.submittedAt),
+    };
+  } else {
+    const state = kind === "pull_request_review_comment" ? "SUBMITTED" : null;
+    if (publication.reviewState !== state || publication.submittedAt !== null) return invalid();
+    selectedPublication = { publishedAt, reviewState: state, submittedAt: null };
+  }
+  const history = fields(entry.history, ["availability", "retainedTotalCount", "records"]);
+  let selectedHistory: ContentEditMetadata["history"];
+  if (history.availability === "unavailable") {
+    if (history.retainedTotalCount !== null || history.records !== null) return invalid();
+    selectedHistory = { availability: "unavailable", retainedTotalCount: null, records: null };
+  } else {
+    if (history.availability !== "available") return invalid();
+    const retainedTotalCount = integer(history.retainedTotalCount, 0, 100);
+    const selectedRecords = records(history.records);
+    if (selectedRecords.length !== retainedTotalCount) return invalid();
+    selectedHistory = { availability: "available", retainedTotalCount, records: selectedRecords };
+  }
+  return {
+    version: "github-comment-edit-metadata/v1",
+    repository: selectedRepository,
+    target: selectedTarget,
+    publication: selectedPublication,
+    includesCreatedEdit: entry.includesCreatedEdit,
+    history: selectedHistory,
+  };
+}
+
 /** This reserved format is optional for legacy facts, and mandatory once its metadata or marker is present. */
-export function collectionContentEditMetadata(value: unknown, family: string): ContentEditMetadata | undefined {
+export function collectionContentEditMetadata(
+  value: unknown,
+  family: string,
+  repositoryId?: number,
+): ContentEditMetadata | CommentEditMetadata | undefined {
   if (value === null || typeof value !== "object") return undefined;
   const revision = Object.getOwnPropertyDescriptor(value, "sourceRevision")?.value;
   if (!("contentEditMetadata" in value) && !(typeof revision === "string" && revision.startsWith("gh-content-edit-")))
@@ -186,6 +301,31 @@ export function collectionContentEditMetadata(value: unknown, family: string): C
     fact.state !== "present"
   )
     return invalid();
+  const candidate = fact.contentEditMetadata;
+  if (
+    candidate !== null &&
+    typeof candidate === "object" &&
+    Object.getOwnPropertyDescriptor(candidate, "version")?.value === "github-comment-edit-metadata/v1"
+  ) {
+    const metadata = parseCommentEditMetadata(candidate);
+    if (
+      metadata.repository.id !== integer(repositoryId, 1) ||
+      metadata.target.id !== fact.subjectId ||
+      metadata.target.url !== fact.sourceUrl
+    )
+      return invalid();
+    const match =
+      typeof fact.sourceRevision === "string"
+        ? /^gh-content-edit-comment-v1:([a-f0-9]{64})\.([a-f0-9]{32})$/.exec(fact.sourceRevision)
+        : null;
+    if (
+      !match ||
+      match[0] !== fact.sourceRevision ||
+      match[1] !== createHash("sha256").update(JSON.stringify(metadata)).digest("hex")
+    )
+      return invalid();
+    return metadata;
+  }
   const metadata = parseContentEditMetadata(fact.contentEditMetadata);
   if (metadata.parent.id !== fact.subjectId || metadata.parent.url !== fact.sourceUrl) return invalid();
   const match =

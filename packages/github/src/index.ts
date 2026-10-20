@@ -11,6 +11,8 @@ export * from "./project-context.js";
 export * from "./timeline-history.js";
 export * from "./issue-field-history.js";
 export * from "./content-edit-history.js";
+export * from "./comment-edit-history.js";
+export * from "./comment-edit-inventory.js";
 export * from "./physical-diff.js";
 export * from "./repository-net-lines.js";
 export * from "./documentation.js";
@@ -18,6 +20,7 @@ export * from "./research.js";
 export * from "./maintenance.js";
 export * from "./release-stewardship-source.js";
 export * from "./release-inclusion.js";
+export * from "./pull-request-merge-target.js";
 export * from "./release-recognition.js";
 export * from "./ordering.js";
 

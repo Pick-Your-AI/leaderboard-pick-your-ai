@@ -7,6 +7,8 @@ import {
   publicScopeKey,
   publicScopeParameters,
   publicRoleScopeSchemaVersion,
+  publicMergeTargetScopeSchemaVersion,
+  supportsPullRequestMergeTarget,
   achievementMilestoneVersion,
   achievementMilestonesPageSchema,
   participationHistoryResponseByteLimit,
@@ -64,6 +66,7 @@ const allowed = new Set([
   "context",
   "project",
   "role",
+  "branch",
   "start",
   "end",
   "snapshot",
@@ -142,6 +145,24 @@ export function createService(options: ServiceOptions = {}) {
   });
   function query(request: FastifyRequest) {
     const params = new URL(request.url, "http://localhost").searchParams;
+    if (params.has("branch")) {
+      try {
+        const branchFields = request.url
+          .split("?")
+          .slice(1)
+          .join("?")
+          .split("&")
+          .map((part) => part.split("="))
+          .filter(([key]) => decodeURIComponent(key!.replace(/\+/g, " ")) === "branch");
+        if (
+          branchFields.length !== 1 ||
+          decodeURIComponent(branchFields[0]!.slice(1).join("=").replace(/\+/g, " ")) !== params.get("branch")
+        )
+          fail(400, "invalid_merge_target_branch");
+      } catch {
+        fail(400, "invalid_merge_target_branch");
+      }
+    }
     for (const key of params.keys())
       if (!allowed.has(key) || params.getAll(key).length !== 1) fail(400, "invalid_query");
     const actorSelection = actorFilterSchema.safeParse(params.get("actors") ?? "all");
@@ -198,6 +219,7 @@ export function createService(options: ServiceOptions = {}) {
         ...(params.has("context") ? { context: params.get("context") } : {}),
         ...(params.has("project") ? { projects: params.get("project")!.split(",") } : {}),
         ...(params.has("role") ? { roles: params.get("role")!.split(",") } : {}),
+        ...(params.has("branch") ? { branch: params.get("branch") } : {}),
       });
     } catch {
       fail(400, "invalid_public_scope");
@@ -206,8 +228,12 @@ export function createService(options: ServiceOptions = {}) {
     if (!/^[1-9]\d{0,2}$/.test(limitText) || Number(limitText) > 100) fail(400, "invalid_limit");
     const metric = item("metric");
     if (metric !== null && !registry.metrics.some((entry) => entry.id === metric)) fail(400, "unknown_metric");
+    if (scope.branch !== undefined && metric !== null && !supportsPullRequestMergeTarget(metric))
+      fail(400, "unsupported_merge_target_metric");
     const category = item("category");
     if (category !== null && !registry.metrics.some((entry) => entry.id === category)) fail(400, "unknown_category");
+    if (scope.branch !== undefined && category !== null && !supportsPullRequestMergeTarget(category))
+      fail(400, "unsupported_merge_target_metric");
     const search = params.get("search");
     if (search !== null && !/^[A-Za-z0-9-]{1,39}$/.test(search)) fail(400, "invalid_search");
     const format = params.get("format") ?? "json";
@@ -366,11 +392,13 @@ export function createService(options: ServiceOptions = {}) {
     const extendedScope = read.selected.scope.schemaVersion !== undefined;
     return {
       schemaVersion:
-        read.selected.scope.schemaVersion === publicRoleScopeSchemaVersion
-          ? "public-read/v3"
-          : extendedScope
-            ? "public-read/v2"
-            : snapshot.schemaVersion,
+        read.selected.scope.schemaVersion === publicMergeTargetScopeSchemaVersion
+          ? "public-read/v4"
+          : read.selected.scope.schemaVersion === publicRoleScopeSchemaVersion
+            ? "public-read/v3"
+            : extendedScope
+              ? "public-read/v2"
+              : snapshot.schemaVersion,
       ...(extendedScope ? { snapshotSchemaVersion: snapshot.schemaVersion } : {}),
       snapshotId: snapshot.snapshotId,
       revision: snapshot.revision,

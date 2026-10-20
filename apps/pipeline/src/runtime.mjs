@@ -69,6 +69,15 @@ import {
 } from "./content-edit-inventory.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
 import { retainPhysicalContext } from "./physical-context.mjs";
+import {
+  mergeTargetNormalizationVersion,
+  mergeTargetGenerationSignature,
+  validateMergeTargetGeneration,
+  readMergeTargetNormalization,
+  assertMergeTargetFacts,
+  captureMergeTargetAuthorization,
+  mergeTargetAuthorization,
+} from "./pull-request-merge-target.mjs";
 import { capturePhysicalSources, selectPhysicalContexts } from "./physical-selection.mjs";
 import {
   defaultDeliveryNormalizationVersion,
@@ -328,6 +337,23 @@ export async function createPipeline(options) {
   const feedbackStore = new DiscussionFeedbackStore(db, feedbackAuthority, () => {
     restrictConfiguration(controlsStore.read());
   });
+  // Discovery only: validate scopes at the approved run/read boundary below.
+  // Invalid scope configuration must not change the existing construction lifecycle.
+  const mergeTargetRepositoryIds = [
+    ...new Set(
+      config.repositories
+        .filter(
+          (repo) =>
+            Array.isArray(config.scopes) &&
+            config.scopes.some((scope) => scope?.branch !== undefined && scope.repository === String(repo.id)),
+        )
+        .map((repo) => repo.id),
+    ),
+  ].sort((a, b) => a - b);
+  const policiesForScope = (scope) =>
+    scope.branch === undefined
+      ? config.policies
+      : config.policies.filter((item) => c.contracts.supportsPullRequestMergeTarget(item.policy.metricId));
   const reconciliationPolicy = validateReconciliationPolicy(config.reconciliation);
   const projectWorkstreamMappings = canonicalProjectWorkstreamMappings(
     config,
@@ -596,9 +622,12 @@ export async function createPipeline(options) {
     );
     const rows = (
       await tx.query(
-        `SELECT n.document,n.document_hash,f.fact_key,f.observed_at,f.first_run_id,f.family FROM leaderboard_pipeline.normalizations AS n
+        `SELECT n.document,n.document_hash,n.policy_signature,f.fact_key,f.observed_at,f.first_run_id,f.family,
+          f.repository_id,f.document AS source_document FROM leaderboard_pipeline.normalizations AS n
        JOIN leaderboard_ingestion.source_facts AS f ON f.fact_key=n.fact_key
-       WHERE n.document_hash=ANY($1::text[]) AND n.policy_signature=ANY($2::text[])
+       WHERE n.document_hash=ANY($1::text[]) AND (n.policy_signature=ANY($2::text[])
+         OR (n.document->'pullRequestMergeTargetNormalization'->>'schemaVersion'=$6
+           AND n.document->'pullRequestMergeTargetNormalization'->>'baseSignature'=$7))
          AND f.repository_id=ANY($3::bigint[])
          AND ($4::jsonb IS NULL OR EXISTS (
            SELECT 1 FROM jsonb_to_recordset($4::jsonb) AS bound(fact_key text,document_hash text)
@@ -619,6 +648,8 @@ export async function createPipeline(options) {
                 })),
               ),
           10000 * identityNormalizationSignatures.length + 1,
+          mergeTargetNormalizationVersion,
+          normalizationSignature,
         ],
       )
     ).rows;
@@ -635,6 +666,29 @@ export async function createPipeline(options) {
       409,
       "Frozen identity evidence integrity failure",
     );
+    const mergeAuthorization = captureMergeTargetAuthorization(authorization).mergeTargetEvidence;
+    for (const row of rows) {
+      if (row.document.pullRequestMergeTargetNormalization === undefined) {
+        if (
+          mergeAuthorization &&
+          row.family === "pull_requests" &&
+          String(row.repository_id) === mergeAuthorization.repositoryId
+        )
+          fail("merge_target_frozen_normalization_unavailable");
+        continue;
+      }
+      const repo = config.repositories.find((entry) => entry.id === Number(row.repository_id));
+      if (!repo || !mergeTargetRepositoryIds.includes(repo.id)) fail("merge_target_source_scope_mismatch");
+      validateMergeTargetGeneration(
+        row.document,
+        row.policy_signature,
+        normalizationSignature,
+        digest,
+        defaultDeliverySignature,
+        { version: fieldChangeNormalizationVersion, signature: fieldChangeSignature },
+      );
+      await readMergeTargetNormalization(row.document, row, repo, mergeAuthorization?.cutoff ?? null);
+    }
     return rows;
   }
   const reviewEvidenceCurrent = (row) =>
@@ -671,6 +725,17 @@ export async function createPipeline(options) {
     !hasDefaultDeliveryClaims(row.document) ||
     (digest(row.document) === row.document_hash &&
       row.document.defaultDeliveryNormalizationVersion === defaultDeliveryNormalizationVersion);
+  const assertMergeTargetNormalizer = () => {
+    // Compatibility follows the callback actually selected at construction.
+    // Its declaration remains live across awaits and the visibility commit.
+    if (
+      mergeTargetRepositoryIds.length &&
+      (providedNormalizer === undefined || providedNormalizer === null
+        ? c.github?.pullRequestMergeTargetNormalizationVersion
+        : options.pullRequestMergeTargetNormalizationVersion) !== mergeTargetNormalizationVersion
+    )
+      fail("merge_target_normalizer_version_unverified");
+  };
   const fieldChangeEvidenceCurrent = (row) =>
     !hasFieldChangeClaims(row.document) ||
     (digest(row.document) === row.document_hash &&
@@ -699,9 +764,9 @@ export async function createPipeline(options) {
     // option cannot bless an older component; a replacement normalizer must
     // explicitly take responsibility for the current source semantics.
     if (
-      (options.normalizer
-        ? options.defaultDeliveryNormalizationVersion
-        : c.github?.defaultDeliveryNormalizationVersion) !== defaultDeliveryNormalizationVersion
+      (providedNormalizer === undefined || providedNormalizer === null
+        ? c.github?.defaultDeliveryNormalizationVersion
+        : options.defaultDeliveryNormalizationVersion) !== defaultDeliveryNormalizationVersion
     )
       fail("default_delivery_normalizer_version_unverified");
   };
@@ -724,6 +789,12 @@ export async function createPipeline(options) {
     if (maxFrozenBytes !== null && (!Number.isSafeInteger(maxFrozenBytes) || maxFrozenBytes < 0))
       fail("invalid_publication_proof_budget");
     const authorization = explanation.authorization;
+    const needsMergeTarget = scope.branch !== undefined;
+    if (
+      canonical(captureMergeTargetAuthorization(authorization)) !==
+      canonical(mergeTargetAuthorization(scope, explanation.cutoff))
+    )
+      fail("public_merge_target_authority_mismatch");
     const selectedIds = repositoriesFor(scope).map((repo) => String(repo.id));
     await feedbackStore.assertCapture(tx, selectedIds.map(Number), authorization.discussionFeedbackEvidence);
     await feedbackStore.originals(
@@ -767,6 +838,7 @@ export async function createPipeline(options) {
     )
       fail(`public_${kind}_source_scope_mismatch`);
     if (
+      !needsMergeTarget &&
       !needsReview &&
       !needsDiscussion &&
       !defaultDelivery &&
@@ -779,6 +851,7 @@ export async function createPipeline(options) {
     // binds the snapshot below. Newly discovered proof or dependencies retain
     // the full evidence path, as do all review/Discussion/delivery inputs.
     const ordinaryEmptyTransfer =
+      !needsMergeTarget &&
       !needsReview &&
       !needsDiscussion &&
       !defaultDelivery &&
@@ -802,7 +875,14 @@ export async function createPipeline(options) {
       return { obsolete: "field_change" };
     const review = rows.some((row) => row.family === "reviews");
     const discussion = rows.some((row) => row.family === "discussions");
-    if (!review && !discussion && !defaultDelivery && !fieldChange && authorization.issueTransferEvidence === undefined)
+    if (
+      !needsMergeTarget &&
+      !review &&
+      !discussion &&
+      !defaultDelivery &&
+      !fieldChange &&
+      authorization.issueTransferEvidence === undefined
+    )
       return { review: false, discussion: false, defaultDelivery: false, fieldChange: false };
     const retained = (
       await tx.query(
@@ -837,6 +917,9 @@ export async function createPipeline(options) {
         canonical(authorization.issueTransferEvidence) ||
       canonical(retained.document.identityAuthorization?.discussionFeedbackEvidence) !==
         canonical(authorization.discussionFeedbackEvidence) ||
+      canonical(captureMergeTargetAuthorization(retained.document.identityAuthorization ?? {})) !==
+        canonical(mergeTargetAuthorization(scope, explanation.cutoff)) ||
+      (needsMergeTarget && retained.document.engineScope?.branch !== scope.branch) ||
       (authorization.issueTransferEvidence !== undefined &&
         (canonical([...retained.document.frozen.repositoryIds].sort()) !==
           canonical(authorization.sources.map((source) => source.repositoryId).sort()) ||
@@ -921,6 +1004,7 @@ export async function createPipeline(options) {
         "Frozen input source authorization changed",
       );
       const restoredActors = new Map();
+      const restoredMergeTargets = new Map();
       for (const authorization of authorizations) {
         const binding = authorization.identityEvidence;
         const rows = await readNormalizationEvidence(tx, authorization);
@@ -944,6 +1028,11 @@ export async function createPipeline(options) {
         requireThat(rows.every(discussionEvidenceCurrent), 409, "Frozen Discussion normalization obsolete");
         requireThat(rows.every(defaultDeliveryEvidenceCurrent), 409, "Frozen default delivery normalization obsolete");
         requireThat(rows.every(fieldChangeEvidenceCurrent), 409, "Frozen field change normalization obsolete");
+        if (authorization.mergeTargetEvidence !== undefined)
+          restoredMergeTargets.set(
+            digest(authorization),
+            rows.flatMap((row) => row.document.pullRequestMergeTargets ?? []),
+          );
         const normalizationSources = binding.normalizationSources;
         // Hash-only legacy captures did not bind source ordering. They retain
         // their identical-label rule rather than gaining unproven rename history.
@@ -995,6 +1084,11 @@ export async function createPipeline(options) {
           refreshApproval: () => approved(tx),
           restoreInput(input, authorization) {
             if (authorization.identityEvidence === undefined) return input;
+            if (authorization.mergeTargetEvidence !== undefined) {
+              const captures = restoredMergeTargets.get(digest(authorization));
+              requireThat(captures, 409, "Frozen merge-target authority unavailable");
+              assertMergeTargetFacts(input.facts, captures, { complete: false });
+            }
             const actors = restoredActors.get(digest(authorization));
             requireThat(actors, 409, "Frozen identity evidence unavailable");
             return {
@@ -1056,6 +1150,7 @@ export async function createPipeline(options) {
         onUnavailable: (repo, reason) => denyRepository(repo, reason, utc(now())),
         includePullRequestReviewComments: ({ runId }) => expandedGithubCommentsRun(runId),
         includeContentEditMetadata: (request) => contentEditAdmission.allows(request),
+        includeCommentEditMetadata: (request) => contentEditAdmission.allowsComments(request),
         ...(feedbackAuthority.enabled
           ? { discussionFeedback: { authority: feedbackAuthority, store: feedbackStore } }
           : {}),
@@ -1189,6 +1284,7 @@ export async function createPipeline(options) {
       fail("recognition_changed_during_run");
     if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
     if (feedbackAuthority.enabled) feedbackAuthority.assert(runFeedbackAuthority);
+    assertMergeTargetNormalizer();
   };
   const scanContext = (mode, sources, revision, fingerprint) => ({
     key: digest(["bounded-scan/v1", config, dataMode, mode]),
@@ -1209,6 +1305,7 @@ export async function createPipeline(options) {
           defaultCommentsInventory,
         ),
         defaultContentEditInventory,
+        true,
       ),
     ),
   });
@@ -1286,6 +1383,7 @@ export async function createPipeline(options) {
           documentationPolicies: config.documentationPolicies ?? [],
           researchPolicies: config.researchPolicies ?? [],
           releaseInclusionTargets: config.releaseInclusionTargets ?? [],
+          ...(mergeTargetRepositoryIds.length ? { pullRequestMergeTargetRepositoryIds: mergeTargetRepositoryIds } : {}),
           now: () => utc(now()),
           projectWorkstreamMappings,
           ...(providedEnrichment ? { enrich: providedEnrichment } : {}),
@@ -1402,6 +1500,12 @@ export async function createPipeline(options) {
         fail("invalid_public_scope");
       if (scope.repository !== null && !config.repositories.some((repo) => String(repo.id) === scope.repository))
         fail("unapproved_scope_repository");
+      if (
+        scope.branch !== undefined &&
+        (!policiesForScope(scope).length ||
+          !config.repositories.find((repo) => String(repo.id) === scope.repository)?.families.includes("pull_requests"))
+      )
+        fail("merge_target_scope_requires_merged_metric_and_pull_requests");
       if (scope.workstream !== null) required(scope.workstream, "invalid_workstream_scope");
       if ((scope.start === null) !== (scope.end === null)) fail("incomplete_public_window");
       if (scope.start !== null && utc(scope.start) >= utc(scope.end)) fail("invalid_public_window");
@@ -1535,6 +1639,15 @@ export async function createPipeline(options) {
   async function verifyRepository(repo) {
     assertRunConfiguration();
     if (!collectionSource?.readPage || !normalizer || !probeSource) fail("source_provider_unconfigured");
+    const beforeProbe = (
+      await db.query("SELECT state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=$1", [
+        repo.id,
+      ])
+    ).rows[0];
+    // A lifecycle change during this probe must not authorize its older public result.
+    const expectedGeneration = beforeProbe ? String(beforeProbe.generation) : null;
+    const wasPublic = beforeProbe?.state === "public";
+    assertRunConfiguration();
     let checkedAt = utc(now());
     let probe;
     try {
@@ -1567,20 +1680,15 @@ export async function createPipeline(options) {
       await denyRepository(repo, "visibility_or_scope_not_public", checkedAt);
       fail("public_source_not_verified");
     }
-    const current = (
-      await db.query("SELECT state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=$1", [
-        repo.id,
-      ])
-    ).rows[0];
-    if (current?.state === "public") {
+    if (wasPublic) {
       const saved = await db.query(
         "UPDATE leaderboard_ingestion.repository_access SET checked_at=clock_timestamp() WHERE repository_id=$1 AND generation=$2 AND state='public' RETURNING repository_id",
-        [repo.id, current.generation],
+        [repo.id, expectedGeneration],
       );
       if (!saved.rows.length) fail("repository_access_changed");
       return;
     }
-    if (!(await collection.verifyPublic(repo.id, repo.installationId, current ? String(current.generation) : null)))
+    if (!(await collection.verifyPublic(repo.id, repo.installationId, expectedGeneration)))
       fail("repository_revoked_or_changed");
   }
   const hasDispatchEvidence = (document, dispatch, row) =>
@@ -1595,7 +1703,7 @@ export async function createPipeline(options) {
             entry.artifact.publicUrl === dispatch.lease.observation.sourceUrl,
         ),
     );
-  async function normalizeStored(repositoryIds, cutoff, dispatch, releasePass = null) {
+  async function normalizeStored(repositoryIds, cutoff, dispatch, releasePass = null, mergeTargetPass = null) {
     // A first-review sequence depends on the whole cohort, not just the review's
     // mutable fields. Only a source observation bound to the latest completed
     // review scan may supply that sequence to this publication. Retained caches
@@ -1700,8 +1808,15 @@ export async function createPipeline(options) {
     const issueFieldHistoryBatch = Object.freeze({});
     const outputs = [];
     for (const row of sourceRows) {
+      const mergeTargetSource =
+        row.family === "pull_requests" && mergeTargetRepositoryIds.includes(Number(row.repository_id));
+      if (mergeTargetPass?.only && !mergeTargetSource) continue;
+      if (mergeTargetSource) {
+        if (!mergeTargetPass) fail("merge_target_normalizer_version_unverified");
+        assertMergeTargetNormalizer();
+      }
       const typedHistory = ["relationships", "project_history", "issue_field_history"].includes(row.family);
-      const familySignature =
+      const sourceFamilySignature =
         row.family === "reviews"
           ? reviewNormalizationSignature
           : row.family === "discussions"
@@ -1709,6 +1824,9 @@ export async function createPipeline(options) {
             : typedHistory
               ? typedHistoryNormalizationSignature
               : normalizationSignature;
+      const familySignature = mergeTargetSource
+        ? mergeTargetGenerationSignature(normalizationSignature, mergeTargetPass.generation, digest)
+        : sourceFamilySignature;
       const familyDeliverySignature = defaultDeliverySignature(familySignature);
       const previousBaseSignatures = [
         ...new Set([
@@ -1761,6 +1879,7 @@ export async function createPipeline(options) {
           ],
         )
       ).rows;
+      if (mergeTargetSource) assertMergeTargetNormalizer();
       if (row.family === "reviews") assertReviewNormalizer();
       if (row.family === "discussions") assertDiscussionNormalizer();
       if (discussionFeedback) assertDiscussionFeedbackNormalizer();
@@ -1836,6 +1955,8 @@ export async function createPipeline(options) {
         if (
           currentHistoryNormalizer &&
           currentProjectNormalizer &&
+          (!mergeTargetSource ||
+            cached.document.pullRequestMergeTargetNormalization?.generation === mergeTargetPass.generation) &&
           (!fieldChange || cached.document.fieldChangeNormalizationVersion === fieldChangeNormalizationVersion) &&
           // Native field visibility can change without changing an event or its
           // revision. Revalidate every retained transition before publication.
@@ -1859,6 +1980,23 @@ export async function createPipeline(options) {
           }) &&
           hasDispatchEvidence(cached.document, dispatch, row)
         ) {
+          if (mergeTargetSource) {
+            validateMergeTargetGeneration(
+              cached.document,
+              cached.policy_signature,
+              normalizationSignature,
+              digest,
+              defaultDeliverySignature,
+              { version: fieldChangeNormalizationVersion, signature: fieldChangeSignature },
+            );
+            await readMergeTargetNormalization(
+              cached.document,
+              row,
+              repository,
+              mergeTargetPass.collect ? null : cutoff,
+            );
+            assertMergeTargetNormalizer();
+          }
           if (releaseTargets.length && !releasePass?.collect) {
             const records = cached.document.releaseInclusions;
             if (
@@ -1884,6 +2022,7 @@ export async function createPipeline(options) {
           retainPhysicalContext(cached.document, row, repository, c.contracts, dataMode);
           await db.transaction(async (tx) => {
             await lockIssueTransferSources(tx, config.repositories, "update");
+            if (mergeTargetSource) assertMergeTargetNormalizer();
             if (row.family === "reviews") assertReviewNormalizer();
             if (row.family === "discussions") assertDiscussionNormalizer();
             const current = (
@@ -1898,9 +2037,11 @@ export async function createPipeline(options) {
             if (row.family === "discussions") assertDiscussionNormalizer();
             await retainSourceArtifacts(tx, row.fact_key, cached.document);
             await retainIssueTransferIndex(tx, row, cached.policy_signature, cached.document);
+            if (mergeTargetSource) assertMergeTargetNormalizer();
             if (row.family === "reviews") assertReviewNormalizer();
             if (row.family === "discussions") assertDiscussionNormalizer();
           });
+          if (mergeTargetSource) assertMergeTargetNormalizer();
           if (row.family === "reviews") assertReviewNormalizer();
           if (row.family === "discussions") assertDiscussionNormalizer();
           if (fieldChange) assertFieldChangeNormalizer();
@@ -1919,6 +2060,7 @@ export async function createPipeline(options) {
       // A frozen publication may only consume proof collected before its cutoff.
       // Missing compatible caches require a fresh cycle, never a backdated lookup.
       if (releaseTargets.length && !releasePass?.collect) fail("release_inclusion_frozen_normalization_unavailable");
+      if (mergeTargetSource && !mergeTargetPass.collect) fail("merge_target_frozen_normalization_unavailable");
       const normalizationStarted = performance.now();
       let output;
       try {
@@ -1935,6 +2077,7 @@ export async function createPipeline(options) {
           observedAt: new Date(row.observed_at).toISOString(),
           policyVersion: config.version,
         });
+        if (mergeTargetSource) output = copy(output);
         assertRunConfiguration();
         if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
@@ -2053,6 +2196,15 @@ export async function createPipeline(options) {
       // Persist authoritative exclusions even when this dispatch cannot yet
       // prove the target creation. Failure must not leave older evidence visible.
       if (!hasDispatchEvidence(output, dispatch, row)) fail("dispatch_enrichment_unavailable");
+      const pullRequestMergeTargets = mergeTargetSource
+        ? await readMergeTargetNormalization(output, row, repository)
+        : undefined;
+      if (
+        !mergeTargetSource &&
+        (output.pullRequestMergeTargets !== undefined || output.facts.some((fact) => fact.mergeTarget !== undefined))
+      )
+        fail("unconfigured_merge_target_proof");
+      assertRunConfiguration();
       // Keep collector products private and bound to this source repository.
       // The normalizer's public evidence is validated separately above; copying
       // this explicit, minimized field never expands that public boundary.
@@ -2085,6 +2237,16 @@ export async function createPipeline(options) {
         syntheticFactIds = [...output.syntheticFactIds];
       }
       const document = {
+        ...(mergeTargetSource
+          ? {
+              pullRequestMergeTargetNormalization: {
+                schemaVersion: mergeTargetNormalizationVersion,
+                baseSignature: normalizationSignature,
+                generation: mergeTargetPass.generation,
+              },
+              pullRequestMergeTargets,
+            }
+          : {}),
         ...(fieldChange ? { fieldChangeNormalizationVersion } : {}),
         ...(defaultDelivery ? { defaultDeliveryNormalizationVersion } : {}),
         ...(row.family === "reviews" ? { reviewSourceNormalizationVersion } : {}),
@@ -2113,6 +2275,7 @@ export async function createPipeline(options) {
       };
       await db.transaction(async (tx) => {
         await lockIssueTransferSources(tx, config.repositories, "update");
+        if (mergeTargetSource) assertMergeTargetNormalizer();
         if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
         if (fieldChange) assertFieldChangeNormalizer();
@@ -2122,7 +2285,13 @@ export async function createPipeline(options) {
         VALUES ($1,$2,$3::jsonb,$4) ON CONFLICT (fact_key,policy_signature) DO UPDATE
         SET document=EXCLUDED.document,document_hash=EXCLUDED.document_hash
         WHERE normalizations.document_hash=$5`,
-          [row.fact_key, signature, JSON.stringify(document), digest(document), cached?.document_hash ?? null],
+          [
+            row.fact_key,
+            signature,
+            JSON.stringify(document),
+            digest(document),
+            mergeTargetSource ? null : (cached?.document_hash ?? null),
+          ],
         );
         const current = (
           await tx.query(
@@ -2135,9 +2304,11 @@ export async function createPipeline(options) {
         if (row.family === "discussions") assertDiscussionNormalizer();
         await retainSourceArtifacts(tx, row.fact_key, document);
         await retainIssueTransferIndex(tx, row, signature, document);
+        if (mergeTargetSource) assertMergeTargetNormalizer();
         if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
       });
+      if (mergeTargetSource) assertMergeTargetNormalizer();
       if (row.family === "reviews") assertReviewNormalizer();
       if (row.family === "discussions") assertDiscussionNormalizer();
       if (fieldChange) assertFieldChangeNormalizer();
@@ -2201,6 +2372,17 @@ export async function createPipeline(options) {
     /^[a-f0-9]{64}$/.test(confirmation.aggregateExplanationHash);
   function confirmPublication(scope, publication, comparisonInput, publicPeriods = []) {
     controlsStore.transaction((state) => {
+      assertMergeTargetNormalizer();
+      if (
+        publication.fieldChangeNormalizationVersion !== undefined &&
+        !confirmationMatches(
+          state.pipelinePublications?.[publication.snapshotId],
+          scope,
+          publication.snapshotId,
+          publication.revision,
+        )
+      )
+        assertFieldChangeNormalizer();
       if (
         publication.discussionSourceNormalizationVersion !== undefined &&
         !confirmationMatches(
@@ -2288,10 +2470,18 @@ export async function createPipeline(options) {
       windowIndex().record(state, scope, publicPeriods, confirmation);
     });
   }
-  async function publish({ scope, window, publicPeriods = [] }, cutoff, observationCutoff, dispatch, scan = null) {
+  async function publish(
+    { scope, window, publicPeriods = [] },
+    cutoff,
+    observationCutoff,
+    dispatch,
+    scan = null,
+    mergeTargetGeneration = null,
+  ) {
     assertRunConfiguration();
     scope = c.contracts.canonicalPublicScope(scope);
     if (!configuredScope(scope)) fail("scope_not_approved");
+    const selectedPolicies = policiesForScope(scope);
     const repos = repositoriesFor(scope);
     const generations = (
       await db.query(
@@ -2430,6 +2620,8 @@ export async function createPipeline(options) {
       config.repositories.map((repo) => repo.id),
       observationCutoff,
       dispatch,
+      null,
+      mergeTargetGeneration === null ? null : { generation: mergeTargetGeneration, collect: false },
     );
     const selectedArtifactIds = normalizedAll
       .filter((entry) => repos.some((repo) => String(repo.id) === entry.repositoryId))
@@ -2493,7 +2685,9 @@ export async function createPipeline(options) {
       .map((entry) => ({ factKey: entry.source.factKey, documentHash: digest(entry.document) }))
       .sort((left, right) => left.factKey.localeCompare(right.factKey));
     const normalizationHashes = [...new Set(normalizationSources.map((entry) => entry.documentHash))].sort();
-    const physicalSources = config.policies.some((item) => c.contracts.physicalMetricIds.includes(item.policy.metricId))
+    const physicalSources = selectedPolicies.some((item) =>
+      c.contracts.physicalMetricIds.includes(item.policy.metricId),
+    )
       ? capturePhysicalSources(normalized, normalizationSources, digest, dataMode)
       : [];
     const suppressedArtifactIds = new Set([
@@ -2524,7 +2718,7 @@ export async function createPipeline(options) {
         context: scope.context ?? "event",
       },
     ).outputs;
-    if (recognitionBindings.length) {
+    if (recognitionBindings.length && scope.branch === undefined) {
       const combined = {
         facts: outputs.flatMap((o) => o.facts),
         actors: [...actors.values()],
@@ -2562,7 +2756,7 @@ export async function createPipeline(options) {
         combined,
         controlsStore.read(),
         recognitionBindings,
-        config.policies,
+        selectedPolicies,
         c.github.applyRecognitionReceipt,
         observationCutoff,
         c.contracts.publicDocumentationReasons,
@@ -2609,7 +2803,7 @@ export async function createPipeline(options) {
     const reversion = materializeReversionEffectiveness(
       {
         facts,
-        policies: config.policies,
+        policies: selectedPolicies,
         evidence: [...evidence.values()],
       },
       correctionState.decisions,
@@ -2648,6 +2842,7 @@ export async function createPipeline(options) {
       roles: scope.roles ?? [],
       actors: "all",
       context: scope.context ?? "event",
+      ...(scope.branch === undefined ? {} : { branch: scope.branch }),
     };
     const projectContextFor = createPublicProjectContextProjector(normalized, engineScope.context, observationCutoff);
     const state = controlsStore.read();
@@ -2660,7 +2855,7 @@ export async function createPipeline(options) {
         )
       : null;
     const coverage = repos.flatMap((repo) =>
-      [...new Set(config.policies.flatMap((item) => item.policy.sources))].map((source) => {
+      [...new Set(selectedPolicies.flatMap((item) => item.policy.sources))].map((source) => {
         const progress = reconciliation?.progress.filter((row) => row.repositoryId === repo.id);
         const github = source.startsWith("github_");
         const lastSuccessfulSync = reconciliation
@@ -2719,7 +2914,7 @@ export async function createPipeline(options) {
       facts: [...facts, ...corrections],
       coverage,
     };
-    for (const item of config.policies.filter((item) => item.policy.metricId === "pr_accepted_rate")) {
+    for (const item of selectedPolicies.filter((item) => item.policy.metricId === "pr_accepted_rate")) {
       const units = new Set();
       for (const fact of frozen.facts.filter(
         (fact) => fact.metricId === item.policy.metricId && item.policy.rankedStates.includes(fact.state),
@@ -2729,11 +2924,11 @@ export async function createPipeline(options) {
         units.add(unit);
       }
     }
-    const aggregates = config.policies.map((item) => c.metrics.aggregateMetric(frozen, item.policy, engineScope));
+    const aggregates = selectedPolicies.map((item) => c.metrics.aggregateMetric(frozen, item.policy, engineScope));
     const physical = selectPhysicalContexts({
       sources: physicalSources,
       aggregates,
-      policies: config.policies,
+      policies: selectedPolicies,
       contracts: c.contracts,
       serialize: c.metrics.stableJSON,
       policyDigest,
@@ -2742,7 +2937,7 @@ export async function createPipeline(options) {
     const pendingFor = (aggregate, row) => ({
       schemaVersion: "leaderboard-pending/v1",
       state: aggregate.coverage === "complete" ? "measured" : row.pending > 0 ? "partial" : "unknown",
-      valueClass: config.policies.find((item) => item.policy.metricId === aggregate.metricId).policy.rankedStates[0],
+      valueClass: selectedPolicies.find((item) => item.policy.metricId === aggregate.metricId).policy.rankedStates[0],
       count: row.pending > 0 || aggregate.coverage === "complete" ? row.pending : null,
       evidenceIds: row.pendingEvidence.map((fact) => fact.id),
     });
@@ -2805,7 +3000,7 @@ export async function createPipeline(options) {
     );
     // Descriptive public work is not conditional on earning a ranked outcome.
     // Selection reuses existing corrections, source/role/context checks and receipt validation.
-    const portfolioFacts = config.policies.flatMap((item) =>
+    const portfolioFacts = selectedPolicies.flatMap((item) =>
       c.metrics.selectPortfolioFacts(frozen, item.policy, engineScope),
     );
     const portfolioEvidence = portfolioFacts.flatMap((fact) => {
@@ -2854,7 +3049,7 @@ export async function createPipeline(options) {
         facts.find((fact) => fact.id === entry.contribution.contributionId);
       if (fact) {
         entry.occurredAt =
-          fact[config.policies.find((item) => item.policy.metricId === fact.metricId).policy.dateBasis];
+          fact[selectedPolicies.find((item) => item.policy.metricId === fact.metricId).policy.dateBasis];
         Object.assign(entry, materializeEvidenceMetadata(entry, fact));
         Object.assign(entry, projectContextFor(entry, fact));
       }
@@ -2878,14 +3073,14 @@ export async function createPipeline(options) {
       portfolioEvidence,
       pendingEvidence,
       ...physical,
-      ranking: config.policies.map((item) => ({
+      ranking: selectedPolicies.map((item) => ({
         metricId: item.policy.metricId,
         direction: "descending",
         rank: item.policy.rank,
       })),
       rankingPresentationPolicy: copy(c.contracts.currentRankingPresentationPolicy),
       diagnostics,
-      methodology: config.policies.map((item) => ({
+      methodology: selectedPolicies.map((item) => ({
         metricId: item.policy.metricId,
         policyVersion: item.policy.version,
         policySignature: policyDigest(item.signature),
@@ -2905,7 +3100,7 @@ export async function createPipeline(options) {
     const comparisonInputFor = (publication) => ({
       input: { ...frozen, actors: frozen.actors.map(previewActor) },
       scope: engineScope,
-      policies: config.policies.map((item) => item.policy),
+      policies: selectedPolicies.map((item) => item.policy),
       aggregates,
       snapshot: { snapshotId: publication.snapshotId, revision: publication.revision },
       authorization: {
@@ -2919,6 +3114,7 @@ export async function createPipeline(options) {
           // hash-only historical captures can otherwise be ambiguous across families.
           normalizationSources,
         },
+        ...mergeTargetAuthorization(scope, observationCutoff),
         issueTransferEvidence: transferAuthority.capture,
         ...(feedbackCapture.length ? { discussionFeedbackEvidence: feedbackCapture } : {}),
         issueTransferCorrections,
@@ -2942,7 +3138,7 @@ export async function createPipeline(options) {
         digest(document) !== retained.document_hash ||
         canonical(document.scope) !== canonical(scope) ||
         canonical(document.engineScope) !== canonical(engineScope) ||
-        canonical(document.policies) !== canonical(JSON.parse(JSON.stringify(config.policies))) ||
+        canonical(document.policies) !== canonical(JSON.parse(JSON.stringify(selectedPolicies))) ||
         document.identityAuthorization?.configurationHash !== digest(config) ||
         document.identityAuthorization?.dataMode !== dataMode
       )
@@ -3169,7 +3365,7 @@ export async function createPipeline(options) {
             identityAuthorization: comparisonInputFor({ snapshotId, revision }).authorization,
             engineScope,
             scope,
-            policies: config.policies,
+            policies: selectedPolicies,
           }),
         );
         await tx.query(
@@ -3180,7 +3376,7 @@ export async function createPipeline(options) {
           snapshotId,
           revision,
           configuration: config.version,
-          policySignatures: config.policies.map((item) => item.signature),
+          policySignatures: selectedPolicies.map((item) => item.signature),
           datasetId: frozen.datasetId,
           comparisonInputHash: digest(comparisonInputFor({ snapshotId, revision })),
           controlsRevision: state.revision,
@@ -3799,7 +3995,7 @@ export async function createPipeline(options) {
           : null,
       );
       cutoff = scan.cutoff;
-      if (defaultContentEditInventory && scan.plan) contentEditAdmission.setPlanned(scan, scan.plan);
+      if (defaultContentEditInventory && scan.plan) contentEditAdmission.setPlanned(scan, scan.plan, true);
     }
     const publicationWindows = resolveDiscoverablePublicationWindows(
       config.scopes,
@@ -3837,7 +4033,7 @@ export async function createPipeline(options) {
         // otherwise atomically materialize and pin the expanded inventory ID.
         const selectedRequest =
           !scan?.plan && defaultContentEditInventory && request.family === "content_edits"
-            ? await startGithubContentEditRun(db, collection, request, assertRunConfiguration)
+            ? await startGithubContentEditRun(db, collection, request, assertRunConfiguration, true)
             : !scan?.plan && defaultCommentsInventory && request.family === "comments"
               ? await startGithubCommentsRun(db, collection, request, assertRunConfiguration)
               : request;
@@ -3866,14 +4062,40 @@ export async function createPipeline(options) {
     // New release proof is a separate observation from the immutable PR row.
     // Complete only explicitly selected public lookups before freezing the cycle;
     // a frozen retry reuses its exact compatible cache and never recollects it.
+    const mergeTargetGeneration = mergeTargetRepositoryIds.length
+      ? digest([
+          mergeTargetNormalizationVersion,
+          cutoff,
+          mode,
+          scan?.token ?? null,
+          progress
+            .filter((entry) => entry.family === "pull_requests")
+            .map((entry) => entry.runId)
+            .sort(),
+        ])
+      : null;
     if (dataMode === "public" && config.releaseInclusionTargets?.length) {
       const releaseRepositoryIds = config.repositories
         .filter((repo) => config.releaseInclusionTargets.some((target) => target.repositoryId === repo.id))
         .map((repo) => repo.id);
-      await normalizeStored(releaseRepositoryIds, scan?.observationCutoff ?? utc(now()), null, {
-        collect: !scan?.observationCutoff,
-      });
+      await normalizeStored(
+        releaseRepositoryIds,
+        scan?.observationCutoff ?? utc(now()),
+        null,
+        {
+          collect: !scan?.observationCutoff,
+        },
+        mergeTargetGeneration === null
+          ? null
+          : { generation: mergeTargetGeneration, collect: !scan?.observationCutoff },
+      );
     }
+    if (mergeTargetGeneration !== null)
+      await normalizeStored(mergeTargetRepositoryIds, scan?.observationCutoff ?? utc(now()), null, null, {
+        generation: mergeTargetGeneration,
+        collect: !scan?.observationCutoff,
+        only: true,
+      });
     const publications = [];
     let observationCutoff = utc(now());
     try {
@@ -3918,7 +4140,7 @@ export async function createPipeline(options) {
       }
       if (observationCutoff < cutoff) fail("observation_clock_precedes_event_cutoff");
       for (const selected of publicationWindows)
-        publications.push(await publish(selected, cutoff, observationCutoff, dispatch, scan));
+        publications.push(await publish(selected, cutoff, observationCutoff, dispatch, scan, mergeTargetGeneration));
       // SQL publication and synchronous private confirmation must both succeed.
       // A failed/partial batch keeps its original event and observation cutoffs.
       if (scan) await scanContinuations.retire(scan, assertRunConfiguration);
@@ -4252,17 +4474,40 @@ export async function createPipeline(options) {
         await lockIssueTransferSources(tx, config.repositories, "update", [], "share");
         const candidates = (
           await tx.query(
-            `SELECT n.document,n.document_hash,f.repository_id FROM leaderboard_pipeline.normalizations n
-          JOIN leaderboard_ingestion.source_facts f USING(fact_key) WHERE f.repository_id=ANY($1::bigint[]) AND n.policy_signature=ANY($2::text[])
+            `SELECT n.document,n.document_hash,n.policy_signature,f.repository_id,f.family,f.observed_at,f.document AS source_document FROM leaderboard_pipeline.normalizations n
+          JOIN leaderboard_ingestion.source_facts f USING(fact_key) WHERE f.repository_id=ANY($1::bigint[]) AND
+            (n.policy_signature=ANY($2::text[]) OR
+             (n.document->'pullRequestMergeTargetNormalization'->>'schemaVersion'=$4 AND
+              n.document->'pullRequestMergeTargetNormalization'->>'baseSignature'=$5))
           AND EXISTS(SELECT 1 FROM jsonb_array_elements(n.document->'facts') item WHERE item->>'id'=$3)
           ORDER BY n.fact_key,n.policy_signature LIMIT 10001 FOR SHARE OF n`,
-            [config.repositories.map((repo) => repo.id), identityNormalizationSignatures, factId],
+            [
+              config.repositories.map((repo) => repo.id),
+              identityNormalizationSignatures,
+              factId,
+              mergeTargetNormalizationVersion,
+              normalizationSignature,
+            ],
           )
         ).rows;
         if (candidates.length > 10000) fail("correction_evidence_budget_exceeded");
-        for (const row of candidates)
+        for (const row of candidates) {
           if (digest(row.document) !== row.document_hash || row.document.isSynthetic !== (dataMode === "synthetic"))
             fail("normalization_integrity_error");
+          if (row.document.pullRequestMergeTargetNormalization !== undefined) {
+            validateMergeTargetGeneration(
+              row.document,
+              row.policy_signature,
+              normalizationSignature,
+              digest,
+              defaultDeliverySignature,
+              { version: fieldChangeNormalizationVersion, signature: fieldChangeSignature },
+            );
+            const repo = config.repositories.find((entry) => entry.id === Number(row.repository_id));
+            if (!repo || !mergeTargetRepositoryIds.includes(repo.id)) fail("merge_target_source_scope_mismatch");
+            await readMergeTargetNormalization(row.document, row, repo);
+          }
+        }
         const views = candidates
           .flatMap((row) =>
             row.document.facts
@@ -4320,6 +4565,10 @@ export async function createPipeline(options) {
           correctionReceipt: approvalReceipt,
           observedAt: utc(now()),
         };
+        // A new exclusion cannot earn merge credit. Its durable receipt must not
+        // inherit the positive source fact's generation-specific proof projection.
+        // Exact retries retain the original persisted correction bytes.
+        if (!priorCorrection) delete corrected.mergeTarget;
         restrictConfiguration(controlsStore.read());
         await tx.query(
           `INSERT INTO leaderboard_pipeline.corrections (request_id,fact_id,artifact_id,repository_id,document)
@@ -4408,7 +4657,7 @@ export async function createPipeline(options) {
             authorization.configurationHash !== digest(config) ||
             authorization.dataMode !== dataMode ||
             saved.snapshot.dataMode !== dataMode ||
-            canonical(saved.input.policies) !== canonical(config.policies) ||
+            canonical(saved.input.policies) !== canonical(policiesForScope(scope)) ||
             authorization.controlsConfigurationRevision !== overlay.revision ||
             !configuredScope(scope) ||
             !confirmationMatches(confirmation, scope, snapshot.snapshotId, snapshot.revision) ||

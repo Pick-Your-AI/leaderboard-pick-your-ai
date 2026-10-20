@@ -15,7 +15,13 @@ import { ContributorOrganizationHistory } from "./ParticipationHistory.tsx";
 import { EvidenceDrawer, EvidenceProof, Receipt } from "./Evidence.tsx";
 import { isProofTransition, proofHref, readProof, withoutProof } from "./proof.ts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { actorFilterLabels, publicScopeKey, type MetricDefinition, type MetricRegistry } from "@pick-your-ai/contracts";
+import {
+  actorFilterLabels,
+  publicScopeKey,
+  supportsPullRequestMergeTarget,
+  type MetricDefinition,
+  type MetricRegistry,
+} from "@pick-your-ai/contracts";
 import { startLiveUpdates, type LiveState } from "@pick-your-ai/service/live-client";
 import { applyThemePreference, readThemePreference, type ThemePreference } from "../lib/theme.ts";
 import { ActivityFeed, ActivityProofs } from "./Activity.tsx";
@@ -328,6 +334,9 @@ function Filters({
           }
           const roles = input.getAll("role").map(String);
           if (roles.length) params.set("role", roles.join(","));
+          // A branch is an exact native ref name; never trim or normalize it.
+          const branch = String(input.get("branch") ?? "");
+          if (branch !== "") params.set("branch", branch);
           // Existing pins and cursors identify one complete scope. An explicitly
           // changed pin remains reviewable; an unchanged old pin is not reused.
           try {
@@ -368,6 +377,14 @@ function Filters({
           detect AI assistance.
         </p>
         <PublicScopeControls selected={selected} />
+        <label>
+          Merge target at merge
+          <input name="branch" defaultValue={selected.branch ?? ""} placeholder="Exact branch name" />
+        </label>
+        <p className="small">
+          Choose one repository and a merged PR, merge-operator or verified coauthor measure. This filter uses the
+          recorded merge event, not the PR's current target. Missing merge evidence remains unknown.
+        </p>
         {(["organization", "repository", "workstream", "start", "end", "snapshot", "limit", "metric"] as const).map(
           (key) => (
             <label key={key}>
@@ -546,6 +563,8 @@ export function RemoteApp() {
           throw new ReadFailure(400, "conflicting_metric_selection");
         selected.metric = id;
       }
+      if (selected.branch !== undefined && !supportsPullRequestMergeTarget(selected.metric))
+        throw new ReadFailure(400, "unsupported_merge_target_metric");
       const base = apiBase(import.meta.env.VITE_PUBLIC_API_BASE || "/api/v1");
       const liveScope =
         program !== false || isCatalogPath(url.pathname) || /^\/methodology\/[^/]+$/.test(url.pathname)

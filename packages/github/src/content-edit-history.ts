@@ -164,7 +164,7 @@ function edit(value: unknown): NativeContentEdit {
   };
 }
 
-function nativeEdit(value: unknown): NativeContentEdit {
+export function parseNativeGithubContentEditRecord(value: unknown): NativeContentEdit {
   if (!object(value) || value.__typename !== "UserContentEdit") return fail("history_unverified");
   return edit({
     id: value.id,
@@ -177,7 +177,7 @@ function nativeEdit(value: unknown): NativeContentEdit {
   });
 }
 
-function parent(value: unknown, repository?: Repository): ContentEditParent {
+export function parseGithubContentEditParent(value: unknown, repository?: Repository): ContentEditParent {
   const entry = keys(value, ["kind", "id", "number", "url"]);
   if (entry.kind !== "issue" && entry.kind !== "pull_request") return fail("parent_unverified");
   const number = integer(entry.number, 1, Number.MAX_SAFE_INTEGER);
@@ -200,7 +200,7 @@ function parent(value: unknown, repository?: Repository): ContentEditParent {
 function nativeParent(value: unknown, kind: Kind, repository: Repository): ContentEditParent {
   if (!object(value) || value.__typename !== (kind === "issue" ? "Issue" : "PullRequest"))
     return fail("parent_unverified");
-  return parent({ kind, id: value.id, number: value.number, url: value.url }, repository);
+  return parseGithubContentEditParent({ kind, id: value.id, number: value.number, url: value.url }, repository);
 }
 
 function sameParent(value: ContentEditParent, expected: ContentEditParent): void {
@@ -225,30 +225,30 @@ function records(value: unknown, maximum: number): NativeContentEdit[] {
   return result.sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
 }
 
-/** Closed metadata for private persistence and revision verification; no raw response fields survive. */
-export function parseGithubContentEditMetadata(value: unknown): ContentEditMetadata {
-  const entry = keys(value, ["version", "parent", "includesCreatedEdit", "history"]);
-  if (entry.version !== version || typeof entry.includesCreatedEdit !== "boolean") return fail("history_unverified");
-  const selectedParent = parent(entry.parent);
-  const history = keys(entry.history, ["availability", "retainedTotalCount", "records"]);
+/** Closed edit values shared by the parent and bound-comment readers; no body or diff survives. */
+export function parseGithubContentEditHistory(value: unknown): ContentEditMetadata["history"] {
+  const history = keys(value, ["availability", "retainedTotalCount", "records"]);
   if (history.availability === "unavailable") {
     if (history.retainedTotalCount !== null || history.records !== null) return fail("history_unverified");
-    return {
-      version,
-      parent: selectedParent,
-      includesCreatedEdit: entry.includesCreatedEdit,
-      history: { availability: "unavailable", retainedTotalCount: null, records: null },
-    };
+    return { availability: "unavailable", retainedTotalCount: null, records: null };
   }
   if (history.availability !== "available") return fail("history_unverified");
   const count = integer(history.retainedTotalCount, 0, 100);
   const selected = records(history.records, 100);
   if (selected.length !== count) return fail("count_mismatch");
+  return { availability: "available", retainedTotalCount: count, records: selected };
+}
+
+/** Closed metadata for private persistence and revision verification; no raw response fields survive. */
+export function parseGithubContentEditMetadata(value: unknown): ContentEditMetadata {
+  const entry = keys(value, ["version", "parent", "includesCreatedEdit", "history"]);
+  if (entry.version !== version || typeof entry.includesCreatedEdit !== "boolean") return fail("history_unverified");
+  const selectedParent = parseGithubContentEditParent(entry.parent);
   return {
     version,
     parent: selectedParent,
     includesCreatedEdit: entry.includesCreatedEdit,
-    history: { availability: "available", retainedTotalCount: count, records: selected },
+    history: parseGithubContentEditHistory(entry.history),
   };
 }
 
@@ -330,7 +330,7 @@ function parentPage(value: unknown, kind: Kind, options: Captured): ParentPage {
   const count = integer(entry.totalCount, 0, Number.MAX_SAFE_INTEGER);
   if (count > options.maxParents || entry.parents.length > options.first) return fail("budget_exceeded");
   const parents = entry.parents.map((item) => {
-    const result = parent(item, options.repository);
+    const result = parseGithubContentEditParent(item, options.repository);
     if (result.kind !== kind) fail("parent_unverified");
     return result;
   });
@@ -404,7 +404,7 @@ function editPage(value: unknown, expected: ContentEditParent, options: Captured
   ]);
   if (entry.version !== "github-content-edit-metadata-page/v1" || typeof entry.includesCreatedEdit !== "boolean")
     return fail("history_unverified");
-  const selectedParent = parent(entry.parent, options.repository);
+  const selectedParent = parseGithubContentEditParent(entry.parent, options.repository);
   sameParent(selectedParent, expected);
   const info = pageInfo(entry.pageInfo, true);
   const repo = repository(entry.repository, options.repository, true);
@@ -478,7 +478,8 @@ async function metadataFor(expected: ContentEditParent, options: Captured): Prom
             includesCreatedEdit: native.includesCreatedEdit,
             availability: connection === null ? "unavailable" : "available",
             retainedTotalCount: connection === null ? null : connection.totalCount,
-            records: connection === null ? null : (connection.nodes as unknown[]).map(nativeEdit),
+            records:
+              connection === null ? null : (connection.nodes as unknown[]).map(parseNativeGithubContentEditRecord),
             pageInfo: connection === null ? { hasNextPage: false, endCursor: null } : pageInfo(connection.pageInfo),
           },
           expected,
@@ -522,7 +523,7 @@ export async function readGithubContentEditMetadata(
   options: ContentEditReadOptions & { parent: ContentEditParent },
 ): Promise<ContentEditMetadata> {
   const captured = capture(options);
-  const expected = parent(options.parent, captured.repository);
+  const expected = parseGithubContentEditParent(options.parent, captured.repository);
   return metadataFor(expected, captured);
 }
 
