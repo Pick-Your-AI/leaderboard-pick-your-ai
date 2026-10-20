@@ -1543,7 +1543,10 @@ async function pendingPairMergeRetry(t) {
   assert.equal(iso(scans[0].event_cutoff), cutoff);
   assert.equal(iso(scans[0].observation_cutoff), cutoff);
   assert.ok(Object.values(scans[0].scope_heads).every((head) => head === null));
-  assert.deepEqual(original.map((row) => row.fact_key), sources.map((row) => row.fact_key));
+  assert.deepEqual(
+    original.map((row) => row.fact_key),
+    sources.map((row) => row.fact_key),
+  );
 
   // B changes only its capture clock and generation. Its native source rows
   // remain A's exact five observations, and neither cycle has a publication.
@@ -1580,7 +1583,10 @@ async function pendingPairMergeRetry(t) {
       !original.some((prior) => prior.fact_key === row.fact_key && prior.policy_signature === row.policy_signature),
   );
   assert.equal(later.length, 5);
-  assert.deepEqual(later.map((row) => row.fact_key), original.map((row) => row.fact_key));
+  assert.deepEqual(
+    later.map((row) => row.fact_key),
+    original.map((row) => row.fact_key),
+  );
   for (const prior of original) {
     assert.deepEqual(
       all.find((row) => row.fact_key === prior.fact_key && row.policy_signature === prior.policy_signature),
@@ -1775,7 +1781,11 @@ async function assertRetriedPairMergeWithdrawn(fixture, publication) {
     for (const suffix of ["/boards", "/exports"]) {
       const response = await runtime.app.inject("/api/v1" + suffix + "?" + parameters);
       if (response.statusCode === 200) {
-        if (suffix === "/boards") assert.deepEqual(response.json().rows.filter((row) => row.result.value > 0), []);
+        if (suffix === "/boards")
+          assert.deepEqual(
+            response.json().rows.filter((row) => row.result.value > 0),
+            [],
+          );
         else assert.doesNotMatch(response.body, /synthetic-merge-linker/);
       } else assert.equal(response.statusCode, snapshot ? 410 : 503, response.body);
       assert.doesNotMatch(response.body, /I_SYNTHETIC_MERGE_PAIR|PR_BRANCH_|relationshipPair|normalizationSources/);

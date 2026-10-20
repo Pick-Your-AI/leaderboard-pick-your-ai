@@ -147,12 +147,7 @@ test("displaced pair history bounds source reads while matching compact aggregat
     },
   });
   const source = input(
-    [
-      ...Array.from({ length: width }, () => observed),
-      ...Array.from({ length: width }, () => left),
-      right,
-      later,
-    ],
+    [...Array.from({ length: width }, () => observed), ...Array.from({ length: width }, () => left), right, later],
     "synthetic-bounded-pair-history",
   );
   const compact = aggregateMetric(
