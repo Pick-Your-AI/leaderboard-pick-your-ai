@@ -2659,7 +2659,10 @@ for (const metric of ["performance", "regressions_prevented"]) {
     );
     const after = await retained();
     for (const row of original.frozen)
-      assert.deepEqual(after.frozen.find((entry) => entry.snapshot_id === row.snapshot_id), row);
+      assert.deepEqual(
+        after.frozen.find((entry) => entry.snapshot_id === row.snapshot_id),
+        row,
+      );
     for (const row of original.normalizations)
       assert.deepEqual(
         after.normalizations.find(
