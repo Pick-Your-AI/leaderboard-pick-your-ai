@@ -69,11 +69,10 @@ async function nativeObservation(scan, completedAt) {
     }).status,
     "validated",
   );
-  assert.deepEqual(fixture.state.calls.map((call) => call.operation), [
-    "PullRequestDecisionAnchor",
-    "PullRequestDecisionHistory",
-    "PullRequestDecisionAnchor",
-  ]);
+  assert.deepEqual(
+    fixture.state.calls.map((call) => call.operation),
+    ["PullRequestDecisionAnchor", "PullRequestDecisionHistory", "PullRequestDecisionAnchor"],
+  );
   return parsePullRequestDecisionObservation({
     schemaVersion: pullRequestDecisionObservationVersion,
     sourceRevision,

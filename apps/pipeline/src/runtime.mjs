@@ -4091,7 +4091,7 @@ export async function createPipeline(options) {
         "sources",
         "issueTransferEvidence",
         "relationshipPairEvidence",
-      "pullRequestDecisionEvidence",
+        "pullRequestDecisionEvidence",
         "discussionFeedbackEvidence",
         "reversionAuthority",
         "reversionRecordsHash",

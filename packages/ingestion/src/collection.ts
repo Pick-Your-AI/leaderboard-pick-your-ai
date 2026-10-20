@@ -204,7 +204,10 @@ export class CollectionStore {
   readonly #decisionAuthorize: (() => void) | null;
   readonly #decisionAuthorizationMethod: ReadOnlySource["assertAuthorized"] | null;
 
-  constructor(readonly db: SqlDatabase, decisionProducer?: DecisionHistoryCollectionProducer) {
+  constructor(
+    readonly db: SqlDatabase,
+    decisionProducer?: DecisionHistoryCollectionProducer,
+  ) {
     this.#decisionProducer =
       decisionProducer === undefined
         ? null

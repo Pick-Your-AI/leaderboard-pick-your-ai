@@ -222,10 +222,9 @@ const scans = (h) =>
 
 async function frozen(h, publication) {
   const row = (
-    await h.db.query(
-      "SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1",
-      [publication.snapshotId],
-    )
+    await h.db.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
+      publication.snapshotId,
+    ])
   ).rows[0];
   assert.ok(row);
   assert.equal(comparisonHash(row.document), row.document_hash);
@@ -436,7 +435,10 @@ test(
     const b = await captureFor(f, onlyPublication(later), later.progress);
     const retained = await sourceRows(h);
     assert.equal(retained.length, 2);
-    assert.deepEqual(retained.find((row) => row.fact_key === original[0].fact_key), original[0]);
+    assert.deepEqual(
+      retained.find((row) => row.fact_key === original[0].fact_key),
+      original[0],
+    );
     const next = retained.find((row) => row.fact_key !== original[0].fact_key);
     const nextObservation = await assertCapturedRow(next, b.capture);
     assert.equal(next.subject_id, original[0].subject_id);
@@ -504,7 +506,10 @@ test(
     const allNormalizations = await normalizations(h);
     assert.equal(allSources.length, 2);
     assert.equal(allNormalizations.length, 2);
-    assert.deepEqual(allSources.find((row) => row.fact_key === originalSources[0].fact_key), originalSources[0]);
+    assert.deepEqual(
+      allSources.find((row) => row.fact_key === originalSources[0].fact_key),
+      originalSources[0],
+    );
     assert.deepEqual(
       allNormalizations.find((row) => row.fact_key === originalNormalizations[0].fact_key),
       originalNormalizations[0],
@@ -530,7 +535,10 @@ test(
     const a = await captureFor(f, publication, resumed.progress);
     assert.equal(a.capture.asOf, aCutoff);
     assert.equal(a.capture.observationCutoff, aFrozenCutoff);
-    assert.deepEqual(a.capture.runs.map((run) => run.runId), [aObservation.generation.scanId]);
+    assert.deepEqual(
+      a.capture.runs.map((run) => run.runId),
+      [aObservation.generation.scanId],
+    );
     assert.deepEqual(
       a.capture.runs.flatMap((run) => run.observations.map((item) => item.factKey)),
       [originalSources[0].fact_key],
