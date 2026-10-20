@@ -118,15 +118,19 @@ export { relationshipPairNormalizationVersion } from "@pick-your-ai/contracts";
 /** Cache generation for field changes compared as JSON values, not key order. */
 export const fieldChangeNormalizationVersion = "field-change-json-values/v1";
 
-function sameJsonValue(before: unknown, after: unknown): boolean {
-  // Keep the existing JSON projection (including serialization errors). Compare
-  // parsed values so object member order is irrelevant at every nesting level,
-  // while array order, member presence and JSON scalar types remain significant.
-  const beforeJson = JSON.stringify(before);
-  const afterJson = JSON.stringify(after);
+/** Cache generation for triage metadata compared as JSON values, not key order. */
+export const triageMetadataNormalizationVersion = "triage-metadata-json-values/v1";
+
+function sameJsonProjection(beforeJson: string | undefined, afterJson: string | undefined): boolean {
+  // Compare the existing JSON projection so object member order is irrelevant
+  // recursively, while array order, member presence and scalar types still matter.
   if (beforeJson === afterJson) return true;
   if (beforeJson === undefined || afterJson === undefined) return false;
   return isDeepStrictEqual(JSON.parse(beforeJson), JSON.parse(afterJson));
+}
+
+function sameJsonValue(before: unknown, after: unknown): boolean {
+  return sameJsonProjection(JSON.stringify(before), JSON.stringify(after));
 }
 
 /** Hash only explicit source fields; text contributes to revision identity but is never retained. */
@@ -1310,7 +1314,11 @@ export function normalizeGithubObservation(
     const target = targetField ? payload[targetField] : null;
     const targetId = object(target) ? resourceId(target, "metadata", repository.id) : text(payload.target_id);
     if (!metric || !proof.eventId) out.reasons.push("unsupported_or_unproven_triage_action");
-    else if (object(payload.change) && JSON.stringify(payload.change.before) === JSON.stringify(payload.change.after))
+    else if (
+      object(payload.change) &&
+      // Serialize before completely before reading after, including custom getters.
+      sameJsonProjection(JSON.stringify(payload.change.before), JSON.stringify(payload.change.after))
+    )
       out.reasons.push("no_op_metadata_change");
     else {
       const missingTarget = targetField !== null && !targetId;
