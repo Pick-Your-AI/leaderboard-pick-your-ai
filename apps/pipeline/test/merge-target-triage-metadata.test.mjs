@@ -30,7 +30,16 @@ const withTriage = (withField = false) => ({
   triageMetadataNormalizationVersion,
 });
 const validate = (document, signature, triageBinding = triageOption, fieldBinding = fieldOption) =>
-  validateMergeTargetGeneration(document, signature, baseSignature, digest, delivery, fieldBinding, null, triageBinding);
+  validateMergeTargetGeneration(
+    document,
+    signature,
+    baseSignature,
+    digest,
+    delivery,
+    fieldBinding,
+    null,
+    triageBinding,
+  );
 
 test("an unused triage option preserves legacy merge and field generations without admitting a triage wrapper", () => {
   for (const withField of [false, true]) {

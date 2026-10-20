@@ -2087,11 +2087,7 @@ test("protected participation preserves exact projected pair rosters without exp
       const selected = await board(runtime, metric, 2);
       const selectedScope = { ...publicScope, repository: "2" };
       const input = await frozenInput(h, selected.snapshotId);
-      const selectedRead = await runtime.source.read(
-        selectedScope,
-        selected.snapshotId,
-        new AbortController().signal,
-      );
+      const selectedRead = await runtime.source.read(selectedScope, selected.snapshotId, new AbortController().signal);
       const organizationRead = await runtime.source.read(
         publicScope,
         organization.snapshotId,
@@ -2105,7 +2101,10 @@ test("protected participation preserves exact projected pair rosters without exp
         ),
       );
       assert.ok(selectedRead.selected.actors.some((entry) => entry.actorId === "202"));
-      assert.equal(selectedRead.selected.actors.some((entry) => entry.actorId === "303"), false);
+      assert.equal(
+        selectedRead.selected.actors.some((entry) => entry.actorId === "303"),
+        false,
+      );
       const peerActor = organizationRead.selected.actors.find((entry) => entry.actorId === "303");
       assert.ok(peerActor);
       const calls = structuredClone(h.calls);
@@ -2144,7 +2143,10 @@ test("protected participation preserves exact projected pair rosters without exp
       assert.ok(paired);
       assert.equal(paired.history, null);
       assert.deepEqual(paired.current.selected.actors, selectedRead.selected.actors);
-      assert.equal(paired.current.selected.actors.some((entry) => entry.actorId === "303"), false);
+      assert.equal(
+        paired.current.selected.actors.some((entry) => entry.actorId === "303"),
+        false,
+      );
       assert.doesNotMatch(JSON.stringify(paired), /synthetic-earlier-linker|U_SYNTHETIC_CROSS_PAIR_303/);
       assert.equal(originals.length, 1);
       assert.match(originals[0].sql, /CASE WHEN octet_length\(document::text\)<=8000000 THEN document END/);
@@ -2219,104 +2221,110 @@ test("protected participation preserves exact projected pair rosters without exp
     });
 });
 
-test("static pair authority rejects missing triage markers before accepting retained dependencies", { timeout: 120_000 }, async (t) => {
-  const h = await crossRepositoryHarness(t, "reference_links");
-  await published(h);
-  const original = await semanticNormalizationRows(h);
-  assert.equal(original.length, 1);
-  const row = original[0];
-  const base = currentSignature(h.config);
-  assert.equal(row.policy_signature, comparisonHash([version, base]));
-  assert.equal(Object.hasOwn(row.document, "pullRequestMergeTargetNormalization"), false);
-  assert.equal(Object.hasOwn(row.document, "triageMetadataNormalizationVersion"), false);
-  const selected = await board(h.runtime, h.metric);
-  assert.deepEqual(values(selected), [["202", 1]]);
-  const frozen = await frozenInput(h, selected.snapshotId);
-  const read = (pin = selected.snapshotId) =>
-    h.runtime.source.read(publicScope, pin, new AbortController().signal);
-  const first = await read();
-  assert.ok(first);
-  const calls = structuredClone(h.calls);
-  const triageVersion = components.github.triageMetadataNormalizationVersion;
-  const triage = components.github.normalizeGithubObservation({
-    repository: { id: 2, slug: sourceSlug, visibility: "public" },
-    proof: {
-      verified: true,
-      source: "github_rest",
-      revision: "synthetic-static-pair-triage",
-      eventId: "synthetic-static-pair-triage-noop",
-      isSynthetic: true,
-    },
-    family: "triage",
-    action: "unlabeled",
-    occurredAt: ago(2),
-    observedAt: clock(),
-    payload: {
-      issue: {
-        id: 20,
-        node_id: issueId,
-        number: 20,
-        html_url: `https://github.com/${sourceSlug}/issues/20`,
-        created_at: ago(2),
-        updated_at: ago(2),
-        state: "open",
-        user: author,
+test(
+  "static pair authority rejects missing triage markers before accepting retained dependencies",
+  { timeout: 120_000 },
+  async (t) => {
+    const h = await crossRepositoryHarness(t, "reference_links");
+    await published(h);
+    const original = await semanticNormalizationRows(h);
+    assert.equal(original.length, 1);
+    const row = original[0];
+    const base = currentSignature(h.config);
+    assert.equal(row.policy_signature, comparisonHash([version, base]));
+    assert.equal(Object.hasOwn(row.document, "pullRequestMergeTargetNormalization"), false);
+    assert.equal(Object.hasOwn(row.document, "triageMetadataNormalizationVersion"), false);
+    const selected = await board(h.runtime, h.metric);
+    assert.deepEqual(values(selected), [["202", 1]]);
+    const frozen = await frozenInput(h, selected.snapshotId);
+    const read = (pin = selected.snapshotId) => h.runtime.source.read(publicScope, pin, new AbortController().signal);
+    const first = await read();
+    assert.ok(first);
+    const calls = structuredClone(h.calls);
+    const triageVersion = components.github.triageMetadataNormalizationVersion;
+    const triage = components.github.normalizeGithubObservation({
+      repository: { id: 2, slug: sourceSlug, visibility: "public" },
+      proof: {
+        verified: true,
+        source: "github_rest",
+        revision: "synthetic-static-pair-triage",
+        eventId: "synthetic-static-pair-triage-noop",
+        isSynthetic: true,
       },
-      sender: actor,
-      label: { id: 80 },
-      change: { before: { a: 1, b: null }, after: { b: null, a: 1 } },
-    },
-  });
-  assert.deepEqual(triage.facts, []);
-  assert.deepEqual(triage.evidence, []);
-  assert.deepEqual(triage.reasons, ["no_op_metadata_change"]);
-  // This explicit retained-cache fixture preserves the actual pair facts and
-  // source row. It does not rewrite any normalization bound by the publication.
-  const retained = {
-    ...structuredClone(row.document),
-    triageMetadataNormalizationVersion: triageVersion,
-    reasons: [...row.document.reasons, ...triage.reasons],
-  };
-  const signature = comparisonHash([version, comparisonHash([triageVersion, base])]);
-  assert.notEqual(signature, row.policy_signature);
-  await h.db.query(
-    "INSERT INTO leaderboard_pipeline.normalizations(fact_key,policy_signature,document,document_hash) VALUES($1,$2,$3::jsonb,$4)",
-    [row.fact_key, signature, JSON.stringify(retained), comparisonHash(retained)],
-  );
-  assert.deepEqual((await read()).selected.rows, first.selected.rows);
-  const afterInsert = await semanticNormalizationRows(h);
-  assert.equal(afterInsert.length, 2);
-  assert.deepEqual(afterInsert.find((entry) => entry.policy_signature === row.policy_signature), row);
-  assert.deepEqual(await frozenInput(h, selected.snapshotId), frozen);
-  for (const marker of [undefined, "obsolete"]) {
-    const changed = structuredClone(retained);
-    if (marker === undefined) delete changed.triageMetadataNormalizationVersion;
-    else changed.triageMetadataNormalizationVersion = marker;
+      family: "triage",
+      action: "unlabeled",
+      occurredAt: ago(2),
+      observedAt: clock(),
+      payload: {
+        issue: {
+          id: 20,
+          node_id: issueId,
+          number: 20,
+          html_url: `https://github.com/${sourceSlug}/issues/20`,
+          created_at: ago(2),
+          updated_at: ago(2),
+          state: "open",
+          user: author,
+        },
+        sender: actor,
+        label: { id: 80 },
+        change: { before: { a: 1, b: null }, after: { b: null, a: 1 } },
+      },
+    });
+    assert.deepEqual(triage.facts, []);
+    assert.deepEqual(triage.evidence, []);
+    assert.deepEqual(triage.reasons, ["no_op_metadata_change"]);
+    // This explicit retained-cache fixture preserves the actual pair facts and
+    // source row. It does not rewrite any normalization bound by the publication.
+    const retained = {
+      ...structuredClone(row.document),
+      triageMetadataNormalizationVersion: triageVersion,
+      reasons: [...row.document.reasons, ...triage.reasons],
+    };
+    const signature = comparisonHash([version, comparisonHash([triageVersion, base])]);
+    assert.notEqual(signature, row.policy_signature);
     await h.db.query(
-      "UPDATE leaderboard_pipeline.normalizations SET document=$3::jsonb,document_hash=$4 WHERE fact_key=$1 AND policy_signature=$2",
-      [row.fact_key, signature, JSON.stringify(changed), comparisonHash(changed)],
+      "INSERT INTO leaderboard_pipeline.normalizations(fact_key,policy_signature,document,document_hash) VALUES($1,$2,$3::jsonb,$4)",
+      [row.fact_key, signature, JSON.stringify(retained), comparisonHash(retained)],
     );
-    try {
-      // Hash, source, P version and old frozen bindings remain valid. Only the
-      // marker required by this admitted static P(T(base)) key is missing/stale.
-      for (const pin of [selected.snapshotId, null])
-        await assert.rejects(read(pin), { message: "relationship_pair_normalization_obsolete" });
-      assert.deepEqual(await frozenInput(h, selected.snapshotId), frozen);
-      const old = (await semanticNormalizationRows(h)).find(
-        (entry) => entry.policy_signature === row.policy_signature,
-      );
-      assert.deepEqual(old, row);
-    } finally {
+    assert.deepEqual((await read()).selected.rows, first.selected.rows);
+    const afterInsert = await semanticNormalizationRows(h);
+    assert.equal(afterInsert.length, 2);
+    assert.deepEqual(
+      afterInsert.find((entry) => entry.policy_signature === row.policy_signature),
+      row,
+    );
+    assert.deepEqual(await frozenInput(h, selected.snapshotId), frozen);
+    for (const marker of [undefined, "obsolete"]) {
+      const changed = structuredClone(retained);
+      if (marker === undefined) delete changed.triageMetadataNormalizationVersion;
+      else changed.triageMetadataNormalizationVersion = marker;
       await h.db.query(
         "UPDATE leaderboard_pipeline.normalizations SET document=$3::jsonb,document_hash=$4 WHERE fact_key=$1 AND policy_signature=$2",
-        [row.fact_key, signature, JSON.stringify(retained), comparisonHash(retained)],
+        [row.fact_key, signature, JSON.stringify(changed), comparisonHash(changed)],
       );
+      try {
+        // Hash, source, P version and old frozen bindings remain valid. Only the
+        // marker required by this admitted static P(T(base)) key is missing/stale.
+        for (const pin of [selected.snapshotId, null])
+          await assert.rejects(read(pin), { message: "relationship_pair_normalization_obsolete" });
+        assert.deepEqual(await frozenInput(h, selected.snapshotId), frozen);
+        const old = (await semanticNormalizationRows(h)).find(
+          (entry) => entry.policy_signature === row.policy_signature,
+        );
+        assert.deepEqual(old, row);
+      } finally {
+        await h.db.query(
+          "UPDATE leaderboard_pipeline.normalizations SET document=$3::jsonb,document_hash=$4 WHERE fact_key=$1 AND policy_signature=$2",
+          [row.fact_key, signature, JSON.stringify(retained), comparisonHash(retained)],
+        );
+      }
+      assert.deepEqual((await read()).selected.rows, first.selected.rows);
     }
-    assert.deepEqual((await read()).selected.rows, first.selected.rows);
-  }
-  assert.deepEqual(await semanticNormalizationRows(h), afterInsert);
-  assert.deepEqual(h.calls, calls, "current and pinned reads never recollect or rehydrate");
-});
+    assert.deepEqual(await semanticNormalizationRows(h), afterInsert);
+    assert.deepEqual(h.calls, calls, "current and pinned reads never recollect or rehydrate");
+  },
+);
 
 test(
   "protected pair reads bound every authority query before decoding retained payloads",
@@ -2368,8 +2376,7 @@ test(
     const isPairQuery = (sql) =>
       sql.includes(
         "FROM leaderboard_pipeline.normalizations n JOIN leaderboard_ingestion.source_facts f USING(fact_key)",
-      ) &&
-      sql.includes("ORDER BY n.fact_key,n.policy_signature LIMIT 20001 FOR SHARE OF n");
+      ) && sql.includes("ORDER BY n.fact_key,n.policy_signature LIMIT 20001 FOR SHARE OF n");
     const sameTarget = (left, right) =>
       left.phase === right.phase && left.kind === right.kind && left.ordinal === right.ordinal;
 
@@ -2416,7 +2423,10 @@ test(
     assert.ok(result);
     assert.equal(result.history, null, "the host grants no separate historical input");
     assert.ok(result.current.selected.actors.some((entry) => entry.actorId === "202"));
-    assert.equal(result.current.selected.actors.some((entry) => entry.actorId === "303"), false);
+    assert.equal(
+      result.current.selected.actors.some((entry) => entry.actorId === "303"),
+      false,
+    );
     assert.ok(input.frozen.actors.some((entry) => entry.id === "303"));
     assert.ok(healthy.queries.length > 0);
     for (const query of healthy.queries) {
