@@ -121,6 +121,40 @@ test("API methods and discovery render supplied metadata without prototype recor
       assert.match(definition, /No selectable candidate view registered/);
       assert.doesNotMatch(definition, /Raw triage grouping/);
     }
+    const rawTriage = renderToStaticMarkup(
+      React.createElement(RegistryMetadata, { registry, metric: registryMetric(registry, "items_triaged") }),
+    );
+    assert.match(rawTriage, /<dt>Raw triage grouping<\/dt>/);
+    assert.match(rawTriage, /3600-second UTC buckets/);
+    for (const [metricId, label, version] of [
+      ["project_field_updates", "Project item-day grouping", "project-field-day/v1"],
+      ["public_moderation", "Public stewardship item-day grouping", "public-stewardship-day/v1"],
+    ]) {
+      const html = renderToStaticMarkup(
+        React.createElement(RegistryMetadata, { registry, metric: registryMetric(registry, metricId) }),
+      );
+      const detail = html.match(new RegExp("<dt>" + label + "</dt><dd>([\\s\\S]*?)</dd>"))?.[1];
+      assert.ok(detail, metricId);
+      const normalized = detail.replace(/\s+/g, " ");
+      assert.ok(normalized.includes(version));
+      assert.match(normalized, /per UTC calendar day within its repository/);
+      assert.match(html, /No selectable candidate view registered/);
+      assert.doesNotMatch(normalized, /stable definition|definition kind/);
+      if (metricId === "project_field_updates") {
+        assert.match(normalized, /one observed actor and stable Project item/);
+        assert.match(normalized, /Different field facets, repeated changes and reversals share one item day/);
+        assert.match(normalized, /Only the proven source event time chooses the day/);
+        assert.match(normalized, /collection or acceptance time cannot replace it/);
+        assert.doesNotMatch(normalized, /Independently qualified|source or acceptance day/);
+      } else {
+        assert.match(normalized, /one actor and stable item/);
+        assert.match(normalized, /Pin, unpin, lock and unlock facets and repeated toggles share one daily unit/);
+        assert.match(normalized, /Independently qualified same-metric receipts/);
+        assert.match(normalized, /separate source or acceptance day lenses/);
+        assert.match(normalized, /acceptance never supplies a missing raw event time/);
+        assert.match(normalized, /Totals remain descriptive and are never ranked/);
+      }
+    }
     const catalogPage = renderToStaticMarkup(
       React.createElement(RegistryCatalog, {
         registry,

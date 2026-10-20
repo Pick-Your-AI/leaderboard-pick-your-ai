@@ -1,4 +1,5 @@
 import React from "react";
+import { describeMetricGrouping } from "../lib/metric-grouping.ts";
 import type { MetricDefinition, MetricRegistry } from "@pick-your-ai/contracts";
 import { getMetricGroupingPolicy, getMetricUi, getRegistryDepartments } from "@pick-your-ai/metrics";
 import { uiHref, type Selection } from "./client.ts";
@@ -15,6 +16,7 @@ export function RegistryMetadata({ registry, metric }: { registry: MetricRegistr
   const ui = getMetricUi(metric.id, registry);
   const departments = getRegistryDepartments(registry);
   const grouping = getMetricGroupingPolicy(metric.id, registry);
+  const groupingDescription = grouping ? describeMetricGrouping(grouping) : null;
   if (!ui || registry.ui_metadata.decision_state !== "candidate")
     return (
       <p>
@@ -48,28 +50,10 @@ export function RegistryMetadata({ registry, metric }: { registry: MetricRegistr
         </dd>
         <dt>Implementation limitations</dt>
         <dd>{ui.limitations.join(" ")}</dd>
-        {grouping && (
+        {groupingDescription && (
           <>
-            <dt>
-              {grouping.group_by === "actor_artifact_state_interval"
-                ? "Raw triage grouping"
-                : "Definition-day grouping"}
-            </dt>
-            {grouping.group_by === "actor_artifact_state_interval" ? (
-              <dd>
-                {grouping.version}; exact raw source state per actor/artifact in {grouping.grouping_seconds}-second UTC
-                buckets anchored at {grouping.interval_origin}. Repeated identical state in one bucket counts once.
-                Missing state/time remains unknown. No semantic classifier.
-              </dd>
-            ) : (
-              <dd>
-                {grouping.version}; one actor and stable definition per UTC calendar day within its repository and
-                definition kind. Creation, edits and reversals share the same daily unit. Observed changes use the
-                proven source day. Independently qualified receipts can use a separately selected source or acceptance
-                day; acceptance never supplies a missing raw event time. Missing identity or the selected clock stays
-                unknown. Grouping does not establish correctness or enable a view.
-              </dd>
-            )}
+            <dt>{groupingDescription.label}</dt>
+            <dd>{groupingDescription.detail}</dd>
           </>
         )}
       </dl>

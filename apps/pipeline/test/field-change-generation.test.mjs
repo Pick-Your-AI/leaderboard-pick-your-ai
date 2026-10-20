@@ -127,12 +127,20 @@ async function fieldHarness(t, action = "issue_field_changed", extra = {}) {
       const issuePolicy = config.policies[0];
       config.repositories[0].families = [sourceFamily];
       const metricId = actions[action];
+      const grouping = components.metrics.getMetricGroupingPolicy(metricId);
       const policy = {
         ...issuePolicy.policy,
         metricId,
         unit: components.metrics.getMetricDefinition(metricId).definition.unit,
         roles: ["triager"],
         sources: ["github_rest"],
+        ...(grouping
+          ? {
+              groupBy: grouping.group_by,
+              groupingSeconds: grouping.grouping_seconds,
+              groupingPolicyVersion: grouping.version,
+            }
+          : {}),
         rank: false,
       };
       config.policies = [
