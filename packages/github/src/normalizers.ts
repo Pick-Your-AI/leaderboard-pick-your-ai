@@ -1955,6 +1955,9 @@ export function applyRecognitionReceipt(
         }
       : {}),
   };
+  // The native branch binding applies only to supported merge metrics.
+  // A derived recognition metric retains its source, not that projection.
+  if (!supportsPullRequestMergeTarget(fact.metricId)) delete fact.mergeTarget;
   out.facts.push(fact);
   const evidence = targetEvidence;
   if (evidence)

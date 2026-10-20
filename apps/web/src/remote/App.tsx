@@ -1459,7 +1459,7 @@ export function RemoteApp() {
             </>
           )}
           {data?.kind === "evidence" && <EvidenceProof value={data.value} selected={pinned} />}
-          {data?.kind === "unavailable" && (
+          {(url.pathname === "/corrections" || data?.kind === "unavailable") && (
             <section className="notice notice-info">
               <h2>This capability is not available in this UI</h2>
               <p>

@@ -52,21 +52,36 @@ function UpdateControl({
   onFollow: (follow: boolean) => void;
   onApply: () => void;
 }) {
+  const [retainApplyControl, setRetainApplyControl] = useState(false);
   return (
     <div className="update-control">
-      {pendingId ? (
-        <p>
-          <span className="health health-warn">
-            <span aria-hidden="true">◑</span> Update held
-          </span>{" "}
-          Snapshot {pendingId} is ready.{" "}
-          <button type="button" className="button" onClick={onApply}>
+      <p className={pendingId ? undefined : "muted"}>
+        {pendingId ? (
+          <>
+            <span className="health health-warn">
+              <span aria-hidden="true">◑</span> Update held
+            </span>{" "}
+            Snapshot {pendingId} is ready.{" "}
+          </>
+        ) : (
+          "Showing the latest snapshot. New snapshots are held until you apply them. "
+        )}
+        {(pendingId || retainApplyControl) && (
+          <button
+            type="button"
+            className="button"
+            aria-disabled={!pendingId}
+            onFocus={() => setRetainApplyControl(true)}
+            onClick={() => {
+              if (!pendingId) return;
+              onApply();
+            }}
+            onBlur={() => setRetainApplyControl(false)}
+          >
             Apply updates
           </button>
-        </p>
-      ) : (
-        <p className="muted">Showing the latest snapshot. New snapshots are held until you apply them.</p>
-      )}
+        )}
+      </p>
       <label className="checkbox">
         <input
           type="checkbox"

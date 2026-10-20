@@ -690,7 +690,7 @@ export function createService(options: ServiceOptions = {}) {
   );
   app.get("/api/v1/windows", async (request, reply) => {
     const params = new URL(request.url, "http://localhost").searchParams;
-    const dimensions = new Set(["organization", "repository", "workstream", "context", "project", "role"]);
+    const dimensions = new Set(["organization", "repository", "workstream", "context", "project", "role", "branch"]);
     for (const key of params.keys())
       if (!dimensions.has(key) || params.getAll(key).length !== 1) fail(400, "invalid_window_query");
     const { scope } = query(request);
