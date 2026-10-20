@@ -1157,7 +1157,7 @@ async function retainedPairMergeState(h) {
   const normalized = (
     await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature")
   ).rows;
-  return {
+  return structuredClone({
     snapshots,
     frozen,
     normalized,
@@ -1167,7 +1167,7 @@ async function retainedPairMergeState(h) {
       .all(),
     confirmations: structuredClone(h.controlsStore.read().pipelinePublications),
     heads: structuredClone(h.controlsStore.read().pipelineHeads),
-  };
+  });
 }
 
 test("pair and field enriched merge generations preserve frozen authority and withdraw a later unbound pair", async (t) => {
