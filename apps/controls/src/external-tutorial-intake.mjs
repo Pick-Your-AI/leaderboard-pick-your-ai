@@ -133,8 +133,7 @@ function manifestLocator(value) {
 
 function publicationTime(value) {
   if (value === null) return true;
-  if (typeof value !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z(?![\s\S])/.test(value))
-    return false;
+  if (typeof value !== "string" || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z(?![\s\S])/.test(value)) return false;
   const parsed = new Date(value);
   return (
     Number.isFinite(parsed.getTime()) &&
