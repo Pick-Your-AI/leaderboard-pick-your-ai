@@ -57,6 +57,14 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run typecheck
+        id: source_typecheck
+      - name: Print canonical formatting repair
+        if: ${{ failure() && steps.source_typecheck.outcome == 'failure' }}
+        shell: bash
+        timeout-minutes: 3
+        run: |
+          node scripts/format-source.mjs --write
+          git diff --no-ext-diff --no-textconv --full-index --no-color --
       - run: npm test
         env:
           PIPELINE_SCOPE_STORAGE_TEST_DATABASE_URL: postgres://leaderboard:leaderboard@127.0.0.1:5432/leaderboard_test

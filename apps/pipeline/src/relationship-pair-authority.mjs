@@ -176,7 +176,7 @@ function retainedEntry(row, { dataMode, generationsFor }) {
     "relationship_pair_normalization_obsolete",
   );
   check(
-    generationsFor(row.family, row.document).includes(row.policy_signature),
+    generationsFor(row.family, row.document, row.policy_signature).includes(row.policy_signature),
     "relationship_pair_normalization_obsolete",
   );
   return {
@@ -199,20 +199,83 @@ async function validateGeneration(row, options, cutoff = null) {
   return options.mergeTarget.validate(row, cutoff);
 }
 
+const protectedPairPayloadColumns = [
+  "fact_key",
+  "policy_signature",
+  "document",
+  "document_hash",
+  "repository_id",
+  "family",
+  "subject_id",
+  "source_document",
+  "source_evidence",
+  "observed_at",
+  "first_run_id",
+];
+
+// Bound the complete projected result in SQL before the driver decodes JSON or
+// returns variable-width scalar fields. The ordinary authority query is exact.
+function pairReadQuery(query, historyBudget) {
+  if (!historyBudget) return query;
+  return `WITH pair_retained AS MATERIALIZED (${query}),
+    pair_projected AS MATERIALIZED (
+      SELECT fact_key,policy_signature,document,document_hash,repository_id,family,subject_id,
+        CASE WHEN document ? 'pullRequestMergeTargetNormalization' THEN
+          jsonb_build_object('subjectId',source_document->'subjectId','sourceUrl',source_document->'sourceUrl',
+            'sourceRevision',source_document->'sourceRevision') END AS source_document,
+        source_evidence,observed_at,first_run_id
+      FROM pair_retained
+    ), pair_footprint AS (
+      SELECT count(*) AS records,
+        COALESCE(sum(octet_length(to_jsonb(pair_projected)::text)),0) AS bytes
+      FROM pair_projected
+    )
+    SELECT ${protectedPairPayloadColumns
+      .map(
+        (column) =>
+          `CASE WHEN pair_footprint.records<=10000 AND pair_footprint.bytes<=8000000 THEN pair_projected.${column} END AS ${column}`,
+      )
+      .join(",\n      ")},
+      pair_footprint.records AS history_records,pair_footprint.bytes AS history_bytes
+    FROM pair_projected CROSS JOIN pair_footprint
+    ORDER BY pair_projected.fact_key,pair_projected.policy_signature`;
+}
+
+function assertPairReadBudget(rows, historyBudget) {
+  if (!historyBudget) return;
+  check(
+    rows.length <= 10000 &&
+      rows.every(
+        (row) =>
+          Number.isSafeInteger(Number(row.history_records)) &&
+          Number(row.history_records) === rows.length &&
+          Number.isSafeInteger(Number(row.history_bytes)) &&
+          Number(row.history_bytes) >= 0 &&
+          Number(row.history_bytes) <= 8_000_000 &&
+          row.document !== null,
+      ),
+    "participation_history_normalization_budget_exceeded",
+  );
+}
+
 async function retainedEntries(tx, options) {
   const { repositories, cutoff, dataMode, generationsFor, signatures, mergeTarget } = options;
   const rows = (
     await tx.query(
-      `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document AS source_document,
+      pairReadQuery(
+        `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document AS source_document,
        f.document->>'evidence' AS source_evidence,f.observed_at,f.first_run_id
      FROM leaderboard_pipeline.normalizations n JOIN leaderboard_ingestion.source_facts f USING(fact_key)
      WHERE f.repository_id=ANY($1::bigint[]) AND (n.policy_signature=ANY($2::text[])
        OR (f.family='pull_requests' AND f.repository_id=ANY($4::bigint[])))
        AND ($3::timestamptz IS NULL OR f.observed_at<=$3)
      ORDER BY n.fact_key,n.policy_signature LIMIT 20001 FOR SHARE OF n`,
+        options.historyBudget,
+      ),
       [repositories.map((repo) => repo.id), signatures, cutoff ?? null, mergeTarget?.repositoryIds ?? []],
     )
   ).rows;
+  assertPairReadBudget(rows, options.historyBudget);
   check(
     rows.length <= 20000 && new Set(rows.map((row) => row.fact_key)).size <= 10000,
     "relationship_pair_history_budget_exceeded",
@@ -234,7 +297,7 @@ async function retainedEntries(tx, options) {
     )
       continue;
     const captures = await validateGeneration(row, options);
-    if (!generationsFor(row.family, row.document).includes(row.policy_signature)) continue;
+    if (!generationsFor(row.family, row.document, row.policy_signature).includes(row.policy_signature)) continue;
     const entry = retainedEntry(row, { dataMode, generationsFor });
     entries.push(entry);
     if (cutoff != null && captures.some((capture) => compareSourceInstants(capture.observedAt, cutoff) > 0))
@@ -517,14 +580,18 @@ export async function readCapturedRelationshipPairAuthority(tx, value, options) 
     check(same(saved.selectedRepositoryIds, ids(options.repositoryIds)), "relationship_pair_frozen_scope_changed");
   const rows = (
     await tx.query(
-      `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document AS source_document,
+      pairReadQuery(
+        `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document AS source_document,
        f.document->>'evidence' AS source_evidence,f.observed_at,f.first_run_id
      FROM leaderboard_pipeline.normalizations n JOIN leaderboard_ingestion.source_facts f USING(fact_key)
      JOIN unnest($1::text[],$2::text[]) AS bound(fact_key,policy_signature) USING(fact_key,policy_signature)
      ORDER BY n.fact_key,n.policy_signature LIMIT 20001 FOR SHARE OF n`,
+        options.historyBudget,
+      ),
       [saved.bindings.map((binding) => binding.factKey), saved.bindings.map((binding) => binding.policySignature)],
     )
   ).rows;
+  assertPairReadBudget(rows, options.historyBudget);
   check(rows.length === saved.bindings.length, "relationship_pair_frozen_binding_unavailable");
   const entries = [];
   for (const row of rows) {

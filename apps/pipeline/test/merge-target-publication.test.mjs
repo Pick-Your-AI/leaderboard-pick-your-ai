@@ -1874,3 +1874,385 @@ test("a retried pair and field merge publication still withdraws a currently pri
   await assertRetriedPairMergeWithdrawn(fixture, publication);
   assert.deepEqual(await retainedPairMergeState(fixture.h), before);
 });
+
+// Exercise the actual protected-history SQL projection through a real native
+// publication. The wrapper observes unchanged query results and never rewrites them.
+async function boundedMergeSourceRead(h, runtime) {
+  const transaction = h.db.transaction;
+  let captured = null;
+  h.db.transaction = (work) =>
+    transaction((tx) =>
+      work({
+        query: async (sql, params) => {
+          const result = await tx.query(sql, params);
+          if (sql.startsWith("WITH retained AS MATERIALIZED") && sql.includes("history_records")) {
+            captured ??= { sql, params: structuredClone(params), rows: structuredClone(result.rows) };
+          }
+          return result;
+        },
+      }),
+    );
+  try {
+    const read = await runtime.source.read(scope, null, new AbortController().signal, undefined, false, true);
+    assert.ok(captured, "history read must execute its bounded normalization query");
+    return { read, captured };
+  } finally {
+    h.db.transaction = transaction;
+  }
+}
+
+test("bounded history reads retain native merge-target source authority without provider reads", async (t) => {
+  const { h, p, runtime } = await setup(t, { memoryDatabase: true, configuredScopes: [scope] });
+  assert.equal((await runtime.runOnce({ cutoff: iso(Date.now() - 1000) })).state, "published");
+  const ordinary = await readScope(runtime);
+  const saved = await caches(h.db);
+  const requests = p.state.calls.length;
+  p.state.forbid = true;
+  const { read, captured } = await boundedMergeSourceRead(h, runtime);
+  assert.ok(read);
+  assert.deepEqual(read.selected.snapshot, ordinary.selected.snapshot);
+  assert.deepEqual(read.selected.rows, ordinary.selected.rows);
+  assert.equal(read.controls.version, ordinary.controls.version);
+  assert.equal(captured.rows.length, 5);
+  for (const row of captured.rows) {
+    assert.deepEqual(Object.keys(row.source_document).sort(), ["sourceRevision", "sourceUrl", "subjectId"]);
+    assert.equal(typeof row.policy_signature, "string");
+    assert.equal(String(row.repository_id), "2");
+    assert.ok(Number(row.history_bytes) > 0 && Number(row.history_bytes) <= 8_000_000);
+  }
+  assert.equal(p.state.calls.length, requests);
+  assert.deepEqual(await caches(h.db), saved);
+});
+
+test("bounded history SQL minimizes source documents and withholds oversized merge bindings", async (t) => {
+  const { h, p, runtime } = await setup(t, { memoryDatabase: true, configuredScopes: [scope] });
+  assert.equal((await runtime.runOnce({ cutoff: iso(Date.now() - 1000) })).state, "published");
+  const { read, captured } = await boundedMergeSourceRead(h, runtime);
+  const savedCaches = await caches(h.db);
+  const savedSnapshots = await mergeSnapshots(h);
+  const savedControls = h.controlsStore.read();
+  const requests = p.state.calls.length;
+  p.state.forbid = true;
+  const original = captured.rows[0];
+  const syntheticFactKeys = [];
+  // Append hostile synthetic copies for the identical production query only.
+  // Existing immutable source facts, frozen inputs and confirmation rows stay exact.
+  for (const [label, field, oversized] of [
+    ["unselected metadata", "ignoredFixturePadding", false],
+    ["selected source binding", "sourceUrl", true],
+  ]) {
+    const key = comparisonHash(["synthetic-history-merge-binding", label, original.fact_key]);
+    syntheticFactKeys.push(key);
+    await h.db.query(
+      `INSERT INTO leaderboard_ingestion.source_facts
+        (fact_key,repository_id,family,subject_id,source_revision,document,first_run_id,observed_at)
+       SELECT $1,repository_id,family,subject_id,source_revision,
+         document || jsonb_build_object($3::text,repeat('x',8000001)),first_run_id,observed_at
+       FROM leaderboard_ingestion.source_facts WHERE fact_key=$2`,
+      [key, original.fact_key, field],
+    );
+    await h.db.query(
+      `INSERT INTO leaderboard_pipeline.normalizations (fact_key,policy_signature,document,document_hash)
+       SELECT $1,policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations
+       WHERE fact_key=$2 AND policy_signature=$3`,
+      [key, original.fact_key, original.policy_signature],
+    );
+    const params = structuredClone(captured.params);
+    params[0] = [original.document_hash];
+    params[3] = JSON.stringify([{ fact_key: key, document_hash: original.document_hash }]);
+    const rows = (await h.db.query(captured.sql, params)).rows;
+    assert.equal(rows.length, 1);
+    const row = rows[0];
+    assert.equal(Number(row.history_records), 1);
+    if (oversized) {
+      assert.ok(Number(row.history_bytes) > 8_000_000);
+      assert.equal(row.document, null);
+      assert.equal(row.source_document, null);
+      assert.equal(row.policy_signature, null);
+      assert.ok(Buffer.byteLength(JSON.stringify(row)) < 1024, "oversized source data never reaches the reader");
+    } else {
+      assert.deepEqual(row.document, original.document);
+      assert.deepEqual(row.source_document, original.source_document);
+      assert.equal(row.policy_signature, original.policy_signature);
+      const expected = (
+        await h.db.query(
+          "SELECT octet_length($1::jsonb::text)+octet_length($2::jsonb::text)+octet_length($3::text) AS bytes",
+          [JSON.stringify(original.document), JSON.stringify(original.source_document), original.policy_signature],
+        )
+      ).rows[0];
+      assert.equal(Number(row.history_bytes), Number(expected.bytes));
+      assert.ok(Number(row.history_bytes) < 8_000_000);
+    }
+  }
+  // The profiled OR branch admits retained generation signatures before the
+  // JS validator sees them. Many individually indexable signatures must also
+  // stay within the aggregate transport budget, independently of document size.
+  const mergeDocument = {
+    pullRequestMergeTargetNormalization: structuredClone(original.document.pullRequestMergeTargetNormalization),
+    facts: [],
+    actors: [],
+    evidence: [],
+  };
+  const mergeHash = comparisonHash(mergeDocument);
+  const signatureCount = 3600;
+  const signatureBytes = 2300;
+  const bindingBytes = Number(
+    (
+      await h.db.query("SELECT octet_length($1::jsonb::text)+octet_length($2::jsonb::text) AS bytes", [
+        JSON.stringify(mergeDocument),
+        JSON.stringify(original.source_document),
+      ])
+    ).rows[0].bytes,
+  );
+  assert.ok(bindingBytes * signatureCount <= 8_000_000, "documents and source bindings alone fit the budget");
+  assert.ok(signatureBytes * signatureCount > 8_000_000, "the signature bytes alone exceed the budget");
+  await h.db.query(
+    `INSERT INTO leaderboard_pipeline.normalizations (fact_key,policy_signature,document,document_hash)
+     SELECT $1,lpad(fixture.n::text,8,'0') || repeat('x',2292),$2::jsonb,$3
+     FROM generate_series(1,3600) AS fixture(n)`,
+    [original.fact_key, JSON.stringify(mergeDocument), mergeHash],
+  );
+  const mergeParams = structuredClone(captured.params);
+  mergeParams[0] = [mergeHash];
+  mergeParams[3] = JSON.stringify([{ fact_key: original.fact_key, document_hash: mergeHash }]);
+  assert.deepEqual(mergeParams[1], captured.params[1], "the admitted signature allowlist stays unchanged");
+  const oversizedRows = (await h.db.query(captured.sql, mergeParams)).rows;
+  assert.equal(oversizedRows.length, signatureCount);
+  assert.ok(
+    oversizedRows.every(
+      (row) =>
+        Number(row.history_records) === signatureCount &&
+        Number(row.history_bytes) === (bindingBytes + signatureBytes) * signatureCount &&
+        row.document === null &&
+        row.source_document === null &&
+        row.policy_signature === null,
+    ),
+    "the captured SQL must withhold every variable field before returning oversized profiled signatures",
+  );
+  assert.ok(Buffer.byteLength(JSON.stringify(oversizedRows)) < 2_000_000);
+
+  // Without the generation marker, a foreign signature is never admitted by
+  // the unchanged digest allowlist. This does not invent a giant legacy allowlist.
+  const legacyDocument = { facts: [], actors: [], evidence: [] };
+  const legacyHash = comparisonHash(legacyDocument);
+  await h.db.query(
+    "INSERT INTO leaderboard_pipeline.normalizations (fact_key,policy_signature,document,document_hash) VALUES($1,$2,$3::jsonb,$4)",
+    [original.fact_key, "u".repeat(signatureBytes), JSON.stringify(legacyDocument), legacyHash],
+  );
+  const legacyParams = structuredClone(captured.params);
+  legacyParams[0] = [legacyHash];
+  legacyParams[3] = JSON.stringify([{ fact_key: original.fact_key, document_hash: legacyHash }]);
+  assert.deepEqual(legacyParams[1], captured.params[1]);
+  assert.deepEqual((await h.db.query(captured.sql, legacyParams)).rows, []);
+
+  // Remove only the SQL controls' normalization rows before the full current
+  // pair-history read. Their synthetic source facts remain immutable and retained.
+  await h.db.query(
+    `DELETE FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND document_hash=$2
+      AND policy_signature IN (
+        SELECT lpad(fixture.n::text,8,'0') || repeat('x',2292)
+        FROM generate_series(1,$3::integer) AS fixture(n)
+      )`,
+    [original.fact_key, mergeHash, signatureCount],
+  );
+  await h.db.query(
+    "DELETE FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=$2 AND document_hash=$3",
+    [original.fact_key, "u".repeat(signatureBytes), legacyHash],
+  );
+  await h.db.query("DELETE FROM leaderboard_pipeline.normalizations WHERE fact_key=ANY($1::text[])", [
+    syntheticFactKeys,
+  ]);
+
+  const after = await boundedMergeSourceRead(h, runtime);
+  assert.deepEqual(after.read.selected.snapshot, read.selected.snapshot);
+  assert.deepEqual(after.read.selected.rows, read.selected.rows);
+  assert.deepEqual(await mergeSnapshots(h), savedSnapshots);
+  assert.deepEqual(h.controlsStore.read(), savedControls);
+  const originals = new Set(savedCaches.map((row) => JSON.stringify([row.fact_key, row.policy_signature])));
+  assert.deepEqual(
+    (await caches(h.db)).filter((row) => originals.has(JSON.stringify([row.fact_key, row.policy_signature]))),
+    savedCaches,
+  );
+  assert.equal(p.state.calls.length, requests);
+});
+
+test("pair and triage no-op generations compose through frozen reuse, current reads and correction", { timeout: 120_000 }, async (t) => {
+  const fixture = await pairFieldMergeSetup(t);
+  const { h, p, state } = fixture;
+  await fixture.runtime.stop();
+  const originalNormalizer = h.options.normalizer;
+  const triageVersion = components.github.triageMetadataNormalizationVersion;
+  assert.equal(triageVersion, "triage-metadata-json-values/v1");
+  let triageNoops = 0;
+  h.options.normalizer = async (input) => {
+    const output = await originalNormalizer(input);
+    const pull = p.payloads.find((entry) => entry.node_id === input.fact.subjectId);
+    assert.ok(pull);
+    const triage = components.github.normalizeGithubObservation({
+      repository: { id: 2, slug, visibility: "public" },
+      proof: {
+        verified: true,
+        source: "github_rest",
+        revision: input.fact.sourceRevision,
+        eventId: "synthetic-pair-triage-merge-" + pull.number,
+        isSynthetic: true,
+      },
+      family: "triage",
+      action: "unlabeled",
+      occurredAt: pull.merged_at,
+      observedAt: input.observedAt,
+      payload: {
+        pull_request: structuredClone(pull),
+        sender: structuredClone(pull.user),
+        label: { id: 80 },
+        change: {
+          before: { alpha: 1, nested: { left: true, right: null } },
+          after: { nested: { right: null, left: true }, alpha: 1 },
+        },
+      },
+    });
+    assert.deepEqual(triage.facts, []);
+    assert.deepEqual(triage.evidence, []);
+    assert.equal(triage.observations.length, 1);
+    assert.deepEqual(triage.reasons, ["no_op_metadata_change"]);
+    triageNoops++;
+    return {
+      ...output,
+      observations: [...output.observations, ...triage.observations],
+      reasons: [...output.reasons, ...triage.reasons],
+    };
+  };
+  h.options.triageMetadataNormalizationVersion = triageVersion;
+  const runtime = await createPipeline(h.options);
+  t.after(() => runtime.stop());
+  const cutoff = p.state.clock;
+  await assert.rejects(runtime.runOnce(), /synthetic_stop_after_pair_field_merge_freeze/);
+  assert.equal(state.frozen, true);
+  assert.equal(state.calls, 5);
+  assert.equal(triageNoops, 5);
+  assert.equal(p.state.graphql, 5);
+  const saved = await caches(h.db);
+  assert.equal(saved.length, 5);
+  for (const row of saved) {
+    const marker = row.document.pullRequestMergeTargetNormalization;
+    const merge = mergeTargetGenerationSignature(marker.baseSignature, marker.generation, comparisonHash);
+    const delivery = comparisonHash([components.github.defaultDeliveryNormalizationVersion, merge]);
+    const field = comparisonHash([components.github.fieldChangeNormalizationVersion, delivery]);
+    const triage = comparisonHash([triageVersion, field]);
+    assert.equal(row.policy_signature, comparisonHash([components.github.relationshipPairNormalizationVersion, triage]));
+    assert.equal(row.document.fieldChangeNormalizationVersion, components.github.fieldChangeNormalizationVersion);
+    assert.equal(row.document.relationshipPairNormalizationVersion, components.github.relationshipPairNormalizationVersion);
+    assert.equal(row.document.triageMetadataNormalizationVersion, triageVersion);
+    assert.ok(row.document.facts.some((fact) => fact.metricId === "closing_links" && fact.relationshipPair));
+    assert.ok(row.document.facts.some((fact) => fact.metricId === "issue_field_updates"));
+    assert.equal(row.document.facts.some((fact) => fact.metricId === "items_triaged"), false);
+    assert.ok(row.document.reasons.includes("no_op_metadata_change"));
+    const capture = row.document.pullRequestMergeTargets[0];
+    assert.equal(capture.status, "known");
+    assert.equal(capture.event.mergeRefName, target);
+    assert.equal(
+      row.document.facts.find((fact) => fact.metricId === "pr_merged").mergeTarget.proofHash,
+      capture.proofHash,
+    );
+  }
+  const calls = [...p.state.calls];
+  state.forbid = true;
+  p.state.forbid = true;
+  for (const [name, message] of [
+    ["relationshipPairNormalizationVersion", "relationship_pair_normalizer_version_unverified"],
+    ["triageMetadataNormalizationVersion", "triage_metadata_normalizer_version_unverified"],
+  ]) {
+    const version = h.options[name];
+    h.options[name] = "obsolete";
+    try {
+      await assert.rejects(runtime.runOnce(), { message });
+      assert.deepEqual(await caches(h.db), saved);
+      assert.deepEqual((await h.db.query("SELECT snapshot_id FROM leaderboard_pipeline.snapshots")).rows, []);
+      assert.deepEqual(h.controlsStore.read().pipelinePublications ?? {}, {});
+    } finally {
+      h.options[name] = version;
+    }
+  }
+  const resumed = await runtime.runOnce();
+  assert.equal(resumed.state, "published");
+  const publication = pairMergePublication(resumed, h);
+  const confirmed = h.controlsStore.read().pipelinePublications[publication.snapshotId];
+  assert.equal(confirmed.relationshipPairNormalizationVersion, components.github.relationshipPairNormalizationVersion);
+  assert.equal(confirmed.triageMetadataNormalizationVersion, triageVersion);
+  await assertPairMergeQuantity(runtime, 5);
+  await assertPairMergeCapture(h, runtime, publication, saved);
+  assert.deepEqual(await caches(h.db), saved);
+  assert.deepEqual(p.state.calls, calls);
+  assert.equal(state.calls, 5);
+  assert.equal(triageNoops, 5);
+
+  // Confirmed immutable reads use saved authority; only new work needs the
+  // currently selected provider's declaration.
+  const pairVersion = h.options.relationshipPairNormalizationVersion;
+  h.options.relationshipPairNormalizationVersion = "obsolete";
+  h.options.triageMetadataNormalizationVersion = "obsolete";
+  try {
+    await assertPairMergeQuantity(runtime, 5);
+    await assertPairMergeCapture(h, runtime, publication, saved);
+  } finally {
+    h.options.relationshipPairNormalizationVersion = pairVersion;
+    h.options.triageMetadataNormalizationVersion = triageVersion;
+  }
+  const board = await runtime.app.inject("/api/v1/boards?" + query());
+  assert.equal(board.statusCode, 200, board.body);
+  assert.doesNotMatch(board.body, /relationshipPair|triageMetadataNormalizationVersion|pullRequestMergeTargets/);
+  const factId = board.json().rows.find((row) => row.actorId === "101").evidenceIds[0];
+  const requestId = "11111111-1111-4111-8111-000000455477";
+  h.controlsStore.transaction((value) => {
+    value.requests[requestId] = {
+      id: requestId,
+      kind: "correction",
+      owner: "101",
+      locator: p.payloads[0].html_url,
+      status: "pending",
+      version: 1,
+      createdAt: Date.parse(p.state.clock),
+      updatedAt: Date.parse(p.state.clock),
+      history: [],
+    };
+  });
+  const decision = {
+    requestId,
+    expectedVersion: 1,
+    factId,
+    operatorId: "201",
+    approvalReceipt: "synthetic-pair-triage-correction",
+  };
+  const receipt = await runtime.applyCorrection(decision);
+  assert.equal(receipt.status, "applied");
+  const correction = (
+    await h.db.query("SELECT * FROM leaderboard_pipeline.corrections WHERE request_id=$1", [requestId])
+  ).rows[0];
+  assert.equal(correction.document.fact.state, "excluded");
+  assert.equal(Object.hasOwn(correction.document.fact, "mergeTarget"), false);
+  assert.deepEqual(await runtime.applyCorrection(decision), receipt);
+  assert.deepEqual(await caches(h.db), saved);
+  assert.deepEqual(p.state.calls, calls);
+  state.forbid = false;
+  p.state.forbid = false;
+  p.state.clock = iso(Date.parse(p.state.clock) + 5000);
+  const fresh = await runtime.runOnce({ cutoff: iso(Date.parse(cutoff) + 2000) });
+  assert.equal(fresh.state, "published");
+  assert.equal(state.calls, 10);
+  assert.equal(triageNoops, 10);
+  assert.equal(p.state.graphql, 10);
+  const generations = await caches(h.db);
+  assert.equal(generations.length, 10);
+  for (const old of saved)
+    assert.deepEqual(
+      generations.find((row) => row.fact_key === old.fact_key && row.policy_signature === old.policy_signature),
+      old,
+    );
+  const current = await runtime.app.inject("/api/v1/boards?" + query());
+  assert.equal(current.statusCode, 200, current.body);
+  assert.deepEqual(current.json().rows.map((row) => row.actorId).sort(), ["102", "103", "104", "105"]);
+  assert.deepEqual(
+    (await h.db.query("SELECT * FROM leaderboard_pipeline.corrections WHERE request_id=$1", [requestId])).rows[0],
+    correction,
+  );
+});
