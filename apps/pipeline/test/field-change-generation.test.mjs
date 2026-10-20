@@ -1049,3 +1049,177 @@ test("confirmed field dispatch retains immutable authority after its producer de
     await assertField(runtime, h.metric, 1, first.snapshotId);
   });
 });
+
+test("field compatibility is checked inside the final synchronous visibility transaction", async (t) => {
+  const h = await fieldHarness(t, "issue_field_changed", { includeIssueCreation: true, memoryDatabase: true });
+  const cutoff = clock();
+  const sqlTransaction = h.db.transaction;
+  const controlsTransaction = h.controlsStore.transaction.bind(h.controlsStore);
+  let armed = false,
+    withdrawals = 0;
+  h.db.transaction = async (work) => {
+    let published = false;
+    const result = await sqlTransaction((tx) =>
+      work({
+        query: async (sql, params) => {
+          const value = await tx.query(sql, params);
+          if (/INSERT\s+INTO\s+leaderboard_pipeline\.snapshots/i.test(sql)) published = true;
+          return value;
+        },
+      }),
+    );
+    if (published) armed = true;
+    return result;
+  };
+  h.controlsStore.transaction = (work, options) =>
+    controlsTransaction((state) => {
+      if (armed && withdrawals === 0) {
+        delete h.options.fieldChangeNormalizationVersion;
+        withdrawals++;
+      }
+      return work(state);
+    }, options);
+  let outcome;
+  try {
+    outcome = await h.runtime.runOnce({ cutoff }).then(
+      (value) => ({ value }),
+      (error) => ({ error }),
+    );
+  } finally {
+    h.db.transaction = sqlTransaction;
+    h.controlsStore.transaction = controlsTransaction;
+  }
+  assert.equal(withdrawals, 1, "the declaration changes only after SQL commit, inside the actual Controls transaction");
+  const saved = (await h.db.query("SELECT * FROM leaderboard_pipeline.snapshots ORDER BY revision")).rows;
+  const savedCaches = await caches(h);
+  const savedSource = await sourceRow(h);
+  const savedFrozen = (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id")).rows;
+  assert.equal(saved.length, 1, "the actual SQL publication committed before compatibility was withdrawn");
+  assert.equal(savedCaches.length, 1);
+  assert.equal(savedCaches[0].document.fieldChangeNormalizationVersion, version);
+  assert.ok(savedCaches[0].document.facts.some((fact) => fact.metricId === h.metric && fact.actorId === "101"));
+  assert.equal(savedFrozen.length, 1);
+  assert.equal(h.state.hydrations, 1);
+  const publicResponses = await Promise.all(
+    [paths(h.metric)[0], paths(h.metric)[0] + "&snapshot=" + saved[0].snapshot_id].map((path) =>
+      h.runtime.app.inject(path),
+    ),
+  );
+  assert.equal(
+    outcome.error?.message,
+    "field_change_normalizer_version_unverified",
+    "the live field declaration must still hold before visibility; actual public statuses=" +
+      publicResponses.map((response) => response.statusCode).join(","),
+  );
+  for (const response of publicResponses) {
+    assert.ok(response.statusCode >= 400, response.body);
+    assert.doesNotMatch(response.body, /synthetic-alice|synthetic-field-event/);
+  }
+  assert.deepEqual(h.controlsStore.read().pipelinePublications ?? {}, {});
+  assert.deepEqual(h.controlsStore.read().pipelineHeads ?? {}, {});
+  assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM policy_preview_inputs").get().n, 0);
+  assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM pipeline_aggregate_explanations").get().n, 0);
+  h.options.fieldChangeNormalizationVersion = version;
+  const recovered = (await h.runtime.runOnce({ cutoff })).publications[0];
+  assert.equal(recovered.snapshotId, saved[0].snapshot_id);
+  assert.equal(h.state.hydrations, 1, "same-cutoff recovery reuses the verified immutable normalization");
+  assert.deepEqual((await h.db.query("SELECT * FROM leaderboard_pipeline.snapshots ORDER BY revision")).rows, saved);
+  assert.deepEqual(await caches(h), savedCaches);
+  assert.deepEqual(await sourceRow(h), savedSource);
+  assert.deepEqual(
+    (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id")).rows,
+    savedFrozen,
+  );
+  await assertField(h.runtime, h.metric, 1);
+  await assertField(h.runtime, h.metric, 1, recovered.snapshotId);
+});
+
+test("already confirmed field dispatch replay retains immutable authority inside the visibility transaction", async (t) => {
+  const h = await fieldHarness(t, "issue_field_changed", {
+    includeIssueCreation: true,
+    memoryDatabase: true,
+    webhookDispatch: true,
+  });
+  assert.equal(await h.runtime.collection.verifyPublic(2, 1, null), true);
+  await insertDelivery(h, 906);
+  const complete = h.runtime.outbox.complete.bind(h.runtime.outbox);
+  const fail = h.runtime.outbox.fail.bind(h.runtime.outbox);
+  h.runtime.outbox.complete = h.runtime.outbox.fail = async () => {
+    throw Error("synthetic confirmed field acknowledgment loss");
+  };
+  try {
+    await assert.rejects(h.runtime.dispatchOnce(), /synthetic confirmed field acknowledgment loss/);
+  } finally {
+    h.runtime.outbox.complete = complete;
+    h.runtime.outbox.fail = fail;
+  }
+  const first = await savedPublication(h);
+  const before = {
+    snapshots: (await h.db.query("SELECT * FROM leaderboard_pipeline.snapshots ORDER BY revision")).rows,
+    caches: await caches(h),
+    frozen: (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id")).rows,
+    confirmations: structuredClone(h.controlsStore.read().pipelinePublications),
+    heads: structuredClone(h.controlsStore.read().pipelineHeads),
+    hydrations: h.state.hydrations,
+  };
+  assert.equal(before.snapshots.length, 1);
+  assert.equal(before.confirmations[first.snapshotId].fieldChangeNormalizationVersion, version);
+  const preview = await h.runtime.previewPolicy(previewRequest(h, first.snapshotId));
+  const pending = (await h.db.query("SELECT state,completion FROM leaderboard_ingestion.outbox")).rows;
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].state, "leased");
+  assert.equal(pending[0].completion, null);
+  await h.db.query(
+    "UPDATE leaderboard_ingestion.outbox SET lease_until=clock_timestamp()-interval '1 second' WHERE state='leased'",
+  );
+  const query = h.db.query;
+  const controlsTransaction = h.controlsStore.transaction.bind(h.controlsStore);
+  let armed = false,
+    withdrawals = 0;
+  h.db.query = async (sql, params) => {
+    const result = await query(sql, params);
+    if (sql.includes("FROM leaderboard_pipeline.dispatch_publications AS operation")) {
+      assert.equal(result.rows.length, 1);
+      assert.equal(result.rows[0].snapshot_id, first.snapshotId);
+      armed = true;
+    }
+    return result;
+  };
+  h.controlsStore.transaction = (work, options) =>
+    controlsTransaction((state) => {
+      if (armed && withdrawals === 0) {
+        assert.deepEqual(state.pipelinePublications[first.snapshotId], before.confirmations[first.snapshotId]);
+        delete h.options.fieldChangeNormalizationVersion;
+        withdrawals++;
+      }
+      return work(state);
+    }, options);
+  let outcome;
+  try {
+    outcome = await h.runtime.dispatchOnce();
+  } finally {
+    h.db.query = query;
+    h.controlsStore.transaction = controlsTransaction;
+  }
+  assert.equal(withdrawals, 1, "the retained confirmed publication reaches the final Controls transaction");
+  assert.equal(outcome, "processed");
+  assert.equal(h.state.hydrations, before.hydrations);
+  assert.deepEqual(
+    (await h.db.query("SELECT * FROM leaderboard_pipeline.snapshots ORDER BY revision")).rows,
+    before.snapshots,
+  );
+  assert.deepEqual(await caches(h), before.caches);
+  assert.deepEqual(
+    (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id")).rows,
+    before.frozen,
+  );
+  assert.deepEqual(h.controlsStore.read().pipelinePublications, before.confirmations);
+  assert.deepEqual(h.controlsStore.read().pipelineHeads, before.heads);
+  const completed = (await h.db.query("SELECT state,completion FROM leaderboard_ingestion.outbox")).rows;
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0].state, "done");
+  assert.ok(completed[0].completion);
+  await assertField(h.runtime, h.metric, 1);
+  await assertField(h.runtime, h.metric, 1, first.snapshotId);
+  assert.deepEqual(await h.runtime.previewPolicy(previewRequest(h, first.snapshotId)), preview);
+});
