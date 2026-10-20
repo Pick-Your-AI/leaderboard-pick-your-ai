@@ -333,6 +333,11 @@ test("maintenance classification: all98 fingerprints preserve historical default
     const binding = { ...s.binding, metricId: metric.id };
     delete binding.maintenanceClassification;
     for (const state of [empty, s.state]) {
+      // The old generic helpful binding is now explicitly unsupported.
+      if (metric.id === "helpful_feedback") {
+        assert.throws(() => recognitionFingerprint(state, [binding]), /invalid_discussion_feedback_contract/);
+        continue;
+      }
       const actual = recognitionFingerprint(state, [binding]);
       const historical = previousClassificationAuthority(state, [binding]);
       const expected = previousClassificationAuthority(state, [binding], true);

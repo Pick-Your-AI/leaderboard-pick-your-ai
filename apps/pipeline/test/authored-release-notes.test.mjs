@@ -337,6 +337,11 @@ test("authored notes authority: all98 fingerprints preserve historical defaults 
     const binding = { ...s.binding, metricId: metric.id };
     delete binding.documentationPurpose;
     for (const state of [empty, s.state]) {
+      // The old generic helpful binding is now explicitly unsupported.
+      if (metric.id === "helpful_feedback") {
+        assert.throws(() => recognitionFingerprint(state, [binding]), /invalid_discussion_feedback_contract/);
+        continue;
+      }
       const actual = recognitionFingerprint(state, [binding]);
       const historical = previousPurposeAuthority(state, [binding]);
       const expected = previousPurposeAuthority(state, [binding], true);

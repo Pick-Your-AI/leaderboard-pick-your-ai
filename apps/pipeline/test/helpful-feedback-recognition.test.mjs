@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import {
   applyRecognitionReceipt,
@@ -328,6 +329,51 @@ test("current withdrawal/consent and binding changes fence the selected authorit
   assert.equal(accepted(run(s)).length, 0);
   const noRequests = { requests: {}, profiles: {}, audit: [] };
   assert.notEqual(recognitionFingerprint(noRequests, [s.binding]), recognitionFingerprint(noRequests, []));
+});
+test("valid feedback enrollment uses the exact versioned empty-intake authority and preserves unrelated fingerprints", () => {
+  const s = feedbackScenario();
+  const empty = { requests: {}, profiles: {}, audit: [] };
+  const unrelated = { ...s.binding, metricId: "accepted_findings", sourceMetricId: "issues_opened" };
+  delete unrelated.helpfulFeedback;
+  const hash = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  for (const bindings of [[s.binding], [unrelated, s.binding], [s.binding, unrelated]]) {
+    const historical = ["localization-review-target/v1", [], [], [], bindings];
+    const expected = hash([...historical, "accepted-feedback-threads/v1"]);
+    assert.equal(recognitionFingerprint(empty, bindings), expected);
+    assert.notEqual(expected, hash(historical));
+  }
+  for (const bindings of [[], [unrelated]])
+    assert.equal(
+      recognitionFingerprint(empty, bindings),
+      hash(["localization-review-target/v1", [], [], [], bindings]),
+    );
+});
+test("missing or malformed feedback enrollment cannot preserve saved authority or reach a receipt callback", () => {
+  for (const change of [
+    (binding) => delete binding.helpfulFeedback,
+    (binding) => (binding.helpfulFeedback = null),
+    (binding) => (binding.helpfulFeedback.version = "accepted-feedback-threads/v2"),
+    (binding) => (binding.sourceMetricId = "issues_opened"),
+    (binding) => (binding.metricId = "accepted_findings"),
+    (binding) => (binding.repositoryId = "02"),
+  ]) {
+    const s = feedbackScenario();
+    const valid = structuredClone(s.binding);
+    change(s.binding);
+    for (const state of [s.state, { requests: {}, profiles: {}, audit: [] }])
+      for (const bindings of [[s.binding], [valid, s.binding], [s.binding, valid]])
+        assert.throws(() => recognitionFingerprint(state, bindings), /feedback/);
+    let calls = 0;
+    assert.throws(
+      () =>
+        run(s, (input) => {
+          calls++;
+          return input;
+        }),
+      /feedback/,
+    );
+    assert.equal(calls, 0);
+  }
 });
 test("direct receipt cannot bypass original/current feedback source admission with a same-metric overlay", () => {
   const s = feedbackScenario();
