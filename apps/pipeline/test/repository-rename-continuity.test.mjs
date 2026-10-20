@@ -231,10 +231,7 @@ test("an explicitly approved rename retains native identities and quantities thr
       original.rows,
     );
     const refreshed = collected.filter((row) => !oldKeys.has(row.fact_key));
-    assert.deepEqual(
-      refreshed.map((row) => row.subject_id).sort(),
-      original.rows.map((row) => row.subject_id).sort(),
-    );
+    assert.deepEqual(refreshed.map((row) => row.subject_id).sort(), original.rows.map((row) => row.subject_id).sort());
     assert.equal(
       refreshed.every(
         (row) =>
