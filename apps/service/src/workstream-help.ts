@@ -16,7 +16,9 @@ import {
 } from "@pick-your-ai/contracts";
 import { PublicReadError, type PortfolioEvidence, type PublishedSnapshot, type PublicRead, type PublicScope } from "./public-source.js";
 
-const conflict = (): never => { throw new PublicReadError(503, "workstream_help_evidence_conflict"); };
+function conflict(): never {
+  throw new PublicReadError(503, "workstream_help_evidence_conflict");
+}
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
 
 /** The optional collection is bounded as data before Zod, hashing or projection. */
