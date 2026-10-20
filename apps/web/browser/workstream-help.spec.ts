@@ -122,9 +122,9 @@ test("a current correction invalidates the old help page and restart reads the c
     expect(api.current.controls.version).toBe("fixture-help-controls-1");
     expect(api.requests.some((entry) => entry.status === 400)).toBe(true);
     const last = JSON.parse(api.requests.at(-1)!.body);
-    expect(
-      last.recognitions.some((entry: { proof: { artifactId: string } }) => entry.proof.artifactId === first),
-    ).toBe(false);
+    expect(last.recognitions.some((entry: { proof: { artifactId: string } }) => entry.proof.artifactId === first)).toBe(
+      false,
+    );
   } finally {
     await api.close();
   }

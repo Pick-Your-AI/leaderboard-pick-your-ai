@@ -113,7 +113,10 @@ test("current privacy, exact contribution retirement and whole snapshot revocati
   let result = await read(app, { limit: "20" });
   ok(result);
   assert.equal(result.data.totalRecognitions, 2);
-  assert.equal(result.data.recognitions.some((entry) => entry.proof.contributionId === proof.contributionId), false);
+  assert.equal(
+    result.data.recognitions.some((entry) => entry.proof.contributionId === proof.contributionId),
+    false,
+  );
   value.controls.suppressedContributionIds = [];
   value.controls.suppressedArtifactIds = [proof.artifactId];
   result = await read(app, { limit: "20" });
@@ -160,7 +163,10 @@ test("source corrections and acceptance withdrawal never transfer an earlier hel
     const result = await read(app, { limit: "20" });
     ok(result);
     assert.equal(result.data.totalRecognitions, 2);
-    assert.equal(result.data.recognitions.some((entry) => entry.help.contributionId === help.contributionId), false);
+    assert.equal(
+      result.data.recognitions.some((entry) => entry.help.contributionId === help.contributionId),
+      false,
+    );
   }
 });
 

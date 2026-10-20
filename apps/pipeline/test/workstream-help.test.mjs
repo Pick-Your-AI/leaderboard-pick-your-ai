@@ -185,7 +185,10 @@ for (const [name, change] of Object.entries({
     change(s);
     const out = runHelp(s);
     assert.deepEqual(out.reviewedWorkstreamHelp, []);
-    assert.equal(out.facts.some((fact) => fact.metricId === "maintenance"), false);
+    assert.equal(
+      out.facts.some((fact) => fact.metricId === "maintenance"),
+      false,
+    );
   });
 }
 
