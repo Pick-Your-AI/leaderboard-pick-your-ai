@@ -70,6 +70,38 @@ try {
     } else if (!(await prettier.check(source, options))) {
       console.error(`Formatting required: ${path}`);
       changed++;
+      try {
+        const formatted = await prettier.format(source, options);
+        let offset = 0;
+        let line = 1;
+        let lineStart = 0;
+        while (offset < source.length && offset < formatted.length && source[offset] === formatted[offset]) {
+          if (source[offset] === "\n") {
+            line++;
+            lineStart = offset + 1;
+          }
+          offset++;
+        }
+        // Bound each JSON-escaped line to fewer than 400 characters, including quotes.
+        const quoteLine = (value) => {
+          let text = "";
+          for (let index = lineStart; index < value.length; index++) {
+            const escaped = JSON.stringify(value[index]).slice(1, -1);
+            if (text.length + escaped.length > 396) {
+              text += "…";
+              break;
+            }
+            text += escaped;
+            if (value[index] === "\n") break;
+          }
+          return '"' + text + '"';
+        };
+        console.error(`  First mismatch at source line ${line}, column ${offset - lineStart + 1}:`);
+        console.error(`    actual: ${quoteLine(source)}`);
+        console.error(`    expected: ${quoteLine(formatted)}`);
+      } catch {
+        console.error("  First mismatch detail unavailable.");
+      }
     }
   }
   console.log(
