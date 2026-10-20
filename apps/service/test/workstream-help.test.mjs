@@ -189,21 +189,39 @@ test("disabled categories and positively automated actors cannot retain help cre
 });
 
 test("source occurrence keeps its half-open period independently of acceptance and review", async (t) => {
-  const { app } = service(t);
-  const included = await read(app, {
-    start: helpMergedAt,
-    end: "2026-10-07T10:00:00.0001Z",
-    limit: "20",
-  });
-  ok(included);
-  assert.equal(included.data.totalRecognitions, 3);
-  workstreamHelpPage(included.data, included.selected, "101");
-  const excluded = await read(app, {
-    start: "2026-10-07T09:59:59.9999Z",
-    end: helpMergedAt,
-  });
-  ok(excluded);
-  assert.equal(excluded.data.totalRecognitions, 0);
+  for (const [occurredAt, currentCount, previousCount] of [
+    [helpMergedAt, 3, 0],
+    ["2026-10-07T09:59:59.9999Z", 0, 3],
+    ["2026-10-07T10:00:00.0001Z", 3, 0],
+  ]) {
+    const { app, value } = service(t);
+    const clocks = new Map();
+    for (const help of value.selected.reviewedWorkstreamHelp) {
+      clocks.set(help.contributionId, [help.acceptedAt, help.reviewedAt]);
+      for (const entry of copies(value, help.contributionId)) {
+        entry.occurredAt = occurredAt;
+        entry.evidenceMetadata.sourceOccurredAt = occurredAt;
+      }
+      help.statement.occurredAt = occurredAt;
+      rehash(help);
+    }
+    for (const [start, end, expected] of [
+      [helpMergedAt, "2026-10-07T10:00:01.000Z", currentCount],
+      ["2026-10-07T09:59:59.000Z", helpMergedAt, previousCount],
+    ]) {
+      const result = await read(app, { start, end, limit: "20" });
+      ok(result);
+      assert.equal(result.data.totalRecognitions, expected, occurredAt);
+      assert.equal(result.data.recognitions.length, expected, occurredAt);
+      workstreamHelpPage(result.data, result.selected, "101");
+      for (const { help, proof } of result.data.recognitions) {
+        assert.equal(proof.occurredAt, occurredAt);
+        assert.equal(help.statement.occurredAt, occurredAt);
+        assert.equal(help.statementHash, sha256(encodeWorkstreamHelpStatement(help.statement)));
+        assert.deepEqual([help.acceptedAt, help.reviewedAt], clocks.get(help.contributionId));
+      }
+    }
+  }
 });
 
 test("paging binds current projected relationships, full selection and current control authority", async (t) => {

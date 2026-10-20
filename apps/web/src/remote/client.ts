@@ -267,7 +267,13 @@ export function uiHref(
   params.set("ui", "api");
   if (rankComparisonPath(path)) comparisonParameters(params, value);
   if (value.timeZone && value.timeZone !== defaultDisplayTimeZone) params.set("tz", value.timeZone);
-  if ((path.startsWith("/contributors") || path === "/activity" || path.startsWith("/activity/")) && value.category)
+  if (
+    (path.startsWith("/contributors") ||
+      path.startsWith("/contributions/") ||
+      path === "/activity" ||
+      path.startsWith("/activity/")) &&
+    value.category
+  )
     params.set("category", value.category);
   if (path === "/contributors" && value.search) params.set("search", value.search);
   if (path === "/leaderboards" || path === "/methodology" || path === "/methodology/changes") {

@@ -96,6 +96,18 @@ test("real reviewed-help HTTP pages retain proof scope, keyboard focus and acces
     await expect(page.getByRole("heading", { name: "Contribution evidence", exact: true })).toBeVisible();
     expect(new URL(page.url()).searchParams.get("snapshot")).toBe("fixture-help");
     expect(new URL(page.url()).searchParams.get("repository")).toBe("2");
+    expect(new URL(page.url()).searchParams.get("category")).toBe("maintenance");
+    const actor = page.locator("[data-evidence-body]").getByRole("link", { name: "101", exact: true });
+    await expect(actor).toBeVisible();
+    const actorUrl = new URL((await actor.getAttribute("href"))!, page.url());
+    expect(actorUrl.searchParams.get("snapshot")).toBe("fixture-help");
+    expect(actorUrl.searchParams.get("repository")).toBe("2");
+    expect(actorUrl.searchParams.get("category")).toBe("maintenance");
+    await actor.focus();
+    await page.keyboard.press("Enter");
+    await expect(region.getByText(/21 recorded events in this selection. Page 1./)).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/contributors/101");
+    expect(new URL(page.url()).searchParams.get("category")).toBe("maintenance");
   } finally {
     await api.close();
   }

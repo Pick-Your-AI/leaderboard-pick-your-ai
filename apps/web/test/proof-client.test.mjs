@@ -22,6 +22,31 @@ test("drawer links pin exact board scope and cursor without leaking the UI selec
     assert.throws(() => selection(query));
 });
 
+test("permanent proof links retain category for the return profile without filtering evidence requests", () => {
+  const selected = selection(
+    "?ui=api&snapshot=s1&repository=r1&workstream=w1&category=maintenance&search=alice&metric=pr_opened&limit=20&cursor=old.signature&proof=e-1",
+  );
+  const before = structuredClone(selected);
+  const proof = new URL(uiHref("/contributions/e-1", selected, { cursor: null }), "https://example.invalid");
+  const restored = selection(proof.search);
+  for (const key of ["snapshot", "repository", "workstream", "metric", "limit", "category"])
+    assert.equal(restored[key], selected[key], key);
+  for (const key of ["cursor", "proof", "search"]) assert.equal(proof.searchParams.has(key), false, key);
+  const request = parameters(restored);
+  assert.equal(request.has("category"), false);
+  assert.equal(request.toString(), parameters({ ...restored, category: null }).toString());
+  const profile = new URL(uiHref("/contributors/a1", restored), proof);
+  const returned = selection(profile.search);
+  for (const key of ["snapshot", "repository", "workstream", "metric", "limit", "category"])
+    assert.equal(returned[key], selected[key], key);
+  assert.equal(profile.searchParams.has("cursor"), false);
+  for (const path of ["/leaderboards/pr_opened", "/methodology/pr_opened"])
+    assert.equal(new URL(uiHref(path, restored), proof).searchParams.has("category"), false);
+  const unfiltered = new URL(uiHref("/contributions/e-1", { ...selected, category: null }), proof);
+  assert.equal(unfiltered.searchParams.has("category"), false);
+  assert.deepEqual(selected, before);
+});
+
 test("drawer-only Back/Forward retains background DOM only for identical pinned context", () => {
   const board = { pathname: "/leaderboards/pr_opened", search: "?snapshot=s1&cursor=x.y&repository=r1" };
   const drawer = { ...board, search: board.search + "&proof=e-1" };

@@ -363,6 +363,8 @@ test("persisted help and proof are revoked after actual SQL and SQLite reopen, t
   const { harness, components, publicScope } = await import("./harness.mjs");
   const { createPipeline } = await import("../src/runtime.mjs");
   const s = helpScenario();
+  // The SQL and probe clocks run now; keep this reopen fixture valid for the test.
+  s.record.validUntil = new Date(Date.now() + 86_400_000).toISOString();
   const h = await harness(t, {
     markerFreeConfig: true,
     dataMode: "public",
