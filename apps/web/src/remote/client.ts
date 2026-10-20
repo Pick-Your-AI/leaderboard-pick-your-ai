@@ -1,6 +1,7 @@
 import { stableJSON } from "@pick-your-ai/metrics";
 import { defaultDisplayTimeZone, isDisplayTimeZone } from "../lib/display-time-zone.ts";
 import { parseCSVExport } from "./csv-export.ts";
+import { maxExportResponseBytes } from "./export-limits.ts";
 import { responseScope, scopeExportVersion, scopeReadVersion, selectionScope } from "./public-scope.ts";
 import { onlyExportKeys, parseExportJSON } from "./export-json.ts";
 import {
@@ -304,9 +305,9 @@ const maxResponseBytes = 2_000_000;
 function discardBody(response: Response): void {
   void response.body?.cancel().catch(() => {});
 }
-async function readBytes(response: Response, signal: AbortSignal): Promise<Uint8Array> {
+async function readBytes(response: Response, signal: AbortSignal, maxBytes = maxResponseBytes): Promise<Uint8Array> {
   const advertised = response.headers.get("content-length");
-  if (advertised !== null && (!/^\d+$/.test(advertised) || Number(advertised) > maxResponseBytes)) {
+  if (advertised !== null && (!/^\d+$/.test(advertised) || Number(advertised) > maxBytes)) {
     discardBody(response);
     throw new ReadFailure(502, "api_response_too_large");
   }
@@ -327,7 +328,7 @@ async function readBytes(response: Response, signal: AbortSignal): Promise<Uint8
       signal.throwIfAborted();
       if (chunk.done) break;
       bytes += chunk.value.byteLength;
-      if (bytes > maxResponseBytes) throw new ReadFailure(502, "api_response_too_large");
+      if (bytes > maxBytes) throw new ReadFailure(502, "api_response_too_large");
       chunks.push(chunk.value);
     }
   } finally {
@@ -477,7 +478,7 @@ export async function exportPage(
     discardBody(response);
     throw new ReadFailure(502, "api_actor_filter_mismatch");
   }
-  const bytes = await readBytes(response, requestSignal);
+  const bytes = await readBytes(response, requestSignal, maxExportResponseBytes);
   let raw: string;
   try {
     raw = new TextDecoder("utf-8", { fatal: true }).decode(bytes);

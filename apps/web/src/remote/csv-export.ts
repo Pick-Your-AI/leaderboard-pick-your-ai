@@ -1,6 +1,7 @@
 import { stableJSON } from "@pick-your-ai/metrics";
 import type { MetricDefinition } from "@pick-your-ai/contracts";
 import { parseExportJSON } from "./export-json.ts";
+import { maxExportResponseBytes } from "./export-limits.ts";
 
 // Every public-export renderer quotes every cell and terminates every record
 // with CRLF. Read that bounded contract; do not guess a spreadsheet dialect.
@@ -91,7 +92,8 @@ function records(
   raw: string,
   rowLimit: number,
 ): { rows: string[][]; columns: readonly Column[]; version: string; withComparison: boolean } {
-  if (!Number.isSafeInteger(rowLimit) || rowLimit < 1 || rowLimit > 100 || raw.length > 2_000_000) invalid();
+  if (!Number.isSafeInteger(rowLimit) || rowLimit < 1 || rowLimit > 100 || raw.length > maxExportResponseBytes)
+    invalid();
   const result: string[][] = [];
   let index = 0;
   while (index < raw.length) {
