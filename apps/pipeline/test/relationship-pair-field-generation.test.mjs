@@ -822,7 +822,10 @@ for (const generation of ["current", "preceding"]) {
     assert.ok(h.mixed.calls > calls, "a marker alone cannot authorize reuse of its plain-key document");
     retained = await cacheRows(h);
     assert.equal(retained.length, 2);
-    assert.deepEqual(retained.find((row) => row.policy_signature === signature), predecessor);
+    assert.deepEqual(
+      retained.find((row) => row.policy_signature === signature),
+      predecessor,
+    );
     const current = retained.find((row) => row.policy_signature === F(currentBase));
     assert.ok(current, "the empty corrected cache must retain the field wrapper");
     assert.deepEqual(current.document.facts, []);
