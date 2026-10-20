@@ -138,6 +138,10 @@ export function recognitionFingerprint(state, bindings = []) {
     )
   )
     authority.push("domain-id-list-admission/v1");
+  // Earlier comparison receipts allowed mutable or equivalent before/after revisions.
+  // Require recomputation for these destinations while unrelated authority stays exact.
+  if (bindings.some((binding) => ["performance", "regressions_prevented"].includes(binding.metricId)))
+    authority.push("comparison-revision-pins/v1");
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 

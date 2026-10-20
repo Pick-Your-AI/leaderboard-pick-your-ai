@@ -186,6 +186,16 @@ registry. Source occurrence and acceptance remain independently recorded;
 merge/check/disclosure events cannot be later than their acceptance. Performance
 comparisons use exact nonnegative decimal strings, including values beyond the
 JavaScript integer precision range, and never compare unlike units or conditions.
+
+For `regressions_prevented` and `performance`, both before and after revisions are
+complete 40- or 64-character lowercase Git object IDs of the same width for the
+same bound repository. Mutable refs, abbreviated IDs, mixed or malformed widths
+and uppercase aliases are rejected. The two IDs must differ, and the after ID must
+equal the collected source revision. These checks bind distinct immutable revision
+identities; they do not establish object existence, verify measurements or execute
+the scenario. Independent review and all existing conditions, units, outcomes and
+source gates still apply.
+
 Reviewer timestamps support millisecond precision and normalize supported offsets
 to UTC for metric events. Finer fractions are rejected because the metric engine
 cannot preserve them; they cannot silently round into a different event order or
@@ -249,6 +259,15 @@ retain a current or historical publication after the evidence boundary changes.
 A mixed configuration retires its whole snapshot. Every configuration without
 these three metrics retains its exact preceding fingerprint, including all
 previous category markers; private and raw history are preserved.
+
+Bindings for `performance` or `regressions_prevented` additionally pin
+`comparison-revision-pins/v1`. Current and pinned reads withhold their preceding
+authority until normal authorized recomputation under the complete, distinct Git
+revision checks. The marker applies to these configured destinations even when
+there are no accepted requests. A mixed configuration retires its entire bound
+snapshot; unrelated destination configurations retain their exact prior
+fingerprints. Raw source, private receipts and retained frozen documents are not
+rewritten by this fence.
 
 Public evidence carries its immutable source link and fixed, bounded explanation
 codes for the metric, clock, reviewed outcome/method and contribution class.
