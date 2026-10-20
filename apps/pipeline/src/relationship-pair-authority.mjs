@@ -9,9 +9,9 @@ import { issueTransferClosure, issueTransferLimits } from "./issue-transfer-priv
 import { selectIssueTransferSources } from "./issue-transfers.mjs";
 import { hasRelationshipPairMarker, isRelationshipPairMetric } from "./relationship-pair-generation.mjs";
 
-// v2 also binds the conservative interpretation of displaced known history.
-// A v1 frozen result may have promoted a later event after losing its original.
-export const relationshipPairAuthorityVersion = "pipeline-relationship-pair-authority/v2";
+// v3 binds complete engine-semantic equivalence for displaced known history.
+// Earlier captures may have lost a binding or discarded its scope contradiction.
+export const relationshipPairAuthorityVersion = "pipeline-relationship-pair-authority/v3";
 const check = (value, code = "relationship_pair_authority_integrity_error") => {
   if (!value) throw new Error(code);
 };
@@ -286,24 +286,30 @@ function unresolvedHistory(current, retained) {
     Number.isSafeInteger(fact.revision) &&
     fact.revision >= 0 &&
     (fact.revision === 0 || (typeof fact.correctionReceipt === "string" && fact.correctionReceipt.trim().length > 0));
-  const clock = (value) => {
-    if (value === null) return null;
-    check(compareSourceInstants(value, value) === 0, "relationship_pair_history_time_invalid");
-    // Same equality as compareSourceInstants, including sub-millisecond clocks.
-    return [Date.parse(value), (value.match(/\.(\d+)/)?.[1] ?? "").replace(/0+$/, "")];
+  const membership = (context) => {
+    // Engine stableJSON serializes both omitted projected contexts and null as
+    // null. Other retained fact values have already crossed the JSON/hash gate.
+    if (context == null) return null;
+    return {
+      ...context,
+      projects: [...context.projects].sort(),
+      workstreams: [...context.workstreams].sort(),
+      ...(context.projectScope === undefined ? {} : { projectScope: [...context.projectScope].sort() }),
+      ...(context.workstreamScope === undefined ? {} : { workstreamScope: [...context.workstreamScope].sort() }),
+    };
   };
-  const meaning = ({ fact, pair, key }) =>
-    JSON.stringify([
-      key,
-      pair.eventId,
-      pair.action,
-      fact.metricId,
-      fact.artifactId,
-      fact.repoId,
-      fact.role,
-      fact.actorId,
-      clock(fact.occurredAt),
-    ]);
+  const meaning = ({ fact }) => {
+    // Match engine canonical admission: adapter IDs and collection clocks may
+    // differ, but every other field remains semantic. In particular, canonical
+    // identity, exact source clocks, state and acceptance cannot disappear with
+    // an older source row. Membership order alone is not a scope contradiction.
+    const { id, observedAt, ...rest } = fact;
+    return digest({
+      ...rest,
+      eventContext: membership(fact.eventContext),
+      currentContext: membership(fact.currentContext),
+    });
+  };
   const identity = ({ fact }) => JSON.stringify([fact.metricId, fact.id]);
   const groups = new Map(),
     latest = new Map();

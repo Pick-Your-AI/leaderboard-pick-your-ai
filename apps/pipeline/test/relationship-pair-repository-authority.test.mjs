@@ -34,16 +34,26 @@ async function crossRepositoryHarness(
     memoryDatabase = true,
     reviewedPeerHistory = false,
     independentPair = false,
+    wholeSecondPeerClock = false,
   } = {},
 ) {
   const at = ago(2);
-  const peerAt = ago(peerHistoryDays);
+  const peerAt = wholeSecondPeerClock ? ago(peerHistoryDays).replace(/\.\d{3}Z$/, ".000Z") : ago(peerHistoryDays);
   const kind = metric === "reference_links" ? "reference" : "closing";
   const eventId = `synthetic-cross-pair-${kind}`;
   const sourceUrl = `https://github.com/${sourceSlug}/issues/20`;
   const peerUrl = `https://github.com/${peerSlug}/pull/10`;
   const calls = { probes: [], pages: [], hydrations: 0 };
-  const history = { revision: "v1", pair: "bound", reviewedRevision: 0, target: issueId };
+  const history = {
+    revision: "v1",
+    pair: "bound",
+    reviewedRevision: 0,
+    target: issueId,
+    eventContext: null,
+    currentContext: null,
+    factChanges: {},
+    omitContexts: false,
+  };
   let originalPeerFact;
   const h = await harness(t, {
     memoryDatabase,
@@ -69,6 +79,11 @@ async function crossRepositoryHarness(
                 fact.canonicalKey = originalPeerFact.canonicalKey;
                 fact.revision = history.reviewedRevision;
                 fact.correctionReceipt = history.reviewedRevision ? "synthetic-reviewed-pair-revision" : null;
+                Object.assign(fact, structuredClone(history.factChanges));
+                if (history.omitContexts) {
+                  delete fact.eventContext;
+                  delete fact.currentContext;
+                }
                 for (const entry of output.evidence.filter(
                   (entry) => entry.contribution.contributionId === previousId,
                 )) {
@@ -199,6 +214,12 @@ async function crossRepositoryHarness(
         action: kind === "reference" ? "referenced" : "connected",
         occurredAt,
         observedAt: input.observedAt,
+        ...(peer
+          ? {
+              eventContext: structuredClone(history.eventContext),
+              currentContext: structuredClone(history.currentContext),
+            }
+          : {}),
         payload: {
           repository: { id: repositoryId, private: false, full_name: slug },
           [peer ? "pull_request" : "issue"]: {
@@ -288,6 +309,312 @@ async function assertWithdrawn(h, entries) {
 }
 
 for (const metric of ["reference_links", "closing_links"]) {
+  for (const scenario of [
+    "event-membership",
+    "current-membership-knowledge",
+    "canonical-identity",
+    "acceptance",
+    "state",
+    "subject-actor",
+    "equivalent-source-clock",
+  ]) {
+    test(`${metric}: successor semantic contradiction in ${scenario} cannot discharge known history`, async (t) => {
+      const h = await crossRepositoryHarness(t, metric, {
+        earlierPeerHistory: true,
+        reviewedPeerHistory: !["event-membership", "current-membership-knowledge"].includes(scenario),
+        wholeSecondPeerClock: scenario === "equivalent-source-clock",
+      });
+      const context = {
+        projects: ["synthetic-project-a"],
+        workstreams: ["synthetic-workstream-a"],
+        workstreamsKnown: true,
+        projectScope: ["synthetic-project-a", "synthetic-project-b"],
+        workstreamScope: ["synthetic-workstream-a", "synthetic-workstream-b"],
+      };
+      h.history.eventContext = structuredClone(context);
+      h.history.currentContext = structuredClone(context);
+      await published(h);
+      const prior = await board(h.runtime, metric);
+      assert.deepEqual(values(prior), [["303", 1]]);
+      const priorInput = await frozenInput(h, prior.snapshotId);
+      const original = priorInput.frozen.facts.find((fact) => fact.actorId === "303" && fact.metricId === metric);
+      const originalRows = (
+        await h.db.query(
+          "SELECT fact_key,policy_signature,document_hash,document FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature",
+        )
+      ).rows;
+      h.history.revision = "v2";
+      if (scenario === "event-membership") h.history.eventContext.projects = ["synthetic-project-b"];
+      if (scenario === "current-membership-knowledge") h.history.currentContext.workstreamsKnown = false;
+      if (scenario === "canonical-identity")
+        h.history.factChanges.canonicalKey = "synthetic-conflicting-canonical-event";
+      if (scenario === "acceptance")
+        h.history.factChanges = {
+          acceptedAt: original.occurredAt,
+          acceptedBy: "303",
+          acceptanceReceipt: "synthetic-unreviewed-acceptance-change",
+        };
+      if (scenario === "state") h.history.factChanges.state = "pending";
+      if (scenario === "subject-actor") h.history.factChanges.subjectActorId = "202";
+      if (scenario === "equivalent-source-clock")
+        h.history.factChanges.occurredAt = original.occurredAt.replace(".000Z", "Z");
+      await published(h);
+      const rowsAfter = (
+        await h.db.query(
+          "SELECT fact_key,policy_signature,document_hash,document FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature",
+        )
+      ).rows;
+      const currentOriginal = rowsAfter
+        .filter((row) => !originalRows.some((priorRow) => priorRow.fact_key === row.fact_key))
+        .flatMap((row) => row.document.facts)
+        .find((fact) => fact.actorId === "303" && fact.metricId === metric);
+      assert.ok(currentOriginal);
+      assert.equal(currentOriginal.id, original.id);
+      assert.equal(currentOriginal.revision, original.revision);
+      assert.equal(currentOriginal.relationshipPair.eventId, original.relationshipPair.eventId);
+      if (scenario === "equivalent-source-clock")
+        assert.equal(components.contracts.compareSourceInstants(currentOriginal.occurredAt, original.occurredAt), 0);
+      const completeHistory = components.metrics.aggregateMetric(
+        { ...priorInput.frozen, cutoff: clock(), facts: [...priorInput.frozen.facts, currentOriginal] },
+        h.config.policies[0].policy,
+        priorInput.engineScope,
+      );
+      assert.deepEqual(completeHistory.rows, [], "the engine rejects this same-revision semantic contradiction");
+      assert.ok(completeHistory.audit.some((entry) => entry.reason === "conflicting_revision"));
+      const current = await board(h.runtime, metric);
+      t.diagnostic(
+        JSON.stringify({ scenario, rows: current.rows.map((row) => ({ actorId: row.actorId, result: row.result })) }),
+      );
+      assert.deepEqual(values(current), [], "latest-state selection must not erase the engine's known contradiction");
+      assert.deepEqual(values(await board(h.runtime, metric, 2)), []);
+      const input = await frozenInput(h, current.snapshotId);
+      assert.ok(
+        input.frozen.facts.filter((fact) => fact.metricId === metric).every((fact) => fact.state === "unknown"),
+      );
+      const aggregate = components.metrics.aggregateMetric(
+        input.frozen,
+        h.config.policies[0].policy,
+        input.engineScope,
+      );
+      assert.deepEqual(aggregate.rows, [], "withholding is unknown, not a measured zero");
+      assert.ok(aggregate.audit.some((entry) => entry.reason === "unknown_qualification"));
+      for (const row of originalRows)
+        assert.deepEqual(
+          rowsAfter.find(
+            (candidate) => candidate.fact_key === row.fact_key && candidate.policy_signature === row.policy_signature,
+          ),
+          row,
+          "semantic comparison must not rewrite any retained normalization",
+        );
+      const request = {
+        snapshotId: current.snapshotId,
+        policy: { ...h.config.policies[0].policy, version: `synthetic-semantic-${scenario}` },
+        operatorId: "201",
+      };
+      const preview = await h.runtime.previewPolicy(request);
+      assert.equal(
+        preview.comparison.before.rows.some((row) => row.value > 0),
+        false,
+      );
+      assert.deepEqual(await h.runtime.previewPolicy(request), preview);
+    });
+  }
+
+  for (const alternateAdapter of [false, true]) {
+    test(`${metric}: successor semantic equivalence preserves reordered memberships${alternateAdapter ? " across adapter IDs" : ""}`, async (t) => {
+      const h = await crossRepositoryHarness(t, metric, {
+        earlierPeerHistory: true,
+        reviewedPeerHistory: alternateAdapter,
+      });
+      const context = {
+        projects: ["synthetic-project-a", "synthetic-project-b"],
+        workstreams: ["synthetic-workstream-a", "synthetic-workstream-b"],
+        workstreamsKnown: true,
+        projectScope: ["synthetic-project-a", "synthetic-project-b"],
+        workstreamScope: ["synthetic-workstream-a", "synthetic-workstream-b"],
+      };
+      h.history.eventContext = structuredClone(context);
+      h.history.currentContext = structuredClone(context);
+      await published(h);
+      const prior = await board(h.runtime, metric);
+      const before = await frozenInput(h, prior.snapshotId);
+      const original = before.frozen.facts.find((fact) => fact.actorId === "303" && fact.metricId === metric);
+      assert.deepEqual(values(prior), [["303", 1]]);
+      h.history.revision = "v2";
+      for (const name of ["eventContext", "currentContext"])
+        h.history[name] = {
+          workstreamScope: [...context.workstreamScope].reverse(),
+          projectScope: [...context.projectScope].reverse(),
+          workstreamsKnown: true,
+          workstreams: [...context.workstreams].reverse(),
+          projects: [...context.projects].reverse(),
+        };
+      if (alternateAdapter) h.history.factChanges.id = `${original.id}:synthetic-other-adapter`;
+      await published(h);
+      const current = await board(h.runtime, metric);
+      assert.deepEqual(
+        values(current),
+        [["303", 1]],
+        "collection clocks and membership ordering do not change the unit",
+      );
+      assert.deepEqual(values(await board(h.runtime, metric, 2)), []);
+      const input = await frozenInput(h, current.snapshotId);
+      const successor = input.frozen.facts.find((fact) => fact.actorId === "303" && fact.metricId === metric);
+      assert.equal(successor.canonicalKey, original.canonicalKey);
+      assert.equal(successor.occurredAt, original.occurredAt);
+      assert.notEqual(successor.observedAt, original.observedAt);
+      assert.equal(successor.state, "observed");
+      const oracle = components.metrics.aggregateMetric(
+        { ...input.frozen, facts: [...input.frozen.facts, original] },
+        h.config.policies[0].policy,
+        input.engineScope,
+      );
+      assert.deepEqual(
+        oracle.rows.map((row) => [row.actorId, row.value]),
+        [["303", 1]],
+      );
+    });
+  }
+
+  test(`${metric}: successor semantic equivalence preserves null and genuinely omitted contexts`, async (t) => {
+    const h = await crossRepositoryHarness(t, metric, { earlierPeerHistory: true, reviewedPeerHistory: true });
+    await published(h);
+    const prior = await board(h.runtime, metric);
+    const before = await frozenInput(h, prior.snapshotId);
+    const original = before.frozen.facts.find((fact) => fact.actorId === "303" && fact.metricId === metric);
+    assert.equal(original.eventContext, null);
+    assert.equal(original.currentContext, null);
+    assert.deepEqual(values(prior), [["303", 1]]);
+    for (const [revision, omitContexts] of [
+      ["v2", true],
+      ["v3", false],
+    ]) {
+      h.history.revision = revision;
+      h.history.omitContexts = omitContexts;
+      await published(h);
+      const current = await board(h.runtime, metric);
+      const input = await frozenInput(h, current.snapshotId);
+      const selected = input.identityAuthorization.identityEvidence.normalizationSources;
+      const rows = (await h.db.query("SELECT fact_key,document_hash,document FROM leaderboard_pipeline.normalizations"))
+        .rows;
+      const successor = rows
+        .filter((row) =>
+          selected.some((source) => source.factKey === row.fact_key && source.documentHash === row.document_hash),
+        )
+        .flatMap((row) => row.document.facts)
+        .find((fact) => fact.actorId === "303" && fact.metricId === metric);
+      for (const key of ["eventContext", "currentContext"]) {
+        assert.equal(Object.hasOwn(successor, key), !omitContexts, "the retained JSON genuinely omits the context key");
+        if (!omitContexts) assert.equal(successor[key], null);
+      }
+      const oracle = components.metrics.aggregateMetric(
+        {
+          ...input.frozen,
+          facts: [...input.frozen.facts.filter((fact) => fact.actorId !== "303"), original, successor],
+        },
+        h.config.policies[0].policy,
+        input.engineScope,
+      );
+      assert.deepEqual(
+        oracle.rows.map((row) => [row.actorId, row.value]),
+        [["303", 1]],
+      );
+      assert.deepEqual(values(current), [["303", 1]], "unknown contexts share the engine's nullish meaning");
+      assert.deepEqual(values(await board(h.runtime, metric, 2)), []);
+      const request = {
+        snapshotId: current.snapshotId,
+        policy: { ...h.config.policies[0].policy, version: `synthetic-nullish-context-${revision}` },
+        operatorId: "201",
+      };
+      const preview = await h.runtime.previewPolicy(request);
+      assert.deepEqual(
+        preview.comparison.before.rows.map((row) => [row.actorId, row.value]),
+        [["303", 1]],
+      );
+      assert.deepEqual(await h.runtime.previewPolicy(request), preview);
+    }
+  });
+
+  test(`${metric}: a higher reviewed same-fact successor can correct membership and canonical identity`, async (t) => {
+    const h = await crossRepositoryHarness(t, metric, { earlierPeerHistory: true, reviewedPeerHistory: true });
+    await published(h);
+    h.history.revision = "v2";
+    h.history.reviewedRevision = 1;
+    h.history.factChanges.canonicalKey = "synthetic-reviewed-canonical-correction";
+    h.history.eventContext = { projects: ["synthetic-corrected-project"], workstreams: [] };
+    h.history.currentContext = { projects: ["synthetic-corrected-project"], workstreams: [] };
+    await published(h);
+    const current = await board(h.runtime, metric);
+    assert.deepEqual(values(current), [["303", 1]]);
+    assert.deepEqual(values(await board(h.runtime, metric, 2)), []);
+    const input = await frozenInput(h, current.snapshotId);
+    const successor = input.frozen.facts.find((fact) => fact.actorId === "303" && fact.metricId === metric);
+    assert.equal(successor.revision, 1);
+    assert.equal(successor.canonicalKey, "synthetic-reviewed-canonical-correction");
+    const correctedScope = components.metrics.aggregateMetric(input.frozen, h.config.policies[0].policy, {
+      ...input.engineScope,
+      projects: ["synthetic-corrected-project"],
+    });
+    assert.deepEqual(
+      correctedScope.rows.map((row) => [row.actorId, row.value]),
+      [["303", 1]],
+    );
+  });
+
+  test(`${metric}: a legacy v2 changed-membership result cannot authorize private restoration`, async (t) => {
+    const h = await crossRepositoryHarness(t, metric, { earlierPeerHistory: true });
+    await published(h);
+    h.history.revision = "v2";
+    h.history.eventContext = { projects: ["synthetic-changed-project"], workstreams: [] };
+    await published(h);
+    const current = await board(h.runtime, metric);
+    const legacy = structuredClone(await frozenInput(h, current.snapshotId));
+    const rows = (
+      await h.db.query(
+        "SELECT fact_key,document_hash,document FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature",
+      )
+    ).rows;
+    const selected = legacy.identityAuthorization.identityEvidence.normalizationSources;
+    const originals = new Map(
+      rows
+        .filter((row) =>
+          selected.some((source) => source.factKey === row.fact_key && source.documentHash === row.document_hash),
+        )
+        .flatMap((row) => row.document.facts)
+        .map((fact) => [fact.id, fact]),
+    );
+    // v2 admitted these exact latest-state originals without carrying their
+    // membership contradiction. Reconstruct only that old calculation; the
+    // immutable retained normalization/source bindings are never rewritten.
+    legacy.frozen.facts = legacy.frozen.facts.map((fact) => structuredClone(originals.get(fact.id) ?? fact));
+    legacy.identityAuthorization.relationshipPairEvidence.schemaVersion = "pipeline-relationship-pair-authority/v2";
+    const unsafe = components.metrics.aggregateMetric(legacy.frozen, h.config.policies[0].policy, {
+      ...legacy.engineScope,
+      projects: ["synthetic-changed-project"],
+    });
+    assert.deepEqual(
+      unsafe.rows.map((row) => [row.actorId, row.value]),
+      [["303", 1]],
+      "the old frozen interpretation changes attribution scope",
+    );
+    let entered = false;
+    await assert.rejects(
+      h.runtime.policyComparisons.withAuthorizedInputs([legacy.identityAuthorization], () => {
+        entered = true;
+      }),
+      /relationship_pair_frozen_binding_invalid/,
+    );
+    assert.equal(entered, false, "a v2 capture must fail before the private restoration callback");
+    assert.deepEqual(
+      (
+        await h.db.query(
+          "SELECT fact_key,document_hash,document FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature",
+        )
+      ).rows,
+      rows,
+    );
+  });
+
   for (const scenario of ["native-unbound", "native-empty", "reviewed-unbound"]) {
     test(`${metric}: displaced ${scenario} pair history cannot promote a later event`, async (t) => {
       const h = await crossRepositoryHarness(t, metric, {
@@ -331,18 +658,20 @@ for (const metric of ["reference_links", "closing_links"]) {
       );
       assert.equal(
         frozen.identityAuthorization.relationshipPairEvidence.schemaVersion,
-        "pipeline-relationship-pair-authority/v2",
+        "pipeline-relationship-pair-authority/v3",
       );
-      const obsolete = structuredClone(frozen.identityAuthorization.relationshipPairEvidence);
-      obsolete.schemaVersion = "pipeline-relationship-pair-authority/v1";
-      assert.throws(() => validateRelationshipPairCapture(obsolete), /relationship_pair_frozen_binding_invalid/);
-      const obsoleteAuthorization = { ...frozen.identityAuthorization, relationshipPairEvidence: obsolete };
-      await assert.rejects(
-        h.runtime.policyComparisons.withAuthorizedInputs([obsoleteAuthorization], () =>
-          assert.fail("old capture must not reach private restoration"),
-        ),
-        /relationship_pair_frozen_binding_invalid/,
-      );
+      for (const obsoleteVersion of ["v1", "v2"]) {
+        const obsolete = structuredClone(frozen.identityAuthorization.relationshipPairEvidence);
+        obsolete.schemaVersion = `pipeline-relationship-pair-authority/${obsoleteVersion}`;
+        assert.throws(() => validateRelationshipPairCapture(obsolete), /relationship_pair_frozen_binding_invalid/);
+        const obsoleteAuthorization = { ...frozen.identityAuthorization, relationshipPairEvidence: obsolete };
+        await assert.rejects(
+          h.runtime.policyComparisons.withAuthorizedInputs([obsoleteAuthorization], () =>
+            assert.fail("old capture must not reach private restoration"),
+          ),
+          /relationship_pair_frozen_binding_invalid/,
+        );
+      }
       const rowsAfter = (
         await h.db.query(
           "SELECT fact_key,policy_signature,document_hash,document FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature",
@@ -373,7 +702,7 @@ for (const metric of ["reference_links", "closing_links"]) {
           assert.deepEqual(
             await runtime.previewPolicy(request),
             preview,
-            "actual database reopen preserves v2 uncertainty",
+            "actual database reopen preserves v3 uncertainty",
           );
           assert.deepEqual(values(await board(runtime, metric, null, current.snapshotId)), []);
         });
