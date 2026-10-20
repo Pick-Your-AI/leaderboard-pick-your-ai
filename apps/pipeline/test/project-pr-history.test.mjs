@@ -7,6 +7,7 @@ import {
   readTypedIssueHistory,
 } from "../../../packages/github/dist/index.js";
 import { createGithubCollectionSource } from "../src/github-source.mjs";
+import { createPublicProjectContextProjector } from "../src/public-project-context.mjs";
 
 const origin = "https://api.synthetic.invalid";
 const repository = {
@@ -425,4 +426,45 @@ test("legacy typed-history checkpoints cannot bypass stable inventory identity v
   h.client.scanGraphql = scanGraphql;
   h.state.subjectId = undefined;
   assert.equal((await h.source.readPage(request)).expectedCount, 2);
+});
+
+test("public event Project context comes from the exact collected native history proof and its observation clock", async () => {
+  const h = harness();
+  const source = (await h.source.readPage(request)).facts.find((entry) => entry.subjectId === "E_pull");
+  const output = await h.normalize(source);
+  assert.equal(output.facts.length, 1);
+  const document = { ...output, projectHistoryNormalizationVersion: "collected-subject/v2" };
+  const entry = { family: "project_history", source: { observedAt }, document };
+  const before = JSON.stringify(entry);
+  const proof = output.evidence[0],
+    fact = output.facts[0];
+  const value = createPublicProjectContextProjector([entry], "event", observedAt)(proof, fact).projectContext;
+  assert.equal(value.state, "known");
+  assert.equal(value.basis, "event");
+  assert.deepEqual(value.projects, ["PVT_allowed"]);
+  assert.deepEqual(value.projectScope, ["PVT_allowed"]);
+  assert.equal(value.observedAt, observedAt);
+  assert.notEqual(value.observedAt, proof.occurredAt, "collection clock is not the historical event date");
+  for (const candidate of [
+    { ...entry, family: "relationships" },
+    { ...entry, document: { ...document, projectHistoryNormalizationVersion: undefined } },
+  ])
+    assert.equal(
+      createPublicProjectContextProjector([candidate], "event", observedAt)(proof, fact).projectContext.state,
+      "unknown",
+    );
+  assert.equal(
+    createPublicProjectContextProjector([entry], "current", observedAt)(proof, fact).projectContext.state,
+    "unknown",
+  );
+  for (const change of [
+    { sourceRevision: "foreign" },
+    { contribution: { ...proof.contribution, canonicalEventId: "foreign" } },
+  ])
+    assert.equal(
+      createPublicProjectContextProjector([entry], "event", observedAt)({ ...proof, ...change }, fact).projectContext
+        .state,
+      "unknown",
+    );
+  assert.equal(JSON.stringify(entry), before);
 });

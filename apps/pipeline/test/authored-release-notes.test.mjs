@@ -260,8 +260,10 @@ test("authored notes review: a later invalid duplicate cannot hide behind canoni
   assert.equal(calls, 1);
 });
 
-// Exact ae/fd7 prior fingerprint body; retained as historical authority.
-function previousPurposeAuthority(state, bindings = []) {
+// Historical authority stays exact by default for the stale-publication cases.
+// The explicit Project option composes its separately versioned authority into
+// current-format comparisons without changing the historical default.
+function previousPurposeAuthority(state, bindings = [], includeProjectAuthority = false) {
   // An unsupported opt-in cannot keep an old saved hash current without rematerialization.
   for (const binding of bindings) validateMaintenanceClassificationBinding(binding);
   const requests = Object.values(state.requests ?? {})
@@ -292,6 +294,14 @@ function previousPurposeAuthority(state, bindings = []) {
   if (bindings.some((binding) => binding.metricId === "data_quality")) authority.push("data-quality-recognition/v1");
   // Generic reproduction receipts had no scenario/environment/result boundary.
   if (bindings.some((binding) => binding.metricId === "reproductions")) authority.push("reproduction-recognition/v1");
+  // The reviewed Project boundary retires generic manual receipt authority.
+  // Automatic-only states retain the historical fingerprint exactly.
+  if (
+    includeProjectAuthority &&
+    requests.length &&
+    bindings.some((binding) => binding.metricId === "project_configuration")
+  )
+    authority.push("project-configuration-evidence/v1");
   // Earlier generic bug receipts admitted non-issue and explicitly synthetic sources.
   if (bindings.some((binding) => binding.metricId === "confirmed_bugs"))
     authority.push("confirmed-bug-source-admission/v1");
@@ -320,17 +330,20 @@ function previousPurposeAuthority(state, bindings = []) {
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
-test("authored notes authority: all98 binding fingerprints retain prior or independently retired authority", () => {
+test("authored notes authority: all98 fingerprints preserve historical defaults and compose reviewed Project authority", () => {
   const s = scenario(),
     empty = { requests: {}, profiles: {}, audit: [] };
   for (const metric of metricRegistryV1.metrics) {
     const binding = { ...s.binding, metricId: metric.id };
     delete binding.documentationPurpose;
     for (const state of [empty, s.state]) {
-      const current = recognitionFingerprint(state, [binding]);
-      const prior = previousPurposeAuthority(state, [binding]);
-      if (metric.id === "release_stewardship") assert.notEqual(current, prior);
-      else assert.equal(current, prior, metric.id);
+      const actual = recognitionFingerprint(state, [binding]);
+      const historical = previousPurposeAuthority(state, [binding]);
+      const expected = previousPurposeAuthority(state, [binding], true);
+      if (["issue_ordering", "release_stewardship"].includes(metric.id)) assert.notEqual(actual, expected, metric.id);
+      else assert.equal(actual, expected, metric.id);
+      if (metric.id === "project_configuration" && state === s.state) assert.notEqual(expected, historical, metric.id);
+      else assert.equal(expected, historical, metric.id);
     }
   }
   for (const state of [empty, s.state]) {
@@ -366,7 +379,13 @@ test("authored notes publication: current and pinned purposes survive real store
     markerFreeConfig: true,
     dataMode: "public",
     payloads: [s.envelope.payload.pull_request],
-    normalizerFactory: () => async () => structuredClone(s.input),
+    normalizerFactory:
+      () =>
+      async ({ observedAt }) => {
+        const output = components.github.normalizeGithubObservation({ ...s.envelope, observedAt }, s.pathPolicy);
+        assert.ok(output.physicalContext, "the stock adapter retains its source-bound physical receipt");
+        return output;
+      },
     defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
     configure(config) {
       config.repositories[0].families = ["pull_requests"];
@@ -475,8 +494,16 @@ for (const selectedRelease of [false, true])
         payloads: [s.envelope.payload.pull_request],
         authorizePolicyPreview: async () => true,
         defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
-        normalizerFactory: () => async () =>
-          normalizeGithubObservation(s.envelope, interpretPurpose ? s.pathPolicy : oldPolicy),
+        normalizerFactory:
+          () =>
+          async ({ observedAt }) => {
+            const output = normalizeGithubObservation(
+              { ...s.envelope, observedAt },
+              interpretPurpose ? s.pathPolicy : oldPolicy,
+            );
+            assert.ok(output.physicalContext, "both policy generations retain their source-bound physical receipt");
+            return output;
+          },
         configure(config) {
           config.repositories[0].families = ["pull_requests"];
           config.documentationPolicies = [s.pathPolicy];

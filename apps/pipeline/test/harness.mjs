@@ -52,6 +52,27 @@ export function discoveryTestAuthority({ now = Date.now } = {}) {
   };
 }
 
+// Opt in only for history tests that must pass the five-author display gate.
+// The ordinary two-author fixture and its source/quantity expectations stay exact.
+export function fiveAuthorIssuePayloads(payloads) {
+  return [
+    ...payloads,
+    ...[103, 104, 105].map((actorId) => ({
+      ...payloads[0],
+      id: 1000 + actorId,
+      node_id: `SYNTHETIC_ISSUE_${actorId}`,
+      number: actorId,
+      html_url: `https://github.com/synthetic-org/synthetic-repo/issues/${actorId}`,
+      user: {
+        id: actorId,
+        node_id: `U_SYNTHETIC_${actorId}`,
+        login: `synthetic-history-${actorId}`,
+        type: "User",
+      },
+    })),
+  ];
+}
+
 export async function harness(t, extra = {}) {
   const slug = extra.markerFreeConfig ? "example-org/example-repo" : "synthetic-org/synthetic-repo";
   const directory = await mkdtemp(join(tmpdir(), "leaderboard-pipeline-"));

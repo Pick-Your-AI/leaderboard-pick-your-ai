@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { harness, components, getBoard, publicScope } from "./harness.mjs";
+import { harness, components, getBoard, publicScope, fiveAuthorIssuePayloads } from "./harness.mjs";
 import { createPipeline } from "../src/index.mjs";
 import { createConfigurationManager } from "../../controls/src/configuration.mjs";
 
@@ -16,6 +16,9 @@ test("a protected host reviews, replaces and reverses a metric definition withou
   const baselineGrants = new Set();
   const noteURL = (version) => `https://github.com/synthetic-org/synthetic-repo/blob/main/policies/${version}.md`;
   const h = await harness(t, {
+    // Keep this definition-rank transition above the separate display threshold.
+    // The ordinary two-author fixture still exercises small-cohort presentation.
+    transformPayloads: fiveAuthorIssuePayloads,
     configure(config) {
       config.policies[0].policyLink = noteURL(config.policies[0].policy.version);
       baselineGrants.add(stable(config));
@@ -200,7 +203,8 @@ test("a protected host reviews, replaces and reverses a metric definition withou
   const initial = (await runtime.runOnce()).publications[0];
   const before = await getBoard(runtime);
   assert.equal(before.methodology[0].policyVersion, originalPolicy.version);
-  assert.equal(before.rows.length, 2);
+  assert.equal(before.rows.length, 5);
+  assert.deepEqual(new Set(before.rows.map((row) => row.actorId)), new Set(["101", "102", "103", "104", "105"]));
   assert.ok(before.rows.every((row) => row.rank === 1));
   const originalFrozen = await frozenRows();
   const initialFacts = originalFrozen[0].document.frozen.facts;
@@ -211,7 +215,7 @@ test("a protected host reviews, replaces and reverses a metric definition withou
     const preview = await runtime.previewPolicy({ snapshotId, policy, operatorId: "201" });
     assert.equal(preview.comparison.before.datasetId, preview.comparison.after.datasetId);
     assert.equal(preview.comparison.before.cutoff, preview.comparison.after.cutoff);
-    assert.equal(preview.comparison.changes.length, 2);
+    assert.equal(preview.comparison.changes.length, 5);
     await assert.rejects(
       runtime.approvePolicyComparison({
         comparisonId: preview.comparisonId,
@@ -292,7 +296,7 @@ test("a protected host reviews, replaces and reverses a metric definition withou
     "Synthetic release: retain observed totals without ranking.",
   );
   const next = await replaceBaseline(await activate(forwardProposal), nextPolicy);
-  assert.equal(next.rows.length, 2);
+  assert.equal(next.rows.length, 5);
   assert.ok(next.rows.every((row) => row.rank === null));
   assert.deepEqual(
     (await frozenRows()).find((row) => row.snapshot_id === initial.snapshotId),

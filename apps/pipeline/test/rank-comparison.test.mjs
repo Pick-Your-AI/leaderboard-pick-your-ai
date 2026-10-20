@@ -5,7 +5,7 @@ import { createPipeline } from "../src/index.mjs";
 import { aggregateExplanationHash } from "../src/aggregate-explanations.mjs";
 import { retainedRankHistory } from "../src/rank-history.mjs";
 import { correctionStateQuery } from "../src/reversion-store.mjs";
-import { harness, components, clock, ago, boardUrl } from "./harness.mjs";
+import { harness, components, clock, ago, boardUrl, fiveAuthorIssuePayloads } from "./harness.mjs";
 import { attachSyntheticEvidenceState } from "../../../tests/fixtures/evidence-intake.mjs";
 
 async function twoSnapshots(t, extra = {}, beforePublish) {
@@ -18,6 +18,7 @@ async function twoSnapshots(t, extra = {}, beforePublish) {
   };
   const h = await harness(t, {
     ...extra,
+    transformPayloads: fiveAuthorIssuePayloads,
     configure(config) {
       extra.configure?.(config);
       config.scopes = [scope];
@@ -59,27 +60,38 @@ const recognitionPair = (t) =>
       },
     },
     (h) => {
-      const event = {
-        id: "synthetic-paired-recognition-receipt",
-        actor: "202",
-        action: "accepted",
-        at: Date.parse(ago(1.5)),
-        policyVersion: h.config.policies[0].policy.version,
-      };
       h.controlsStore.transaction((state) => {
-        state.requests.claim = {
-          id: "claim",
-          kind: "evidence",
-          status: "accepted",
-          owner: "101",
-          category: "finding",
-          scope: "repository:2",
-          policyVersion: event.policyVersion,
-          locator: "https://github.com/synthetic-org/synthetic-repo/issues/1",
-          collaborators: {},
-          history: [event],
-        };
-        state.audit.push(event);
+        // Keep the original claim and audit event used by the withdrawal/race
+        // mutations; independent accepted peers make the baseline rankable.
+        for (const [actor, number] of [
+          ["101", 1],
+          ["102", 2],
+          ["103", 103],
+          ["104", 104],
+          ["105", 105],
+        ]) {
+          const id = actor === "101" ? "claim" : `claim-${actor}`;
+          const event = {
+            id: actor === "101" ? "synthetic-paired-recognition-receipt" : `synthetic-paired-recognition-${actor}`,
+            actor: "202",
+            action: "accepted",
+            at: Date.parse(ago(1.5)),
+            policyVersion: h.config.policies[0].policy.version,
+          };
+          state.requests[id] = {
+            id,
+            kind: "evidence",
+            status: "accepted",
+            owner: actor,
+            category: "finding",
+            scope: "repository:2",
+            policyVersion: event.policyVersion,
+            locator: `https://github.com/synthetic-org/synthetic-repo/issues/${number}`,
+            collaborators: {},
+            history: [event],
+          };
+          state.audit.push(event);
+        }
         attachSyntheticEvidenceState(state);
       });
     },

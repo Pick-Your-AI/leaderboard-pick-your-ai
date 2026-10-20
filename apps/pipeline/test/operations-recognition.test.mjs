@@ -797,7 +797,7 @@ test("operations: unaffected automatic metrics retain prior fingerprints while m
     if (metrics.includes(definition.id)) continue;
     const bindings = [{ ...s.binding, metricId: definition.id }];
     assert.notEqual(recognitionFingerprint(s.state, bindings), priorAuthority(s.state, bindings));
-    if (["release_changes", "release_stewardship"].includes(definition.id))
+    if (["release_changes", "issue_ordering", "release_stewardship"].includes(definition.id))
       assert.notEqual(recognitionFingerprint(empty, bindings), priorAuthority(empty, bindings));
     else assert.equal(recognitionFingerprint(empty, bindings), priorAuthority(empty, bindings), definition.id);
   }
@@ -1085,7 +1085,12 @@ test("operations deployment ID authority: retained SQL publication is withheld a
     defaultDeliveryNormalizationVersion,
     normalizerFactory: () => async () => {
       normalizationCalls++;
-      return structuredClone(retained);
+      // The legacy output deliberately omits its merged candidate, and both
+      // outputs retain fixed observation clocks for saved-authority checks.
+      // Neither supplies the original source/fact binding of a physical receipt.
+      const output = structuredClone(retained);
+      delete output.physicalContext;
+      return output;
     },
     configure(config) {
       config.repositories[0].families = ["pull_requests"];
@@ -1130,6 +1135,7 @@ test("operations deployment ID authority: retained SQL publication is withheld a
     ).rows;
   const originalSavedRows = await savedRows();
   assert.equal(originalSavedRows.length, 1);
+  assert.equal(Object.hasOwn(originalSavedRows[0].document, "physicalContext"), false);
   assert.equal(
     originalSavedRows[0].document.facts.filter(
       (fact) => fact.metricId === "deployment_work" && fact.state === "qualified",
@@ -1215,6 +1221,7 @@ test("operations deployment ID authority: retained SQL publication is withheld a
   const result = await repaired.runOnce({ cutoff });
   assert.equal(result.state, "published");
   assert.equal(receiptCalls, 1);
+  assert.ok((await savedRows()).every(({ document }) => !Object.hasOwn(document, "physicalContext")));
   assert.ok(normalizationCalls > savedNormalizationCalls);
   const newId = result.publications[0].snapshotId;
   assert.notEqual(newId, snapshotId);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createPipeline } from "../src/index.mjs";
-import { harness, components, clock, getBoard } from "./harness.mjs";
+import { harness, components, clock, getBoard, publicScope } from "./harness.mjs";
 
 async function assertRetainedLedgerRebuild(t, { transformPayloads, inspect = async () => {} } = {}) {
   let normalizations = 0;
@@ -93,8 +93,23 @@ test("deleted source actor stays unknown and unranked through retained-ledger re
       assert.ok(deleted.evidence.every((entry) => entry.contribution.actorId === null));
       assert.deepEqual(
         board.rows.map((row) => [row.actorId, row.result.value, row.rank]),
-        [["101", 1, 1]],
-        "only the known actor receives a named total or rank, before and after rebuild",
+        [["101", 1, null]],
+        "only the known actor receives a named total; the small public cohort remains unranked before and after rebuild",
+      );
+      assert.equal(board.rankingPresentation.state, "small_cohort");
+      assert.equal(board.rankingPresentation.comparableContributors, 1);
+      const paired = await runtime.source.readComparison(
+        publicScope,
+        board.snapshotId,
+        { snapshotId: board.snapshotId, scope: publicScope },
+        new AbortController().signal,
+      );
+      assert.equal(
+        paired.currentHistory.metrics
+          .find((entry) => entry.metricId === "issues_opened")
+          .rows.find((row) => row.actorId === "101").rank,
+        1,
+        "the original private rank remains intact without reconstructing the deleted actor",
       );
       const directory = await runtime.app.inject("/api/v1/contributors");
       assert.equal(directory.statusCode, 200, directory.body);

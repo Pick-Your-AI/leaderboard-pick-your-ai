@@ -9,6 +9,7 @@ import {
   validateAutomationSource,
   validateMaintenanceSource,
   validateReleaseChangesSource,
+  registerOrderingPlan,
   validateReleaseStewardshipSource,
 } from "@pick-your-ai/github";
 import {
@@ -21,6 +22,7 @@ import {
   qualifyDomainRecognition,
   hasSparseDomainIdentifierAuthority,
 } from "./domain-recognition.mjs";
+import { verifyProjectConfigurationConsistency } from "./project-configuration-recognition.mjs";
 import { localizationReviewRequest, parseLocalizationReviewTarget } from "../../controls/src/localization-review.mjs";
 import { releaseReviewRequest, parseReleaseReviewTarget } from "../../controls/src/release-review.mjs";
 import { hasRequiredParticipantConsent, hasReviewedParticipantConsent } from "../../controls/src/evidence-consent.mjs";
@@ -65,6 +67,10 @@ export function recognitionFingerprint(state, bindings = []) {
   if (bindings.some((binding) => binding.metricId === "data_quality")) authority.push("data-quality-recognition/v1");
   // Generic reproduction receipts had no scenario/environment/result boundary.
   if (bindings.some((binding) => binding.metricId === "reproductions")) authority.push("reproduction-recognition/v1");
+  // Earlier generic Project receipts did not bind a typed before/after change set.
+  // Without a manual request there is no receipt to retire; preserve automatic authority.
+  if (requests.length && bindings.some((binding) => binding.metricId === "project_configuration"))
+    authority.push("project-configuration-evidence/v1");
   // Earlier generic bug receipts admitted non-issue and explicitly synthetic sources.
   if (bindings.some((binding) => binding.metricId === "confirmed_bugs"))
     authority.push("confirmed-bug-source-admission/v1");
@@ -89,6 +95,8 @@ export function recognitionFingerprint(state, bindings = []) {
   // Retire generic receipts and the earlier pre-collection release observation authority.
   if (bindings.some((binding) => binding.metricId === "release_changes"))
     authority.push("release-inclusion-recognition/v2");
+  // Even an empty current intake must retire the former generic ordering authority.
+  if (bindings.some((binding) => binding.metricId === "issue_ordering")) authority.push("reviewed-ordering-plan/v1");
   // Earlier same-metric receipts lacked original publication/clock/unit admission.
   // Retire only this destination; unrelated source and receipt authority stay exact.
   if (bindings.some((binding) => binding.metricId === "release_stewardship"))
@@ -127,14 +135,26 @@ export function materializeRecognition(
   cutoff,
   publicReasons = () => [],
 ) {
+  if (bindings.some((binding) => binding.metricId === "issue_ordering")) {
+    // Freeze the invocation before any host receipt callback can change a later
+    // source, claim, scope enrollment or policy used by this same evaluation.
+    input = structuredClone(input);
+    state = structuredClone(state);
+    bindings = structuredClone(bindings);
+    policies = structuredClone(policies);
+  }
   for (const binding of bindings) validateDocumentationPurposeBinding(binding);
   let output = structuredClone(input);
   const domainUnits = new Set();
+  const projectChangesets = new Map();
+  const projectArtifacts = new Map();
   const mergedChangeUnits = new Set();
   const releaseMemberships = new Set();
   const stewardshipUnits = new Set();
   const domainReasons = new Map();
   const reviewedOperationArtifacts = new Map();
+  const orderingPlans = new Map();
+  const orderingJobs = [];
   const decisionTime = (request) => {
     const at = request.history?.findLast((event) => event.action === "accepted")?.at;
     const time = typeof at === "number" ? at : typeof at === "string" ? Date.parse(at) : NaN;
@@ -393,7 +413,15 @@ export function materializeRecognition(
       if (previous !== undefined && previous !== hash) throw new Error("domain_recognition_evidence_unverified");
       reviewedOperationArtifacts.set(url, hash);
     }
+    if (domain?.ordering) {
+      // Validate every plan and alias before awarding any ordering unit. A
+      // conflicting later alias cannot hide behind an earlier deduplication.
+      if (!registerOrderingPlan(orderingPlans, domain.ordering))
+        orderingJobs.push({ domain, decision, binding, request, target: candidates[0], acceptedAt });
+      continue;
+    }
     if (domain) {
+      verifyProjectConfigurationConsistency(domain, projectChangesets, projectArtifacts);
       const unit = JSON.stringify([request.owner, domain.changesetId]);
       if (domainUnits.has(unit)) continue;
       domainUnits.add(unit);
@@ -458,6 +486,28 @@ export function materializeRecognition(
         domainReasons.set(evidence.contribution.contributionId, domain.publicReasonCodes);
       }
     }
+  }
+  for (const { domain, decision, binding, request, target, acceptedAt } of orderingJobs) {
+    const previousEvidence = output.evidence.length;
+    output = applyReceipt(
+      output,
+      {
+        id: decision.id,
+        verified: true,
+        targetFactId: target.id,
+        metricId: "issue_ordering",
+        actorId: request.owner,
+        reviewerId: decision.actor,
+        acceptedAt,
+        decision: "accepted",
+        evidenceIds: [target.id],
+        ordering: domain.ordering,
+        orderingAuthority: domain.orderingAuthority,
+      },
+      binding.reviewerIds,
+    );
+    for (const evidence of output.evidence.slice(previousEvidence))
+      domainReasons.set(evidence.contribution.contributionId, domain.publicReasonCodes);
   }
   // Audit receipt identifiers remain private even when the normalizer annotates evidence.
   for (const entry of output.evidence.slice(input.evidence.length))

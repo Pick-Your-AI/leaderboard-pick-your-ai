@@ -284,7 +284,7 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
     throw new Error("State grouping requires an explicit positive interval");
   const grouping = getMetricGroupingPolicy(policy.metricId);
   if (policy.groupBy === "actor_artifact_interval" && grouping?.group_by !== "actor_artifact_interval")
-    throw new Error("Definition days require their exact versioned grouping policy");
+    throw new Error("Daily groups require their exact versioned grouping policy");
   const supportedGroupingSelection =
     !grouping ||
     (policy.dateBasis === grouping.date_basis && policy.rankedStates[0] === grouping.state) ||
@@ -701,8 +701,8 @@ function prepare(
           Math.floor(instant(fact.occurredAt) / (policy.groupingSeconds! * 1000)),
         );
       } else if (policy.groupBy === "actor_artifact_interval") {
-        // Definitions share a day across their facets, not across repositories,
-        // actors or metric kinds. Use the same explicitly selected clock as the
+        // A versioned daily unit shares its facets, not repositories, actors
+        // or metric kinds. Use the same explicitly selected clock as the
         // window filter; observation/replay time never supplies a missing date.
         const at = fact.state === "pending" ? fact.occurredAt : fact[policy.dateBasis];
         if (!at) {

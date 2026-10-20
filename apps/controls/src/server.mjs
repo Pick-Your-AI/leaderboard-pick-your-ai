@@ -1,4 +1,5 @@
 import { createOperationsManager } from "./operations.mjs";
+import { bindOrderingReview } from "@pick-your-ai/github";
 import { createServer } from "node:http";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { actorId, ControlError, exactKeys, locator, record, requireThat, text } from "./store.mjs";
@@ -720,6 +721,7 @@ export function createControlsServer({
                 "localization",
                 "releaseInclusion",
                 "sourceUseReview",
+                "ordering",
               ]);
               requireThat(session.roles.includes(roleNeeded(request)), 403, "Reviewer role required");
               requireThat(
@@ -736,6 +738,8 @@ export function createControlsServer({
                     input.sourceUseReview === undefined),
               );
               requireThat(input.localization === undefined || input.releaseInclusion === undefined);
+              requireThat(input.decision === "accept" || input.ordering === undefined);
+              requireThat(request.category === "ordering" || input.ordering === undefined);
               requireThat(!["withdrawn", "merged", "applied"].includes(request.status), 409, "Request is terminal");
               if (request.status === "appealed" || input.decision === "rollback") {
                 requireThat(
@@ -769,6 +773,14 @@ export function createControlsServer({
                 );
                 const sourceUse = parseSourceUseReview(input.sourceUseReview);
                 requireThat(sourceUse, 400, "Independent source-use review and reviewed references required");
+                let ordering;
+                if (request.category === "ordering") {
+                  try {
+                    ordering = bindOrderingReview(input.ordering, request, sourceUse.references);
+                  } catch {
+                    throw new ControlError(400, "Invalid current ordering review");
+                  }
+                }
                 requireThat(
                   !Object.values(s.requests).some(
                     (other) =>
@@ -823,6 +835,7 @@ export function createControlsServer({
                   }),
                   ...(localization ? { localization, evidenceRequest: localizationReviewRequest(request) } : {}),
                   ...(releaseInclusion ? { releaseInclusion, evidenceRequest: releaseReviewRequest(request) } : {}),
+                  ...(ordering ? { ordering } : {}),
                 });
                 requireThat(
                   hasReviewedEvidenceIntake(request),
