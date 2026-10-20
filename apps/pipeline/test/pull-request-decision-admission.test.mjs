@@ -483,7 +483,7 @@ test(
     );
     const legacy = fact(observation);
     delete legacy.pullRequestDecisionHistory;
-    for (const position of ["outer", "prototype", "ancestor", "callable"]) {
+    for (const position of ["outer", "prototype", "ancestor", "callable", "callable-prototype", "callable-ancestor"]) {
       for (const revoked of [false, true]) {
         const label = position + (revoked ? "-revoked" : "-trapping");
         await t.test(label, async () => {
@@ -492,8 +492,10 @@ test(
             hooks++;
             throw new Error("synthetic proxy hook must not run");
           };
-          const candidate = position === "callable" ? Object.assign(() => {}, legacy) : { ...legacy };
-          const pair = Proxy.revocable(position === "outer" || position === "callable" ? candidate : {}, {
+          const callable = position.startsWith("callable");
+          const candidate = callable ? Object.assign(() => {}, legacy) : { ...legacy };
+          const direct = position === "outer" || position === "callable";
+          const pair = Proxy.revocable(direct ? candidate : {}, {
             get: trap,
             has: trap,
             ownKeys: trap,
@@ -502,10 +504,18 @@ test(
           });
           if (revoked) pair.revoke();
           let value = pair.proxy;
-          if (position !== "outer" && position !== "callable") {
-            Object.setPrototypeOf(candidate, position === "prototype" ? pair.proxy : Object.create(pair.proxy));
+          if (!direct) {
+            Object.setPrototypeOf(
+              candidate,
+              position === "prototype" || position === "callable-prototype" ? pair.proxy : Object.create(pair.proxy),
+            );
             value = candidate;
           }
+          assert.throws(() => collectionPullRequestDecisionObservation(value, "pull_requests", 2), {
+            name: "TypeError",
+            message: "invalid_pull_request_decision_observation",
+          });
+          assert.equal(hooks, 0, "admission rejects proxies without invoking hooks");
           const scan = request("synthetic-decision-proxy-" + label);
           await store.start(scan);
           assert.equal(
