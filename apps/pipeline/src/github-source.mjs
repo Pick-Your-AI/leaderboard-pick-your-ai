@@ -1,4 +1,5 @@
 import { GithubClientError } from "../../../packages/github/dist/client.js";
+import { isPromise } from "node:util/types";
 import { readTypedIssueHistory, typedHistoryRevision } from "../../../packages/github/dist/timeline-history.js";
 import { readIssueFieldHistory, issueFieldHistoryRevision } from "../../../packages/github/dist/issue-field-history.js";
 import { assertPublicProjects } from "../../../packages/github/dist/project-snapshots.js";
@@ -19,6 +20,8 @@ import {
   readGithubContentEditParents,
   githubContentEditRevision,
 } from "../../../packages/github/dist/content-edit-history.js";
+import { readGithubCommentEditInventory } from "../../../packages/github/dist/comment-edit-inventory.js";
+import { githubCommentEditRevision } from "../../../packages/github/dist/comment-edit-history.js";
 import { minimizeDiscussionFeedback, discussionFeedbackRevision } from "@pick-your-ai/github";
 import { discussionFeedbackContentVersion, discussionFeedbackLimits } from "@pick-your-ai/contracts";
 
@@ -116,6 +119,7 @@ export function createGithubCollectionSource({
   useRestSnapshotRevisions = () => false,
   includePullRequestReviewComments = () => false,
   includeContentEditMetadata = () => false,
+  includeCommentEditMetadata = () => false,
   discussionFeedback = null,
 }) {
   if (
@@ -129,7 +133,8 @@ export function createGithubCollectionSource({
     maxPages > 1000 ||
     typeof useRestSnapshotRevisions !== "function" ||
     typeof includePullRequestReviewComments !== "function" ||
-    typeof includeContentEditMetadata !== "function"
+    typeof includeContentEditMetadata !== "function" ||
+    typeof includeCommentEditMetadata !== "function"
   )
     throw new Error("invalid_github_collection_source");
   if (
@@ -201,12 +206,28 @@ export function createGithubCollectionSource({
               : true))
       )
         throw new Error("reconciliation_source_plan_invalid");
+      let expandedContentEdits = false;
       if (request.family === "content_edits") {
         assertAuthorized();
         const admitted = includeContentEditMetadata(Object.freeze({ ...request }));
+        if (isPromise(admitted))
+          void Promise.prototype.then.call(
+            admitted,
+            () => {},
+            () => {},
+          );
         assertAuthorized();
         if (typeof admitted !== "boolean") throw new Error("invalid_content_edit_inventory_policy");
         if (!admitted) throw new Error("source_content_edit_inventory_unavailable");
+        expandedContentEdits = includeCommentEditMetadata(Object.freeze({ ...request }));
+        if (isPromise(expandedContentEdits))
+          void Promise.prototype.then.call(
+            expandedContentEdits,
+            () => {},
+            () => {},
+          );
+        assertAuthorized();
+        if (typeof expandedContentEdits !== "boolean") throw new Error("invalid_comment_edit_inventory_policy");
       }
       const expandedComments =
         request.family === "comments" ? includePullRequestReviewComments({ runId: request.runId }) : false;
@@ -258,7 +279,7 @@ export function createGithubCollectionSource({
       let values;
       let projectSubjectCount = null;
       if (request.family === "content_edits") {
-        const inventory = await readGithubContentEditParents({
+        const inventory = await (expandedContentEdits ? readGithubCommentEditInventory : readGithubContentEditParents)({
           client,
           source: sourceId,
           repository: { id: repository.id, slug: repository.slug },
@@ -659,9 +680,12 @@ export function createGithubCollectionSource({
           };
         if (request.family === "content_edits")
           return {
-            subjectId: value.parent.id,
-            sourceRevision: githubContentEditRevision(value, request.runId),
-            sourceUrl: value.parent.url,
+            subjectId: (value.version === "github-comment-edit-metadata/v1" ? value.target : value.parent).id,
+            sourceRevision:
+              value.version === "github-comment-edit-metadata/v1"
+                ? githubCommentEditRevision(value, request.runId)
+                : githubContentEditRevision(value, request.runId),
+            sourceUrl: (value.version === "github-comment-edit-metadata/v1" ? value.target : value.parent).url,
             evidence: "current_state",
             actorId: null,
             occurredAt: null,

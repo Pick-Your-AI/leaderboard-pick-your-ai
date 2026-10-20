@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import type { SqlDatabase, SqlSession } from "./store.js";
-import { collectionContentEditMetadata, type ContentEditMetadata } from "./content-edit-metadata.js";
+import {
+  collectionContentEditMetadata,
+  type ContentEditMetadata,
+  type CommentEditMetadata,
+} from "./content-edit-metadata.js";
 import { collectionDiscussionFeedback } from "./discussion-feedback.js";
 import type { DiscussionFeedbackObservation } from "@pick-your-ai/contracts";
 
@@ -36,8 +40,8 @@ export interface SourceFact {
   issueFieldId?: string;
   /** Native issue/PR identity for a complete current Project membership snapshot. */
   projectSubjectId?: string;
-  /** Private native-parent metadata, never transition or recognition evidence. */
-  contentEditMetadata?: ContentEditMetadata;
+  /** Private native-parent or published-comment metadata, never transition or recognition evidence. */
+  contentEditMetadata?: ContentEditMetadata | CommentEditMetadata;
   /** Private content fingerprints and complete-observation generation; never raw text. */
   discussionFeedback?: DiscussionFeedbackObservation;
   sourceRevision: string;
@@ -92,8 +96,8 @@ function validateScanRequest(request: ScanRequest): void {
   if (!sourceFamilies.includes(request.family) || !["backfill", "reconcile", "audit"].includes(request.mode))
     throw new Error("invalid_scan_scope");
 }
-function normalizeFact(value: SourceFact, family: SourceFamily): SourceFact {
-  const contentEditMetadata = collectionContentEditMetadata(value, family);
+function normalizeFact(value: SourceFact, family: SourceFamily, repositoryId: number): SourceFact {
+  const contentEditMetadata = collectionContentEditMetadata(value, family, repositoryId);
   const discussionFeedback = collectionDiscussionFeedback(value, family);
   id(value.subjectId);
   if (value.historySubjectId !== undefined) id(value.historySubjectId);
@@ -341,7 +345,7 @@ export class CollectionStore {
         throw new Error("nonadvancing_source_page");
       if (page.expectedCount !== null && (!Number.isSafeInteger(page.expectedCount) || page.expectedCount < 0))
         throw new Error("invalid_source_count");
-      const facts = page.facts.map((fact) => normalizeFact(fact, request.family));
+      const facts = page.facts.map((fact) => normalizeFact(fact, request.family, request.repositoryId));
       if (page.expectedCount !== null && facts.some((fact) => fact.contentEditMetadata !== undefined))
         throw new Error("content_edit_history_count_unknown");
       if (
