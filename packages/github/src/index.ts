@@ -16,6 +16,7 @@ export * from "./comment-edit-inventory.js";
 export * from "./physical-diff.js";
 export * from "./repository-net-lines.js";
 export * from "./documentation.js";
+export * from "./localization-review.js";
 export * from "./research.js";
 export * from "./maintenance.js";
 export * from "./release-stewardship-source.js";

@@ -46,6 +46,12 @@ import { readGithubCommentSource, readGithubCommentIdentity } from "./comment-id
 import { consistentReviewCohortIdentities, reviewParentMatches, reviewSourceMatches } from "./review-cohort.js";
 import { firstReviewSubmission } from "./first-review.js";
 import {
+  localizationReviewNormalizationVersion,
+  readLocalizationReviewSource,
+  type GithubLocalizationMergeSource,
+  type GithubLocalizationReviewSource,
+} from "./localization-review.js";
+import {
   hasGithubRestSnapshotPrefix,
   isGithubRestSnapshotFamily,
   githubRestSnapshotSemanticRevision,
@@ -374,6 +380,9 @@ export interface NormalizedGithubResult {
   syntheticFactIds?: readonly string[];
   /** Private output of the bounded authorized release collector. */
   releaseInclusions?: readonly GithubReleaseInclusionRecord[];
+  /** Private inputs for the separately bound merged-locale reviewer projection. */
+  localizationMergeSource?: GithubLocalizationMergeSource;
+  localizationReviewSource?: GithubLocalizationReviewSource;
   /** Private merge-event proofs, including explicit unknown outcomes. */
   pullRequestMergeTargets?: readonly GithubPullRequestMergeTargetCapture[];
   facts: NormalizedGithubFact[];
@@ -696,6 +705,7 @@ export function normalizeGithubObservation(
   envelope: GithubEvidenceEnvelope,
   documentationPolicy?: DocumentationPathPolicy,
   researchPolicy?: ResearchPathPolicy,
+  localizationReviews = false,
 ): NormalizedGithubResult {
   const out = result();
   const { repository, proof } = envelope;
@@ -1153,6 +1163,29 @@ export function normalizeGithubObservation(
         emit("first_reviews", reviewer, "reviewer", firstReviewAt, `${id}:first-review`, {
           rawState: "first_nonself_submitted_review",
         });
+    }
+    if (
+      localizationReviews &&
+      documentationPolicy?.repositoryId === repository.id &&
+      documentationPolicy.localizationPaths?.length &&
+      envelope.reviewSequence?.verified
+    ) {
+      validateDocumentationPolicy(documentationPolicy);
+      const source = readLocalizationReviewSource({
+        repositoryId: String(repository.id),
+        artifactId: id,
+        sourceRevision: proof.revision,
+        current: review,
+        parent: resource,
+        parentUrl: publicUrl,
+        parentApiUrl: `https://api.github.com/repos/${repository.slug}/pulls/${resource.number}`,
+        cohort: envelope.reviewSequence.reviews,
+        observedAt,
+        readActor: (value) => classifyActor(actor(value)),
+        readTime: time,
+      });
+      if (source) out.localizationReviewSource = source;
+      else out.reasons.push("localization_first_native_review_unverified");
     }
     out.reasons.push("review_quality_requires_independent_receipt");
   } else if (envelope.family === "commit") {
@@ -1617,6 +1650,41 @@ export function normalizeGithubObservation(
           `localization_category:${category}`,
         );
       }
+      if (
+        localizationReviews &&
+        classification.localizations.length &&
+        author?.kind === "user" &&
+        positive(resource.id) &&
+        object(resource.head) &&
+        typeof resource.head.sha === "string" &&
+        resource.head.sha.length === 40 &&
+        /^[a-f0-9]+$/.test(resource.head.sha) &&
+        integration.after.length === 40 &&
+        /^[a-f0-9]+$/.test(integration.after)
+      )
+        out.localizationMergeSource = {
+          schemaVersion: localizationReviewNormalizationVersion,
+          repositoryId: String(repository.id),
+          artifactId: id,
+          pullRequestId: resource.id as number,
+          publicUrl,
+          sourceRevision: proof.revision,
+          headRevision: resource.head.sha,
+          mergeRevision: integration.after,
+          mergedAt,
+          observedAt,
+          authorId: author.id,
+          policyVersion: documentationPolicy.version,
+          units: classification.localizations.map(({ locale, category }) => ({
+            factId: out.facts.find(
+              (fact) =>
+                fact.metricId === "localization" &&
+                fact.rawState === `merged_locale_participation:${locale}:${category}`,
+            )!.id,
+            locale,
+            category,
+          })),
+        };
     }
   }
   if (researchPolicy && envelope.family === "pull_request") {
@@ -2083,6 +2151,8 @@ export interface GithubEvidenceNormalizerOptions {
   /** Bound the complete review cohort scan; exhaustion never establishes participation. */
   maxReviewPages?: number;
   documentationPolicies?: readonly DocumentationPathPolicy[];
+  /** Host-selected localization policy includes native reviewer participation. */
+  localizationReviews?: boolean;
   researchPolicies?: readonly ResearchPathPolicy[];
   projectWorkstreamMappings?: readonly (ProjectWorkstreamMapping & { repositoryId: number })[];
   /** Protected, finite selections; submitted notes cannot nominate release proof. */
@@ -2099,6 +2169,9 @@ function detachedCollectionInput(input: CollectionNormalizerInput): CollectionNo
 
 /** Read-only collection-to-metric adapter. Lossy snapshots are hydrated rather than guessed. */
 export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizerOptions) {
+  if (options.localizationReviews !== undefined && typeof options.localizationReviews !== "boolean")
+    throw new Error("invalid_localization_review_option");
+  const localizationReviews = options.localizationReviews === true;
   const releaseNow = options.now ?? (() => new Date().toISOString());
   const releaseTargets = structuredClone(options.releaseInclusionTargets ?? []);
   if (
@@ -2600,12 +2673,13 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
             isSynthetic: options.isSynthetic === true || enriched.proof.isSynthetic === true,
           },
         },
-        input.family === "pull_requests"
+        input.family === "pull_requests" || (localizationReviews && input.family === "reviews")
           ? documentationPolicies.find((policy) => policy.repositoryId === input.repository.id)
           : undefined,
         input.family === "pull_requests"
           ? researchPolicies.find((policy) => policy.repositoryId === input.repository.id)
           : undefined,
+        localizationReviews,
       );
     } else {
       const sourceUrl = url(input.fact.sourceUrl.split("#")[0], input.repository.slug);
@@ -2829,39 +2903,46 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       if (timeline && (!object(payload.issue) || payload.issue.html_url !== sourceUrl))
         return none("timeline_subject_scope_unverified");
       const hydrated = family === "review" ? { review: payload, pull_request: pullResource } : payload;
-      normalized = normalizeGithubObservation({
-        repository: {
-          id: input.repository.id,
-          slug: input.repository.slug,
-          visibility: "public",
-          ...(typeof repositoryPayload.default_branch === "string"
-            ? { defaultBranch: repositoryPayload.default_branch }
+      normalized = normalizeGithubObservation(
+        {
+          repository: {
+            id: input.repository.id,
+            slug: input.repository.slug,
+            visibility: "public",
+            ...(typeof repositoryPayload.default_branch === "string"
+              ? { defaultBranch: repositoryPayload.default_branch }
+              : {}),
+          },
+          proof: {
+            verified: true,
+            source: family === "discussion" ? "github_graphql" : "github_rest",
+            ...(timeline ? { eventId: `github:${input.repository.id}:issue-event:${input.fact.subjectId}` } : {}),
+            revision: input.fact.sourceRevision,
+            isSynthetic: options.isSynthetic === true,
+          },
+          family,
+          action: timeline ? String(payload.event) : "snapshot",
+          ...(timeline ? { occurredAt: time(payload.created_at) } : {}),
+          observedAt: input.observedAt,
+          payload: hydrated,
+          ...(options.reviewedServiceAccounts === undefined
+            ? {}
+            : { reviewedServiceAccounts: options.reviewedServiceAccounts }),
+          ...(options.authorizedClassifierIds === undefined
+            ? {}
+            : { authorizedClassifierIds: options.authorizedClassifierIds }),
+          ...(reviewParticipation ? { reviewParticipation } : {}),
+          ...(reviewSequence ? { reviewSequence } : {}),
+          ...(family === "discussion" && input.selectedCurrentState
+            ? { discussionAnswerSelection: { verified: true as const } }
             : {}),
         },
-        proof: {
-          verified: true,
-          source: family === "discussion" ? "github_graphql" : "github_rest",
-          ...(timeline ? { eventId: `github:${input.repository.id}:issue-event:${input.fact.subjectId}` } : {}),
-          revision: input.fact.sourceRevision,
-          isSynthetic: options.isSynthetic === true,
-        },
-        family,
-        action: timeline ? String(payload.event) : "snapshot",
-        ...(timeline ? { occurredAt: time(payload.created_at) } : {}),
-        observedAt: input.observedAt,
-        payload: hydrated,
-        ...(options.reviewedServiceAccounts === undefined
-          ? {}
-          : { reviewedServiceAccounts: options.reviewedServiceAccounts }),
-        ...(options.authorizedClassifierIds === undefined
-          ? {}
-          : { authorizedClassifierIds: options.authorizedClassifierIds }),
-        ...(reviewParticipation ? { reviewParticipation } : {}),
-        ...(reviewSequence ? { reviewSequence } : {}),
-        ...(family === "discussion" && input.selectedCurrentState
-          ? { discussionAnswerSelection: { verified: true as const } }
-          : {}),
-      });
+        localizationReviews && family === "review"
+          ? documentationPolicies.find((policy) => policy.repositoryId === input.repository.id)
+          : undefined,
+        undefined,
+        localizationReviews,
+      );
     }
     if (collectMergeTarget) {
       // The profile is explicit even when this source contains no proved merge.
