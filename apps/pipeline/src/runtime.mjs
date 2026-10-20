@@ -1,4 +1,13 @@
-import { publicMaintenanceClassificationReasons, documentationPurposeVersion } from "@pick-your-ai/contracts";
+import {
+  publicMaintenanceClassificationReasons,
+  documentationPurposeVersion,
+  discussionFeedbackContentVersion,
+} from "@pick-your-ai/contracts";
+import {
+  createDiscussionFeedbackAuthority,
+  DiscussionFeedbackStore,
+  privateDiscussionFeedbackMetadata,
+} from "./discussion-feedback-store.mjs";
 import { validatePublicationPeriods, publicScopeFromTemplate } from "./publication-windows.mjs";
 import {
   resolveDiscoverablePublicationWindows,
@@ -291,6 +300,23 @@ export async function createPipeline(options) {
       fail("synthetic_data_forbidden_in_public_runtime");
   };
   const config = copy(options.config ?? { version: "unconfigured", repositories: [], policies: [], scopes: [] });
+  const feedbackAuthority = createDiscussionFeedbackAuthority(
+    config,
+    dataMode,
+    options.discussionFeedbackAuthorityEpoch,
+  );
+  for (const binding of config.recognitionBindings ?? [])
+    if (
+      binding.metricId === "helpful_feedback" &&
+      !feedbackAuthority.repositoryIds.includes(Number(binding.repositoryId))
+    )
+      fail("helpful_feedback_source_not_enrolled");
+  const feedbackAuthorityHash = () => (feedbackAuthority.enabled ? digest(feedbackAuthority.capture()) : null);
+  const feedbackInScope = (scope) =>
+    repositoriesFor(scope).some((repo) => feedbackAuthority.repositoryIds.includes(repo.id));
+  const feedbackStore = new DiscussionFeedbackStore(db, feedbackAuthority, () => {
+    restrictConfiguration(controlsStore.read());
+  });
   const reconciliationPolicy = validateReconciliationPolicy(config.reconciliation);
   const projectWorkstreamMappings = canonicalProjectWorkstreamMappings(
     config,
@@ -405,7 +431,11 @@ export async function createPipeline(options) {
     (version) =>
       [normalizationSignature, ...previousNormalizationSignatures].map((signature) => digest([version, signature])),
   );
-  const discussionNormalizationSignature = digest([discussionSourceNormalizationVersion, normalizationSignature]);
+  const discussionNormalizationSignature = digest([
+    ...(feedbackAuthority.enabled ? [discussionFeedbackContentVersion] : []),
+    discussionSourceNormalizationVersion,
+    normalizationSignature,
+  ]);
   const defaultDeliverySignature = (signature) => digest([defaultDeliveryNormalizationVersion, signature]);
   const frozenNormalizationSignatures = [
     defaultDeliverySignature(typedHistoryNormalizationSignature),
@@ -591,7 +621,9 @@ export async function createPipeline(options) {
   const discussionEvidenceCurrent = (row) =>
     row.family !== "discussions" ||
     (digest(row.document) === row.document_hash &&
-      row.document.discussionSourceNormalizationVersion === discussionSourceNormalizationVersion);
+      row.document.discussionSourceNormalizationVersion === discussionSourceNormalizationVersion &&
+      (row.document.discussionFeedbackSources === undefined ||
+        row.document.discussionFeedbackNormalizationVersion === discussionFeedbackContentVersion));
   const defaultDeliveryEvidenceCurrent = (row) =>
     !hasDefaultDeliveryClaims(row.document) ||
     (digest(row.document) === row.document_hash &&
@@ -627,6 +659,12 @@ export async function createPipeline(options) {
       fail("invalid_publication_proof_budget");
     const authorization = explanation.authorization;
     const selectedIds = repositoriesFor(scope).map((repo) => String(repo.id));
+    await feedbackStore.assertCapture(tx, selectedIds.map(Number), authorization.discussionFeedbackEvidence);
+    await feedbackStore.originals(
+      tx,
+      controlsStore.read(),
+      recognitionBindings.filter((binding) => selectedIds.includes(binding.repositoryId)),
+    );
     const transferAuthority = await readIssueTransferAuthority(tx, {
       repositories: config.repositories,
       repositoryIds: selectedIds,
@@ -716,6 +754,8 @@ export async function createPipeline(options) {
           canonical(authorization.identityEvidence)) ||
       canonical(retained.document.identityAuthorization?.issueTransferEvidence) !==
         canonical(authorization.issueTransferEvidence) ||
+      canonical(retained.document.identityAuthorization?.discussionFeedbackEvidence) !==
+        canonical(authorization.discussionFeedbackEvidence) ||
       (authorization.issueTransferEvidence !== undefined &&
         (canonical([...retained.document.frozen.repositoryIds].sort()) !==
           canonical(authorization.sources.map((source) => source.repositoryId).sort()) ||
@@ -726,6 +766,9 @@ export async function createPipeline(options) {
       review,
       discussion,
       defaultDelivery,
+      discussionFeedbackContent: authorization.discussionFeedbackEvidence?.length
+        ? { discussionFeedbackEvidenceHash: digest(authorization.discussionFeedbackEvidence) }
+        : {},
       ...(authorization.issueTransferEvidence === undefined
         ? {}
         : {
@@ -740,6 +783,7 @@ export async function createPipeline(options) {
   // Source read locks span the final reviewer reauthentication and synchronous
   // private result transaction. No source/network permission is granted here.
   async function withAuthorizedComparisonInputs(authorizations, work, transaction) {
+    const comparisonFeedbackAuthority = feedbackAuthority.capture();
     requireThat(
       authorizations.every(
         (authorization) => authorization.configurationHash === digest(config) && authorization.dataMode === dataMode,
@@ -758,6 +802,12 @@ export async function createPipeline(options) {
         const saved = authorization.issueTransferEvidence;
         if (saved !== undefined) validateIssueTransferCapture(saved);
         const selected = saved?.selectedRepositoryIds ?? authorization.sources.map((source) => source.repositoryId);
+        await feedbackStore.assertCapture(tx, selected.map(Number), authorization.discussionFeedbackEvidence);
+        await feedbackStore.originals(
+          tx,
+          controlsStore.read(),
+          recognitionBindings.filter((binding) => selected.includes(binding.repositoryId)),
+        );
         selected.forEach((id) => selectedIds.add(id));
         const current = await readIssueTransferAuthority(tx, {
           repositories: config.repositories,
@@ -888,12 +938,22 @@ export async function createPipeline(options) {
             // The host must atomically read its authoritative roster/configuration
             // cache. Two independently awaited checks cannot establish this fence.
             if (typeof options.policyComparisonAuthorityCurrent !== "function") return false;
+            try {
+              feedbackAuthority.assert(comparisonFeedbackAuthority);
+            } catch {
+              return false;
+            }
             const current = options.policyComparisonAuthorityCurrent({
               configurationHash: digest(config),
               actorId: session.actorId,
               roleVersion: session.roleVersion,
             });
             if (current && typeof current.then === "function") void Promise.resolve(current).catch(() => undefined);
+            try {
+              feedbackAuthority.assert(comparisonFeedbackAuthority);
+            } catch {
+              return false;
+            }
             return current === true;
           },
         },
@@ -913,6 +973,9 @@ export async function createPipeline(options) {
         onUnavailable: (repo, reason) => denyRepository(repo, reason, utc(now())),
         includePullRequestReviewComments: ({ runId }) => expandedGithubCommentsRun(runId),
         includeContentEditMetadata: (request) => contentEditAdmission.allows(request),
+        ...(feedbackAuthority.enabled
+          ? { discussionFeedback: { authority: feedbackAuthority, store: feedbackStore } }
+          : {}),
         async useRestSnapshotRevisions({ repositoryId, family }) {
           if (reconciliationPolicy) return true;
           // Keep immutable observation identities after an approved policy change
@@ -1035,12 +1098,14 @@ export async function createPipeline(options) {
   const recognitionBindings = copy(config.recognitionBindings ?? []);
   let runRecognitionFingerprint = null;
   let runConfigurationRevision = null;
+  let runFeedbackAuthority = null;
   const assertRunConfiguration = () => {
     const state = controlsStore.read();
     const overlay = restrictConfiguration(state);
     if (recognitionBindings.length && recognitionFingerprint(state, recognitionBindings) !== runRecognitionFingerprint)
       fail("recognition_changed_during_run");
     if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
+    if (feedbackAuthority.enabled) feedbackAuthority.assert(runFeedbackAuthority);
   };
   const scanContext = (mode, sources, revision, fingerprint) => ({
     key: digest(["bounded-scan/v1", config, dataMode, mode]),
@@ -1051,6 +1116,7 @@ export async function createPipeline(options) {
             revision,
             recognitionBindings.length ? fingerprint : null,
             sources,
+            ...(feedbackAuthority.enabled ? [discussionFeedbackContentVersion, feedbackAuthority.capture()] : []),
             // Selected release proofs use the PR delivery generation. Retire an older
             // frozen scan before collecting a newly required normalization generation.
             ...(dataMode === "public" && (config.releaseInclusionTargets?.length || selectedDocumentationPurpose)
@@ -1124,6 +1190,7 @@ export async function createPipeline(options) {
           allowedRepositoryIds: config.repositories.map((repo) => repo.id),
           isSynthetic: dataMode === "synthetic",
           assertAuthorized: () => assertRunConfiguration(),
+          verifyDiscussionFeedbackSource: (input) => feedbackStore.verifyInput(input),
           documentationPolicies: config.documentationPolicies ?? [],
           researchPolicies: config.researchPolicies ?? [],
           releaseInclusionTargets: config.releaseInclusionTargets ?? [],
@@ -1170,6 +1237,7 @@ export async function createPipeline(options) {
     return pending;
   };
   async function approved(transaction = db) {
+    const capturedFeedbackAuthority = feedbackAuthority.capture();
     authorized = Boolean(await verifyConfig(copy(config)));
     if (!authorized) return false;
     assertDataMode(config);
@@ -1258,6 +1326,7 @@ export async function createPipeline(options) {
       if (error?.message === "duplicate_public_scope") fail("duplicate_public_scope_configuration");
       throw error;
     }
+    feedbackAuthority.assert(capturedFeedbackAuthority);
     return true;
   }
   const configuredScope = (scope) =>
@@ -1487,11 +1556,14 @@ export async function createPipeline(options) {
     if (new Set(latestProjectRuns.map((run) => String(run.repository_id))).size !== latestProjectRuns.length)
       fail("ambiguous_current_project_run");
     const selectedProjectRuns = latestProjectRuns.map((run) => run.run_id);
+    const selectedFeedbackRuns = await db.transaction((tx) => feedbackStore.currentScanIds(tx, repositoryIds, cutoff));
+    assertRunConfiguration();
     const sourceRows = (
       await db.query(
         `SELECT fact.* FROM leaderboard_ingestion.source_facts AS fact
       JOIN leaderboard_ingestion.repository_access AS access USING (repository_id)
       WHERE fact.repository_id = ANY($1::bigint[]) AND fact.observed_at <= $2 AND access.state='public'
+      AND (fact.family<>'discussions' OR fact.repository_id<>ALL($4::bigint[]) OR fact.first_run_id=ANY($5::text[]))
       AND (
         (fact.family='project_current' AND fact.document ? 'projectSubjectId'
           AND EXISTS (SELECT 1 FROM leaderboard_ingestion.collection_items AS selected
@@ -1508,7 +1580,7 @@ export async function createPipeline(options) {
       AND NOT EXISTS (SELECT 1 FROM leaderboard_ingestion.object_suppressions AS removed
         WHERE removed.repository_id=fact.repository_id AND removed.subject_id=fact.subject_id)
       ORDER BY fact.fact_key LIMIT 10001`,
-        [repositoryIds, cutoff, selectedProjectRuns],
+        [repositoryIds, cutoff, selectedProjectRuns, feedbackAuthority.repositoryIds, selectedFeedbackRuns],
       )
     ).rows;
     if (sourceRows.length > 10000) fail("frozen_dataset_budget_exceeded");
@@ -1578,6 +1650,15 @@ export async function createPipeline(options) {
       )
         fail("discussion_normalizer_version_unverified");
       const repository = config.repositories.find((repo) => String(repo.id) === String(row.repository_id));
+      if (row.document.discussionFeedback !== undefined) {
+        if (
+          (options.normalizer || options.githubEnrich) &&
+          options.discussionFeedbackNormalizationVersion !== discussionFeedbackContentVersion
+        )
+          fail("discussion_feedback_normalizer_version_unverified");
+        await db.transaction((tx) => feedbackStore.verifyRow(tx, row, { current: true }));
+        assertRunConfiguration();
+      }
       const releaseTargets =
         dataMode === "public" && row.family === "pull_requests"
           ? (config.releaseInclusionTargets ?? []).filter(
@@ -1898,6 +1979,7 @@ export async function createPipeline(options) {
         ...retainPhysicalContext(output, row, repository, c.contracts, dataMode),
         ...normalizedProjectContext(output, row, repository, projectWorkstreamMappings),
         ...privateIssueTransferMetadata(output, row, repository, config.repositories, cached?.document),
+        ...privateDiscussionFeedbackMetadata(output, row),
         reasons: Array.isArray(output.reasons)
           ? output.reasons.map((reason) =>
               typeof reason === "string" && /^[a-z0-9_:-]{1,100}$/.test(reason) ? reason : "normalization_unavailable",
@@ -1965,6 +2047,11 @@ export async function createPipeline(options) {
     confirmation.scopeKey === scopeKey(scope) &&
     confirmation.snapshotId === snapshotId &&
     confirmation.revision === revision &&
+    (feedbackInScope(scope)
+      ? confirmation.discussionFeedbackNormalizationVersion === discussionFeedbackContentVersion &&
+        confirmation.discussionFeedbackAuthorityHash === feedbackAuthorityHash()
+      : confirmation.discussionFeedbackNormalizationVersion === undefined &&
+        confirmation.discussionFeedbackAuthorityHash === undefined) &&
     (confirmation.reviewSourceNormalizationVersion === undefined ||
       confirmation.reviewSourceNormalizationVersion === reviewSourceNormalizationVersion) &&
     (confirmation.discussionSourceNormalizationVersion === undefined ||
@@ -1975,6 +2062,7 @@ export async function createPipeline(options) {
     /^[a-f0-9]{64}$/.test(confirmation.aggregateExplanationHash);
   function confirmPublication(scope, publication, comparisonInput, publicPeriods = []) {
     controlsStore.transaction((state) => {
+      if (feedbackAuthority.enabled) feedbackAuthority.assert(runFeedbackAuthority);
       const overlay = restrictConfiguration(state);
       if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
       if (
@@ -1998,6 +2086,12 @@ export async function createPipeline(options) {
       if (comparisonInput) publication.comparisonInput = policyComparisons.capture(state, comparisonInput);
       state.pipelinePublications ||= {};
       const confirmation = {
+        ...(feedbackInScope(scope)
+          ? {
+              discussionFeedbackNormalizationVersion: discussionFeedbackContentVersion,
+              discussionFeedbackAuthorityHash: feedbackAuthorityHash(),
+            }
+          : {}),
         ...(publication.discussionSourceNormalizationVersion === undefined
           ? {}
           : { discussionSourceNormalizationVersion: publication.discussionSourceNormalizationVersion }),
@@ -2132,6 +2226,7 @@ export async function createPipeline(options) {
           for (const field of [
             "reviewSourceNormalizationVersion",
             "discussionSourceNormalizationVersion",
+            "discussionFeedbackNormalizationVersion",
             "defaultDeliveryNormalizationVersion",
           ])
             if (priorConfirmation[field] !== undefined) priorPublication[field] = priorConfirmation[field];
@@ -2193,6 +2288,13 @@ export async function createPipeline(options) {
     ).normalized;
     const hasReviewSources = normalized.some((entry) => entry.family === "reviews");
     const hasDiscussionSources = normalized.some((entry) => entry.family === "discussions");
+    const feedbackCapture = await db.transaction((tx) =>
+      feedbackStore.capture(
+        tx,
+        repos.map((repo) => repo.id),
+      ),
+    );
+    assertRunConfiguration();
     const hasDefaultDeliverySources = normalized.some(
       (entry) => entry.document.defaultDeliveryNormalizationVersion === defaultDeliveryNormalizationVersion,
     );
@@ -2260,6 +2362,21 @@ export async function createPipeline(options) {
         reasons: [],
         issueTransfers: transferAuthority.transfers,
         issueCreationScopes: transferAuthority.creationScopes,
+        discussionFeedbackSources: outputs.flatMap((output) =>
+          (output.discussionFeedbackSources ?? []).map((source) => ({
+            ...source,
+            selectedCurrentState: output.selectedCurrentState === true,
+          })),
+        ),
+        discussionFeedbackRepositoryIds: feedbackCapture.map((entry) => entry.repositoryId),
+        discussionFeedbackOriginals: await db.transaction((tx) =>
+          feedbackStore.originals(
+            tx,
+            controlsStore.read(),
+            recognitionBindings.filter((binding) => repos.some((repo) => String(repo.id) === binding.repositoryId)),
+            observationCutoff,
+          ),
+        ),
       };
       combined.facts = [
         ...new Map(
@@ -2568,6 +2685,12 @@ export async function createPipeline(options) {
       }
     }
     const content = {
+      ...(feedbackCapture.length
+        ? {
+            discussionFeedbackNormalizationVersion: discussionFeedbackContentVersion,
+            discussionFeedbackEvidenceHash: digest(feedbackCapture),
+          }
+        : {}),
       ...(hasDiscussionSources ? { discussionSourceNormalizationVersion } : {}),
       ...(hasDefaultDeliverySources ? { defaultDeliveryNormalizationVersion } : {}),
       ...(hasReviewSources ? { reviewSourceNormalizationVersion } : {}),
@@ -2621,6 +2744,7 @@ export async function createPipeline(options) {
           normalizationSources,
         },
         issueTransferEvidence: transferAuthority.capture,
+        ...(feedbackCapture.length ? { discussionFeedbackEvidence: feedbackCapture } : {}),
         issueTransferCorrections,
         sources: transferAuthority.access.map((row) => ({
           repositoryId: String(row.repository_id),
@@ -2687,6 +2811,11 @@ export async function createPipeline(options) {
     try {
       const publication = await db.transaction(async (tx) => {
         await lockIssueTransferSources(tx, config.repositories);
+        await feedbackStore.assertCapture(
+          tx,
+          repos.map((repo) => repo.id),
+          feedbackCapture.length ? feedbackCapture : undefined,
+        );
         const scanHeads = scan ? await scanContinuations.lockForPublication(tx, scan, assertRunConfiguration) : null;
         if (dispatch) await outbox.assertLease(tx, dispatch.lease);
         const bindPublication = async (publication) => {
@@ -2883,6 +3012,7 @@ export async function createPipeline(options) {
       // the same synchronous SQLite boundary used by configuration activation.
       if (hasReviewSources) publication.reviewSourceNormalizationVersion = reviewSourceNormalizationVersion;
       if (hasDiscussionSources) publication.discussionSourceNormalizationVersion = discussionSourceNormalizationVersion;
+      if (feedbackCapture.length) publication.discussionFeedbackNormalizationVersion = discussionFeedbackContentVersion;
       if (hasDefaultDeliverySources)
         publication.defaultDeliveryNormalizationVersion = defaultDeliveryNormalizationVersion;
       confirmPublication(scope, publication, retainedComparisonInput ?? comparisonInputFor(publication), publicPeriods);
@@ -2948,6 +3078,7 @@ export async function createPipeline(options) {
           access: accessIdentity(access),
           removed: [...removed].sort(),
           corrections: corrections.fingerprint,
+          discussionFeedback: await feedbackStore.capture(tx, repositoryIds),
         };
         if (!(await approved(tx)) || signal.aborted) return null;
         finalRead = () => {
@@ -3095,6 +3226,7 @@ export async function createPipeline(options) {
             currentCorrections,
           ),
           corrections: currentCorrections.fingerprint,
+          discussionFeedback: await feedbackStore.capture(tx, repositoryIds),
         };
         if (canonical(currentAuthority) !== canonical(capturedAuthority)) return null;
         const current = finalRead();
@@ -3433,10 +3565,12 @@ export async function createPipeline(options) {
     const runState = controlsStore.read();
     runConfigurationRevision = restrictConfiguration(runState).revision;
     runRecognitionFingerprint = recognitionFingerprint(runState, recognitionBindings);
+    runFeedbackAuthority = feedbackAuthority.capture();
     if (dispatch && runConfigurationRevision !== dispatch.lease.operation.configurationRevision)
       fail("dispatch_configuration_changed");
     if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 10000) fail("invalid_pipeline_page_budget");
     if (!["backfill", "reconcile", "audit"].includes(mode)) fail("invalid_scan_scope");
+    if (feedbackAuthority.enabled) await feedbackStore.assertStorage();
     let scan = null;
     if (implicitCutoff && !dispatch) {
       // Verify all configured sources before choosing a durable scan context.
@@ -3495,6 +3629,9 @@ export async function createPipeline(options) {
               cutoff,
               mode,
               dataMode,
+              ...(family === "discussions" && feedbackAuthority.repositoryIds.includes(repo.id)
+                ? [discussionFeedbackContentVersion, feedbackAuthority.current(repo.id).authorityHash]
+                : []),
               ...(scan ? [scan.token] : []),
               ...(dispatch ? [dispatch.lease.operation.operationKey, dispatch.lease.collectionRevision] : []),
             ]),

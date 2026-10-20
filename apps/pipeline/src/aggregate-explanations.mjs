@@ -1,5 +1,6 @@
 import { captureRankEvidence, retainedRankHistory } from "./rank-history.mjs";
 import { createHash } from "node:crypto";
+import { parseDiscussionFeedbackCapture } from "@pick-your-ai/contracts";
 import { reversionAuthorityVersion } from "./reversion-effectiveness.mjs";
 import { captureIssueTransferAuthorization } from "./issue-transfer-authority.mjs";
 
@@ -367,6 +368,11 @@ export function buildAggregateExplanation(capture, binding) {
       dataMode: authorization.dataMode,
       controlsConfigurationRevision: authorization.controlsConfigurationRevision,
       ...identityAuthorization(authorization),
+      ...(authorization.discussionFeedbackEvidence === undefined
+        ? {}
+        : {
+            discussionFeedbackEvidence: parseDiscussionFeedbackCapture(authorization.discussionFeedbackEvidence),
+          }),
       ...reversionAuthorization(authorization),
       sources: authorization.sources.map((source) => ({
         repositoryId: token(source.repositoryId),
@@ -434,6 +440,14 @@ export class AggregateExplanationStore {
       );
       check(document.computationVersion === aggregateExplanationLimitsV1.computationVersion);
       reversionAuthorization(document.authorization);
+      if (document.authorization.discussionFeedbackEvidence !== undefined) {
+        const capture = parseDiscussionFeedbackCapture(document.authorization.discussionFeedbackEvidence);
+        check(
+          capture.every((entry) =>
+            document.authorization.sources.some((source) => source.repositoryId === String(entry.repositoryId)),
+          ),
+        );
+      }
       for (const metric of document.metrics) {
         for (const row of metric.rows)
           validateArithmetic(row, metric.aggregation, metric.minimumSamples, metric.ranked);
