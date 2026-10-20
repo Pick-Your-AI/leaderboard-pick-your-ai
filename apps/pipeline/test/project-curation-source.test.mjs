@@ -637,10 +637,9 @@ test("curation frozen previews and authorized corrections survive database reope
   const receipts = await h.runtime.receipts();
   assert.deepEqual(await h.runtime.applyCorrection(decision), applied);
   assert.deepEqual(await h.runtime.receipts(), receipts);
-  assert.deepEqual(
-    (await board(h.runtime, "&snapshot=" + snapshotId)).rows.map((row) => row.result.value),
-    [1],
-  );
+  // Current privacy withholds an immutable aggregate whose proof was suppressed.
+  // A rebuilt publication below recomputes the remaining native operation.
+  assert.deepEqual((await board(h.runtime, "&snapshot=" + snapshotId)).rows, []);
 
   await h.runtime.stop();
   await h.reopenDatabase();
@@ -652,6 +651,7 @@ test("curation frozen previews and authorized corrections survive database reope
     (await board(reopened)).rows.map((row) => row.result.value),
     [1],
   );
+  assert.deepEqual((await board(reopened, "&snapshot=" + snapshotId)).rows, []);
   assert.deepEqual(
     (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [snapshotId])).rows,
     frozen,
