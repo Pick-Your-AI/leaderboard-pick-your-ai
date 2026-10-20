@@ -106,7 +106,11 @@ function items(value: unknown): asserts value is string[] {
 const stable = (value: unknown): string =>
   JSON.stringify(value, (_key, item) =>
     item && typeof item === "object" && !Array.isArray(item)
-      ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]]))
+      ? Object.fromEntries(
+          Object.keys(item)
+            .sort()
+            .map((key) => [key, item[key]]),
+        )
       : item,
   );
 const digest = (value: unknown): string => createHash("sha256").update(stable(value)).digest("hex");

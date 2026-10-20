@@ -23,10 +23,10 @@ submitted head and first submission for that reviewer/head round. A GitHub
 `APPROVED` state supplies no quality acceptance; a substantive `COMMENTED`
 review can qualify only through the same independent evidence review.
 
-The source fact must identify a visible human user, distinct from the actual
-PR author retained in `subjectActorId`. Unknown authors, bots, organizations,
-service accounts and evidenced automated execution cannot supply this
-specialization. The fact must still be observed, with its original source
+The source fact must identify a visible GitHub User account, with no evidenced
+automated execution, distinct from the actual PR author retained in
+`subjectActorId`. Unknown authors, bots, organizations and service accounts
+cannot supply this specialization. The fact must still be observed, with its original source
 evidence, no prior acceptance receipt, known occurrence and observation clocks,
 and a public GitHub PR locator. Explicitly synthetic source provenance is
 rejected by the production qualifier.

@@ -84,9 +84,7 @@ function consent(s, request = s.request) {
   attachSyntheticEvidenceIntake(request, {
     intake: { roles: { submitter: "reviewer", collaborators: {} } },
     sourceUseReview: {
-      references: [
-        { locator: `https://github.com/${slug}/commit/${targetRecord.head}`, revision: targetRecord.head },
-      ],
+      references: [{ locator: `https://github.com/${slug}/commit/${targetRecord.head}`, revision: targetRecord.head }],
     },
   });
   const decision = request.history.at(-1);
@@ -445,7 +443,10 @@ for (const [name, change] of [
     "source after acceptance",
     (s) => {
       s.target.occurredAt = cutoff;
+      s.target.observedAt = cutoff;
       s.evidence.occurredAt = cutoff;
+      s.evidence.evidenceMetadata.sourceOccurredAt = cutoff;
+      s.evidence.evidenceMetadata.observedAt = cutoff;
     },
   ],
   [
@@ -656,9 +657,15 @@ test("documentation review: current privacy and authority retire persisted proof
   const restarted = await createPipeline(h.options);
   t.after(() => restarted.stop());
   assert.equal((await read(restarted)).selected.rows[0].result.value, 1);
-  h.setPrivate(true);
+  h.controlsStore.transaction((state) => {
+    state.audit = [];
+  });
   assert.equal(await read(restarted), null);
-  h.setPrivate(false);
+  await assert.rejects(restarted.aggregateExplanations.read(snapshotId), /authorization_changed/);
+  h.controlsStore.transaction((state) => {
+    state.audit = structuredClone(s.state.audit);
+  });
+  assert.equal((await read(restarted)).selected.rows[0].result.value, 1);
   h.controlsStore.transaction((state) => {
     state.requests[s.request.id].status = "withdrawn";
   });
@@ -666,7 +673,8 @@ test("documentation review: current privacy and authority retire persisted proof
   await assert.rejects(restarted.aggregateExplanations.read(snapshotId), /authorization_changed/);
   h.controlsStore.transaction((state) => {
     state.requests[s.request.id] = structuredClone(s.request);
-    state.audit = [];
   });
+  assert.equal((await read(restarted)).selected.rows[0].result.value, 1);
+  h.setPrivate(true);
   assert.equal(await read(restarted), null);
 });
