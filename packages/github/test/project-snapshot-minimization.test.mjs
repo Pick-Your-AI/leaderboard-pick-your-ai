@@ -408,7 +408,10 @@ test("a fresh legacy read replaces completed old checkpoint bytes without trusti
   h.state.public = false;
   const before = h.calls.length;
   await assert.rejects(h.read(), { message: "project_not_authorized" });
-  assert.deepEqual(h.calls.slice(before).map((call) => call.kind), ["legacy-scope"]);
+  assert.deepEqual(
+    h.calls.slice(before).map((call) => call.kind),
+    ["legacy-scope"],
+  );
   assert.equal(
     await readFile(record.path, "utf8"),
     legacy,
