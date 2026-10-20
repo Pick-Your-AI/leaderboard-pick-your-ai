@@ -933,3 +933,159 @@ test("a captured custom provider cannot become builtin when its option is remove
   assert.deepEqual(await caches(h), []);
   assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 0);
 });
+
+function atFieldConfirmation(h, changeDeclaration) {
+  const sqlTransaction = h.db.transaction.bind(h.db);
+  const controlsTransaction = h.controlsStore.transaction.bind(h.controlsStore);
+  let armed = false;
+  let changes = 0;
+  h.db.transaction = (work) =>
+    sqlTransaction(async (tx) => {
+      let publication = false;
+      const result = await work({
+        query: async (sql, params) => {
+          const value = await tx.query(sql, params);
+          if (sql.includes("SELECT snapshot_id,revision FROM leaderboard_pipeline.heads")) publication = true;
+          return value;
+        },
+      });
+      if (publication) armed = true;
+      return result;
+    });
+  h.controlsStore.transaction = (work, options) =>
+    controlsTransaction((state) => {
+      if (armed && changes === 0) {
+        changes++;
+        changeDeclaration();
+      }
+      return work(state);
+    }, options);
+  return {
+    changes: () => changes,
+    restore() {
+      h.db.transaction = sqlTransaction;
+      h.controlsStore.transaction = controlsTransaction;
+    },
+  };
+}
+const fieldSnapshots = async (h) =>
+  (
+    await h.db.query(
+      "SELECT snapshot_id,revision,document_hash FROM leaderboard_pipeline.snapshots ORDER BY snapshot_id",
+    )
+  ).rows;
+
+for (const provider of ["custom", "builtin"])
+  for (const loss of ["missing", "changed"])
+    test(`field compatibility is rechecked inside new confirmation; ${provider}/${loss}`, async (t) => {
+      const h = await fieldHarness(t, "issue_field_changed", {
+        includeIssueCreation: provider === "custom",
+        components: { ...components, github: { ...components.github } },
+      });
+      const declaration = provider === "custom" ? h.options : h.options.components.github;
+      assert.equal(declaration.fieldChangeNormalizationVersion, version);
+      const cutoff = clock();
+      const boundary = atFieldConfirmation(h, () => {
+        if (loss === "missing") delete declaration.fieldChangeNormalizationVersion;
+        else declaration.fieldChangeNormalizationVersion = "synthetic-incompatible-field-version";
+      });
+      let result;
+      let error;
+      try {
+        result = await h.runtime.runOnce({ cutoff });
+      } catch (caught) {
+        error = caught;
+      } finally {
+        boundary.restore();
+      }
+      const saved = await fieldSnapshots(h);
+      const privateState = h.controlsStore.read();
+      const explanations = h.controlsStore.db
+        .prepare("SELECT count(*) AS n FROM pipeline_aggregate_explanations")
+        .get().n;
+      const previews = h.controlsStore.db.prepare("SELECT count(*) AS n FROM policy_preview_inputs").get().n;
+      const publicResponse = await h.runtime.app.inject(paths(h.metric)[0]);
+      t.diagnostic(
+        JSON.stringify({
+          provider,
+          loss,
+          changes: boundary.changes(),
+          state: result?.state ?? null,
+          error: error?.message ?? null,
+          sqlSnapshots: saved.length,
+          privateConfirmations: Object.keys(privateState.pipelinePublications ?? {}).length,
+          privateHeads: Object.keys(privateState.pipelineHeads ?? {}).length,
+          explanations,
+          previews,
+          publicStatus: publicResponse.statusCode,
+        }),
+      );
+      assert.equal(boundary.changes(), 1, "declaration must change inside the final controls transaction");
+      assert.equal(saved.length, 1, "the real SQL publication commits before private visibility admission");
+      assert.equal(error?.message, "field_change_normalizer_version_unverified");
+      assert.deepEqual(privateState.pipelinePublications ?? {}, {});
+      assert.deepEqual(privateState.pipelineHeads ?? {}, {});
+      assert.equal(explanations, 0);
+      assert.equal(previews, 0);
+      assert.notEqual(publicResponse.statusCode, 200);
+
+      declaration.fieldChangeNormalizationVersion = version;
+      const hydrations = h.state.hydrations;
+      const recovered = (await h.runtime.runOnce({ cutoff })).publications[0];
+      assert.equal(recovered.snapshotId, saved[0].snapshot_id);
+      assert.deepEqual(await fieldSnapshots(h), saved, "recovery retains the exact committed SQL snapshot");
+      assert.equal(h.state.hydrations, hydrations, "compatible frozen recovery does not normalize again");
+      assert.equal(
+        h.controlsStore.read().pipelinePublications[recovered.snapshotId].fieldChangeNormalizationVersion,
+        version,
+      );
+      await assertField(h.runtime, h.metric, 1, recovered.snapshotId);
+    });
+
+test("field compatibility unchanged inside confirmation still publishes", async (t) => {
+  const h = await fieldHarness(t, "issue_field_changed", { includeIssueCreation: true });
+  const boundary = atFieldConfirmation(h, () => {
+    h.options.fieldChangeNormalizationVersion = version;
+  });
+  let publication;
+  try {
+    publication = (await h.runtime.runOnce()).publications[0];
+  } finally {
+    boundary.restore();
+  }
+  assert.equal(boundary.changes(), 1);
+  assert.equal((await fieldSnapshots(h)).length, 1);
+  assert.equal(
+    h.controlsStore.read().pipelinePublications[publication.snapshotId].fieldChangeNormalizationVersion,
+    version,
+  );
+  await assertField(h.runtime, h.metric, 1, publication.snapshotId);
+});
+
+test("field compatibility loss inside an already confirmed acknowledgment preserves its authority", async (t) => {
+  const h = await fieldHarness(t, "issue_field_changed", { includeIssueCreation: true });
+  const cutoff = clock();
+  const first = (await h.runtime.runOnce({ cutoff })).publications[0];
+  const saved = await fieldSnapshots(h);
+  const confirmation = h.controlsStore.read().pipelinePublications[first.snapshotId];
+  const head = h.controlsStore.read().pipelineHeads[components.contracts.publicScopeKey(publicScope)];
+  const explanation = new AggregateExplanationStore(h.controlsStore).read(first.snapshotId);
+  const boundary = atFieldConfirmation(h, () => {
+    delete h.options.fieldChangeNormalizationVersion;
+  });
+  let acknowledged;
+  try {
+    acknowledged = (await h.runtime.runOnce({ cutoff })).publications[0];
+  } finally {
+    boundary.restore();
+  }
+  assert.equal(boundary.changes(), 1);
+  assert.equal(h.options.fieldChangeNormalizationVersion, undefined);
+  assert.equal(acknowledged.snapshotId, first.snapshotId);
+  assert.equal(acknowledged.changed, false);
+  assert.deepEqual(await fieldSnapshots(h), saved);
+  assert.deepEqual(h.controlsStore.read().pipelinePublications[first.snapshotId], confirmation);
+  assert.deepEqual(h.controlsStore.read().pipelineHeads[components.contracts.publicScopeKey(publicScope)], head);
+  assert.deepEqual(new AggregateExplanationStore(h.controlsStore).read(first.snapshotId), explanation);
+  await assertField(h.runtime, h.metric, 1, first.snapshotId);
+});

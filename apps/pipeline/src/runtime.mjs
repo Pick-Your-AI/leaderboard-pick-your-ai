@@ -2202,6 +2202,16 @@ export async function createPipeline(options) {
   function confirmPublication(scope, publication, comparisonInput, publicPeriods = []) {
     controlsStore.transaction((state) => {
       if (
+        publication.fieldChangeNormalizationVersion !== undefined &&
+        !confirmationMatches(
+          state.pipelinePublications?.[publication.snapshotId],
+          scope,
+          publication.snapshotId,
+          publication.revision,
+        )
+      )
+        assertFieldChangeNormalizer();
+      if (
         publication.discussionSourceNormalizationVersion !== undefined &&
         !confirmationMatches(
           state.pipelinePublications?.[publication.snapshotId],
