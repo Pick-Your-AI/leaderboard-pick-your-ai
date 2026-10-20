@@ -179,10 +179,15 @@ claim that its earlier pages were read during that invocation: its first-phase
 the prior committed cursor when a save fails before durable replacement; hosts
 remain responsible for atomic writes and recovery from uncertain storage outcomes.
 
-An asynchronous `assertAuthorized` result is denied immediately. A native
-Promise's rejection is observed without awaiting it or granting access later;
-other objects' `then` getters and callbacks are not invoked. Host
-authorization is checked before and after awaited host work and at the
+An asynchronous `assertAuthorized` result is denied immediately. For ordinary
+native Promises, rejection observation is best-effort; it neither awaits them
+nor grants access later. The runner does not invoke an object's own `then`
+getter or a foreign thenable callback. This does not guarantee that every error
+from an invalid host callback is handled. The trusted host must honor the
+synchronous fence contract and manage any asynchronous work and its errors
+separately. Unsupported results still withhold the report, including when
+observation itself fails. Host authorization is checked before and after
+awaited host work and at the
 client's existing network, body, cache, quota, checkpoint and delivery boundaries.
 Repository views also retain their durable retirement guard. These checks
 withhold newly denied results; they do not undo a storage write that began while

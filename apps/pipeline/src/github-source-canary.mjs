@@ -209,8 +209,9 @@ export async function runGithubSourceCanary(host, options = {}) {
       // invalidate the callback used at the final result-delivery boundary.
       const decision = assertAuthorized.call(host, request);
       if (decision !== true) {
-        // Asynchronous authority never grants access. Observe its rejection so
-        // an invalid async callback cannot emit a private unhandled exception.
+        // Asynchronous authority never grants access. Rejection observation is
+        // best-effort for ordinary native Promises; the trusted host owns any
+        // asynchronous work and its diagnostics.
         if (types.isPromise(decision)) {
           void Promise.prototype.then.call(
             decision,

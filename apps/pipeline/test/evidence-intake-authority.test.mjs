@@ -139,6 +139,10 @@ test("manual intake retires exact pre-intake authority for every metric, includi
     for (const previousAuthority of [beforeIntakeAuthority, beforeReceivedIntakeAuthority]) {
       for (const metric of metricRegistryV1.metrics) {
         const bindings = [{ ...binding, metricId: metric.id }];
+        if (metric.id === "helpful_feedback") {
+          assert.throws(() => recognitionFingerprint(state, bindings), /invalid_discussion_feedback_contract/);
+          continue;
+        }
         assert.notEqual(
           recognitionFingerprint(state, bindings),
           previousAuthority(state, bindings),
@@ -167,6 +171,12 @@ test("zero manual requests preserve unaffected prior authority and independently
     const original = structuredClone(state);
     const all = metricRegistryV1.metrics.map((metric) => ({ ...binding, metricId: metric.id }));
     for (const bindings of [[], ...all.map((entry) => [entry]), all]) {
+      // A missing feedback opt-in fails the whole selected configuration,
+      // including a mixed list whose earlier entries are valid.
+      if (bindings.some((entry) => entry.metricId === "helpful_feedback")) {
+        assert.throws(() => recognitionFingerprint(state, bindings), /invalid_discussion_feedback_contract/);
+        continue;
+      }
       const current = recognitionFingerprint(state, bindings);
       const receivedCategories = [
         "governance",
