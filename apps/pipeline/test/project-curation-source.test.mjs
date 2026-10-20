@@ -150,10 +150,10 @@ test("curation collector retains minimized native bindings and unknown total his
   assert.equal(next.nextCursor, null);
   assert.equal(first.expectedCount, null);
   assert.equal(next.expectedCount, null);
-  assert.deepEqual([first.facts[0].historySubjectId, next.facts[0].historySubjectId], [
-    "I_SYNTHETIC_CURATION",
-    "PR_SYNTHETIC_CURATION",
-  ]);
+  assert.deepEqual(
+    [first.facts[0].historySubjectId, next.facts[0].historySubjectId],
+    ["I_SYNTHETIC_CURATION", "PR_SYNTHETIC_CURATION"],
+  );
   for (const fact of [...first.facts, ...next.facts]) {
     assert.equal(fact.evidence, "observed_transition");
     assert.equal(fact.projectCurationProjectId, curationProjectId);
