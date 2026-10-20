@@ -308,8 +308,6 @@
         "issue_clarifications",
         "duplicate_resolution",
         "title_scope_edits",
-        "reference_links",
-        "closing_links",
         "project_field_updates",
         "project_updates",
         "routing_handoffs",
@@ -756,6 +754,22 @@
       "positive_test": "accepted source authors, verified coauthors and reviewers produce distinct evidenced peers",
       "negative_test": "ordinary source observations and actual unreviewed PR/review facts cannot create accepted peers",
       "limitation": "Actual normalized PR/review facts with independently accepted synthetic receipts produce two evidenced peers with exact roles, source artifact and pair-formation times. Replacing them with actual unreviewed facts yields unknown/no peers; additional cases reject either side's missing acceptance or self review. Incomplete coverage, null rank and publicEnabled false remain explicit; no real consent, complete peer history or public activation is established."
+    },
+    {
+      "metric_id": "reference_links",
+      "path": "packages/metrics/test/reference-closing-source.test.js",
+      "positive_test": "${metricId} retains only the first independently identified pair event and its actor",
+      "negative_test": "${metricId} does not move an old pair into a later reporting window or actor lens",
+      "limitation": "Synthetic protected enrichment verifies typed endpoint bindings and conserves one directed source/target pair in authorized known history. Missing or conflicting attribution remains unavailable; partial observations do not prove first-ever history, native event collection, approved source capability or public activation.",
+      "case_parameter": "reference_links"
+    },
+    {
+      "metric_id": "closing_links",
+      "path": "packages/metrics/test/reference-closing-source.test.js",
+      "positive_test": "${metricId} retains only the first independently identified pair event and its actor",
+      "negative_test": "${metricId} does not move an old pair into a later reporting window or actor lens",
+      "limitation": "Synthetic protected enrichment verifies typed endpoint bindings and conserves one canonical PR/issue closing pair in authorized known history. Missing or conflicting attribution remains unavailable; partial observations do not prove first-ever history, native event collection, approved source capability or public activation.",
+      "case_parameter": "closing_links"
     }
   ]
 }

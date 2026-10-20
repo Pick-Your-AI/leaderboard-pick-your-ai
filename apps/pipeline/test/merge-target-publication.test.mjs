@@ -2,11 +2,13 @@
 // handlers. No socket, GitHub credentials, public deployment or real evidence.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { components, harness, publicScope } from "./harness.mjs";
+import { components, fixtureId, harness, publicScope } from "./harness.mjs";
 import { createPipeline } from "../src/runtime.mjs";
 import { syntheticCheckpointStore } from "../../../packages/github/test/synthetic-client.mjs";
 import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
 import { mergeTargetGenerationSignature } from "../src/pull-request-merge-target.mjs";
+import { pairPolicy } from "./relationship-pair-fixtures.mjs";
+import { AggregateExplanationStore } from "../src/aggregate-explanations.mjs";
 
 const slug = "synthetic-org/synthetic-repo",
   target = "release/previous-target";
@@ -873,4 +875,1364 @@ test("field-enriched native merge generations retain current, frozen and correct
   );
   assert.equal(state.calls, 10);
   assert.equal(p.state.graphql, 10);
+});
+
+async function pairFieldMergeSetup(t, { freeze = true, replay = false } = {}) {
+  const p = provider(true);
+  const issue = {
+    id: 9472,
+    node_id: "I_SYNTHETIC_MERGE_REPLAY",
+    number: 9472,
+    html_url: "https://github.com/" + slug + "/issues/9472",
+    created_at: p.payloads[0].created_at,
+    updated_at: p.payloads[0].updated_at,
+    state: "open",
+    user: p.payloads[0].user,
+  };
+  const state = {
+    calls: 0,
+    collections: 0,
+    forbid: false,
+    afterFreeze: freeze,
+    frozen: false,
+    unboundSubject: null,
+    unboundObservedAt: null,
+  };
+  const h = await harness(t, {
+    memoryDatabase: true,
+    githubClient: p.client,
+    now: p.now,
+    webhookDispatch: replay,
+    probeRepository: async () => ({ repositoryId: 2, installationId: 1, visibility: "public", checkedAt: p.now() }),
+    source: {
+      async readPage(request) {
+        assert.equal(state.forbid, false, "confirmed history must not recollect provider observations");
+        state.collections++;
+        assert.ok(request.family === "pull_requests" || (replay && request.family === "issues"));
+        const items = request.family === "pull_requests" ? p.payloads : [issue];
+        return {
+          repositoryId: 2,
+          visibility: "public",
+          isSynthetic: true,
+          nextCursor: null,
+          expectedCount: items.length,
+          facts: items.map((item) => ({
+            subjectId: item.node_id,
+            sourceRevision: item.updated_at,
+            sourceUrl: item.html_url,
+            evidence: "current_state",
+            actorId: null,
+            occurredAt: null,
+            state: "present",
+          })),
+        };
+      },
+    },
+    configure(config) {
+      const issuePolicy = config.policies[0];
+      config.repositories[0].families = replay ? ["pull_requests", "issues"] : ["pull_requests"];
+      config.scopes = [plain, scope];
+      const fieldPolicy = {
+        ...policy("pr_merged"),
+        metricId: "issue_field_updates",
+        unit: components.metrics.getMetricDefinition("issue_field_updates").definition.unit,
+        version: "synthetic-pair-field-merge-policy-v1",
+        roles: ["triager"],
+      };
+      config.policies = [policy("pr_merged"), pairPolicy(), fieldPolicy].map((value) => ({
+        policy: value,
+        signature: components.metrics.stableJSON(value),
+        approvalReceipt: "synthetic-pair-field-merge-policy",
+      }));
+      if (replay) config.policies.push(issuePolicy);
+    },
+  });
+  await h.runtime.stop();
+  const native = components.github.createGithubEvidenceNormalizer({
+    client: p.client,
+    source: h.options.sourceId,
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+    assertAuthorized: () => assert.equal(h.options.dataMode, "synthetic"),
+    pullRequestMergeTargetRepositoryIds: [2],
+    now: p.now,
+  });
+  h.options.normalizer = async (input) => {
+    assert.equal(state.forbid, false, "confirmed history must not invoke the withdrawn producer");
+    if (input.family === "issues") {
+      assert.equal(input.fact.subjectId, issue.node_id);
+      return components.github.normalizeGithubObservation({
+        repository: { id: 2, slug, visibility: "public" },
+        proof: {
+          verified: true,
+          source: "github_rest",
+          revision: input.fact.sourceRevision,
+          eventId: "synthetic-merge-replay-issue-created",
+          isSynthetic: true,
+        },
+        family: "issue",
+        action: "opened",
+        occurredAt: issue.created_at,
+        observedAt: input.observedAt,
+        payload: { issue, sender: issue.user },
+      });
+    }
+    assert.equal(input.family, "pull_requests");
+    state.calls++;
+    const pull = p.payloads.find((entry) => entry.node_id === input.fact.subjectId);
+    assert.ok(pull);
+    const merge = await native(input);
+    const eventId = "synthetic-pair-merge-" + pull.number;
+    const unbound = state.unboundSubject === pull.node_id;
+    const pair = components.github.normalizeGithubObservation({
+      repository: { id: 2, slug, visibility: "public", defaultBranch: "main" },
+      proof: {
+        verified: true,
+        source: "github_graphql",
+        revision: input.fact.sourceRevision,
+        eventId,
+        isSynthetic: true,
+      },
+      family: "relationship",
+      action: "connected",
+      occurredAt: pull.merged_at,
+      observedAt: unbound ? state.unboundObservedAt : input.observedAt,
+      payload: {
+        repository: { id: 2, private: false, full_name: slug },
+        pull_request: pull,
+        sender: { id: 202, node_id: "U_SYNTHETIC_MERGE_PAIR", login: "synthetic-merge-linker", type: "User" },
+        relationship: {
+          kind: "closing",
+          from: pull.node_id,
+          to: "I_SYNTHETIC_MERGE_PAIR",
+          intentional: true,
+          publicEndpointsVerified: true,
+          ...(unbound
+            ? {}
+            : {
+                pair: {
+                  version: components.github.relationshipPairNormalizationVersion,
+                  kind: "closing",
+                  action: "connect",
+                  eventId,
+                  from: { repositoryId: "2", artifactId: pull.node_id, kind: "pull_request" },
+                  to: { repositoryId: "2", artifactId: "I_SYNTHETIC_MERGE_PAIR", kind: "issue" },
+                },
+              }),
+        },
+      },
+    });
+    const field = components.github.normalizeGithubObservation({
+      repository: { id: 2, slug, visibility: "public" },
+      proof: {
+        verified: true,
+        source: "github_rest",
+        revision: input.fact.sourceRevision,
+        eventId: "synthetic-pair-merge-field-" + pull.number,
+        isSynthetic: true,
+      },
+      family: "field_change",
+      action: "issue_field_changed",
+      occurredAt: pull.merged_at,
+      observedAt: input.observedAt,
+      payload: { issue: pull, sender: pull.user, change: { before: { priority: 1 }, after: { priority: 2 } } },
+    });
+    assert.equal(pair.facts.length, 1);
+    assert.equal(pair.facts[0].metricId, "closing_links");
+    assert.equal(field.facts.length, 1);
+    assert.equal(field.facts[0].metricId, "issue_field_updates");
+    // Actual normalizers supply all claims; the runtime supplies generation markers.
+    return {
+      ...merge,
+      facts: [...merge.facts, ...pair.facts, ...field.facts],
+      actors: [
+        ...new Map([...merge.actors, ...pair.actors, ...field.actors].map((actor) => [actor.id, actor])).values(),
+      ],
+      evidence: [...merge.evidence, ...pair.evidence, ...field.evidence],
+    };
+  };
+  for (const name of [
+    "defaultDeliveryNormalizationVersion",
+    "fieldChangeNormalizationVersion",
+    "relationshipPairNormalizationVersion",
+    "pullRequestMergeTargetNormalizationVersion",
+  ])
+    h.options[name] = components.github[name];
+  const guardedQuery = async (run, sql, params) => {
+    if (sql.includes("UPDATE leaderboard_pipeline.scan_continuations SET observation_cutoff")) state.frozen = true;
+    if (
+      state.afterFreeze &&
+      state.frozen &&
+      sql.startsWith("SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access")
+    ) {
+      state.afterFreeze = false;
+      throw new Error("synthetic_stop_after_pair_field_merge_freeze");
+    }
+    return run(sql, params);
+  };
+  h.options.db = {
+    query: (sql, params) => guardedQuery(h.db.query.bind(h.db), sql, params),
+    transaction: (work) =>
+      h.db.transaction((tx) => work({ query: (sql, params) => guardedQuery(tx.query.bind(tx), sql, params) })),
+  };
+  const runtime = await createPipeline(h.options);
+  t.after(() => runtime.stop());
+  return { h, p, runtime, state, issue };
+}
+
+function pairMergePublication(result, h, selected = plain) {
+  const head = h.controlsStore.read().pipelineHeads[components.contracts.publicScopeKey(selected)];
+  assert.ok(head);
+  const publication = result.publications.find((entry) => entry.snapshotId === head.snapshotId);
+  assert.ok(publication);
+  assert.equal(publication.comparisonInput.state, "retained");
+  return publication;
+}
+
+async function assertPairMergeQuantity(runtime, expected) {
+  const ordinary = await readScope(runtime, plain);
+  assert.deepEqual(
+    ordinary.selected.rows
+      .filter((row) => row.result.metricId === "closing_links" && row.result.value > 0)
+      .map((row) => [row.actorId, row.result.value]),
+    [["202", expected]],
+  );
+  const branch = await readScope(runtime);
+  assert.equal(branch.selected.rows.length, 5);
+  assert.ok(branch.selected.rows.every((row) => row.result.metricId === "pr_merged"));
+  const unsupported = await runtime.app.inject("/api/v1/boards?" + query({ metric: "closing_links" }));
+  assert.equal(unsupported.statusCode, 400, unsupported.body);
+  assert.match(unsupported.body, /unsupported_merge_target_metric/);
+}
+
+async function assertPairMergeCapture(h, runtime, publication, rows) {
+  const frozen = (
+    await h.db.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
+      publication.snapshotId,
+    ])
+  ).rows[0];
+  assert.equal(comparisonHash(frozen.document), frozen.document_hash);
+  const record = runtime.policyComparisons.comparisons.input(publication.comparisonInput.inputId);
+  const explanation = new AggregateExplanationStore(h.controlsStore).read(publication.snapshotId).document;
+  const captured = frozen.document.identityAuthorization.relationshipPairEvidence;
+  assert.equal(captured.schemaVersion, "pipeline-relationship-pair-authority/v4");
+  assert.deepEqual(record.authorization.relationshipPairEvidence, captured);
+  assert.deepEqual(explanation.authorization.relationshipPairEvidence, captured);
+  for (const row of rows) {
+    const binding = captured.bindings.find(
+      (entry) =>
+        entry.factKey === row.fact_key &&
+        entry.documentHash === row.document_hash &&
+        entry.policySignature === row.policy_signature,
+    );
+    assert.ok(binding);
+    assert.equal(comparisonHash(row.document), row.document_hash);
+    for (const fact of row.document.facts.filter((entry) => entry.metricId === "closing_links"))
+      assert.ok(binding.factHashes.includes(comparisonHash(fact)));
+  }
+  const pairs = (input) =>
+    input.facts
+      .filter((fact) => fact.metricId === "closing_links")
+      .sort((left, right) => comparisonHash(left).localeCompare(comparisonHash(right)));
+  assert.equal(pairs(frozen.document.frozen).length, 5);
+  assert.deepEqual(pairs(record.input), pairs(frozen.document.frozen));
+  await runtime.policyComparisons.withAuthorizedInputs([record.authorization], async (_removed, authority) => {
+    const compared = runtime.policyComparisons.comparisons.compare(
+      record,
+      { ...pairPolicy(), version: "synthetic-pair-merge-preview-v2" },
+      authority.restoreInput,
+    );
+    for (const aggregate of [compared.document.before, compared.document.after])
+      assert.deepEqual(
+        aggregate.rows.map((row) => [row.actorId, row.value]),
+        [["202", 5]],
+      );
+  });
+  await runtime.aggregateExplanations.read(publication.snapshotId);
+}
+
+async function retainedPairMergeState(h) {
+  const snapshots = (await h.db.query("SELECT * FROM leaderboard_pipeline.snapshots ORDER BY snapshot_id")).rows;
+  const frozen = (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id")).rows;
+  const normalized = (
+    await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature")
+  ).rows;
+  return structuredClone({
+    snapshots,
+    frozen,
+    normalized,
+    privateInputs: h.controlsStore.db.prepare("SELECT * FROM policy_preview_inputs ORDER BY id").all(),
+    explanations: h.controlsStore.db
+      .prepare("SELECT * FROM pipeline_aggregate_explanations ORDER BY snapshot_id")
+      .all(),
+    confirmations: structuredClone(h.controlsStore.read().pipelinePublications),
+    heads: structuredClone(h.controlsStore.read().pipelineHeads),
+  });
+}
+
+test("pair and field enriched merge generations preserve frozen authority and withdraw a later unbound pair", async (t) => {
+  const { h, p, runtime, state } = await pairFieldMergeSetup(t);
+  const cutoff = p.state.clock;
+  await assert.rejects(runtime.runOnce(), /synthetic_stop_after_pair_field_merge_freeze/);
+  assert.equal(state.calls, 5);
+  assert.equal(p.state.graphql, 5);
+  const original = await caches(h.db);
+  assert.equal(original.length, 5);
+  for (const row of original) {
+    const marker = row.document.pullRequestMergeTargetNormalization;
+    const merge = mergeTargetGenerationSignature(marker.baseSignature, marker.generation, comparisonHash);
+    const delivery = comparisonHash([components.github.defaultDeliveryNormalizationVersion, merge]);
+    const field = comparisonHash([components.github.fieldChangeNormalizationVersion, delivery]);
+    assert.equal(row.policy_signature, comparisonHash([components.github.relationshipPairNormalizationVersion, field]));
+    assert.equal(
+      row.document.defaultDeliveryNormalizationVersion,
+      components.github.defaultDeliveryNormalizationVersion,
+    );
+    assert.equal(row.document.fieldChangeNormalizationVersion, components.github.fieldChangeNormalizationVersion);
+    assert.equal(
+      row.document.relationshipPairNormalizationVersion,
+      components.github.relationshipPairNormalizationVersion,
+    );
+    assert.ok(row.document.facts.some((fact) => fact.relationshipPair?.kind === "closing"));
+    assert.equal(row.document.pullRequestMergeTargets[0].status, "known");
+  }
+  p.state.forbid = true;
+  const resumed = await runtime.runOnce();
+  assert.equal(resumed.state, "published");
+  assert.equal(state.calls, 5);
+  assert.equal(p.state.graphql, 5);
+  assert.deepEqual(await caches(h.db), original);
+  await assertPairMergeQuantity(runtime, 5);
+  const originalPublication = pairMergePublication(resumed, h);
+  await assertPairMergeCapture(h, runtime, originalPublication, original);
+
+  p.state.forbid = false;
+  p.state.clock = iso(Date.parse(p.state.clock) + 5000);
+  const nextCutoff = iso(Date.parse(cutoff) + 2000);
+  const fresh = await runtime.runOnce({ cutoff: nextCutoff });
+  assert.equal(fresh.state, "published");
+  assert.equal(state.calls, 10);
+  assert.equal(p.state.graphql, 10);
+  const generations = await caches(h.db);
+  assert.equal(generations.length, 10);
+  for (const old of original)
+    assert.deepEqual(
+      generations.find((row) => row.fact_key === old.fact_key && row.policy_signature === old.policy_signature),
+      old,
+    );
+  await assertPairMergeQuantity(runtime, 5);
+  const historical = await runtime.source.read(plain, originalPublication.snapshotId, new AbortController().signal);
+  assert.deepEqual(
+    historical.selected.rows
+      .filter((row) => row.result.metricId === "closing_links" && row.result.value > 0)
+      .map((row) => [row.actorId, row.result.value]),
+    [["202", 5]],
+  );
+  await assertPairMergeCapture(h, runtime, originalPublication, original);
+  const branchPublication = pairMergePublication(fresh, h, scope);
+  const record = runtime.policyComparisons.comparisons.input(branchPublication.comparisonInput.inputId);
+  await runtime.policyComparisons.withAuthorizedInputs([record.authorization], async (_removed, authority) => {
+    authority.restoreInput(record.input, record.authorization);
+    const forged = structuredClone(record.input);
+    const fact = forged.facts.find((entry) => entry.metricId === "pr_merged" && entry.actorId === "101");
+    const previous = original
+      .flatMap((row) => row.document.facts)
+      .find((entry) => entry.metricId === "pr_merged" && entry.actorId === "101");
+    assert.ok(fact?.mergeTarget);
+    assert.ok(previous?.mergeTarget);
+    assert.notEqual(fact.mergeTarget.proofHash, previous.mergeTarget.proofHash);
+    fact.mergeTarget.proofHash = previous.mergeTarget.proofHash;
+    assert.throws(
+      () => authority.restoreInput(forged, record.authorization),
+      /merge_target_normalization_binding_unavailable/,
+    );
+  });
+
+  // One native event becomes unresolved; retaining its older proof must not
+  // silently restore its positive credit. The other four pairs remain supported.
+  state.unboundSubject = p.payloads[0].node_id;
+  state.unboundObservedAt = iso(Date.parse(nextCutoff) + 1000);
+  p.state.clock = iso(Date.parse(p.state.clock) + 5000);
+  const unresolved = await runtime.runOnce({ cutoff: iso(Date.parse(nextCutoff) + 2000) });
+  assert.equal(unresolved.state, "published");
+  assert.equal(state.calls, 15);
+  assert.equal(p.state.graphql, 15);
+  const retained = await caches(h.db);
+  assert.equal(retained.length, 15);
+  for (const old of generations)
+    assert.deepEqual(
+      retained.find((row) => row.fact_key === old.fact_key && row.policy_signature === old.policy_signature),
+      old,
+    );
+  const unknown = retained
+    .filter(
+      (row) =>
+        !generations.some((old) => old.fact_key === row.fact_key && old.policy_signature === row.policy_signature),
+    )
+    .flatMap((row) => row.document.facts)
+    .find((fact) => fact.metricId === "closing_links" && fact.artifactId === state.unboundSubject);
+  assert.equal(unknown?.state, "unknown");
+  assert.equal(Object.hasOwn(unknown, "relationshipPair"), false);
+  await assertPairMergeQuantity(runtime, 4);
+
+  // A fresh generation must validate every retained predecessor of its first
+  // source before classification; an old marker cannot hide a broken hash.
+  const saved = await retainedPairMergeState(h);
+  const beforeTamperCalls = state.calls;
+  const beforeTamperNative = [...p.state.calls];
+  const previous = original[0];
+  const firstSource = (
+    await h.db.query(
+      "SELECT fact_key FROM leaderboard_ingestion.source_facts WHERE family='pull_requests' ORDER BY fact_key",
+    )
+  ).rows[0];
+  assert.equal(previous.fact_key, firstSource.fact_key);
+  const tampered = structuredClone(previous.document);
+  delete tampered.pullRequestMergeTargetNormalization;
+  p.state.clock = iso(Date.parse(p.state.clock) + 5000);
+  p.state.forbid = true;
+  try {
+    await h.db.query(
+      "UPDATE leaderboard_pipeline.normalizations SET document=$3::jsonb WHERE fact_key=$1 AND policy_signature=$2",
+      [previous.fact_key, previous.policy_signature, JSON.stringify(tampered)],
+    );
+    await assert.rejects(
+      runtime.runOnce({ cutoff: iso(Date.parse(nextCutoff) + 4000) }),
+      /normalization_integrity_error/,
+    );
+  } finally {
+    await h.db.query(
+      "UPDATE leaderboard_pipeline.normalizations SET document=$3::jsonb WHERE fact_key=$1 AND policy_signature=$2",
+      [previous.fact_key, previous.policy_signature, JSON.stringify(previous.document)],
+    );
+  }
+  assert.equal(state.calls, beforeTamperCalls);
+  assert.deepEqual(p.state.calls, beforeTamperNative);
+  assert.deepEqual(await retainedPairMergeState(h), saved);
+  await assertPairMergeQuantity(runtime, 4);
+});
+
+test("already confirmed pair field and merge publications acknowledge without a withdrawn producer", async (t) => {
+  const { h, p, runtime, state, issue } = await pairFieldMergeSetup(t, { freeze: false, replay: true });
+  assert.equal((await runtime.runOnce({ cutoff: iso(Date.parse(p.state.clock) - 1000) })).state, "published");
+  p.state.clock = iso(Date.parse(p.state.clock) + 2000);
+  await runtime.inbox.insert({
+    deliveryId: fixtureId(9472),
+    bodyHash: "a".repeat(64),
+    envelope: {
+      version: "github-delivery/v1",
+      deliveryId: fixtureId(9472),
+      event: "issues",
+      action: "opened",
+      installationId: 1,
+      repositoryId: 2,
+      subjectId: issue.node_id,
+      sourceUrl: issue.html_url,
+      actorId: null,
+      occurredAt: issue.created_at,
+    },
+  });
+  assert.equal(await runtime.inbox.complete(await runtime.inbox.claim()), true);
+  runtime.outbox.complete = runtime.outbox.fail = async () => {
+    throw new Error("synthetic combined merge acknowledgment loss");
+  };
+  await assert.rejects(runtime.dispatchOnce(), /synthetic combined merge acknowledgment loss/);
+  const saved = await retainedPairMergeState(h);
+  const ordinaryHead = saved.heads[components.contracts.publicScopeKey(plain)];
+  assert.equal(ordinaryHead.defaultDeliveryNormalizationVersion, components.github.defaultDeliveryNormalizationVersion);
+  assert.equal(ordinaryHead.fieldChangeNormalizationVersion, components.github.fieldChangeNormalizationVersion);
+  assert.equal(
+    ordinaryHead.relationshipPairNormalizationVersion,
+    components.github.relationshipPairNormalizationVersion,
+  );
+  const before = (await h.db.query("SELECT event_key,operation FROM leaderboard_ingestion.outbox")).rows[0];
+  assert.ok(before);
+  const dispatchReceipts = (
+    await h.db.query(
+      "SELECT scope_key,snapshot_id FROM leaderboard_pipeline.dispatch_publications WHERE operation_key=$1 ORDER BY scope_key",
+      [before.operation.operationKey],
+    )
+  ).rows;
+  assert.deepEqual(
+    dispatchReceipts.map((entry) => entry.scope_key),
+    [plain, scope].map(components.contracts.publicScopeKey).sort(),
+  );
+  for (const entry of dispatchReceipts) {
+    const confirmation = saved.confirmations[entry.snapshot_id];
+    assert.ok(confirmation);
+    assert.equal(confirmation.scopeKey, entry.scope_key);
+    assert.equal(confirmation.snapshotId, entry.snapshot_id);
+    assert.equal(saved.heads[entry.scope_key]?.snapshotId, entry.snapshot_id);
+  }
+  const calls = state.calls;
+  const collections = state.collections;
+  const nativeCalls = [...p.state.calls];
+  await h.db.query(
+    "UPDATE leaderboard_ingestion.outbox SET lease_until=clock_timestamp()-interval '1 second' WHERE state='leased'",
+  );
+  for (const name of [
+    "defaultDeliveryNormalizationVersion",
+    "fieldChangeNormalizationVersion",
+    "relationshipPairNormalizationVersion",
+    "pullRequestMergeTargetNormalizationVersion",
+  ])
+    delete h.options[name];
+  state.forbid = true;
+  p.state.forbid = true;
+  await runtime.stop();
+  const verifyConfiguration = h.options.verifyConfiguration;
+  let hostApproved = true,
+    deniedApprovalReads = 0;
+  h.options.verifyConfiguration = async (value) => {
+    if (!hostApproved) {
+      deniedApprovalReads++;
+      return false;
+    }
+    return verifyConfiguration(value);
+  };
+  const restarted = await createPipeline(h.options);
+  t.after(() => restarted.stop());
+  const dispatchRow = async () =>
+    (await h.db.query("SELECT * FROM leaderboard_ingestion.outbox WHERE event_key=$1", [before.event_key])).rows[0];
+  const receiptRows = async () =>
+    (await h.db.query("SELECT * FROM leaderboard_pipeline.receipts ORDER BY receipt_id")).rows;
+  const boundDispatchRows = async () =>
+    (
+      await h.db.query(
+        "SELECT * FROM leaderboard_pipeline.dispatch_publications WHERE operation_key=$1 ORDER BY scope_key",
+        [before.operation.operationKey],
+      )
+    ).rows;
+  const savedReceipts = await receiptRows();
+  const savedDispatchRows = await boundDispatchRows();
+  assert.equal((await dispatchRow()).attempts, 1);
+  const assertRefused = async (attempt, reason, expected) => {
+    const row = await dispatchRow();
+    assert.equal(row.state, "pending");
+    assert.equal(row.completion, null);
+    assert.equal(row.attempts, attempt);
+    assert.equal(row.reason_code, reason);
+    assert.deepEqual(row.operation, before.operation);
+    assert.deepEqual(await retainedPairMergeState(h), expected);
+    assert.deepEqual(await receiptRows(), savedReceipts);
+    assert.deepEqual(await boundDispatchRows(), savedDispatchRows);
+    assert.equal(state.calls, calls);
+    assert.equal(state.collections, collections);
+    assert.deepEqual(p.state.calls, nativeCalls);
+  };
+  const readyRetry = () =>
+    h.db.query(
+      "UPDATE leaderboard_ingestion.outbox SET available_at=clock_timestamp() WHERE event_key=$1 AND state='pending'",
+      [before.event_key],
+    );
+
+  // A partial private confirmation set must fall back to the live producer guards.
+  const missingSnapshotId = dispatchReceipts[0].snapshot_id;
+  const partial = structuredClone(saved);
+  delete partial.confirmations[missingSnapshotId];
+  h.controlsStore.transaction((value) => {
+    delete value.pipelinePublications[missingSnapshotId];
+  });
+  try {
+    assert.equal(await restarted.dispatchOnce(), "retry_scheduled");
+    await assertRefused(2, "publication_unavailable", partial);
+  } finally {
+    h.controlsStore.transaction((value) => {
+      value.pipelinePublications[missingSnapshotId] = structuredClone(saved.confirmations[missingSnapshotId]);
+    });
+  }
+  assert.deepEqual(await retainedPairMergeState(h), saved);
+
+  // Updating the SQL hash cannot retarget the originally confirmed calculation.
+  const originalFrozen = saved.frozen.find((row) => row.snapshot_id === ordinaryHead.snapshotId);
+  assert.ok(originalFrozen);
+  const changedDocument = structuredClone(originalFrozen.document);
+  const changedPair = changedDocument.frozen.facts.find(
+    (fact) => fact.metricId === "closing_links" && fact.relationshipPair,
+  );
+  assert.ok(changedPair);
+  changedPair.relationshipPair.eventId += "-retained-tamper";
+  const changedHash = comparisonHash(changedDocument);
+  assert.notEqual(changedHash, originalFrozen.document_hash);
+  const changedState = structuredClone(saved);
+  const changedRow = changedState.frozen.find((row) => row.snapshot_id === originalFrozen.snapshot_id);
+  changedRow.document = changedDocument;
+  changedRow.document_hash = changedHash;
+  await h.db.query(
+    "UPDATE leaderboard_pipeline.frozen_inputs SET document=$2::jsonb,document_hash=$3 WHERE snapshot_id=$1",
+    [originalFrozen.snapshot_id, JSON.stringify(changedDocument), changedHash],
+  );
+  try {
+    await readyRetry();
+    assert.equal(await restarted.dispatchOnce(), "retry_scheduled");
+    await assertRefused(3, "publication_unavailable", changedState);
+  } finally {
+    await h.db.query(
+      "UPDATE leaderboard_pipeline.frozen_inputs SET document=$2::jsonb,document_hash=$3 WHERE snapshot_id=$1",
+      [originalFrozen.snapshot_id, JSON.stringify(originalFrozen.document), originalFrozen.document_hash],
+    );
+  }
+  assert.deepEqual(await retainedPairMergeState(h), saved);
+
+  // Revoke only after the real awaited claim, beyond the dispatch entry approval.
+  await readyRetry();
+  const claim = restarted.outbox.claim;
+  let revokedClaims = 0;
+  restarted.outbox.claim = async (...args) => {
+    const lease = await claim.apply(restarted.outbox, args);
+    assert.ok(lease);
+    assert.equal(hostApproved, true);
+    hostApproved = false;
+    revokedClaims++;
+    return lease;
+  };
+  try {
+    assert.equal(await restarted.dispatchOnce(), "retry_scheduled");
+    assert.equal(revokedClaims, 1);
+    assert.ok(deniedApprovalReads > 0, "the claimed reuse path must recheck current host approval");
+    await assertRefused(4, "source_unavailable", saved);
+  } finally {
+    restarted.outbox.claim = claim;
+    hostApproved = true;
+  }
+
+  await readyRetry();
+  assert.equal(await restarted.dispatchOnce(), "processed");
+  assert.equal((await dispatchRow()).attempts, 5);
+  assert.deepEqual(await receiptRows(), savedReceipts);
+  assert.deepEqual(await boundDispatchRows(), savedDispatchRows);
+  const after = (await h.db.query("SELECT event_key,state,operation FROM leaderboard_ingestion.outbox")).rows[0];
+  assert.equal(after.state, "done");
+  assert.equal(after.event_key, before.event_key);
+  assert.deepEqual(after.operation, before.operation);
+  assert.deepEqual(await retainedPairMergeState(h), saved);
+  assert.equal(state.calls, calls);
+  assert.equal(state.collections, collections);
+  assert.deepEqual(p.state.calls, nativeCalls);
+  await assertPairMergeQuantity(restarted, 5);
+  await assert.rejects(
+    restarted.runOnce(),
+    /(?:merge_target|default_delivery|field_change|relationship_pair)_normalizer_version_unverified/,
+  );
+  assert.equal(state.calls, calls);
+  assert.equal(state.collections, collections);
+  assert.deepEqual(p.state.calls, nativeCalls);
+  assert.deepEqual(await retainedPairMergeState(h), saved);
+});
+
+async function pendingPairMergeRetry(t) {
+  const fixture = await pairFieldMergeSetup(t);
+  const { h, p, runtime, state } = fixture;
+  const sourceRows = async () =>
+    structuredClone((await h.db.query("SELECT * FROM leaderboard_ingestion.source_facts ORDER BY fact_key")).rows);
+  const scanRows = async () =>
+    structuredClone(
+      (await h.db.query("SELECT * FROM leaderboard_pipeline.scan_continuations ORDER BY configuration_key")).rows,
+    );
+  const cutoff = p.state.clock;
+  await assert.rejects(runtime.runOnce(), /synthetic_stop_after_pair_field_merge_freeze/);
+  assert.equal(state.calls, 5);
+  assert.equal(state.collections, 1);
+  assert.equal(p.state.graphql, 5);
+  const original = structuredClone(await caches(h.db));
+  const sources = await sourceRows();
+  const scans = await scanRows();
+  assert.equal(original.length, 5);
+  assert.equal(sources.length, 5);
+  assert.equal(scans.length, 1);
+  assert.equal(iso(scans[0].event_cutoff), cutoff);
+  assert.equal(iso(scans[0].observation_cutoff), cutoff);
+  assert.ok(Object.values(scans[0].scope_heads).every((head) => head === null));
+  assert.deepEqual(
+    original.map((row) => row.fact_key),
+    sources.map((row) => row.fact_key),
+  );
+
+  // B changes only its capture clock and generation. Its native source rows
+  // remain A's exact five observations, and neither cycle has a publication.
+  const payloads = JSON.stringify(p.payloads);
+  p.state.clock = iso(Date.parse(cutoff) + 5000);
+  let committed = 0;
+  const transaction = h.db.transaction;
+  afterMergeTransaction(
+    h,
+    (sql) => /INSERT\s+INTO\s+leaderboard_pipeline\.normalizations\b/.test(sql),
+    () => {
+      if (++committed === 5) throw new Error("synthetic_stop_after_later_merge_generation_commit");
+    },
+  );
+  try {
+    await assert.rejects(
+      runtime.runOnce({ cutoff: iso(Date.parse(cutoff) + 2000) }),
+      /synthetic_stop_after_later_merge_generation_commit/,
+    );
+  } finally {
+    h.db.transaction = transaction;
+  }
+  assert.equal(committed, 5, "the fault follows all five committed B normalizations");
+  assert.equal(state.calls, 10);
+  assert.equal(state.collections, 2);
+  assert.equal(p.state.graphql, 10);
+  assert.equal(JSON.stringify(p.payloads), payloads);
+  assert.deepEqual(await sourceRows(), sources);
+  assert.deepEqual(await scanRows(), scans);
+  const all = structuredClone(await caches(h.db));
+  assert.equal(all.length, 10);
+  const later = all.filter(
+    (row) =>
+      !original.some((prior) => prior.fact_key === row.fact_key && prior.policy_signature === row.policy_signature),
+  );
+  assert.equal(later.length, 5);
+  assert.deepEqual(
+    later.map((row) => row.fact_key),
+    original.map((row) => row.fact_key),
+  );
+  for (const prior of original) {
+    assert.deepEqual(
+      all.find((row) => row.fact_key === prior.fact_key && row.policy_signature === prior.policy_signature),
+      prior,
+    );
+    const next = later.find((row) => row.fact_key === prior.fact_key);
+    assert.notEqual(next.policy_signature, prior.policy_signature);
+    assert.notEqual(
+      next.document.pullRequestMergeTargetNormalization.generation,
+      prior.document.pullRequestMergeTargetNormalization.generation,
+    );
+    assert.equal(prior.document.pullRequestMergeTargets.length, 1);
+    assert.equal(next.document.pullRequestMergeTargets.length, 1);
+    const before = await components.contracts.verifyGithubPullRequestMergeTargetCapture(
+      prior.document.pullRequestMergeTargets[0],
+    );
+    const after = await components.contracts.verifyGithubPullRequestMergeTargetCapture(
+      next.document.pullRequestMergeTargets[0],
+    );
+    assert.equal(before.status, "known");
+    assert.equal(after.status, "known");
+    assert.equal(before.observedAt, cutoff);
+    assert.equal(after.observedAt, p.state.clock);
+    assert.ok(after.observedAt > cutoff);
+    const { observedAt: _beforeClock, proofHash: _beforeHash, ...beforeMeaning } = before;
+    const { observedAt: _afterClock, proofHash: _afterHash, ...afterMeaning } = after;
+    assert.deepEqual(afterMeaning, beforeMeaning);
+    assert.equal(comparisonHash(prior.document), prior.document_hash);
+    assert.equal(comparisonHash(next.document), next.document_hash);
+    assert.ok(prior.document.facts.some((fact) => fact.metricId === "closing_links" && fact.relationshipPair));
+    assert.ok(next.document.facts.some((fact) => fact.metricId === "closing_links" && fact.relationshipPair));
+    assert.equal(prior.document.fieldChangeNormalizationVersion, components.github.fieldChangeNormalizationVersion);
+    assert.equal(next.document.fieldChangeNormalizationVersion, components.github.fieldChangeNormalizationVersion);
+  }
+  const pending = await retainedPairMergeState(h);
+  for (const key of ["snapshots", "frozen", "privateInputs", "explanations"]) assert.equal(pending[key].length, 0);
+  assert.equal(Object.keys(pending.confirmations ?? {}).length, 0);
+  assert.equal(Object.keys(pending.heads ?? {}).length, 0);
+  assert.equal(pending.normalized.length, 10);
+  state.forbid = true;
+  p.state.forbid = true;
+  const calls = { normalized: state.calls, collections: state.collections, graphql: p.state.graphql };
+  const nativeCalls = [...p.state.calls];
+  return {
+    ...fixture,
+    cutoff,
+    original,
+    later,
+    all,
+    pending,
+    sources,
+    scans,
+    sourceRows,
+    scanRows,
+    assertNoRecollection() {
+      assert.deepEqual({ normalized: state.calls, collections: state.collections, graphql: p.state.graphql }, calls);
+      assert.deepEqual(p.state.calls, nativeCalls);
+    },
+  };
+}
+
+async function assertPendingPairMergeRetry(fixture, expected = fixture.pending) {
+  fixture.assertNoRecollection();
+  assert.deepEqual(await fixture.sourceRows(), fixture.sources);
+  assert.deepEqual(await fixture.scanRows(), fixture.scans);
+  assert.deepEqual(await retainedPairMergeState(fixture.h), expected);
+}
+
+async function completePairMergeRetry(fixture) {
+  const { h, runtime, cutoff, original, all } = fixture;
+  await assertPendingPairMergeRetry(fixture);
+  const result = await runtime.runOnce();
+  assert.equal(result.state, "published");
+  assert.equal(result.publications.length, 2);
+  fixture.assertNoRecollection();
+  assert.deepEqual(await fixture.sourceRows(), fixture.sources);
+  assert.deepEqual(await caches(h.db), all);
+  assert.deepEqual(await fixture.scanRows(), [], "only successful confirmation retires A's continuation");
+  await assertPairMergeQuantity(runtime, 5);
+  const publication = pairMergePublication(result, h);
+  await assertPairMergeCapture(h, runtime, publication, original);
+  const expectedBindings = original
+    .map((row) => JSON.stringify([row.fact_key, row.policy_signature, row.document_hash]))
+    .sort();
+  const originalProofs = new Set(
+    original.flatMap((row) => row.document.pullRequestMergeTargets.map((p) => p.proofHash)),
+  );
+  const laterProofs = new Set(
+    fixture.later.flatMap((row) => row.document.pullRequestMergeTargets.map((p) => p.proofHash)),
+  );
+  for (const selected of result.publications) {
+    const frozen = (
+      await h.db.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
+        selected.snapshotId,
+      ])
+    ).rows[0];
+    const record = runtime.policyComparisons.comparisons.input(selected.comparisonInput.inputId);
+    const explanation = new AggregateExplanationStore(h.controlsStore).read(selected.snapshotId).document;
+    assert.equal(comparisonHash(frozen.document), frozen.document_hash);
+    assert.equal(frozen.document.frozen.cutoff, cutoff);
+    assert.equal(record.input.cutoff, cutoff);
+    assert.equal(explanation.cutoff, cutoff);
+    const capture = frozen.document.identityAuthorization.relationshipPairEvidence;
+    assert.equal(capture.schemaVersion, "pipeline-relationship-pair-authority/v4");
+    assert.deepEqual(
+      capture.bindings
+        .map((entry) => JSON.stringify([entry.factKey, entry.policySignature, entry.documentHash]))
+        .sort(),
+      expectedBindings,
+      "only A's exact five bindings authorize the resumed frozen publication",
+    );
+    assert.deepEqual(record.authorization.relationshipPairEvidence, capture);
+    assert.deepEqual(explanation.authorization.relationshipPairEvidence, capture);
+    const proofs = frozen.document.frozen.facts
+      .filter((fact) => fact.mergeTarget)
+      .map((fact) => fact.mergeTarget.proofHash);
+    assert.ok(proofs.length >= 5);
+    assert.ok(proofs.every((proof) => originalProofs.has(proof) && !laterProofs.has(proof)));
+  }
+  fixture.assertNoRecollection();
+  assert.deepEqual(await caches(h.db), all);
+  return publication;
+}
+
+async function writePairMergeRetryCache(h, row, document, hash = comparisonHash(document)) {
+  const result = await h.db.query(
+    "UPDATE leaderboard_pipeline.normalizations SET document=$3::jsonb,document_hash=$4 WHERE fact_key=$1 AND policy_signature=$2 RETURNING document_hash",
+    [row.fact_key, row.policy_signature, JSON.stringify(document), hash],
+  );
+  assert.deepEqual(result.rows, [{ document_hash: hash }]);
+}
+
+test("an unconfirmed pair and field merge cycle retries before a later unconfirmed generation", async (t) => {
+  await completePairMergeRetry(await pendingPairMergeRetry(t));
+});
+
+for (const malformed of ["hash", "pair fact"]) {
+  test("an unconfirmed retry validates a future merge generation's " + malformed, async (t) => {
+    const fixture = await pendingPairMergeRetry(t);
+    const previous = fixture.later[0];
+    const document = structuredClone(previous.document);
+    if (malformed === "hash") document.reasons.push("synthetic_future_hash_mismatch");
+    else document.facts.find((fact) => fact.metricId === "closing_links").id = 17;
+    const hash = malformed === "hash" ? previous.document_hash : comparisonHash(document);
+    await writePairMergeRetryCache(fixture.h, previous, document, hash);
+    try {
+      const altered = await retainedPairMergeState(fixture.h);
+      await assert.rejects(
+        fixture.runtime.runOnce(),
+        malformed === "hash" ? /normalization_integrity_error/ : /relationship_pair_authority_integrity_error/,
+      );
+      await assertPendingPairMergeRetry(fixture, altered);
+    } finally {
+      await writePairMergeRetryCache(fixture.h, previous, previous.document, previous.document_hash);
+    }
+    await completePairMergeRetry(fixture);
+  });
+}
+
+test("a frozen retry cannot admit its selected merge proof after the original cutoff", async (t) => {
+  const fixture = await pendingPairMergeRetry(t);
+  const previous = fixture.original[0];
+  const document = structuredClone(previous.document);
+  const capture = document.pullRequestMergeTargets[0];
+  const { proofHash, ...body } = capture;
+  body.observedAt = fixture.p.state.clock;
+  const replacement = { ...body, proofHash: await components.contracts.githubPullRequestMergeTargetHash(body) };
+  await components.contracts.verifyGithubPullRequestMergeTargetCapture(replacement);
+  document.pullRequestMergeTargets[0] = replacement;
+  for (const fact of document.facts)
+    if (fact.mergeTarget?.proofHash === proofHash) fact.mergeTarget.proofHash = replacement.proofHash;
+  assert.ok(replacement.observedAt > fixture.cutoff);
+  await writePairMergeRetryCache(fixture.h, previous, document);
+  try {
+    const altered = await retainedPairMergeState(fixture.h);
+    await assert.rejects(fixture.runtime.runOnce(), /merge_target_normalization_binding_unavailable/);
+    await assertPendingPairMergeRetry(fixture, altered);
+  } finally {
+    await writePairMergeRetryCache(fixture.h, previous, previous.document, previous.document_hash);
+  }
+  await completePairMergeRetry(fixture);
+});
+
+async function assertRetriedPairMergeWithdrawn(fixture, publication) {
+  const { runtime } = fixture;
+  for (const snapshot of [null, publication.snapshotId]) {
+    const parameters = new URLSearchParams({
+      ...components.contracts.publicScopeParameters(plain),
+      metric: "closing_links",
+      ...(snapshot ? { snapshot } : {}),
+    });
+    for (const suffix of ["/boards", "/exports"]) {
+      const response = await runtime.app.inject("/api/v1" + suffix + "?" + parameters);
+      if (response.statusCode === 200) {
+        if (suffix === "/boards")
+          assert.deepEqual(
+            response.json().rows.filter((row) => row.result.value > 0),
+            [],
+          );
+        else assert.doesNotMatch(response.body, /synthetic-merge-linker/);
+      } else assert.equal(response.statusCode, snapshot ? 410 : 503, response.body);
+      assert.doesNotMatch(response.body, /I_SYNTHETIC_MERGE_PAIR|PR_BRANCH_|relationshipPair|normalizationSources/);
+    }
+  }
+  const record = runtime.policyComparisons.comparisons.input(publication.comparisonInput.inputId);
+  await assert.rejects(
+    runtime.policyComparisons.withAuthorizedInputs([record.authorization], () => {
+      assert.fail("withdrawn current authority must not reach private restoration");
+    }),
+    /Frozen|unavailable|changed/,
+  );
+  await assert.rejects(runtime.aggregateExplanations.read(publication.snapshotId), /Frozen|unavailable|changed/);
+  fixture.assertNoRecollection();
+}
+
+test("a retried pair and field merge publication still withdraws a currently deleted endpoint", async (t) => {
+  const fixture = await pendingPairMergeRetry(t);
+  const publication = await completePairMergeRetry(fixture);
+  const { h, p, runtime } = fixture;
+  const before = await retainedPairMergeState(h);
+  const runId = fixtureId(9641);
+  await runtime.collection.start({
+    runId,
+    repositoryId: 2,
+    family: "issues",
+    mode: "audit",
+    since: null,
+    until: p.state.clock,
+  });
+  assert.equal(
+    await runtime.collection.step(runId, {
+      async readPage(request) {
+        assert.equal(request.repositoryId, 2);
+        assert.equal(request.family, "issues");
+        return {
+          repositoryId: 2,
+          visibility: "public",
+          isSynthetic: true,
+          expectedCount: 1,
+          nextCursor: null,
+          facts: [
+            {
+              subjectId: "I_SYNTHETIC_MERGE_PAIR",
+              sourceRevision: "synthetic-frozen-pair-endpoint-deleted-v1",
+              sourceUrl: "https://github.com/" + slug + "/issues/9473",
+              evidence: "current_state",
+              actorId: null,
+              occurredAt: null,
+              state: "deleted",
+            },
+          ],
+        };
+      },
+    }),
+    "complete",
+  );
+  assert.deepEqual(
+    (
+      await h.db.query(
+        "SELECT subject_id,reason FROM leaderboard_ingestion.object_suppressions WHERE repository_id=2 ORDER BY subject_id",
+      )
+    ).rows,
+    [{ subject_id: "I_SYNTHETIC_MERGE_PAIR", reason: "deleted" }],
+  );
+  assert.equal(
+    (await h.db.query("SELECT state FROM leaderboard_ingestion.repository_access WHERE repository_id=2")).rows[0].state,
+    "public",
+  );
+  await assertRetriedPairMergeWithdrawn(fixture, publication);
+  assert.deepEqual(await retainedPairMergeState(h), before);
+});
+
+test("a retried pair and field merge publication still withdraws a currently private repository", async (t) => {
+  const fixture = await pendingPairMergeRetry(t);
+  const publication = await completePairMergeRetry(fixture);
+  const before = await retainedPairMergeState(fixture.h);
+  assert.equal(
+    await fixture.runtime.collection.suppress(fixtureId(9642), "d".repeat(64), 1, [2], "private"),
+    "accepted",
+  );
+  const access = await fixture.h.db.query(
+    "SELECT state FROM leaderboard_ingestion.repository_access WHERE repository_id=2",
+  );
+  assert.equal(access.rows[0].state, "unavailable");
+  await assertRetriedPairMergeWithdrawn(fixture, publication);
+  assert.deepEqual(await retainedPairMergeState(fixture.h), before);
+});
+
+// Exercise the actual protected-history SQL projection through a real native
+// publication. The wrapper observes unchanged query results and never rewrites them.
+async function boundedMergeSourceRead(h, runtime) {
+  const transaction = h.db.transaction;
+  let captured = null;
+  h.db.transaction = (work) =>
+    transaction((tx) =>
+      work({
+        query: async (sql, params) => {
+          const result = await tx.query(sql, params);
+          if (
+            sql.startsWith("WITH retained AS MATERIALIZED") &&
+            sql.includes("history_records") &&
+            sql.includes("source_binding")
+          ) {
+            captured ??= { sql, params: structuredClone(params), rows: structuredClone(result.rows) };
+          }
+          return result;
+        },
+      }),
+    );
+  try {
+    const read = await runtime.source.read(scope, null, new AbortController().signal, undefined, false, true);
+    assert.ok(captured, "history read must execute its bounded normalization query");
+    return { read, captured };
+  } finally {
+    h.db.transaction = transaction;
+  }
+}
+
+test("bounded history reads retain native merge-target source authority without provider reads", async (t) => {
+  const { h, p, runtime } = await setup(t, { memoryDatabase: true, configuredScopes: [scope] });
+  assert.equal((await runtime.runOnce({ cutoff: iso(Date.now() - 1000) })).state, "published");
+  const ordinary = await readScope(runtime);
+  const saved = await caches(h.db);
+  const requests = p.state.calls.length;
+  p.state.forbid = true;
+  const { read, captured } = await boundedMergeSourceRead(h, runtime);
+  assert.ok(read);
+  assert.deepEqual(read.selected.snapshot, ordinary.selected.snapshot);
+  assert.deepEqual(read.selected.rows, ordinary.selected.rows);
+  assert.equal(read.controls.version, ordinary.controls.version);
+  assert.equal(captured.rows.length, 5);
+  for (const row of captured.rows) {
+    assert.deepEqual(Object.keys(row.source_document).sort(), ["sourceRevision", "sourceUrl", "subjectId"]);
+    assert.equal(typeof row.policy_signature, "string");
+    assert.equal(String(row.repository_id), "2");
+    assert.ok(Number(row.history_bytes) > 0 && Number(row.history_bytes) <= 8_000_000);
+  }
+  assert.equal(p.state.calls.length, requests);
+  assert.deepEqual(await caches(h.db), saved);
+});
+
+test("bounded history SQL minimizes source documents and withholds oversized merge bindings", async (t) => {
+  const { h, p, runtime } = await setup(t, { memoryDatabase: true, configuredScopes: [scope] });
+  assert.equal((await runtime.runOnce({ cutoff: iso(Date.now() - 1000) })).state, "published");
+  const { read, captured } = await boundedMergeSourceRead(h, runtime);
+  const savedCaches = await caches(h.db);
+  const savedSnapshots = await mergeSnapshots(h);
+  const savedControls = h.controlsStore.read();
+  const requests = p.state.calls.length;
+  p.state.forbid = true;
+  const original = captured.rows[0];
+  // Keep deliberate SQL-only overflow copies inside one rolled-back transaction.
+  // The final protected read below must use only the original publication.
+  const replayRollback = new Error("synthetic-history-merge-replay-rollback");
+  await assert.rejects(
+    h.db.transaction(async (tx) => {
+      // Append hostile synthetic copies for the identical production query only.
+      // Existing immutable source facts, frozen inputs and confirmation rows stay exact.
+      for (const [label, field, oversized] of [
+        ["unselected metadata", "ignoredFixturePadding", false],
+        ["selected source binding", "sourceUrl", true],
+      ]) {
+        const key = comparisonHash(["synthetic-history-merge-binding", label, original.fact_key]);
+        await tx.query(
+          `INSERT INTO leaderboard_ingestion.source_facts
+        (fact_key,repository_id,family,subject_id,source_revision,document,first_run_id,observed_at)
+       SELECT $1,repository_id,family,subject_id,source_revision,
+         document || jsonb_build_object($3::text,repeat('x',8000001)),first_run_id,observed_at
+       FROM leaderboard_ingestion.source_facts WHERE fact_key=$2`,
+          [key, original.fact_key, field],
+        );
+        await tx.query(
+          `INSERT INTO leaderboard_pipeline.normalizations (fact_key,policy_signature,document,document_hash)
+       SELECT $1,policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations
+       WHERE fact_key=$2 AND policy_signature=$3`,
+          [key, original.fact_key, original.policy_signature],
+        );
+        const params = structuredClone(captured.params);
+        params[0] = [original.document_hash];
+        params[3] = JSON.stringify([{ fact_key: key, document_hash: original.document_hash }]);
+        const rows = (await tx.query(captured.sql, params)).rows;
+        assert.equal(rows.length, 1);
+        const row = rows[0];
+        assert.equal(Number(row.history_records), 1);
+        if (oversized) {
+          assert.ok(Number(row.history_bytes) > 8_000_000);
+          assert.equal(row.document, null);
+          assert.equal(row.source_document, null);
+          assert.equal(row.policy_signature, null);
+          assert.ok(Buffer.byteLength(JSON.stringify(row)) < 1024, "oversized source data never reaches the reader");
+        } else {
+          assert.deepEqual(row.document, original.document);
+          assert.deepEqual(row.source_document, original.source_document);
+          assert.equal(row.policy_signature, original.policy_signature);
+          const expected = (
+            await tx.query(
+              "SELECT octet_length($1::jsonb::text)+octet_length($2::jsonb::text)+octet_length($3::text) AS bytes",
+              [JSON.stringify(original.document), JSON.stringify(original.source_document), original.policy_signature],
+            )
+          ).rows[0];
+          assert.equal(Number(row.history_bytes), Number(expected.bytes));
+          assert.ok(Number(row.history_bytes) < 8_000_000);
+        }
+      }
+      // The profiled OR branch admits retained generation signatures before the
+      // JS validator sees them. Many individually indexable signatures must also
+      // stay within the aggregate transport budget, independently of document size.
+      const mergeDocument = {
+        pullRequestMergeTargetNormalization: structuredClone(original.document.pullRequestMergeTargetNormalization),
+        facts: [],
+        actors: [],
+        evidence: [],
+      };
+      const mergeHash = comparisonHash(mergeDocument);
+      const signatureCount = 3600;
+      const signatureBytes = 2300;
+      const bindingBytes = Number(
+        (
+          await tx.query("SELECT octet_length($1::jsonb::text)+octet_length($2::jsonb::text) AS bytes", [
+            JSON.stringify(mergeDocument),
+            JSON.stringify(original.source_document),
+          ])
+        ).rows[0].bytes,
+      );
+      assert.ok(bindingBytes * signatureCount <= 8_000_000, "documents and source bindings alone fit the budget");
+      assert.ok(signatureBytes * signatureCount > 8_000_000, "the signature bytes alone exceed the budget");
+      await tx.query(
+        `INSERT INTO leaderboard_pipeline.normalizations (fact_key,policy_signature,document,document_hash)
+     SELECT $1,lpad(fixture.n::text,8,'0') || repeat('x',2292),$2::jsonb,$3
+     FROM generate_series(1,3600) AS fixture(n)`,
+        [original.fact_key, JSON.stringify(mergeDocument), mergeHash],
+      );
+      const mergeParams = structuredClone(captured.params);
+      mergeParams[0] = [mergeHash];
+      mergeParams[3] = JSON.stringify([{ fact_key: original.fact_key, document_hash: mergeHash }]);
+      assert.deepEqual(mergeParams[1], captured.params[1], "the admitted signature allowlist stays unchanged");
+      const oversizedRows = (await tx.query(captured.sql, mergeParams)).rows;
+      assert.equal(oversizedRows.length, signatureCount);
+      assert.ok(
+        oversizedRows.every(
+          (row) =>
+            Number(row.history_records) === signatureCount &&
+            Number(row.history_bytes) === (bindingBytes + signatureBytes) * signatureCount &&
+            row.document === null &&
+            row.source_document === null &&
+            row.policy_signature === null,
+        ),
+        "the captured SQL must withhold every variable field before returning oversized profiled signatures",
+      );
+      assert.ok(Buffer.byteLength(JSON.stringify(oversizedRows)) < 2_000_000);
+
+      // Without the generation marker, a foreign signature is never admitted by
+      // the unchanged digest allowlist. This does not invent a giant legacy allowlist.
+      const legacyDocument = { facts: [], actors: [], evidence: [] };
+      const legacyHash = comparisonHash(legacyDocument);
+      await tx.query(
+        "INSERT INTO leaderboard_pipeline.normalizations (fact_key,policy_signature,document,document_hash) VALUES($1,$2,$3::jsonb,$4)",
+        [original.fact_key, "u".repeat(signatureBytes), JSON.stringify(legacyDocument), legacyHash],
+      );
+      const legacyParams = structuredClone(captured.params);
+      legacyParams[0] = [legacyHash];
+      legacyParams[3] = JSON.stringify([{ fact_key: original.fact_key, document_hash: legacyHash }]);
+      assert.deepEqual(legacyParams[1], captured.params[1]);
+      assert.deepEqual((await tx.query(captured.sql, legacyParams)).rows, []);
+      throw replayRollback;
+    }),
+    (error) => error === replayRollback,
+  );
+
+  const after = await boundedMergeSourceRead(h, runtime);
+  assert.deepEqual(after.read.selected.snapshot, read.selected.snapshot);
+  assert.deepEqual(after.read.selected.rows, read.selected.rows);
+  assert.deepEqual(await mergeSnapshots(h), savedSnapshots);
+  assert.deepEqual(h.controlsStore.read(), savedControls);
+  const originals = new Set(savedCaches.map((row) => JSON.stringify([row.fact_key, row.policy_signature])));
+  assert.deepEqual(
+    (await caches(h.db)).filter((row) => originals.has(JSON.stringify([row.fact_key, row.policy_signature]))),
+    savedCaches,
+  );
+  assert.equal(p.state.calls.length, requests);
+});
+
+
+test("protected pair-authority projection omits unused source bodies but budgets every required merge identity field", async (t) => {
+  const { h, p, state, runtime: original } = await pairFieldMergeSetup(t, { freeze: false });
+  await original.stop();
+  const runtime = await createPipeline({
+    ...h.options,
+    participationHistoryAuthority: {
+      epoch: () => "synthetic-merge-pair-history-budget",
+      resolve: async () => null,
+    },
+  });
+  t.after(() => runtime.stop());
+  const outcome = await runtime.runOnce({ cutoff: iso(Date.parse(p.state.clock) - 1000) });
+  assert.equal(outcome.state, "published");
+  const selected = await readScope(runtime);
+  assert.ok(selected && selected.selected.rows.length === 5);
+  const pin = selected.selected.snapshot.snapshotId;
+  const read = () => runtime.source.readParticipationHistory(scope, pin, "101", new AbortController().signal);
+  const healthy = await read();
+  assert.ok(healthy);
+  assert.equal(healthy.history, null);
+  assert.deepEqual(healthy.current.selected.actors, selected.selected.actors);
+  const entries = (await h.db.query(
+    "SELECT to_jsonb(n) AS normalization,to_jsonb(f) AS source " +
+    "FROM leaderboard_pipeline.normalizations n " +
+    "JOIN leaderboard_ingestion.source_facts f USING(fact_key) ORDER BY n.fact_key,n.policy_signature",
+  )).rows;
+  const marker = entries.find((entry) => entry.normalization.document.pullRequestMergeTargetNormalization);
+  assert.ok(marker);
+  for (const capture of marker.normalization.document.pullRequestMergeTargets)
+    assert.deepEqual(await components.contracts.verifyGithubPullRequestMergeTargetCapture(capture), capture);
+  const publication = pairMergePublication(outcome, h, scope);
+  assert.equal(publication.snapshotId, pin);
+  const input = (await h.db.query(
+    "SELECT document FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [pin],
+  )).rows[0].document;
+  const pairCapture = input.identityAuthorization.relationshipPairEvidence;
+  assert.equal(pairCapture.schemaVersion, "pipeline-relationship-pair-authority/v4");
+  const bound = pairCapture.bindings.find((binding) =>
+    binding.factKey === marker.normalization.fact_key &&
+    binding.policySignature === marker.normalization.policy_signature &&
+    binding.documentHash === marker.normalization.document_hash);
+  assert.ok(bound, "the selected publication must capture this exact merge-and-pair normalization");
+  const pairFacts = marker.normalization.document.facts.filter((fact) => fact.relationshipPair);
+  assert.ok(pairFacts.length > 0);
+  assert.ok(pairFacts.every((fact) => bound.factHashes.includes(comparisonHash(fact))));
+  const calls = {
+    provider: structuredClone(p.state.calls),
+    normalized: state.calls,
+    collections: state.collections,
+  };
+  const frozen = (await h.db.query(
+    "SELECT snapshot_id,document,document_hash FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id",
+  )).rows;
+  const budgetFailure = (error) =>
+    error instanceof Error && error.message === "participation_history_normalization_budget_exceeded";
+
+  async function withSourceFixture(kind, change, work, onObserved = () => {}) {
+    const transaction = h.db.transaction;
+    let observed = null;
+    h.db.transaction = (callback) => transaction((tx) => callback({
+      query: async (sql, params) => {
+        const pair = sql.includes("FROM leaderboard_pipeline.normalizations n") &&
+          sql.includes("JOIN leaderboard_ingestion.source_facts f USING(fact_key)");
+        const actualKind = sql.includes("JOIN unnest($1::text[],$2::text[]) AS bound") ? "captured" : "current";
+        if (!pair || actualKind !== kind || observed !== null) return tx.query(sql, params);
+        const copies = structuredClone(entries);
+        for (const entry of copies)
+          if (entry.source.fact_key === marker.source.fact_key) change(entry.source.document);
+        await tx.query(
+          "CREATE TEMP TABLE merge_pair_budget_normalizations " +
+          "(LIKE leaderboard_pipeline.normalizations INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES) ON COMMIT DROP",
+        );
+        await tx.query(
+          "CREATE TEMP TABLE merge_pair_budget_sources " +
+          "(LIKE leaderboard_ingestion.source_facts INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES) ON COMMIT DROP",
+        );
+        await tx.query(
+          "INSERT INTO pg_temp.merge_pair_budget_sources " +
+          "SELECT * FROM jsonb_populate_recordset(NULL::pg_temp.merge_pair_budget_sources,$1::jsonb)",
+          [JSON.stringify([...new Map(copies.map((entry) => [entry.source.fact_key, entry.source])).values()])],
+        );
+        await tx.query(
+          "INSERT INTO pg_temp.merge_pair_budget_normalizations " +
+          "SELECT * FROM jsonb_populate_recordset(NULL::pg_temp.merge_pair_budget_normalizations,$1::jsonb)",
+          [JSON.stringify(copies.map((entry) => entry.normalization))],
+        );
+        assert.equal(sql.split("leaderboard_pipeline.normalizations").length, 2);
+        assert.equal(sql.split("leaderboard_ingestion.source_facts").length, 2);
+        const fixtureSQL = sql
+          .replace("leaderboard_pipeline.normalizations", "pg_temp.merge_pair_budget_normalizations")
+          .replace("leaderboard_ingestion.source_facts", "pg_temp.merge_pair_budget_sources");
+        // Actual query, predicates, locks and binding parameters are unchanged.
+        const result = await tx.query(fixtureSQL, params);
+        observed = {
+          rows: result.rows.map((row) => ({
+            factKey: row.fact_key,
+            sourceIdentityMatches: ["subjectId", "sourceUrl", "sourceRevision"].every(
+              (key) => row.source_document?.[key] === marker.source.document[key],
+            ),
+            sourceKeys: Object.keys(row.source_document ?? {}).sort(),
+            unusedBytes: row.source_document?.unusedHistoryBody?.length ?? 0,
+            payloadWithheld: Object.entries(row).every(
+              ([key, value]) => key === "history_records" || key === "history_bytes" || value === null,
+            ),
+            records: Number(row.history_records),
+            bytes: Number(row.history_bytes),
+          })),
+        };
+        onObserved(observed);
+        return result;
+      },
+    }));
+    try {
+      return { value: await work(), observation: () => observed };
+    } finally {
+      h.db.transaction = transaction;
+    }
+  }
+
+  for (const kind of ["current", "captured"]) {
+    await t.test(kind + ": unused body preserves real merge proof and ordinary behavior", async () => {
+      const change = (document) => { document.unusedHistoryBody = "x".repeat(8_100_000); };
+      const ordinary = await withSourceFixture(kind, change, () =>
+        runtime.source.read(scope, pin, new AbortController().signal));
+      assert.ok(ordinary.value);
+      assert.deepEqual(ordinary.value.selected.actors, selected.selected.actors);
+      assert.ok(ordinary.observation().rows.some((row) => row.unusedBytes === 8_100_000));
+      const protectedRead = await withSourceFixture(kind, change, read);
+      assert.ok(protectedRead.value);
+      assert.equal(protectedRead.value.history, null);
+      assert.deepEqual(protectedRead.value.current.selected.actors, selected.selected.actors);
+      const observed = protectedRead.observation().rows.find((row) => row.factKey === marker.source.fact_key);
+      assert.ok(observed);
+      assert.equal(observed.unusedBytes, 0);
+      assert.deepEqual(observed.sourceKeys, ["sourceRevision", "sourceUrl", "subjectId"]);
+      assert.equal(observed.sourceIdentityMatches, true);
+      assert.ok(observed.records <= 10_000 && observed.bytes <= 8_000_000);
+    });
+    await t.test(kind + ": required source identity aggregate is withheld before validation", async () => {
+      let observation;
+      await assert.rejects(withSourceFixture(kind, (document) => {
+        // Individually sub-limit hostile fields exceed the combined SQL budget.
+        // These are not claimed to be newly admissible native merge identities.
+        for (const key of ["subjectId", "sourceUrl", "sourceRevision"])
+          document[key] = "x".repeat(2_700_000);
+      }, read, (value) => { observation = value; }), budgetFailure);
+      assert.ok(observation && observation.rows.length > 0);
+      assert.ok(observation.rows.every((row) => row.payloadWithheld));
+      assert.ok(observation.rows.every((row) => row.records <= 10_000 && row.bytes > 8_000_000));
+      assert.deepEqual((await read()).current.selected.actors, selected.selected.actors);
+    });
+  }
+  assert.deepEqual((await h.db.query(
+    "SELECT to_jsonb(n) AS normalization,to_jsonb(f) AS source " +
+    "FROM leaderboard_pipeline.normalizations n " +
+    "JOIN leaderboard_ingestion.source_facts f USING(fact_key) ORDER BY n.fact_key,n.policy_signature",
+  )).rows, entries);
+  assert.deepEqual((await h.db.query(
+    "SELECT snapshot_id,document,document_hash FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id",
+  )).rows, frozen);
+  assert.deepEqual({
+    provider: p.state.calls,
+    normalized: state.calls,
+    collections: state.collections,
+  }, calls, "protected projection must not recollect or invoke either provider or normalizer");
 });

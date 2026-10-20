@@ -1199,3 +1199,82 @@ test("cross-repository metadata compaction keeps other work visible and supports
     await api.close();
   }
 });
+
+for (const moveFocusDuringRead of [false, true])
+  test(
+    moveFocusDuringRead
+      ? "manual API snapshot application respects focus moved away during its pending read"
+      : "manual API snapshot application preserves its exact keyboard control during and after the read",
+    async ({ page }) => {
+      await page.addInitScript(() =>
+        Object.defineProperty(window, "EventSource", { value: undefined, configurable: true }),
+      );
+      await page.clock.install({ time: new Date(at) });
+      await page.clock.pauseAt(new Date(Date.parse(at) + 1000));
+      const api = await service(page);
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let requested = 0;
+      await page.route("**/api/v1/boards?**", async (route) => {
+        if (new URL(route.request().url()).searchParams.get("snapshot") === "api-2") {
+          requested += 1;
+          await gate;
+        }
+        await route.fallback();
+      });
+      try {
+        await page.goto("/leaderboards/pr_merged?ui=api&repository=repo-1");
+        const provenance = page.getByRole("region", { name: "Snapshot provenance" });
+        await expect(provenance).toContainText("Snapshot api-1");
+        await expect(page.getByRole("checkbox", { name: /Follow while/ })).not.toBeChecked();
+        api.next();
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        await expect(page.getByText("Update held: snapshot api-2 is available.")).toBeVisible();
+        const apply = page.getByRole("button", { name: "Apply new snapshot" });
+        const originalControl = await apply.elementHandle();
+        expect(originalControl).not.toBeNull();
+        await apply.focus();
+        await expect(apply).toBeFocused();
+        await apply.press("Enter");
+        await expect.poll(() => requested).toBe(1);
+        await expect(apply).toHaveAttribute("aria-disabled", "true");
+        await page.keyboard.press("Enter");
+        expect(requested).toBe(1);
+        const recheck = page.getByRole("button", { name: "Recheck current publication controls" });
+        if (moveFocusDuringRead) {
+          await recheck.focus();
+          await expect(recheck).toBeFocused();
+        } else {
+          expect(
+            await originalControl!.evaluate((element) => ({
+              connected: element.isConnected,
+              focused: document.activeElement === element,
+            })),
+          ).toEqual({ connected: true, focused: true });
+        }
+        release();
+        await expect(provenance).toContainText("Snapshot api-2");
+        await expect(page.getByRole("row", { name: /Synthetic API A/ }).locator("strong")).toHaveText("10");
+        if (moveFocusDuringRead) await expect(recheck).toBeFocused();
+        else
+          expect(
+            await originalControl!.evaluate((element) => ({
+              connected: element.isConnected,
+              focused: document.activeElement === element,
+            })),
+          ).toEqual({ connected: true, focused: true });
+        await expect(apply).toHaveAttribute("aria-disabled", "true");
+        expect(requested).toBe(1);
+        if (!moveFocusDuringRead) {
+          await page.keyboard.press("Enter");
+          expect(requested).toBe(1);
+        }
+        await expect(page.getByRole("checkbox", { name: /Follow while/ })).not.toBeChecked();
+      } finally {
+        release();
+        await api.close();
+      }
+    },
+  );

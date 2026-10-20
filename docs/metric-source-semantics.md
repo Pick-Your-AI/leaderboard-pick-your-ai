@@ -3,10 +3,11 @@
 This is a partial implementation of [LB-19.01 / issue #72](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/72).
 The new suite feeds synthetic GitHub source payloads through the actual normalizer
 and metric engine. It adds explicit actor, clock, source-proof and grouping
-checks for 18 metric IDs. The inventory separately maps 59 other IDs to existing
-meaningful source cases, with exact test names and their limits. Twenty-one IDs
-remain explicitly deferred in the inventory. The eleven-reference update below
-does not requalify those remaining dispositions or certify all 98 public definitions.
+checks for 18 metric IDs. The inventory separately maps 61 other IDs to existing
+meaningful source cases, with exact test names and their limits. Nineteen IDs
+remain explicitly deferred in the inventory. The accepted eleven-reference update
+and two pair mappings below do not requalify those remaining dispositions or
+certify all 98 public definitions.
 
 The [machine-readable inventory](../packages/metrics/test/fixtures/metric-source-semantics.json)
 accounts for every registry ID exactly once. A metric with new cases has an
@@ -69,13 +70,13 @@ the corresponding metric rather than marking its entire public definition done.
 
 ## Remaining acceptance and ownership
 
-The inventory now has 18 direct-suite entries, 59 existing-source mappings and
-21 explicit remaining dispositions. The references include specialized domain
+The inventory now has 18 direct-suite entries, 61 existing-source mappings and
+19 explicit remaining dispositions. The references include specialized domain
 receipt admission, localization, bug/answer recognition, typed history,
 participation history, physical diff eligibility, maintenance, automation and
 editorial consent. Each maps a literal positive and exclusion test; parameterized
 domain cases also name their metric input. These are bounded source-review
-references, not 59 new executions or a claim that every remaining facet is done.
+references, not 61 new executions or a claim that every remaining facet is done.
 The original 18/47/33 inventory and its semantic/cache executions remain attributed
 to the earlier source. The separately reviewed repository-net helper adds one
 reference backed by its own 20 synthetic source cases, producing the historical
@@ -106,6 +107,20 @@ and deny access after authority withdrawal. These are different return contracts
 neither accessor substitutes for the other. All eleven mappings concern synthetic
 source or review inputs, with their remaining limits retained beside each entry.
 
+The eleven-reference inventory reconciliation was accepted through
+[#456](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/456) at
+`0cea9173d81598f910bf44a377b55c802e5169ff`, producing the historical 18/59/21
+inventory. This composition preserves all eleven references and adds the two
+relationship-pair mappings below without relabeling either source's executions.
+
+The dedicated [reference/closing source cases](../packages/metrics/test/reference-closing-source.test.js)
+add two further mappings for the conserved directed reference and typed closing
+pairs. Their literal inclusion and later-window/actor exclusion tests are linked
+separately for each metric. The [source-contract guide](relationship-pair-units.md)
+describes the synthetic typed endpoint bindings, first-known-history limit and
+retained-generation guards. Both pair mappings retain their source completeness,
+capability and public-activation limits beside the inventory entries.
+
 An inclusion and an exclusion may be asserted by the same named test. The
 milestone reference uses the body that actually constructs milestone no-ops and
 repeated day units; a label-only midnight test is not substituted for it. The
@@ -117,8 +132,9 @@ as evidence for unknown in-scope active-week exclusion. Its calendar denominator
 is context, not a certified fully covered participation share or month projection.
 
 The remaining dispositions retain seven derivation/admission prerequisites and
-fourteen IDs needing additional semantic cases. This eleven-reference review does
-not establish whether later source changes resolve any of those 21 entries.
+twelve IDs needing additional semantic cases. The accepted eleven-reference review
+left 21 entries; this composition adds only the two pair mappings and does not
+establish whether other source changes resolve any of the remaining 19 entries.
 The optional retained-line and commit-attributed
 lenses are not silently assigned to the adjacent physical-context PRs. A raw
 relationship cannot establish preserved duplicate evidence; a generic accepted

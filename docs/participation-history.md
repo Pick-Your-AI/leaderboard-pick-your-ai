@@ -87,9 +87,100 @@ The private protocol's `decisionId`, hashes, revisions and nonempty strings are
 cross-bindings and public projection; it cannot prove that arbitrary bytes from a
 trusted provider are the claimed dataset or that a forged review string is an
 authorized decision. A provider implementation must supply that authority through
-its actual protected configuration/storage flow and tests. This change does not
-install such an admission in the stock pipeline. Its existing partial historical
-coverage and unknown origin continue to produce unknown newcomer status.
+its actual protected configuration/storage flow and tests. The pipeline integration
+below does not install a real admission. Without that separate host capability,
+existing partial historical coverage and unknown origin continue to produce
+unknown newcomer status.
+
+### Pipeline producer and host admission
+
+`createPipeline` accepts an optional `participationHistoryAuthority` object from
+protected, in-process host code. It has exactly two callback properties: synchronous
+`epoch(request)` and asynchronous `resolve(request, signal)`. Neither pipeline
+configuration strings, an `approvalReceipt`, a public HTTP parameter nor a Boolean
+enables this capability. The callbacks do not receive a bound `this` value.
+
+The request uses `pipeline-participation-history-request/v1` and contains the exact
+configuration hash, configuration version, data mode, organization and selected
+immutable input: snapshot ID, revision, SHA256 and frozen observation cutoff.
+`epoch` returns a bounded revision string while that exact request remains admitted,
+or null when it is not. It must be synchronous and must change or become null when
+the protected decision is revoked, expires or changes. A Promise or other invalid
+return does not grant admission. `resolve` returns null when no applicable history
+is available; otherwise it returns this closed decision shape:
+
+| Field | Required binding |
+| --- | --- |
+| `schemaVersion` | `pipeline-participation-history-admission/v1` |
+| `selectedInput` | Exact requested snapshot, revision, input hash and cutoff |
+| `historyInput` | Exact confirmed organization/all-time snapshot, revision and retained input hash, at the same cutoff |
+| `admission` | Decision ID, organization, reviewed origin and review time, independent required repository/source inventory, and all configured policy versions, signature hashes, roles and adapters |
+| `coverage` | One complete, gap-free existing coverage record for every required pair, enclosing origin through cutoff |
+| `proofSources` | Exactly one explicit contribution-ID, repository-ID and source-adapter binding for every retained historical portfolio proof |
+| `unresolved` | All additional withheld, conflicting or unknown actor/time/qualification gaps known to the host |
+
+The host must derive required inventory and completeness from its independently
+reviewed source authority, not from the returned proofs or coverage entries. Every
+configured repository and policy must remain present. The pipeline checks shapes,
+exact hashes and cross-bindings; it does not authenticate an arbitrary host's
+decision or turn a partial source scan into complete history. No real origin,
+inventory approval or history grant is supplied by this repository's synthetic
+tests. No source collection or historical backfill is triggered by either GET.
+
+The reader first resolves the selected confirmed input, commits that read and then
+asks the host outside SQL locks. It rechecks both exact immutable inputs in a
+second transaction using the full configured repository inventory, current source
+generations and installations, retained normalization and actor identities, policy
+and configuration bindings, sealed publication explanations and current controls.
+The historical input must be organization/all-time with all actors and repositories,
+event context, and no Project, workstream or role filter. No nearest-cutoff or
+latest-publication fallback replaces the supplied pin.
+
+The existing SQL source locks span both reads and the final source/denial/correction
+statement. After the actual transaction commit, a synchronous fence checks the host
+epoch, complete current private controls, publication and head confirmations,
+recognition state, feedback authority and retained-source retirement tombstones
+again. This is a final local return check, not a claim of atomicity with a later HTTP
+send or a remote authority change. A stale or cancelled pair is not returned.
+
+History is a detached private projection of the confirmed publication. Its complete
+portfolio and restored actor identities remain intact; ordinary rows, primary and
+pending evidence, and diagnostics are empty. The host's separate coverage assertion
+is applied only to this private response. Stored snapshots, frozen inputs, normal
+selected-scope reads and their partial coverage are unchanged.
+
+The reader inspects the entire retained fact universe and sealed metric audits
+before actor/privacy filtering. Unknown actors, source occurrence times,
+qualification, conflicting records and omitted accepted proofs remain gaps. An
+effective accepted or pending canonical fact remains a gap when its proof was
+omitted from the stored portfolio, even if it was not ranked. The reader reuses the
+existing descriptive selector's correction, revision, eligibility and canonical
+deduplication rules; it does not promote obsolete accepted versions to current work.
+An accepted-time ranking's missing acceptance clock is harmless only when every exact
+referenced fact is explicitly observed-only with no acceptance timestamp and a
+valid original occurrence at or before its observation and the frozen cutoff.
+That narrow case does not exempt unknown or accepted facts. Supplied host gaps are
+retained even when no corresponding public payload can be disclosed.
+
+Host-returned JSON is bounded before copying, schema checks or hashing, using the
+same byte, depth, node and array budgets described below. Producer-only SQL
+projections withhold selected and latest snapshot JSON and frozen inputs above
+8,000,000 bytes before the driver returns their documents. Each consumed
+normalization result set is admitted in a locked query only if it contains at most
+10,000 rows totaling at most 8,000,000 bytes, including its projected source binding
+and policy signature; every decoded document also passes the structural bounds.
+
+Protected current and captured relationship-pair authority queries apply those
+limits to the complete projected row JSON, including signatures and source
+metadata. Merge-target rows retain only the source subject ID, URL and revision;
+non-merge rows omit the source document. An over-budget query returns null payload
+columns, and the reader rejects it before copying or hashing.
+
+These limits apply on head retries, to both input restorations and to the final
+protected source check, without changing ordinary board, health or comparison
+query behavior. The service separately validates the complete assembled private
+response and public projection; combining individually valid inputs is not
+permission to exceed either final response budget.
 
 ### Private publication profile
 
@@ -226,6 +317,9 @@ responses, privacy, narrow layout and automated accessibility checks.
 These tests establish executable protocol and rendering behavior. They do not
 supply a real reviewed origin, independent source acceptance, production history
 admission, native assistive-technology acceptance or operational deployment.
-Connecting an actual protected producer and its reviewed complete universe remains
-explicit work. The selected-summary and metric-engine history paths remain intact;
-this bounded implementation alone does not close the complete #98 or #124 package.
+The pipeline suites additionally exercise real persisted paired publications,
+physical database reopen, cross-repository original occurrence ordering, protected
+admission rejection and currentness at the transaction boundary. They do not
+certify a real host's reviewed complete universe or its production admission.
+The selected-summary and metric-engine history paths remain intact; this bounded
+implementation alone does not close the complete #98 or #124 package.

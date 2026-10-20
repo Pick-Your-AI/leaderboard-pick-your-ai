@@ -27,6 +27,9 @@ import {
   type AcceptedFeedbackThread,
   discussionFeedbackFields,
   parseDiscussionFeedbackSource,
+  relationshipPairNormalizationVersion,
+  relationshipPairSchema,
+  type RelationshipPair,
   supportsPullRequestMergeTarget,
   validatePullRequestMergeTarget,
   type PrMergeTarget,
@@ -110,6 +113,7 @@ import {
 
 /** Cache generation for separately observed repository default-branch admission. */
 export const defaultDeliveryNormalizationVersion = "default-delivery-scope/v1";
+export { relationshipPairNormalizationVersion } from "@pick-your-ai/contracts";
 
 /** Cache generation for field changes compared as JSON values, not key order. */
 export const fieldChangeNormalizationVersion = "field-change-json-values/v1";
@@ -267,6 +271,8 @@ export interface NormalizedGithubFact {
   recognitionSourceFactId?: string;
   /** Private accepted release membership and conserved work identity. */
   releaseInclusion?: GithubReleaseMembership;
+  /** Private typed relationship identity; raw event identity and clocks remain separate. */
+  relationshipPair?: RelationshipPair;
   /** Private projection bound to the separately retained native merge-event capture. */
   mergeTarget?: PrMergeTarget;
 }
@@ -740,7 +746,13 @@ export function normalizeGithubObservation(
                   ? payload.milestone
                   : payload;
   const kind: NormalizedPublicEvidence["artifact"]["kind"] =
-    envelope.family === "pull_request" || envelope.family === "review" || envelope.family === "revert"
+    envelope.family === "pull_request" ||
+    envelope.family === "review" ||
+    envelope.family === "revert" ||
+    (envelope.family === "relationship" &&
+      object(payload.relationship) &&
+      ["reference", "closing"].includes(String(payload.relationship.kind)) &&
+      object(payload.pull_request))
       ? "pull_request"
       : envelope.family === "commit"
         ? "commit"
@@ -1383,6 +1395,54 @@ export function normalizeGithubObservation(
         out.reasons.push("automatic_reference_or_relationship_actor_unverified");
       } else if (relationship.publicEndpointsVerified !== true) {
         out.reasons.push("relationship_endpoint_visibility_unverified");
+      } else if (metric === "reference_links" || metric === "closing_links") {
+        const parsed = relationshipPairSchema.safeParse(relationship.pair);
+        const pair = parsed.success ? parsed.data : undefined;
+        const sourceActionMatches =
+          pair?.action === "reference"
+            ? ["referenced", "cross_referenced"].includes(sourceAction)
+            : pair?.action === "connect"
+              ? sourceAction === "connected"
+              : pair?.action === "disconnect" && sourceAction === "disconnected";
+        const bound =
+          pair !== undefined &&
+          pair.kind === relationshipKind &&
+          pair.eventId === proof.eventId &&
+          pair.from.artifactId === relationship.from &&
+          pair.to.artifactId === relationship.to &&
+          [pair.from, pair.to].some(
+            (endpoint) =>
+              endpoint.artifactId === id && endpoint.repositoryId === String(repository.id) && endpoint.kind === kind,
+          ) &&
+          sourceActionMatches;
+        if (!bound) out.reasons.push("relationship_pair_source_unverified");
+        // The native action is retained in observations and pair.eventId. A
+        // view discriminator prevents two endpoint evidence views from being
+        // mistaken for conflicting revisions of one container artifact.
+        emit(
+          metric,
+          sender,
+          "triager",
+          at,
+          stable(
+            relationshipPairNormalizationVersion,
+            "event-view",
+            relationshipKind,
+            relationship.from,
+            relationship.to,
+            id,
+            String(repository.id),
+            sourceAction,
+            at,
+            sender?.id,
+            proof.eventId,
+          ),
+          {
+            rawState: String(relationshipKind),
+            ...(bound ? { relationshipPair: pair } : { state: "unknown" as const }),
+            ...(bound && pair.action === "disconnect" ? { state: "excluded" as const } : {}),
+          },
+        );
       } else {
         const endpoints = [String(relationship.from), String(relationship.to)];
         if (["related", "duplicate"].includes(String(relationshipKind))) endpoints.sort();

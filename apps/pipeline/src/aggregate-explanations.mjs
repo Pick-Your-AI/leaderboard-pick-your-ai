@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { parseDiscussionFeedbackCapture } from "@pick-your-ai/contracts";
 import { reversionAuthorityVersion } from "./reversion-effectiveness.mjs";
 import { captureIssueTransferAuthorization } from "./issue-transfer-authority.mjs";
+import { validateRelationshipPairCapture } from "./relationship-pair-authority.mjs";
 import { captureMergeTargetAuthorization } from "./pull-request-merge-target.mjs";
 
 // Local fail-closed bounds, not a production retention or capacity commitment.
@@ -86,9 +87,22 @@ function identityAuthorization(authorization) {
     check(
       entry !== null &&
         typeof entry === "object" &&
-        Object.keys(entry).every((key) => ["factKey", "documentHash"].includes(key)),
+        Object.keys(entry).every((key) => ["factKey", "documentHash", "relationshipPairFactHashes"].includes(key)),
     );
-    return { factKey: hash(entry.factKey), documentHash: hash(entry.documentHash) };
+    const projection = entry.relationshipPairFactHashes;
+    check(
+      projection === undefined ||
+        (Array.isArray(projection) &&
+          projection.length > 0 &&
+          projection.length <= 10000 &&
+          same(projection, sorted(projection))),
+    );
+    if (projection !== undefined) projection.forEach(hash);
+    return {
+      factKey: hash(entry.factKey),
+      documentHash: hash(entry.documentHash),
+      ...(projection === undefined ? {} : { relationshipPairFactHashes: [...projection] }),
+    };
   });
   const hashes = new Set(normalizationHashes);
   check(
@@ -373,6 +387,11 @@ export function buildAggregateExplanation(capture, binding) {
         ? {}
         : {
             discussionFeedbackEvidence: parseDiscussionFeedbackCapture(authorization.discussionFeedbackEvidence),
+          }),
+      ...(authorization.relationshipPairEvidence === undefined
+        ? {}
+        : {
+            relationshipPairEvidence: validateRelationshipPairCapture(authorization.relationshipPairEvidence),
           }),
       ...captureMergeTargetAuthorization(authorization),
       ...reversionAuthorization(authorization),
