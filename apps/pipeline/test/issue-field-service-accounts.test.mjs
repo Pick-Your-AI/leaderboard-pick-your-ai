@@ -82,6 +82,7 @@ for (const ordinaryIssue of [false, true])
           };
         },
       },
+      fieldChangeNormalizationVersion: components.github.fieldChangeNormalizationVersion,
       normalizerFactory: (options) =>
         components.github.createGithubEvidenceNormalizer({
           client: options.githubClient,

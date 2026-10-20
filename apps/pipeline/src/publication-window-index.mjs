@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   defaultDeliveryNormalizationVersion,
+  fieldChangeNormalizationVersion,
   discussionSourceNormalizationVersion,
   reviewSourceNormalizationVersion,
 } from "@pick-your-ai/github";
@@ -38,6 +39,7 @@ const confirmationVersions = {
   reviewSourceNormalizationVersion,
   discussionSourceNormalizationVersion,
   defaultDeliveryNormalizationVersion,
+  fieldChangeNormalizationVersion,
 };
 const digest = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const filterScope = (scope) => canonicalPublicScope({ ...scope, start: null, end: null });

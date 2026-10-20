@@ -6,6 +6,7 @@ import {
   type VerifiedResearchRecord,
 } from "./research.js";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   compareSourceInstants,
   sourceEventSchema,
@@ -82,6 +83,20 @@ import {
 
 /** Cache generation for separately observed repository default-branch admission. */
 export const defaultDeliveryNormalizationVersion = "default-delivery-scope/v1";
+
+/** Cache generation for field changes compared as JSON values, not key order. */
+export const fieldChangeNormalizationVersion = "field-change-json-values/v1";
+
+function sameJsonFieldValue(before: unknown, after: unknown): boolean {
+  // Keep the existing JSON projection (including serialization errors). Compare
+  // parsed values so object member order is irrelevant at every nesting level,
+  // while array order, member presence and JSON scalar types remain significant.
+  const beforeJson = JSON.stringify(before);
+  const afterJson = JSON.stringify(after);
+  if (beforeJson === afterJson) return true;
+  if (beforeJson === undefined || afterJson === undefined) return false;
+  return isDeepStrictEqual(JSON.parse(beforeJson), JSON.parse(afterJson));
+}
 
 /** Hash only explicit source fields; text contributes to revision identity but is never retained. */
 export function githubReviewRevision(value: Record<string, unknown>): string {
@@ -1202,8 +1217,7 @@ export function normalizeGithubObservation(
       payload.change.after === undefined
     )
       out.reasons.push("unsupported_or_unproven_field_subtype");
-    else if (JSON.stringify(payload.change.before) === JSON.stringify(payload.change.after))
-      out.reasons.push("no_op_field_change");
+    else if (sameJsonFieldValue(payload.change.before, payload.change.after)) out.reasons.push("no_op_field_change");
     else emit(metric, sender, "triager", at, transitionUnit, { rawState: sourceAction });
   } else if (envelope.family === "triage") {
     const mapping: Record<string, string> = {

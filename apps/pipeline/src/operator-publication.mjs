@@ -6,6 +6,7 @@ const normalizationVersionFields = [
   "reviewSourceNormalizationVersion",
   "discussionSourceNormalizationVersion",
   "defaultDeliveryNormalizationVersion",
+  "fieldChangeNormalizationVersion",
 ];
 
 const unavailable = () => {
