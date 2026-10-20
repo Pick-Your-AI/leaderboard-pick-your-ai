@@ -81,20 +81,39 @@ function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+// Bound container nesting independently of the HTTP byte and checkpoint size limits.
+// This also keeps recursive minimization below the engine's call-stack limit.
+const maxSourceJsonDepth = 128;
+
 /** Omit structured identity emails; free-text source content is not sanitized here. */
-function minimizeIdentityEmails(value: unknown, identity = false): unknown {
+function minimizeIdentityEmails(
+  value: unknown,
+  source: string,
+  invalidKind: "invalid_response" | "invalid_checkpoint",
+  identity = false,
+  depth = 0,
+): unknown {
+  if ((Array.isArray(value) || object(value)) && depth >= maxSourceJsonDepth)
+    throw new GithubClientError({ kind: invalidKind }, source);
   if (Array.isArray(value)) {
-    const items = value.map((item) => minimizeIdentityEmails(item, identity));
+    const items = value.map((item) => minimizeIdentityEmails(item, source, invalidKind, identity, depth + 1));
     return items.some((item, index) => item !== value[index]) ? items : value;
   }
   if (!object(value)) return value;
   let changed = false;
   const entries = Object.entries(value).flatMap(([key, item]) => {
+    // Discarded fields still belong to the input's structural bound.
+    const minimized = minimizeIdentityEmails(
+      item,
+      source,
+      invalidKind,
+      key === "author" || key === "committer",
+      depth + 1,
+    );
     if (identity && key === "email") {
       changed = true;
       return [];
     }
-    const minimized = minimizeIdentityEmails(item, key === "author" || key === "committer");
     if (minimized !== item) changed = true;
     return [[key, minimized]];
   });
@@ -377,7 +396,7 @@ export class GithubReadClient {
     }
     const cache = cached as CachedResponse | undefined;
     if (cache) {
-      const body = minimizeIdentityEmails(cache.body);
+      const body = minimizeIdentityEmails(cache.body, source, "invalid_checkpoint");
       if (body !== cache.body) {
         cache.body = body;
         // Migrate legacy values before any request or conditional cache reuse.
@@ -447,7 +466,7 @@ export class GithubReadClient {
         }
         let body: unknown;
         try {
-          body = minimizeIdentityEmails(await this.body(response, source));
+          body = minimizeIdentityEmails(await this.body(response, source), source, "invalid_response");
         } catch (error) {
           // Error responses may be empty/non-JSON (for example proxy outages).
           // Their HTTP status still determines authorization/retry behavior.
@@ -600,7 +619,7 @@ export class GithubReadClient {
         items: [],
         complete: false,
       };
-      const items = minimizeIdentityEmails(state.items) as unknown[];
+      const items = minimizeIdentityEmails(state.items, source, "invalid_checkpoint") as unknown[];
       if (items !== state.items) {
         state.items = items;
         // Completed and interrupted legacy scans both migrate before reuse.
@@ -616,7 +635,12 @@ export class GithubReadClient {
         const page = await fetchPage(next);
         await this.authorize(source, assertAuthorized);
         if (!Array.isArray(page.items)) throw new GithubClientError({ kind: "invalid_response" }, source);
-        state.items.push(...(minimizeIdentityEmails(page.items) as unknown[]));
+        // Validate indexed values, then validate the materialized iterator output
+        // before mutating accepted scan state. An iterator can yield other values.
+        minimizeIdentityEmails(page.items, source, "invalid_response");
+        // Indexed minimization can copy the array and discard its custom iterator.
+        const pageItems = minimizeIdentityEmails([...page.items], source, "invalid_response") as unknown[];
+        for (let index = 0; index < pageItems.length; index += 1) state.items.push(pageItems[index]);
         state.visited.push(next);
         state.next = page.next;
         state.complete = page.next === null;

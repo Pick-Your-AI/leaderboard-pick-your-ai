@@ -3,10 +3,10 @@
 This is a partial implementation of [LB-19.01 / issue #72](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/72).
 The new suite feeds synthetic GitHub source payloads through the actual normalizer
 and metric engine. It adds explicit actor, clock, source-proof and grouping
-checks for 18 metric IDs. The inventory separately maps 48 other IDs to existing
-meaningful source cases, with exact test names and their limits. Thirty-two
-IDs still require source implementation, additional cases or an active owner's
-integration. This does not certify all 98 public definitions.
+checks for 18 metric IDs. The inventory separately maps 59 other IDs to existing
+meaningful source cases, with exact test names and their limits. Twenty-one IDs
+remain explicitly deferred in the inventory. The eleven-reference update below
+does not requalify those remaining dispositions or certify all 98 public definitions.
 
 The [machine-readable inventory](../packages/metrics/test/fixtures/metric-source-semantics.json)
 accounts for every registry ID exactly once. A metric with new cases has an
@@ -69,17 +69,42 @@ the corresponding metric rather than marking its entire public definition done.
 
 ## Remaining acceptance and ownership
 
-The inventory now has 18 direct-suite entries, 48 existing-source mappings and
-32 explicit remaining dispositions. The references include specialized domain
+The inventory now has 18 direct-suite entries, 59 existing-source mappings and
+21 explicit remaining dispositions. The references include specialized domain
 receipt admission, localization, bug/answer recognition, typed history,
 participation history, physical diff eligibility, maintenance, automation and
 editorial consent. Each maps a literal positive and exclusion test; parameterized
 domain cases also name their metric input. These are bounded source-review
-references, not 48 new executions or a claim that every remaining facet is done.
+references, not 59 new executions or a claim that every remaining facet is done.
 The original 18/47/33 inventory and its semantic/cache executions remain attributed
 to the earlier source. The separately reviewed repository-net helper adds one
-reference backed by its own 20 synthetic source cases; this inventory update does
-not relabel those earlier runs.
+reference backed by its own 20 synthetic source cases, producing the historical
+18/48/32 inventory. The eleven references added here are present in accepted
+`4d1df3b12cf9a7d74b27dfa6463c8dbf263ca3ed`. This update preserves every earlier
+direct case and existing reference and does not relabel their executions.
+
+| Newly mapped metric | Meaningful source case | Exclusion and remaining limit |
+| --- | --- | --- |
+| `issue_transfers` | Exact retained transition, actor and both approved endpoints | Private, unknown, unapproved or unavailable endpoints yield no transfer fact. The admitted fact remains raw; qualified merit, public aggregation and whole COV15 acceptance are separate. |
+| `release_changes` | Accepted PR author and immutable release link yield one unit in the publication window | Review before publication fails in both admission paths. Live release coverage and public activation remain separate. |
+| `release_stewardship` | A reviewed publisher counts once at publication, separately from the acceptance clock | Missing or stale intake, pending or declined consent, withdrawal and suppression withhold admission. Named-contributor and checklist receipts remain separate. |
+| `deployment_work` | Reviewed authored deployment improvement retains its exact source and acceptance clock | Execution-only runs, unknown source use, missing or repeated deployment objects and private free-text environment names used as identifiers fail qualification. Actual permission and public activation remain separate. |
+| `incidents` | An approved postmortem or remediation contribution retains its author and acceptance clock | Incident count, personally owned uptime and unapproved narrative fail qualification. Recognition remains a narrative spotlight and rejects ranked output. |
+| `project_configuration` | Typed before/after evidence and contributor roles admit one change set across its facets | Generic receipts cannot supply configuration proof. Current Project creator or update time cannot establish later authorship. |
+| `issue_ordering` | Audited before/after ordering with exact contributor and source-use bindings admits one accepted-at unit | Legacy receipts and mismatched roles, details, revisions or digests grant no claim or recognized fact. This covers a reviewed plan, not observed drag history. |
+| `governance` | Independently reviewed authored governance work retains its accepted decision and version | Permission administration alone, unaccepted proposals and undeclared access rosters fail qualification. Real policy adoption and public activation remain separate. |
+| `repositories` | Three accepted source activities yield two stable repositories with all evidence retained | Raw observations, assignment and approval words supply no accepted breadth. Supplied policy and incomplete coverage remain explicit. |
+| `workstreams` | Overlapping Project lenses count each supplied event-time workstream once | Raw activity supplies no accepted breadth; unknown historical mapping stays unknown or partial, and current membership cannot replace history. |
+| `collaborations` | Accepted author, coauthor and reviewer facts produce two distinct evidenced peers with their pair-formation times | Actual unreviewed source facts yield unknown value/state, incomplete coverage and no peers. Real consent, complete peer history and public activation remain separate. |
+
+The inventory gives the literal positive and negative test names for these
+references. Operations entries also name the metric parameter in their shared
+test template. Their same-file acceptance-clock cases assert direct aggregate
+`rows[].value === 1` and `publicEnabled === false`. Project configuration and
+ordering additionally test actual publication using `rows[].result.value === 1`
+and deny access after authority withdrawal. These are different return contracts;
+neither accessor substitutes for the other. All eleven mappings concern synthetic
+source or review inputs, with their remaining limits retained beside each entry.
 
 An inclusion and an exclusion may be asserted by the same named test. The
 milestone reference uses the body that actually constructs milestone no-ops and
@@ -91,15 +116,15 @@ week. It does not borrow an out-of-window, other-role newcomer uncertainty case
 as evidence for unknown in-scope active-week exclusion. Its calendar denominator
 is context, not a certified fully covered participation share or month projection.
 
-The remaining dispositions distinguish seven IDs with currently owned
-implementations, eleven other derivation/admission prerequisites, and fourteen
-IDs whose complete semantic cases
-are still being developed. The optional retained-line and commit-attributed
+The remaining dispositions retain seven derivation/admission prerequisites and
+fourteen IDs needing additional semantic cases. This eleven-reference review does
+not establish whether later source changes resolve any of those 21 entries.
+The optional retained-line and commit-attributed
 lenses are not silently assigned to the adjacent physical-context PRs. A raw
 relationship cannot establish preserved duplicate evidence; a generic accepted
 author fact cannot prove an exact suggestion link or a consented mentorship.
 
-At this source lane's ownership check, [#382](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/382)
+At the original source lane's ownership check, [#382](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/382)
 owned COV15 transfer lineage, alias conservation and privacy suppression;
 [#377](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/377) and
 [#385](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/385) owned
@@ -110,8 +135,11 @@ owned Project configuration; and [#395](https://github.com/Pick-Your-AI/pick-you
 owned Discussion capability handling. The later [#410](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/410)
 maintenance-facet and [#412](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/412)
 manual-ordering lanes are also preserved. The narrow shared normalizer changes
-below do not adopt or alter those owners' semantics. These links record coordination,
-not permanent ownership or completed delivery.
+below do not adopt or alter those owners' semantics. These links record historical
+coordination, not permanent ownership or individual PR delivery. In particular,
+#375, #367, #406 and #412 closed without separate merges; the new references prove
+that the relevant source is present in accepted `4d1df3b`, without claiming that
+each donor PR merged.
 
 `net_lines` now has a [repository-only projection](repository-net-lines.md) and
 named signed-subtotal and file-class exclusion assertions. Its supplied verified
@@ -121,8 +149,9 @@ unknown, and public output/ranking remain disabled. The actor-row engine still
 rejects signed net aggregation; that assertion is retained independently of the
 new repository-context positive. Issue #72's unchecked requirement
 for meaningful inclusion and exclusion evidence for **each** public metric
-remains open, as do the separately owned COV15 correction and applicable public
-source/policy gates. Synthetic fixtures are not live observations, actual
+remains open. The transfer admission pair alone does not establish complete
+COV15 acceptance, and applicable public source/policy gates remain separate.
+Synthetic fixtures are not live observations, actual
 independent contributor acceptance, or production readiness evidence.
 
 ## Narrow production corrections
@@ -176,6 +205,24 @@ node --test --test-isolation=none packages/metrics/test/metric-source-semantics.
 The normal metrics package discovery includes the source suite. For the persistence
 regression, also build `@pick-your-ai/service`, then run
 `node --test --test-isolation=none apps/pipeline/test/review-cache-migration.test.mjs`.
+
+To rerun the inventory guard and all eight files supplying the eleven new references,
+build the repository workspaces and run:
+
+```sh
+npm run build
+node --test --test-isolation=none \
+  packages/metrics/test/metric-source-semantics.test.js \
+  packages/github/test/issue-transfer-provenance.test.mjs \
+  apps/pipeline/test/release-recognition.test.mjs \
+  apps/pipeline/test/release-stewardship-recognition.test.mjs \
+  apps/pipeline/test/operations-recognition.test.mjs \
+  apps/pipeline/test/project-configuration-recognition.test.mjs \
+  apps/pipeline/test/ordering-recognition.test.mjs \
+  packages/metrics/test/breadth-source.test.js \
+  packages/metrics/test/collaborations-source.test.js
+```
+
 No workflow, source permission, public policy, scope baseline or publication
 setting changes. The unrelated local Git fixture may require child-process
 permission in a restricted execution environment; a blocked fixture is not a

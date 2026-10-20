@@ -708,7 +708,7 @@ test("commit author/committer and verified lineage stay separate and integration
   assert.equal(integrated.participation.filter((item) => item.role === "coauthor").length, 1);
 });
 
-test("release publication keeps automation sender separate from notes author; green CI is unsupported", () => {
+test("release publication keeps automation sender separate from notes author", () => {
   const release = {
     id: 60,
     node_id: "RE_synthetic",
@@ -724,6 +724,58 @@ test("release publication keeps automation sender separate from notes author; gr
   assert.equal(out.facts[0].role, "automation");
   assert.equal(metrics(out, "maintenance").length, 0);
   assert.equal(metrics(out, "deployment_work").length, 0);
+});
+
+test("default collection normalization excludes a successful workflow completion", async () => {
+  const transportRequests = [];
+  let acceptanceCalls = 0;
+  const client = new GithubReadClient({
+    apiOrigin: "https://api.synthetic.invalid",
+    token: async () => undefined,
+    checkpoints: syntheticCheckpointStore(),
+    fetch: async (url) => {
+      transportRequests.push(String(url));
+      throw new Error("Unsupported CI evidence must not be fetched");
+    },
+  });
+  const normalize = createGithubEvidenceNormalizer({
+    client,
+    source: "synthetic-source",
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+    acceptance: async () => {
+      acceptanceCalls++;
+      return [];
+    },
+  });
+  // Exercise the existing string-family collection boundary without inventing
+  // a workflow GithubEvidenceEnvelope or supplying trusted event enrichment.
+  const input = {
+    repository: { id: 2, slug: "synthetic-owner/repository" },
+    family: "workflow_run",
+    factKey: "synthetic-successful-workflow-901",
+    observedAt,
+    policyVersion: "synthetic-policy/v1",
+    fact: {
+      subjectId: "901",
+      sourceRevision: at,
+      sourceUrl: "https://github.com/synthetic-owner/repository/actions/runs/901",
+      evidence: "observed_transition",
+      actorId: "404",
+      occurredAt: at,
+      state: "success",
+    },
+  };
+  const original = structuredClone(input);
+  const out = await normalize(input);
+  assert.deepEqual(out.facts, []);
+  assert.deepEqual(out.evidence, []);
+  assert.deepEqual(out.actors, []);
+  assert.deepEqual(out.reasons, ["source_family_requires_exact_event_enrichment"]);
+  assert.equal(out.isSynthetic, true);
+  assert.deepEqual(transportRequests, []);
+  assert.equal(acceptanceCalls, 0);
+  assert.deepEqual(input, original);
 });
 
 test("subjective maintenance, deployment, reliability and coordination stay receipt-based with accepted/rejected cases", () => {
