@@ -2,6 +2,8 @@
 
 This reader provides bounded metadata for the available edit histories of native Issues and PullRequests. It contributes to [the inventory and backfill work package](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/59). Native issue-field timeline events remain a separate source capability.
 
+The separate [comment and review edit reader](github-comment-edit-metadata.md) reads already-bound published comment/review targets. It has its own metadata and checkpoint versions and does not change the production parent inventory or the saved-run behavior described here.
+
 The default source connects the [GitHub metadata reader](../packages/github/src/content-edit-history.ts), [private inventory selector](../apps/pipeline/src/content-edit-inventory.mjs), collection boundary and normalizer. An approved configuration can include `content_edits` for an explicitly admitted full audit or backfill. The resulting private parent snapshots carry native edit metadata without producing metric evidence. Source approval and actual provider capability remain separate requirements.
 
 ## Native metadata contract
