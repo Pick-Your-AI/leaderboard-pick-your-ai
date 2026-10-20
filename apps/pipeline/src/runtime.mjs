@@ -38,7 +38,7 @@ import {
 } from "./reconciliation-plan.mjs";
 import { readReconciliationProgress, leastReconciliationTime } from "./reconciliation-progress.mjs";
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
-import { selectWorkstreamHelp } from "./workstream-help.mjs";
+import { selectWorkstreamHelp, validateWorkstreamHelpBindings } from "./workstream-help.mjs";
 import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
 import { AggregateExplanationStore } from "./aggregate-explanations.mjs";
 import { assertPipelineSourcesNotRetired } from "./derived-retirement.mjs";
@@ -367,7 +367,10 @@ export async function createPipeline(options) {
     if (value?.isSynthetic === true || /synthetic[_.:-]|synthetic\.example/i.test(serialized))
       fail("synthetic_data_forbidden_in_public_runtime");
   };
-  const config = copy(options.config ?? { version: "unconfigured", repositories: [], policies: [], scopes: [] });
+  const configured = options.config ?? { version: "unconfigured", repositories: [], policies: [], scopes: [] };
+  // Admit the optional protected extension before copying host configuration.
+  validateWorkstreamHelpBindings(configured.recognitionBindings ?? []);
+  const config = copy(configured);
   const feedbackAuthority = createDiscussionFeedbackAuthority(
     config,
     dataMode,
