@@ -172,10 +172,43 @@ test("negative public visibility probe fences reads even when no lifecycle webho
   const h = await harness(t);
   await h.runtime.runOnce();
   const pin = (await getBoard(h.runtime)).snapshotId;
+  const validators = [];
+  for (const url of [boardUrl, `${boardUrl}&snapshot=${pin}`]) {
+    const response = await h.runtime.app.inject(url);
+    assert.equal(response.statusCode, 200, response.body);
+    const value = response.json();
+    assert.equal(value.snapshotId, pin);
+    assert.equal(value.rows.length, 2);
+    assert.ok(value.rows.every((row) => row.evidenceIds.length > 0));
+    const etag = response.headers.etag;
+    assert.match(etag, /^"[a-f0-9]{64}"$/);
+    const unchanged = await h.runtime.app.inject({
+      method: "GET",
+      url,
+      headers: { "if-none-match": etag },
+    });
+    assert.equal(unchanged.statusCode, 304, unchanged.body);
+    assert.equal(unchanged.body, "");
+    assert.equal(unchanged.headers.etag, etag);
+    const publicContent = [value.snapshotId, ...value.rows.flatMap((row) => [row.actorId, ...row.evidenceIds])];
+    assert.ok(publicContent.every((entry) => typeof entry === "string" && entry.length > 0));
+    validators.push({ url, etag, publicContent });
+  }
   h.setPrivate(true);
   await assert.rejects(h.runtime.runOnce(), /not_verified/);
   assert.equal((await h.runtime.app.inject(boardUrl)).statusCode, 503);
   assert.equal((await h.runtime.app.inject(`${boardUrl}&snapshot=${pin}`)).statusCode, 410);
+  for (const cached of validators) {
+    const response = await h.runtime.app.inject({
+      method: "GET",
+      url: cached.url,
+      headers: { "if-none-match": cached.etag },
+    });
+    assert.equal(response.statusCode, cached.url === boardUrl ? 503 : 410, cached.url);
+    assert.equal(response.headers["cache-control"], "no-store", cached.url);
+    assert.deepEqual(Object.keys(response.json()), ["error"], cached.url);
+    for (const value of cached.publicContent) assert.equal(response.body.includes(value), false, cached.url);
+  }
   assert.equal(
     (await h.runtime.receipts()).some((receipt) => receipt.kind === "source_unavailable"),
     true,
