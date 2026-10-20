@@ -86,6 +86,7 @@ async function nativeHarness(t, { eventCount = 1 } = {}) {
         };
       },
     },
+    fieldChangeNormalizationVersion: components.github.fieldChangeNormalizationVersion,
     normalizerFactory: () => async (input) => {
       normalized++;
       assert.equal(input.family, family);
