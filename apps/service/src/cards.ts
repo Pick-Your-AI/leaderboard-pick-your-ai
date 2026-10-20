@@ -115,6 +115,9 @@ function measurementContext(
     ...(read.selected.scope.roles?.length
       ? ([["Contribution roles", read.selected.scope.roles.join(", ")]] as [string, string][])
       : []),
+    ...(read.selected.scope.branch === undefined
+      ? []
+      : ([["Merge target at merge", read.selected.scope.branch]] as [string, string][])),
   ];
 }
 

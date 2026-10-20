@@ -53,14 +53,16 @@ type Column =
   | (typeof legacyColumns)[number]
   | (typeof membershipColumns)[number]
   | "roles"
+  | "branch"
   | "ranking_presentation"
   | "physical_context";
-const scopedColumns = (roles: boolean): Column[] => {
+const scopedColumns = (roles: boolean, branch = false): Column[] => {
   const split = legacyColumns.indexOf("start");
   return [
     ...legacyColumns.slice(0, split),
     ...membershipColumns,
     ...(roles ? ["roles" as const] : []),
+    ...(branch ? ["branch" as const] : []),
     ...legacyColumns.slice(split),
   ];
 };
@@ -72,6 +74,19 @@ const variants: { version: string; columns: readonly Column[] }[] = [
     const split = columns.indexOf("ranking") + 1;
     return {
       version: "public-export/v4",
+      columns: [
+        ...columns.slice(0, split),
+        "ranking_presentation" as const,
+        ...columns.slice(split),
+        "physical_context" as const,
+      ],
+    };
+  }),
+  { version: "public-export/v5", columns: scopedColumns(true, true) },
+  ...[scopedColumns(true, true)].map((columns) => {
+    const split = columns.indexOf("ranking") + 1;
+    return {
+      version: "public-export/v5",
       columns: [
         ...columns.slice(0, split),
         "ranking_presentation" as const,
@@ -117,7 +132,7 @@ function records(
       if (!closed || formula(cell) || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(cell)) invalid();
       if (new TextEncoder().encode(cell).byteLength > 256 * 1024) invalid();
       row.push(cell);
-      if (row.length > legacyColumns.length + 8) invalid();
+      if (row.length > legacyColumns.length + 9) invalid();
       if (raw[index] === ",") {
         index++;
         continue;
@@ -252,7 +267,9 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
       evidenceIds,
       ...(pending === undefined ? {} : { pending }),
       ...(withComparison ? { movement } : {}),
-      ...(version === "public-export/v4" ? { physicalContext: parseExportJSON(at(row, "physical_context")) } : {}),
+      ...(columns.includes("physical_context")
+        ? { physicalContext: parseExportJSON(at(row, "physical_context")) }
+        : {}),
     };
   });
   return {
@@ -279,11 +296,12 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
             projects: parseExportJSON(at(metadata, "projects")),
           }),
       ...(columns.includes("roles") ? { roles: parseExportJSON(at(metadata, "roles")) } : {}),
+      ...(columns.includes("branch") ? { branch: originalText(at(metadata, "branch")) } : {}),
     },
     actorFilter: at(metadata, "actor_filter"),
     metric: parseExportJSON(at(metadata, "metric_definition")),
     ranking: parseExportJSON(at(metadata, "ranking")),
-    ...(version === "public-export/v4"
+    ...(columns.includes("ranking_presentation")
       ? { rankingPresentation: parseExportJSON(at(metadata, "ranking_presentation")) }
       : {}),
     coverage: parseExportJSON(at(metadata, "coverage")),

@@ -2,6 +2,7 @@ import { captureRankEvidence, retainedRankHistory } from "./rank-history.mjs";
 import { createHash } from "node:crypto";
 import { reversionAuthorityVersion } from "./reversion-effectiveness.mjs";
 import { captureIssueTransferAuthorization } from "./issue-transfer-authority.mjs";
+import { captureMergeTargetAuthorization } from "./pull-request-merge-target.mjs";
 
 // Local fail-closed bounds, not a production retention or capacity commitment.
 // Records have the retained snapshot's lifecycle, never the optional preview TTL.
@@ -367,6 +368,7 @@ export function buildAggregateExplanation(capture, binding) {
       dataMode: authorization.dataMode,
       controlsConfigurationRevision: authorization.controlsConfigurationRevision,
       ...identityAuthorization(authorization),
+      ...captureMergeTargetAuthorization(authorization),
       ...reversionAuthorization(authorization),
       sources: authorization.sources.map((source) => ({
         repositoryId: token(source.repositoryId),

@@ -121,7 +121,8 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
   const pendingEvidence = [...pendingIds].sort().map(serializeEvidence);
   const snapshot = read.selected.snapshot;
   const extendedScope = read.selected.scope.schemaVersion !== undefined;
-  const roleScope = read.selected.scope.schemaVersion === publicRoleScopeSchemaVersion;
+  const branchScope = read.selected.scope.branch !== undefined;
+  const roleScope = branchScope || read.selected.scope.schemaVersion === publicRoleScopeSchemaVersion;
   const presentation = rankingPresentation(read, board.metric.id);
   if (
     (presentation !== null && presentation.totalContributors !== board.totalRows) ||
@@ -130,8 +131,9 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
       board.rows.some((row) => row.rank !== null || (row.movement && row.movement.state !== "unavailable")))
   )
     unsafe();
-  const exportVersion =
-    presentation !== null
+  const exportVersion = branchScope
+    ? "public-export/v5"
+    : presentation !== null
       ? "public-export/v4"
       : roleScope
         ? "public-export/v3"
@@ -195,6 +197,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     "workstream",
     ...(extendedScope ? ["scope_schema_version", "context", "projects"] : []),
     ...(roleScope ? ["roles"] : []),
+    ...(branchScope ? ["branch"] : []),
     "start",
     "end",
     "metric",
@@ -243,6 +246,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     s.workstream,
     ...(extendedScope ? [s.schemaVersion!, s.context!, boundedJson(s.projects!)] : []),
     ...(roleScope ? [boundedJson(s.roles!)] : []),
+    ...(branchScope ? [s.branch!] : []),
     s.start,
     s.end,
     board.metric.id,

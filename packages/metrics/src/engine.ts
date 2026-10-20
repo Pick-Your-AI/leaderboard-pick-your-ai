@@ -4,7 +4,11 @@ import {
   contributionRoleSchema,
   coverageSchema,
   executionModeSchema,
+  isPullRequestMergeTargetBranch,
   serviceAccountClassificationSchema,
+  supportsPullRequestMergeTarget,
+  validatePullRequestMergeTarget,
+  type PrMergeTarget,
   type ServiceAccountClassification,
   type Actor,
   type Contribution,
@@ -56,6 +60,8 @@ export interface MetricFact {
   firstReviewAt?: string | null;
   /** Exact observed locale fact whose accepted representation replaces current portfolio display. */
   recognitionSourceFactId?: string;
+  /** Private projection of a source-verified historical merged event, never the current REST base. */
+  mergeTarget?: PrMergeTarget;
   /** Private inclusion identity; the public projection exposes only selected evidence. */
   releaseInclusion?: {
     version: "release-inclusion-units/v1";
@@ -106,6 +112,8 @@ export interface MetricScope {
   from: string | null;
   to: string;
   repos: string[];
+  /** Exact historical merge target; supported only for explicit single-repository merged-PR views. */
+  branch?: string;
   projects: string[];
   workstreams: string[];
   roles: Role[];
@@ -213,6 +221,8 @@ function canonicalScope(scope: MetricScope): MetricScope {
   }
   if (scope.roles.some((role) => !knownRoles.includes(role))) throw new Error("Unknown role filter");
   for (const id of [...scope.repos, ...scope.projects, ...scope.workstreams]) required(id, "Scope ID");
+  if (scope.branch !== undefined && (!isPullRequestMergeTargetBranch(scope.branch) || unique(scope.repos).length !== 1))
+    throw new Error("Merge-target filtering requires a valid branch and one explicit repository");
   return {
     ...scope,
     repos: unique(scope.repos),
@@ -411,6 +421,8 @@ const uncertaintyReasons = new Set([
   "unknown_raw_state_or_time",
   "unknown_qualification",
   "conflicting_policy_unit",
+  "unknown_merge_target",
+  "conflicting_merge_target",
 ]);
 const hasUncertainty = (prepared: Prepared) => prepared.audit.some((entry) => uncertaintyReasons.has(entry.reason));
 function validMembershipIdentifiers(ids: readonly unknown[]): boolean {
@@ -423,6 +435,34 @@ function validMembershipIdentifiers(ids: readonly unknown[]): boolean {
   }
   return true;
 }
+
+/** Source authority/digest verification belongs to the asynchronous normalizer and retained-capture join.
+ * The synchronous engine requires that projection to bind the exact selected fact, not merely a hash-shaped string.
+ */
+function boundMergeTarget(fact: MetricFact): PrMergeTarget | null {
+  let target: PrMergeTarget;
+  try {
+    target = validatePullRequestMergeTarget(fact.mergeTarget);
+  } catch {
+    return null;
+  }
+  const role = fact.metricId === "pr_merged" ? "author" : fact.metricId === "maintainer_merges" ? "merger" : "coauthor";
+  if (
+    !supportsPullRequestMergeTarget(fact.metricId) ||
+    target.repositoryId !== fact.repoId ||
+    target.pullRequestId !== fact.artifactId ||
+    fact.role !== role ||
+    !["observed", "qualified", "reviewed"].includes(fact.state) ||
+    (fact.outcome !== undefined && fact.outcome !== "merged") ||
+    fact.occurredAt === null ||
+    instant(target.mergedAt) !== instant(fact.occurredAt) ||
+    instant(target.mergedAt) > instant(fact.observedAt) ||
+    (fact.metricId === "pr_coauthored" && (fact.subjectActorId === null || fact.subjectActorId === fact.actorId))
+  )
+    return null;
+  return target;
+}
+
 function prepare(
   input: FrozenInput,
   policy: MetricPolicy,
@@ -430,6 +470,8 @@ function prepare(
   conserveReleaseWork = true,
   requireKnownWorkstreams = false,
 ): Prepared {
+  if (scope.branch !== undefined && !supportsPullRequestMergeTarget(policy.metricId))
+    throw new Error("Merge-target filtering is unsupported for this metric");
   const cutoff = instant(input.cutoff);
   if (instant(scope.to) > cutoff) throw new Error("Scope cannot exceed the frozen cutoff");
   required(input.datasetId, "Dataset ID");
@@ -522,13 +564,25 @@ function prepare(
     versions.set(fact.id, bucket);
   }
   const current: MetricFact[] = [];
+  const comparisonFact = (fact: MetricFact) => {
+    const { mergeTarget, ...legacy } = fact;
+    // An optional source extension cannot change any unfiltered legacy comparison.
+    if (scope.branch === undefined || mergeTarget === undefined) return legacy;
+    try {
+      // Separate captures can prove the same event without changing its semantic identity.
+      const { proofHash, ...target } = validatePullRequestMergeTarget(mergeTarget);
+      return { ...legacy, mergeTarget: target };
+    } catch {
+      return { ...legacy, mergeTarget };
+    }
+  };
   for (const bucket of versions.values()) {
     const revision = Math.max(...bucket.map((fact) => fact.revision));
     const latest = bucket.filter((fact) => fact.revision === revision);
     // The same source fact can be observed again without changing its revision.
     // Observation time describes collection, not a competing semantic fact.
     const semantic = (fact: MetricFact) => {
-      const { observedAt, ...rest } = fact;
+      const { observedAt, ...rest } = comparisonFact(fact);
       return stableJSON(rest);
     };
     if (new Set(latest.map(semantic)).size !== 1) {
@@ -538,6 +592,19 @@ function prepare(
     current.push(
       latest.sort((a, b) => compareInstants(a.observedAt, b.observedAt) || compare(a.observedAt, b.observedAt))[0]!,
     );
+  }
+  const targetIdentities = new Map<string, Set<string>>();
+  if (scope.branch !== undefined) {
+    for (const fact of current) {
+      if (!scope.repos.includes(fact.repoId)) continue;
+      const target = boundMergeTarget(fact);
+      if (!target) continue;
+      const { proofHash, ...identity } = target;
+      const unit = key(fact.repoId, fact.artifactId);
+      const identities = targetIdentities.get(unit) ?? new Set<string>();
+      identities.add(stableJSON(identity));
+      targetIdentities.set(unit, identities);
+    }
   }
   const canonical = new Map<string, MetricFact[]>();
   for (const fact of current) {
@@ -582,7 +649,7 @@ function prepare(
   for (const bucket of canonical.values()) {
     // Adapter receipts may differ; semantic fields must agree, including corrections.
     const semantic = (fact: MetricFact) => {
-      const { id, observedAt, ...rest } = fact;
+      const { id, observedAt, ...rest } = comparisonFact(fact);
       return stableJSON(rest);
     };
     if (new Set(bucket.map(semantic)).size !== 1) {
@@ -660,6 +727,13 @@ function prepare(
       ["qualified", "reviewed"].includes(fact.state)
     )
       reason = "acceptance_after_cutoff";
+    if (!reason && scope.branch !== undefined) {
+      const target = boundMergeTarget(fact);
+      if (!target) reason = "unknown_merge_target";
+      else if ((targetIdentities.get(key(fact.repoId, fact.artifactId))?.size ?? 0) > 1)
+        reason = "conflicting_merge_target";
+      else if (target.branch !== scope.branch) reason = "branch_filter";
+    }
     if (reason) {
       reject([fact], reason);
       continue;
@@ -1295,8 +1369,9 @@ export function participationView(
   validateMetricPolicy(policy);
   const scope = canonicalScope(requestedScope);
   // Newcomer discovery uses policy-eligible organization history, independent of selected lenses.
+  const { branch, ...historySelection } = scope;
   const historyScope = canonicalScope({
-    ...scope,
+    ...historySelection,
     period: "custom",
     from: history?.originAt ?? null,
     repos: [],
