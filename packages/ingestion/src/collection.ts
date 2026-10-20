@@ -336,13 +336,15 @@ export class CollectionStore {
         page.facts.length > limit
       )
         throw new Error("invalid_source_page");
-      cursor(page.nextCursor);
-      if (page.nextCursor !== null && (page.nextCursor === run.cursor || page.facts.length === 0))
+      // Validate and commit the same scalars even if the source retains its page.
+      const { nextCursor, expectedCount } = page;
+      cursor(nextCursor);
+      if (nextCursor !== null && (nextCursor === run.cursor || page.facts.length === 0))
         throw new Error("nonadvancing_source_page");
-      if (page.expectedCount !== null && (!Number.isSafeInteger(page.expectedCount) || page.expectedCount < 0))
+      if (expectedCount !== null && (!Number.isSafeInteger(expectedCount) || expectedCount < 0))
         throw new Error("invalid_source_count");
       const facts = page.facts.map((fact) => normalizeFact(fact, request.family));
-      if (page.expectedCount !== null && facts.some((fact) => fact.contentEditMetadata !== undefined))
+      if (expectedCount !== null && facts.some((fact) => fact.contentEditMetadata !== undefined))
         throw new Error("content_edit_history_count_unknown");
       if (
         facts.some(
@@ -389,10 +391,10 @@ export class CollectionStore {
         ).rows[0]!;
         source.assertAuthorized?.();
         if (current.page_count !== run.page_count || current.state === "complete") return "superseded";
-        if (current.expected_count !== null && current.expected_count !== page.expectedCount)
+        if (current.expected_count !== null && current.expected_count !== expectedCount)
           throw new Error("source_count_changed");
         const count = Number(current.item_count) + facts.length;
-        if (page.nextCursor === null && page.expectedCount !== null && count !== page.expectedCount)
+        if (nextCursor === null && expectedCount !== null && count !== expectedCount)
           throw new Error("source_count_mismatch");
         let changed = 0;
         for (const fact of facts) {
@@ -435,10 +437,10 @@ export class CollectionStore {
           `UPDATE leaderboard_ingestion.collection_runs SET cursor = $2, page_count = page_count + 1,
           item_count = $3, expected_count = $4, state = $5, reason = NULL,
           last_success_at = clock_timestamp(), attempted_at = clock_timestamp() WHERE run_id = $1`,
-          [runId, page.nextCursor, count, page.expectedCount, page.nextCursor === null ? "complete" : "pending"],
+          [runId, nextCursor, count, expectedCount, nextCursor === null ? "complete" : "pending"],
         );
         source.assertAuthorized?.();
-        return page.nextCursor === null ? "complete" : "progress";
+        return nextCursor === null ? "complete" : "progress";
       });
     } catch {
       // Never retain adapter exceptions, URLs with credentials, or source payloads.
