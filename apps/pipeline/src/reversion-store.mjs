@@ -115,6 +115,7 @@ export async function applyReviewedReversion({
   authorize,
   verifyFrozen,
   suppressedArtifacts,
+  lockSources,
   receipt,
   markApplied,
 }) {
@@ -154,13 +155,15 @@ export async function applyReviewedReversion({
     )
       fail("original_capture_required");
     const ids = repositoryIds(saved.repository_ids);
-    const access = (
-      await tx.query(
-        `SELECT repository_id,installation_id,state,generation FROM leaderboard_ingestion.repository_access
+    const access = lockSources
+      ? await lockSources(tx, ids)
+      : (
+          await tx.query(
+            `SELECT repository_id,installation_id,state,generation FROM leaderboard_ingestion.repository_access
        WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id FOR UPDATE`,
-        [ids],
-      )
-    ).rows;
+            [ids],
+          )
+        ).rows;
     if (access.length !== ids.length || access.some((row) => row.state !== "public")) fail("source_unavailable");
     const input = {
       snapshotId: requested.snapshotId,

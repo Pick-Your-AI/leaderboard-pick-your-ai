@@ -79,6 +79,71 @@ Native issue fields, Project item custom fields, Project status transitions and 
 
 Relationship types retain parent/child and blocked-by direction. Related/information links do not become blockers. The collector must independently verify both endpoints are public and set `relationship.publicEndpointsVerified`; a public container alone does not establish a linked private item's visibility. Reverse representations of an intentional symmetric link share one canonical unit; automatic cross-references do not create intentional-link merit. Public transfer lineage preserves issue identity and grants no new issue creation/authorship credit. Private, unknown or unapproved destinations produce suppression directives; historical projections must obey those controls. Current ordering cannot identify who reordered items.
 
+An enriched public transfer must identify an issue at each endpoint, with complete
+`owner/repository` coordinates, a canonical positive safe-integer issue number,
+an explicit destination identity and a different positive destination repository
+ID. Pull-request payloads, pull-request URLs, repository roots and extra path
+segments cannot establish issue-transfer lineage. Missing source actor or event
+time remains unknown; another reporter, assignee, update time or later observation
+cannot supply it. Reobserving the same transfer preserves its canonical unit;
+forward and reverse transfers remain descriptive observations, with no qualified
+outcome or new issue-creation credit.
+
+For a known source artifact, a private, unknown, missing or unapproved destination
+still produces a suppression directive when the public source locator is absent
+or unusable. The directive does not require an attributable actor or event time.
+The pipeline must apply it to retained snapshots as well as the current board.
+The [transfer admission cases](../packages/github/test/issue-transfer-admission.test.mjs)
+exercise 28 source-admission, replay and privacy cases. Two additional
+[pipeline cases](../apps/pipeline/test/transfer-visibility.test.mjs) feed the actual
+normalizer into the synthetic PGlite/SQLite runtime and verify durable suppression,
+cached-board filtering, pinned evidence withdrawal and JSON/CSV export filtering.
+They do not represent live GitHub events or installed-service qualification.
+
+The `github-issue-transfer-admission/v1` normalization generation also reprocesses
+unchanged source revisions cached before these admission rules. It retains the
+previous normalization generation for frozen identity authorization and preserves
+historical normalization documents and frozen inputs. The two
+[cache migration cases](../apps/pipeline/test/transfer-cache-migration.test.mjs)
+seed output from the exact legacy normalizer using a
+[synthetic fixture](../tests/fixtures/legacy-transfer-admission.json), restart with
+unchanged source revisions and observation clocks, and verify that current and
+pinned boards, evidence and JSON/CSV exports obey the new suppression. They also
+verify that the original cached documents and frozen inputs remain intact.
+
+Frozen reads also retain the pre-transfer Review, Discussion and default-delivery
+cache generations, including delivery wrappers on enriched source families.
+Their source-version, exact source-binding and document-hash checks still apply.
+Reprocessing adds the current generation without changing the retained record.
+An integrity-valid, same-policy pre-transfer cache also retains its delivery
+classification when recalculation produces no delivery facts. Only the
+classification crosses that boundary; the current normalizer rehydrates the
+source, and the new cache keeps the current delivery version. This applies to
+enriched source families as well as commits and pull requests. The
+[classification migration cases](../apps/pipeline/test/transfer-delivery-classification-migration.test.mjs)
+verify an actual database reopen, preservation of the old cache and frozen input,
+and rejection of a corrupt historical classification record.
+
+Current normalization applies the transfer-admission wrapper to the
+`project-membership-context/v2` generation. Frozen identity reads retain the
+original Project v1, transfer-wrapped Project v1 and unwrapped Project v2 keys,
+including each review, Discussion and default-delivery wrapper. Every selected
+same-source, same-policy predecessor is checked for document integrity and data
+mode before either its classification or an existing current cache is used.
+The [combined migration cases](../apps/pipeline/test/project-transfer-cache-migration.test.mjs)
+cover empty-result classification across both upgrades and reject a corrupt
+predecessor even when a valid current delivery cache is already present.
+
+GitHub's native GraphQL
+[`TransferredEvent`](https://docs.github.com/en/graphql/reference/issues#transferredevent)
+exposes the source repository and associated issue, but no immutable historical
+destination field. The current issue repository cannot establish every earlier
+transfer destination. These tests exercise an explicitly enriched envelope;
+they add no native transfer collector, installed-App capability, reviewed metric
+enablement or qualified routing receipt. This bounded COV15 contribution does not
+complete [#72](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/72)
+or the separate semantic, inclusion and enablement acceptance for all 98 metrics.
+
 Field-change, triage and relationship subtype lookups accept only entries explicitly declared in their metric maps. Inherited object-property names cannot create a fact or contribution evidence. Relationship kinds must be literal supported strings; arrays and objects are not coerced into a supported kind. Unsupported inputs retain their raw observation and existing reason code. The valid metric identities, actor/time handling, endpoint checks and canonical relationship units are unchanged.
 
 `groupTriageTransitions` requires an explicit reviewed policy version, adjacency interval and cooldown. It groups per actor/artifact/facet/target, deduplicates exact event IDs, rejects conflicting IDs, marks groups returning to their initial state as reversal-suppressed, and marks repeated terminal states within cooldown. Raw counts remain inspectable. It also returns a global distinct-artifact count and sorted per-actor raw-action, session and distinct-artifact summaries; unknown actor/artifact/time events cannot invent those totals. It always reports zero qualified outcomes: persistence, churn suppression and grouping never prove correctness. A scripted batch therefore cannot spill into unrelated accepted-outcome boards. The [definition-day and session policy](triage-definition-grouping.md) specifies the exact boundaries and counting scopes. Runtime policy approval, actual triager review and pathological real-source audits remain acceptance work.
@@ -86,6 +151,8 @@ Field-change, triage and relationship subtype lookups accept only entries explic
 Label and milestone definition events always select their own stable definition artifact, including when an envelope also carries issue context. `triage-definition-day/v1` groups their facets once per actor/repository/definition/UTC day, with separate proven source-day and independently accepted receipt-day lenses. Label applications and issue milestone membership never become definition credit. Missing history remains unknown, and neither definition gains a selectable public view from this grouping implementation.
 
 `applyRecognitionReceipt` accepts independently authenticated host receipts with known contributor, distinct authorized reviewer, acceptance time, exact target fact and supporting evidence IDs. Accepted/rejected decisions remain explicit and raw evidence stays intact. Supported subjective categories include accepted findings, confirmed bugs, resolution support, label corrections, clarifications, accepted review suggestions, release/automation/maintenance, sanitized deployment/reliability, reproduction, accepted answers, routing, mentoring/onboarding, Project configuration and ordering. A `changesetId` identifies one reviewed configuration operation; the host selects one representative target/scope fact per changeset, rather than materializing a receipt once per affected child. Ordering instead requires the [reviewed ordering profile](ordering-recognition.md): its actor/repository/scope/public-plan identity ignores supplied `changesetId` values and validates every receipt before plan deduplication. Conflicting duplicate receipt materializations fail closed. These receipts do not authorize public release by themselves.
+
+Release stewardship receipts use the original observed publisher/release identity and publication clock, with independent review recorded separately. The direct receipt API uses the shared validator, and the pipeline runs it before its host receipt callback, and only selected stewardship authority is retired. See [release stewardship publication admission](release-stewardship-recognition.md) for the supported host boundary, conserved unit, exact policy fields and remaining named-participant limitations.
 
 ## Remaining acceptance
 

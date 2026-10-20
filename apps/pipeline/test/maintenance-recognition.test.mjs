@@ -493,6 +493,7 @@ test("maintenance: configuration fences preserve automatic sources while manual 
         "deployment_work",
         "incidents",
         "release_changes",
+        "release_stewardship",
         "issue_ordering",
       ].includes(metric.id)
     )

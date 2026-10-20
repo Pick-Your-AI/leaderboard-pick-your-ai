@@ -554,6 +554,7 @@ test("automation: configuration fences preserve automatic sources while manual i
         "deployment_work",
         "incidents",
         "release_changes",
+        "release_stewardship",
         "issue_ordering",
       ].includes(metric.id)
     )
