@@ -234,10 +234,32 @@ test("legacy operator content keeps absent optional fields absent and does not a
     configurationCurrent: () => true,
     withAuthorizedInputs: async (_authorizations, work) => work([], { refreshApproval: async () => true }),
   });
+  // The legacy content has no transfer records. Attend the real graph gate and
+  // empty dependency discovery before the existing source and snapshot reads.
+  const emptyTransferReads = [
+    [/^SELECT pg_advisory_xact_lock_shared\(hashtextextended\('pipeline-issue-transfer-graph\/v1',0\)\)$/, undefined],
+    [/^SELECT DISTINCT a\.artifact_id FROM leaderboard_pipeline\.source_artifacts a\n/, [["2"]]],
+    [/^WITH RECURSIVE reachable\(fact_key,policy_signature\) AS \(/, [["2"], [], null]],
+    [/^SELECT endpoint\.\* FROM leaderboard_pipeline\.issue_transfer_endpoints endpoint\n/, [[], []]],
+    [
+      /^SELECT DISTINCT source\.repository_id,artifact\.artifact_id FROM leaderboard_pipeline\.source_artifacts artifact\n/,
+      [[]],
+    ],
+  ];
+  let transferReads = 0;
   const tx = {
-    async query(sql) {
-      if (sql.includes("FROM leaderboard_ingestion.repository_access"))
+    async query(sql, parameters) {
+      if (transferReads < emptyTransferReads.length) {
+        const [expectedSQL, expectedParameters] = emptyTransferReads[transferReads++];
+        assert.match(sql, expectedSQL);
+        assert.deepEqual(parameters, expectedParameters);
+        return { rows: [] };
+      }
+      if (sql.includes("FROM leaderboard_ingestion.repository_access")) {
+        assert.match(sql, /ORDER BY repository_id FOR SHARE$/);
+        assert.deepEqual(parameters, [["2"]]);
         return { rows: [{ repository_id: 2, installation_id: 1, state: "public", generation: 1 }] };
+      }
       if (sql.includes("FROM leaderboard_pipeline.dispatch_publications"))
         return {
           rows: [{ scope_key: publication.scopeKey, snapshot_id: snapshotId, revision: 1, document_bytes: 1024 }],
@@ -246,7 +268,13 @@ test("legacy operator content keeps absent optional fields absent and does not a
       return { rows: [{ document, document_hash: digest(document) }] };
     },
   };
-  const confirmed = await verify(tx, binding);
+  const read = async () => {
+    transferReads = 0;
+    const result = await verify(tx, binding);
+    assert.equal(transferReads, emptyTransferReads.length);
+    return result;
+  };
+  const confirmed = await read();
   assert.equal(typeof confirmed, "function");
   assert.equal(confirmed(), true);
   assert.deepEqual(document, original);
@@ -257,8 +285,8 @@ test("legacy operator content keeps absent optional fields absent and does not a
   ]) {
     document = { ...structuredClone(original), [field]: structuredClone(value) };
     assert.notEqual(digest(document), digest(original));
-    assert.equal(await verify(tx, binding), null, `${field}: adding bytes cannot preserve a legacy content ID`);
+    assert.equal(await read(), null, `${field}: adding bytes cannot preserve a legacy content ID`);
   }
   document = structuredClone(original);
-  assert.equal((await verify(tx, binding))(), true);
+  assert.equal((await read())(), true);
 });
