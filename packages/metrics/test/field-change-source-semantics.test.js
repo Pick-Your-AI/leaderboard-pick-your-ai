@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeGithubObservation } from "../../github/dist/index.js";
-import { aggregateMetric, getMetricDefinition, metricRegistryV1 } from "../dist/index.js";
+import { aggregateMetric, getMetricDefinition, getMetricGroupingPolicy, metricRegistryV1 } from "../dist/index.js";
 
 // Synthetic source-to-metric cases for explicitly supplied enriched envelopes.
 // These do not represent native webhook acquisition or publicly activated metrics.
@@ -56,6 +56,8 @@ function run(action, metric, before, after, alter = () => {}) {
   const input = envelope(action, before, after);
   alter(input);
   const out = normalizeGithubObservation(input);
+  const grouping = getMetricGroupingPolicy(metric);
+  if (metric === "project_field_updates") assert.equal(grouping?.version, "project-field-day/v1");
   const aggregate = aggregateMetric(
     {
       datasetId: "synthetic-field-noop-witness",
@@ -76,6 +78,13 @@ function run(action, metric, before, after, alter = () => {}) {
       rankedStates: ["observed"],
       roles: ["triager"],
       groupBy: "canonical",
+      ...(grouping
+        ? {
+            groupBy: grouping.group_by,
+            groupingSeconds: grouping.grouping_seconds,
+            groupingPolicyVersion: grouping.version,
+          }
+        : {}),
       sources: ["github_webhook"],
       minimumSamples: 1,
       rank: false,

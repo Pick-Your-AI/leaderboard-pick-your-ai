@@ -306,7 +306,6 @@
         "issue_clarifications",
         "duplicate_resolution",
         "title_scope_edits",
-        "project_field_updates",
         "project_updates",
         "routing_handoffs",
         "mentorship",
@@ -782,6 +781,13 @@
       "positive_test": "the metric uses independent acceptance windows while native facts, distinct authors and definition-only maturity remain intact",
       "negative_test": "self-review, an unenrolled reviewer, a duplicated audit and an ambiguous source target cannot earn feedback",
       "limitation": "Actual Discussion normalization, exact original/current source validation and synthetic intake whose enrolled reviewer is distinct from the source author feed receipt application and aggregation. Inclusion checks acceptance-time windows, distinct authors and unchanged native facts; exclusion rejects self or unenrolled reviewers, duplicate audits and ambiguous targets before callbacks. No real participant consent, live source-use permission or public metric approval is established; maturity remains definition_only and publicEnabled remains false."
+    },
+    {
+      "metric_id": "project_field_updates",
+      "path": "packages/metrics/test/project-field-days.test.js",
+      "positive_test": "different field facets and reversals retain raw events but share one observed editor item day",
+      "negative_test": "missing editor, item identity, source time or event proof cannot create an observed item day",
+      "limitation": "Explicitly enriched synthetic Project item transitions exercise the real normalizer and engine under project-field-day/v1. The cases cover observed editor/item/source-day grouping and bounded authority, deduplication, no-op, snapshot and subtype exclusions. They do not establish native projects_v2_item parsing, installed grants, complete field history, live sender identity, manual work, independent correction authority or public activation. Coverage remains incomplete, ranks null and publicEnabled false; the UI stays definition_only with no selectable/default combination. Scalar field edits are separate from Project progress-update publication."
     }
   ]
 }
