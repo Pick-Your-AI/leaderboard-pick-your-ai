@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { helpfulFeedbackHarness } from "./helpful-feedback-harness.mjs";
-import { clock, publicScope } from "./harness.mjs";
+import { publicScope } from "./harness.mjs";
 import { feedbackSentinel, feedbackTitleSentinel } from "../../../tests/fixtures/helpful-feedback.mjs";
 
 const read = (h, snapshotId = null) => h.runtime.source.read(publicScope, snapshotId, new AbortController().signal);
@@ -19,6 +19,23 @@ const feedbackRows = (selected) =>
     .filter((row) => row.result.metricId === "helpful_feedback")
     .map((row) => [row.actorId, row.result.value]);
 const unavailable = /feedback|authorization_changed|policy_input_revoked|source_unavailable|not_verified/;
+
+async function sourceExclusionHarness(t, options = {}) {
+  let instant = Date.now();
+  const now = () => {
+    instant = Math.max(instant, Date.now()) + 1;
+    return new Date(instant).toISOString();
+  };
+  const h = await helpfulFeedbackHarness(t, {
+    ...options,
+    runtimeOptions: { ...options.runtimeOptions, now },
+  });
+  return {
+    ...h,
+    now,
+    collect: (options = {}) => h.collect({ cutoff: now(), ...options }),
+  };
+}
 
 async function assertWithheld(h, pin) {
   for (const id of [null, pin]) {
@@ -57,8 +74,9 @@ async function assertNoRawContent(h) {
 
 async function acceptedPublication(h) {
   assert.equal((await h.collect()).state, "published");
-  const accepted = await h.accept();
-  const cutoff = clock();
+  const acceptedAt = h.now();
+  const accepted = await h.accept({ acceptedAt });
+  const cutoff = h.now();
   const result = await h.collect({ cutoff });
   assert.equal(result.state, "published");
   const pin = result.publications[0].snapshotId;
@@ -77,7 +95,7 @@ async function acceptedPublication(h) {
 }
 
 test("private initial feedback source is rejected before content reads or accepted observations", async (t) => {
-  const h = await helpfulFeedbackHarness(t, { memoryDatabase: true });
+  const h = await sourceExclusionHarness(t, { memoryDatabase: true });
   h.state.privateRepository = true;
   await assert.rejects(h.collect(), /public_source_not_verified/);
   assert.equal(h.state.reads, 0);
@@ -100,7 +118,7 @@ test("accepted public feedback is withheld after a private probe, including pinn
   // File-backed SQL and the existing controls store retain the accepted receipt.
   // Only the observed repository privacy changes; the synthetic source-use
   // epoch and independent review remain unchanged.
-  const h = await helpfulFeedbackHarness(t);
+  const h = await sourceExclusionHarness(t);
   const { accepted, cutoff, pin } = await acceptedPublication(h);
   const contentReads = h.state.reads;
   const snapshots = await count(h, "leaderboard_pipeline.snapshots");
@@ -137,7 +155,7 @@ for (const [label, url] of [
   ["non-Discussion native path", "https://github.com/synthetic-org/synthetic-repo/issues/1"],
 ])
   test("feedback rejects " + label + " before checkpointing or qualification", async (t) => {
-    const h = await helpfulFeedbackHarness(t, { memoryDatabase: true });
+    const h = await sourceExclusionHarness(t, { memoryDatabase: true });
     const originalUrl = h.state.rows[0].url;
     h.state.rows[0].url = url;
     const result = await h.collect();
