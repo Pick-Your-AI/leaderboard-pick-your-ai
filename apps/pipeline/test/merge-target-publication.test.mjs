@@ -733,8 +733,8 @@ async function fieldMergeSetup(t) {
 
 test("field-enriched native merge generations retain current, frozen and correction authority", async (t) => {
   const { h, p, runtime, state } = await fieldMergeSetup(t);
-  const cutoff = iso(Date.now() - 1000);
-  await assert.rejects(runtime.runOnce({ cutoff }), /synthetic_stop_after_combined_merge_field_freeze/);
+  const cutoff = p.state.clock;
+  await assert.rejects(runtime.runOnce(), /synthetic_stop_after_combined_merge_field_freeze/);
   assert.equal(state.frozen, true);
   assert.equal(state.calls, 5);
   assert.equal(p.state.graphql, 5);
@@ -761,7 +761,7 @@ test("field-enriched native merge generations retain current, frozen and correct
   }
 
   p.state.forbid = true;
-  const resumed = await runtime.runOnce({ cutoff });
+  const resumed = await runtime.runOnce();
   assert.equal(resumed.state, "published");
   assert.equal(state.calls, 5);
   assert.equal(p.state.graphql, 5);
