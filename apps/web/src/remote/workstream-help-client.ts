@@ -1,13 +1,11 @@
-import {
-  compareSourceInstants,
-  workstreamHelpPageSchema,
-  type PublicScope,
-} from "@pick-your-ai/contracts";
+import { compareSourceInstants, workstreamHelpPageSchema, type PublicScope } from "@pick-your-ai/contracts";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { metadata, ReadFailure, type Selection } from "./client.ts";
 import { milestoneParameters } from "./recognition-client.ts";
 
-const fail = (): never => { throw new ReadFailure(502, "invalid_workstream_help_response"); };
+const fail = (): never => {
+  throw new ReadFailure(502, "invalid_workstream_help_response");
+};
 export const workstreamHelpParameters = milestoneParameters;
 
 /** Validate scope and proof consistency; the public client cannot authenticate source review. */
@@ -32,11 +30,15 @@ export function workstreamHelpPage(value: unknown, selected: Selection, actorId:
   const disabled = new Set(meta.disabledMetrics.map((metric) => metric.id));
   if (page.category !== null && (!known.has(page.category) || disabled.has(page.category))) return fail();
   const scope: PublicScope = meta.scope;
-  const catalogs = new Map<string, string>(), artifacts = new Map<string, string>(), proofs = new Set<string>();
+  const catalogs = new Map<string, string>(),
+    artifacts = new Map<string, string>(),
+    proofs = new Set<string>();
   const statementHashes = new Map<string, string>();
   for (const entry of page.recognitions) {
     const { proof, help } = entry;
-    if (proof.actorId !== actorId || help.statement.organization !== selected.organization ||
+    if (
+      proof.actorId !== actorId ||
+      help.statement.organization !== selected.organization ||
       selected.actors === "automation" ||
       (selected.repository !== null && proof.repositoryId !== selected.repository) ||
       (selected.category !== null && !proof.metricIds.includes(selected.category)) ||
@@ -45,9 +47,13 @@ export function workstreamHelpPage(value: unknown, selected: Selection, actorId:
       (selected.start !== null && compareSourceInstants(proof.occurredAt, selected.start) < 0) ||
       (selected.end !== null && compareSourceInstants(proof.occurredAt, selected.end) >= 0) ||
       compareSourceInstants(proof.occurredAt, meta.generatedAt) > 0 ||
-      compareSourceInstants(help.reviewedAt, meta.generatedAt) > 0 || proofs.has(proof.contributionId)) return fail();
+      compareSourceInstants(help.reviewedAt, meta.generatedAt) > 0 ||
+      proofs.has(proof.contributionId)
+    )
+      return fail();
     proofs.add(proof.contributionId);
-    if (statementHashes.has(help.statementUrl) && statementHashes.get(help.statementUrl) !== help.statementHash) return fail();
+    if (statementHashes.has(help.statementUrl) && statementHashes.get(help.statementUrl) !== help.statementHash)
+      return fail();
     statementHashes.set(help.statementUrl, help.statementHash);
     const artifact = JSON.stringify([proof.artifactKind, proof.repositoryId, proof.sourceUrl]);
     if (artifacts.has(proof.artifactId) && artifacts.get(proof.artifactId) !== artifact) return fail();

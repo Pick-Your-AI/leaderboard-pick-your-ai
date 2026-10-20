@@ -2719,7 +2719,9 @@ export async function createPipeline(options) {
         context: scope.context ?? "event",
       },
     ).outputs;
-    let reviewedWorkstreamHelp = recognitionBindings.some((binding) => Object.hasOwn(binding, "workstreamHelp")) ? [] : null;
+    let reviewedWorkstreamHelp = recognitionBindings.some((binding) => Object.hasOwn(binding, "workstreamHelp"))
+      ? []
+      : null;
     let workstreamHelpSourceDecisions = [];
     if (recognitionBindings.length && scope.branch === undefined) {
       const combined = {
@@ -2765,8 +2767,10 @@ export async function createPipeline(options) {
         c.contracts.publicDocumentationReasons,
       );
       if (reviewedWorkstreamHelp !== null) {
-        if (!Array.isArray(recognized.reviewedWorkstreamHelp) ||
-          recognized.reviewedWorkstreamHelp.some((entry) => entry.statement.organization !== scope.organization))
+        if (
+          !Array.isArray(recognized.reviewedWorkstreamHelp) ||
+          recognized.reviewedWorkstreamHelp.some((entry) => entry.statement.organization !== scope.organization)
+        )
           fail("workstream_help_evidence_unverified");
         reviewedWorkstreamHelp = recognized.reviewedWorkstreamHelp;
         workstreamHelpSourceDecisions = recognized.workstreamHelpSourceDecisions;
@@ -3082,9 +3086,16 @@ export async function createPipeline(options) {
       evidence: publicEvidence,
       portfolioEvidence,
       pendingEvidence,
-      ...(reviewedWorkstreamHelp === null ? {} : {
-        reviewedWorkstreamHelp: selectWorkstreamHelp(reviewedWorkstreamHelp, portfolioFacts, evidence, workstreamHelpSourceDecisions),
-      }),
+      ...(reviewedWorkstreamHelp === null
+        ? {}
+        : {
+            reviewedWorkstreamHelp: selectWorkstreamHelp(
+              reviewedWorkstreamHelp,
+              portfolioFacts,
+              evidence,
+              workstreamHelpSourceDecisions,
+            ),
+          }),
       ...physical,
       ranking: selectedPolicies.map((item) => ({
         metricId: item.policy.metricId,
@@ -3328,9 +3339,11 @@ export async function createPipeline(options) {
           evidence: publicEvidence,
           portfolioEvidence,
           pendingEvidence,
-          ...(content.reviewedWorkstreamHelp === undefined ? {} : {
-            reviewedWorkstreamHelp: content.reviewedWorkstreamHelp,
-          }),
+          ...(content.reviewedWorkstreamHelp === undefined
+            ? {}
+            : {
+                reviewedWorkstreamHelp: content.reviewedWorkstreamHelp,
+              }),
           ...physical,
           ranking: content.ranking,
           rankingPresentationPolicy: content.rankingPresentationPolicy,

@@ -3,19 +3,31 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createService } from "../dist/app.js";
 import { projectWorkstreamHelp } from "../dist/workstream-help.js";
-import { encodeWorkstreamHelpStatement, workstreamHelpVersion, publicWorkstreamHelpSchema } from "@pick-your-ai/contracts";
+import {
+  encodeWorkstreamHelpStatement,
+  workstreamHelpVersion,
+  publicWorkstreamHelpSchema,
+} from "@pick-your-ai/contracts";
 import { selection } from "../../web/src/remote/client.ts";
 import { workstreamHelpPage, workstreamHelpParameters } from "../../web/src/remote/workstream-help-client.ts";
 import { publicHelpFixture, helpMergedAt, sha256 } from "../../../tests/fixtures/workstream-help.mjs";
 
-function service(t, value = publicHelpFixture(), approved = workstreamHelpVersion, achievement = "accepted-evidence/v2") {
+function service(
+  t,
+  value = publicHelpFixture(),
+  approved = workstreamHelpVersion,
+  achievement = "accepted-evidence/v2",
+) {
   const app = createService({
     approvedWorkstreamHelpRuleVersion: approved,
     approvedAchievementRuleVersion: achievement,
     cursorSecret: "fixture-workstream-help-cursor-secret-000000",
-    source: { read: async (scope) => ({
-      ...structuredClone(value), selected: { ...structuredClone(value.selected), scope },
-    }) },
+    source: {
+      read: async (scope) => ({
+        ...structuredClone(value),
+        selected: { ...structuredClone(value.selected), scope },
+      }),
+    },
   });
   t.after(() => app.close());
   return { app, value };
@@ -26,10 +38,13 @@ async function read(app, extra = {}, actor = "101") {
   return { response, data: response.json(), selected: selection("?" + params) };
 }
 const ok = (result) => assert.equal(result.response.statusCode, 200, result.response.body);
-const copies = (value, id) => [
-  ...value.selected.evidence, ...value.selected.portfolioEvidence,
-].filter((entry) => entry.contribution.contributionId === id);
-const rehash = (help) => { help.statementHash = sha256(encodeWorkstreamHelpStatement(help.statement)); };
+const copies = (value, id) =>
+  [...value.selected.evidence, ...value.selected.portfolioEvidence].filter(
+    (entry) => entry.contribution.contributionId === id,
+  );
+const rehash = (help) => {
+  help.statementHash = sha256(encodeWorkstreamHelpStatement(help.statement));
+};
 
 test("reviewed help uses exact accepted proof and independent dates with partial historical coverage", async (t) => {
   const { app } = service(t);
@@ -47,7 +62,10 @@ test("reviewed help uses exact accepted proof and independent dates with partial
     const evidence = await app.inject("/api/v1/evidence/" + entry.proof.contributionId + "?snapshot=fixture-help");
     assert.equal(evidence.statusCode, 200, evidence.body);
   }
-  assert.doesNotMatch(result.response.body, /private-help|requestVersion|decisionId|sourceAcceptance|sourceUseReview|validUntil/);
+  assert.doesNotMatch(
+    result.response.body,
+    /private-help|requestVersion|decisionId|sourceAcceptance|sourceUseReview|validUntil/,
+  );
   assert.match(result.response.headers["cache-control"], /no-store/);
   assert.equal(workstreamHelpPage(result.data, result.selected, "101").recognitions.length, 3);
   const filtered = await read(app, { category: "documentation" });
@@ -101,7 +119,10 @@ test("current privacy, exact contribution retirement and whole snapshot revocati
   result = await read(app, { limit: "20" });
   ok(result);
   assert.equal(result.data.totalRecognitions, 2);
-  assert.notEqual((await app.inject("/api/v1/evidence/" + proof.contributionId + "?snapshot=fixture-help")).statusCode, 200);
+  assert.notEqual(
+    (await app.inject("/api/v1/evidence/" + proof.contributionId + "?snapshot=fixture-help")).statusCode,
+    200,
+  );
   value.controls.suppressedActorIds = ["101"];
   assert.equal((await read(app)).response.statusCode, 404);
   value.controls.suppressedActorIds = [];
@@ -113,9 +134,15 @@ test("current privacy, exact contribution retirement and whole snapshot revocati
 
 test("source corrections and acceptance withdrawal never transfer an earlier help statement", async (t) => {
   for (const change of [
-    (entry) => { entry.sourceRevision = "corrected-observation"; },
-    (entry) => { entry.contribution.roles = ["coauthor"]; },
-    (entry) => { entry.artifact.publicUrl += "9"; },
+    (entry) => {
+      entry.sourceRevision = "corrected-observation";
+    },
+    (entry) => {
+      entry.contribution.roles = ["coauthor"];
+    },
+    (entry) => {
+      entry.artifact.publicUrl += "9";
+    },
     (entry) => {
       entry.occurredAt = "2026-10-07T10:00:00.0001Z";
       entry.evidenceMetadata.sourceOccurredAt = entry.occurredAt;
@@ -158,13 +185,16 @@ test("disabled categories and positively automated actors cannot retain help cre
 test("source occurrence keeps its half-open period independently of acceptance and review", async (t) => {
   const { app } = service(t);
   const included = await read(app, {
-    start: helpMergedAt, end: "2026-10-07T10:00:00.0001Z", limit: "20",
+    start: helpMergedAt,
+    end: "2026-10-07T10:00:00.0001Z",
+    limit: "20",
   });
   ok(included);
   assert.equal(included.data.totalRecognitions, 3);
   workstreamHelpPage(included.data, included.selected, "101");
   const excluded = await read(app, {
-    start: "2026-10-07T09:59:59.9999Z", end: helpMergedAt,
+    start: "2026-10-07T09:59:59.9999Z",
+    end: helpMergedAt,
   });
   ok(excluded);
   assert.equal(excluded.data.totalRecognitions, 0);
@@ -180,11 +210,18 @@ test("paging binds current projected relationships, full selection and current c
   ok(second);
   assert.equal(second.data.recognitions.length, 1);
   assert.equal(second.data.nextCursor, null);
-  assert.equal(new Set([...first.data.recognitions, ...second.data.recognitions]
-    .map((entry) => entry.help.contributionId)).size, 3);
+  assert.equal(
+    new Set([...first.data.recognitions, ...second.data.recognitions].map((entry) => entry.help.contributionId)).size,
+    3,
+  );
   for (const changed of [
-    { category: "maintenance" }, { limit: "1" }, { repository: "2" }, { role: "author" }, { actors: "user" },
-  ]) assert.equal((await read(app, { cursor: first.data.nextCursor, ...changed })).response.statusCode, 400);
+    { category: "maintenance" },
+    { limit: "1" },
+    { repository: "2" },
+    { role: "author" },
+    { actors: "user" },
+  ])
+    assert.equal((await read(app, { cursor: first.data.nextCursor, ...changed })).response.statusCode, 400);
   value.controls.suppressedArtifactIds = [first.data.recognitions[0].proof.artifactId];
   const stale = await read(app, { cursor: first.data.nextCursor });
   assert.equal(stale.response.statusCode, 400);
@@ -197,98 +234,165 @@ test("paging binds current projected relationships, full selection and current c
   assert.equal(retired.response.statusCode, 410);
 });
 
-test("ambiguous identities, stale accepted clocks and changed immutable bytes fail closed before public output", async (t) => {
-  for (const change of [
-    (value) => { value.selected.reviewedWorkstreamHelp.push(structuredClone(value.selected.reviewedWorkstreamHelp[0])); },
-    (value) => { value.selected.reviewedWorkstreamHelp = Array(1001).fill(value.selected.reviewedWorkstreamHelp[0]); },
-    (value) => { value.selected.reviewedWorkstreamHelp[0].statementHash = "a".repeat(64); },
-    (value) => { value.selected.reviewedWorkstreamHelp[0].privateDecision = "PRIVATE"; },
-    (value) => {
-      const help = value.selected.reviewedWorkstreamHelp[0];
-      for (const entry of copies(value, help.contributionId)) delete entry.evidenceMetadata;
-    },
-    (value) => {
-      value.selected.reviewedWorkstreamHelp[0].acceptedAt = "2026-10-09T09:00:00.000Z";
-    },
-    (value) => {
-      value.selected.reviewedWorkstreamHelp[0].reviewedAt = "2026-10-10T10:00:00.0001Z";
-    },
-    (value) => {
-      value.selected.evidence[0].sourceRevision = "contradictory-route-revision";
-    },
-    (value) => {
-      const pending = structuredClone(value.selected.portfolioEvidence[0]);
-      pending.activityState = "pending";
-      pending.evidenceMetadata.activityState = "pending";
-      pending.evidenceMetadata.acceptedAt = null;
-      pending.evidenceMetadata.sourceAction = "pull_request_merged";
-      value.selected.pendingEvidence = [pending];
-    },
-    (value) => {
-      const help = value.selected.reviewedWorkstreamHelp[1];
-      help.statement.from.label = "Different Platform";
-      rehash(help);
-    },
-    (value) => {
-      const prior = value.selected.reviewedWorkstreamHelp[0], help = value.selected.reviewedWorkstreamHelp[1];
-      help.statementUrl = prior.statementUrl;
-      help.statementRevision = prior.statementRevision;
-    },
-    (value) => {
-      const actor = structuredClone(value.selected.actors.find((entry) => entry.actorId === "101"));
-      actor.actorId = "different-public-id";
-      value.selected.actors.push(actor);
-    },
-  ]) {
-    const { app, value } = service(t);
-    change(value);
-    const result = await read(app);
-    assert.equal(result.response.statusCode, 503, result.response.body);
-    assert.match(result.response.headers["cache-control"], /no-store/);
-    assert.equal(Object.hasOwn(result.data, "recognitions"), false);
-  }
-});
+test(
+  "ambiguous identities, stale accepted clocks and changed immutable bytes fail closed before public output",
+  async (t) => {
+    for (const change of [
+      (value) => {
+        value.selected.reviewedWorkstreamHelp.push(structuredClone(value.selected.reviewedWorkstreamHelp[0]));
+      },
+      (value) => {
+        value.selected.reviewedWorkstreamHelp = Array(1001).fill(value.selected.reviewedWorkstreamHelp[0]);
+      },
+      (value) => {
+        value.selected.reviewedWorkstreamHelp[0].statementHash = "a".repeat(64);
+      },
+      (value) => {
+        value.selected.reviewedWorkstreamHelp[0].privateDecision = "PRIVATE";
+      },
+      (value) => {
+        const help = value.selected.reviewedWorkstreamHelp[0];
+        for (const entry of copies(value, help.contributionId)) delete entry.evidenceMetadata;
+      },
+      (value) => {
+        value.selected.reviewedWorkstreamHelp[0].acceptedAt = "2026-10-09T09:00:00.000Z";
+      },
+      (value) => {
+        value.selected.reviewedWorkstreamHelp[0].reviewedAt = "2026-10-10T10:00:00.0001Z";
+      },
+      (value) => {
+        value.selected.evidence[0].sourceRevision = "contradictory-route-revision";
+      },
+      (value) => {
+        const pending = structuredClone(value.selected.portfolioEvidence[0]);
+        pending.activityState = "pending";
+        pending.evidenceMetadata.activityState = "pending";
+        pending.evidenceMetadata.acceptedAt = null;
+        pending.evidenceMetadata.sourceAction = "pull_request_merged";
+        value.selected.pendingEvidence = [pending];
+      },
+      (value) => {
+        const help = value.selected.reviewedWorkstreamHelp[1];
+        help.statement.from.label = "Different Platform";
+        rehash(help);
+      },
+      (value) => {
+        const prior = value.selected.reviewedWorkstreamHelp[0],
+          help = value.selected.reviewedWorkstreamHelp[1];
+        help.statementUrl = prior.statementUrl;
+        help.statementRevision = prior.statementRevision;
+      },
+      (value) => {
+        const actor = structuredClone(value.selected.actors.find((entry) => entry.actorId === "101"));
+        actor.actorId = "different-public-id";
+        value.selected.actors.push(actor);
+      },
+    ]) {
+      const { app, value } = service(t);
+      change(value);
+      const result = await read(app);
+      assert.equal(result.response.statusCode, 503, result.response.body);
+      assert.match(result.response.headers["cache-control"], /no-store/);
+      assert.equal(Object.hasOwn(result.data, "recognitions"), false);
+    }
+  },
+);
 
-test("the strict client rejects wrong identity, scope, clocks, roles, private fields and malformed pages", async (t) => {
-  const { app } = service(t);
-  const result = await read(app, { limit: "20", category: "maintenance", repository: "2" });
-  ok(result);
-  for (const change of [
-    (x) => { x.actorId = "303"; },
-    (x) => { x.ruleVersion = [workstreamHelpVersion]; },
-    (x) => { x.recognitions[0].proof.actorId = "303"; },
-    (x) => { x.recognitions[0].proof.roles = ["coauthor"]; },
-    (x) => { x.recognitions[0].proof.activityState = "observed"; },
-    (x) => { x.recognitions[0].proof.metricIds = ["documentation"]; },
-    (x) => { x.recognitions[0].help.statement.organization = "Other"; },
-    (x) => { x.recognitions[0].help.statement.from.id = x.recognitions[0].help.statement.to.id; },
-    (x) => { x.recognitions[0].help.statementUrl = x.recognitions[0].help.statementUrl.replace("b".repeat(40), "main"); },
-    (x) => { x.recognitions[0].help.statement.sourceUrl += "\n"; },
-    (x) => { x.recognitions[0].help.statement.sourceUrl += "?"; },
-    (x) => { x.recognitions[0].help.statement.sourceUrl += "#"; },
-    (x) => { x.recognitions[0].help.statementUrl += "?"; },
-    (x) => { x.recognitions[0].help.statementUrl += "#"; },
-    (x) => { x.recognitions[0].help.contributionId = ".."; },
-    (x) => { x.recognitions[0].help.reviewedAt = "2026-10-10T10:00:00.0001Z"; },
-    (x) => { x.recognitions[0].help.acceptedAt = "2026-10-09T10:00:01.000Z"; },
-    (x) => { x.recognitions[0].help.sourceAcceptance = "PRIVATE"; },
-    (x) => { x.recognitions.push(x.recognitions[0]); },
-    (x) => { x.pageSize = 1; },
-    (x) => { x.totalRecognitions = 1; },
-    (x) => { x.nextCursor = "page.signature\n"; },
-    (x) => { x.recognitions[1].help.statement.from.label = "Contradictory name"; },
-    (x) => { x.recognitions[1].help.statementUrl = x.recognitions[0].help.statementUrl; },
-  ]) {
-    const changed = structuredClone(result.data);
-    change(changed);
-    assert.throws(() => workstreamHelpPage(changed, result.selected, "101"));
-  }
-  assert.throws(() => workstreamHelpPage(result.data, selection("?snapshot=fixture-help&repository=other&limit=20"), "101"));
-  assert.throws(() => workstreamHelpPage(result.data, { ...result.selected, actors: "automation" }, "101"));
-});
+test(
+  "the strict client rejects wrong identity, scope, clocks, roles, private fields and malformed pages",
+  async (t) => {
+    const { app } = service(t);
+    const result = await read(app, { limit: "20", category: "maintenance", repository: "2" });
+    ok(result);
+    for (const change of [
+      (x) => {
+        x.actorId = "303";
+      },
+      (x) => {
+        x.ruleVersion = [workstreamHelpVersion];
+      },
+      (x) => {
+        x.recognitions[0].proof.actorId = "303";
+      },
+      (x) => {
+        x.recognitions[0].proof.roles = ["coauthor"];
+      },
+      (x) => {
+        x.recognitions[0].proof.activityState = "observed";
+      },
+      (x) => {
+        x.recognitions[0].proof.metricIds = ["documentation"];
+      },
+      (x) => {
+        x.recognitions[0].help.statement.organization = "Other";
+      },
+      (x) => {
+        x.recognitions[0].help.statement.from.id = x.recognitions[0].help.statement.to.id;
+      },
+      (x) => {
+        x.recognitions[0].help.statementUrl = x.recognitions[0].help.statementUrl.replace("b".repeat(40), "main");
+      },
+      (x) => {
+        x.recognitions[0].help.statement.sourceUrl += "\n";
+      },
+      (x) => {
+        x.recognitions[0].help.statement.sourceUrl += "?";
+      },
+      (x) => {
+        x.recognitions[0].help.statement.sourceUrl += "#";
+      },
+      (x) => {
+        x.recognitions[0].help.statementUrl += "?";
+      },
+      (x) => {
+        x.recognitions[0].help.statementUrl += "#";
+      },
+      (x) => {
+        x.recognitions[0].help.contributionId = "..";
+      },
+      (x) => {
+        x.recognitions[0].help.reviewedAt = "2026-10-10T10:00:00.0001Z";
+      },
+      (x) => {
+        x.recognitions[0].help.acceptedAt = "2026-10-09T10:00:01.000Z";
+      },
+      (x) => {
+        x.recognitions[0].help.sourceAcceptance = "PRIVATE";
+      },
+      (x) => {
+        x.recognitions.push(x.recognitions[0]);
+      },
+      (x) => {
+        x.pageSize = 1;
+      },
+      (x) => {
+        x.totalRecognitions = 1;
+      },
+      (x) => {
+        x.nextCursor = "page.signature\n";
+      },
+      (x) => {
+        x.recognitions[1].help.statement.from.label = "Contradictory name";
+      },
+      (x) => {
+        x.recognitions[1].help.statementUrl = x.recognitions[0].help.statementUrl;
+      },
+    ]) {
+      const changed = structuredClone(result.data);
+      change(changed);
+      assert.throws(() => workstreamHelpPage(changed, result.selected, "101"));
+    }
+    assert.throws(() =>
+      workstreamHelpPage(result.data, selection("?snapshot=fixture-help&repository=other&limit=20"), "101"),
+    );
+    assert.throws(() => workstreamHelpPage(result.data, { ...result.selected, actors: "automation" }, "101"));
+  },
+);
 
 test("help paging never borrows timeline, card or milestone cursors", () => {
-  const selected = selection("?snapshot=fixture-help&repository=2&category=maintenance&metric=pr_merged&search=101&cursor=timeline.signature&limit=99");
+  const selected = selection(
+    "?snapshot=fixture-help&repository=2&category=maintenance&metric=pr_merged&search=101&cursor=timeline.signature&limit=99",
+  );
   const params = workstreamHelpParameters(selected, "fixture-help");
   assert.equal(params.get("snapshot"), "fixture-help");
   assert.equal(params.get("repository"), "2");
@@ -302,18 +406,30 @@ test("the optional provider collection rejects getters and over-budget data befo
   const value = publicHelpFixture();
   let invoked = false;
   Object.defineProperty(value.selected, "reviewedWorkstreamHelp", {
-    enumerable: true, get() { invoked = true; return []; },
+    enumerable: true,
+    get() {
+      invoked = true;
+      return [];
+    },
   });
   assert.throws(() => projectWorkstreamHelp(value.selected, value.selected.portfolioEvidence, value.selected.scope));
   assert.equal(invoked, false);
   const proxy = publicHelpFixture();
-  proxy.selected.reviewedWorkstreamHelp = new Proxy([], { get() { throw new Error("trap invoked"); } });
-  assert.throws(() => projectWorkstreamHelp(proxy.selected, proxy.selected.portfolioEvidence, proxy.selected.scope),
-    /workstream_help_evidence_conflict/);
+  proxy.selected.reviewedWorkstreamHelp = new Proxy([], {
+    get() {
+      throw new Error("trap invoked");
+    },
+  });
+  assert.throws(
+    () => projectWorkstreamHelp(proxy.selected, proxy.selected.portfolioEvidence, proxy.selected.scope),
+    /workstream_help_evidence_conflict/,
+  );
   const excessive = publicHelpFixture();
   excessive.selected.reviewedWorkstreamHelp[0].unused = "x".repeat(8_000_001);
-  assert.throws(() => projectWorkstreamHelp(excessive.selected, excessive.selected.portfolioEvidence, excessive.selected.scope),
-    /workstream_help_evidence_conflict/);
+  assert.throws(
+    () => projectWorkstreamHelp(excessive.selected, excessive.selected.portfolioEvidence, excessive.selected.scope),
+    /workstream_help_evidence_conflict/,
+  );
 });
 
 for (const [name, make, asKey] of [
@@ -336,8 +452,10 @@ for (const [name, make, asKey] of [
       parses++;
       throw new Error("schema admission reached");
     });
-    assert.throws(() => projectWorkstreamHelp(value.selected, value.selected.portfolioEvidence, value.selected.scope),
-      /workstream_help_evidence_conflict/);
+    assert.throws(
+      () => projectWorkstreamHelp(value.selected, value.selected.portfolioEvidence, value.selected.scope),
+      /workstream_help_evidence_conflict/,
+    );
     assert.equal(parses, 0);
   });
 }
@@ -362,7 +480,9 @@ test("the public provider bounds property count before descriptor copies or sche
     parses++;
     throw new Error("schema admission reached");
   });
-  assert.throws(() => projectWorkstreamHelp(value.selected, value.selected.portfolioEvidence, value.selected.scope),
-    /workstream_help_evidence_conflict/);
+  assert.throws(
+    () => projectWorkstreamHelp(value.selected, value.selected.portfolioEvidence, value.selected.scope),
+    /workstream_help_evidence_conflict/,
+  );
   assert.equal(parses, 0);
 });

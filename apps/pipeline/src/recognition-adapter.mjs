@@ -151,7 +151,10 @@ export function materializeRecognition(
   publicReasons = () => [],
 ) {
   let helpBindings = validateWorkstreamHelpBindings(bindings);
-  if (helpBindings.size || bindings.some((binding) => ["issue_ordering", "helpful_feedback"].includes(binding.metricId))) {
+  if (
+    helpBindings.size ||
+    bindings.some((binding) => ["issue_ordering", "helpful_feedback"].includes(binding.metricId))
+  ) {
     // Freeze the invocation before any host receipt callback can change a later
     // source, claim, scope enrollment or policy used by this same evaluation.
     input = structuredClone(input);
@@ -470,7 +473,14 @@ export function materializeRecognition(
     });
     if (documentationPurpose) domain.publicReasonCodes.push("documentation_purpose:release_notes");
     const workstreamHelp = qualifyWorkstreamHelp({
-      input, state, request, decision, binding, candidate: candidates[0], acceptedAt, cutoff,
+      input,
+      state,
+      request,
+      decision,
+      binding,
+      candidate: candidates[0],
+      acceptedAt,
+      cutoff,
       configured: helpBindings.get(binding),
     });
     verifyWorkstreamHelpConsistency(workstreamHelp, workstreamHelpUnits);
@@ -555,9 +565,7 @@ export function materializeRecognition(
       }
     }
     if (workstreamHelp && workstreamHelp.sourceAcceptance.decisionId === decision.id)
-      bindWorkstreamHelp(
-        workstreamHelp, output.facts.slice(previousFacts), output.evidence.slice(previousEvidence),
-      );
+      bindWorkstreamHelp(workstreamHelp, output.facts.slice(previousFacts), output.evidence.slice(previousEvidence));
   }
   for (const { feedback, decision, binding, request, target, acceptedAt } of feedbackJobs) {
     output = invokeReceipt(
@@ -607,7 +615,9 @@ export function materializeRecognition(
     ];
   if (helpBindings.size) {
     const help = materializedWorkstreamHelp(
-      workstreamHelpJobs, output.facts.slice(input.facts.length), output.evidence.slice(input.evidence.length),
+      workstreamHelpJobs,
+      output.facts.slice(input.facts.length),
+      output.evidence.slice(input.evidence.length),
     );
     output.reviewedWorkstreamHelp = help.records;
     // Private, invocation-local dependencies; the runtime never publishes these identifiers.

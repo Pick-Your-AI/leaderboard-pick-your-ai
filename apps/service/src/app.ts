@@ -1045,8 +1045,15 @@ export function createService(options: ServiceOptions = {}) {
   app.get<{ Params: { actorId: string } }>("/api/v1/contributors/:actorId/workstream-help", async (request, reply) => {
     const q = query(request);
     const actorId = request.params.actorId;
-    if (!identifier.test(actorId) || actorId === "." || actorId === ".." ||
-      q.metric || q.search || q.format !== "json") fail(400, "unsupported_filter");
+    if (
+      !identifier.test(actorId) ||
+      actorId === "." ||
+      actorId === ".." ||
+      q.metric ||
+      q.search ||
+      q.format !== "json"
+    )
+      fail(400, "unsupported_filter");
     if (options.approvedWorkstreamHelpRuleVersion !== workstreamHelpVersion)
       fail(503, "workstream_help_policy_unapproved");
     const cursor = q.cursor ? decodeCursor(q.cursor) : null;
@@ -1057,7 +1064,13 @@ export function createService(options: ServiceOptions = {}) {
     const digest = createHash("sha256");
     for (const entry of recognitions) digest.update(JSON.stringify(entry)).update("\n");
     const binding = JSON.stringify([
-      workstreamHelpVersion, actorId, cursorScope(q.scope), q.category, q.limit, q.actors, digest.digest("hex"),
+      workstreamHelpVersion,
+      actorId,
+      cursorScope(q.scope),
+      q.category,
+      q.limit,
+      q.actors,
+      digest.digest("hex"),
     ]);
     boundCursor(q, binding);
     const { entries, nextCursor } = page(recognitions, q, read, cursor, binding, 1_000_000);

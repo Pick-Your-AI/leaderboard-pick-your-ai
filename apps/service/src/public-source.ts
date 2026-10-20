@@ -216,9 +216,13 @@ export function filterPublicActors(read: PublicRead, filter: ActorFilter): Publi
       ...(read.selected.portfolioEvidence === undefined
         ? {}
         : { portfolioEvidence: read.selected.portfolioEvidence.filter(included) }),
-      ...(read.selected.reviewedWorkstreamHelp === undefined ? {} : {
-        reviewedWorkstreamHelp: read.selected.reviewedWorkstreamHelp.filter((entry) => ids.has(entry.statement.actorId)),
-      }),
+      ...(read.selected.reviewedWorkstreamHelp === undefined
+        ? {}
+        : {
+            reviewedWorkstreamHelp: read.selected.reviewedWorkstreamHelp.filter((entry) =>
+              ids.has(entry.statement.actorId),
+            ),
+          }),
       ...(read.selected.pendingEvidence === undefined
         ? {}
         : { pendingEvidence: read.selected.pendingEvidence.filter(included) }),

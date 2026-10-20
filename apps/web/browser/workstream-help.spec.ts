@@ -6,17 +6,23 @@ const profile = "/contributors/101?ui=api&snapshot=fixture-help&repository=2";
 
 async function service(page: Page, count = 3) {
   const { createService } = await import(new URL("../../service/dist/app.js", import.meta.url).href);
-  const { publicHelpFixture } = await import(new URL("../../../tests/fixtures/workstream-help.mjs", import.meta.url).href);
+  const { publicHelpFixture } = await import(
+    new URL("../../../tests/fixtures/workstream-help.mjs", import.meta.url).href
+  );
   const current = publicHelpFixture(count);
   const requests: { category: string | null; cursor: string | null; status: number; body: string }[] = [];
-  let paused: { category: string; wait: Promise<void>; release: () => void; seen: number; finished: number } | null = null;
+  let paused: { category: string; wait: Promise<void>; release: () => void; seen: number; finished: number } | null =
+    null;
   const app = createService({
     approvedWorkstreamHelpRuleVersion: "reviewed-cross-workstream-help/v1",
     approvedAchievementRuleVersion: "accepted-evidence/v2",
     cursorSecret: "fixture-browser-help-cursor-secret-000000",
-    source: { read: async (scope: unknown) => ({
-      ...structuredClone(current), selected: { ...structuredClone(current.selected), scope },
-    }) },
+    source: {
+      read: async (scope: unknown) => ({
+        ...structuredClone(current),
+        selected: { ...structuredClone(current.selected), scope },
+      }),
+    },
   });
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
@@ -28,17 +34,24 @@ async function service(page: Page, count = 3) {
       await hold.wait;
     }
     await route.fulfill({ status: response.statusCode, headers: response.headers, body: response.body });
-    if (help) requests.push({
-      category: url.searchParams.get("category"), cursor: url.searchParams.get("cursor"),
-      status: response.statusCode, body: response.body,
-    });
+    if (help)
+      requests.push({
+        category: url.searchParams.get("category"),
+        cursor: url.searchParams.get("cursor"),
+        status: response.statusCode,
+        body: response.body,
+      });
     if (help && hold?.category === url.searchParams.get("category")) hold.finished++;
   });
   return {
-    current, requests, close: () => app.close(),
+    current,
+    requests,
+    close: () => app.close(),
     pause(category: string) {
       let release!: () => void;
-      const wait = new Promise<void>((resolve) => { release = resolve; });
+      const wait = new Promise<void>((resolve) => {
+        release = resolve;
+      });
       paused = { category, wait, release, seen: 0, finished: 0 };
       return release;
     },
@@ -47,7 +60,9 @@ async function service(page: Page, count = 3) {
   };
 }
 
-test("real reviewed-help HTTP pages retain proof scope, keyboard focus and accessible narrow presentation", async ({ page }) => {
+test("real reviewed-help HTTP pages retain proof scope, keyboard focus and accessible narrow presentation", async ({
+  page,
+}) => {
   const api = await service(page, 21);
   try {
     await page.setViewportSize({ width: 375, height: 812 });
@@ -81,7 +96,9 @@ test("real reviewed-help HTTP pages retain proof scope, keyboard focus and acces
     await expect(page.getByRole("heading", { name: "Contribution evidence", exact: true })).toBeVisible();
     expect(new URL(page.url()).searchParams.get("snapshot")).toBe("fixture-help");
     expect(new URL(page.url()).searchParams.get("repository")).toBe("2");
-  } finally { await api.close(); }
+  } finally {
+    await api.close();
+  }
 });
 
 test("a current correction invalidates the old help page and restart reads the corrected set", async ({ page }) => {
@@ -105,11 +122,17 @@ test("a current correction invalidates the old help page and restart reads the c
     expect(api.current.controls.version).toBe("fixture-help-controls-1");
     expect(api.requests.some((entry) => entry.status === 400)).toBe(true);
     const last = JSON.parse(api.requests.at(-1)!.body);
-    expect(last.recognitions.some((entry: { proof: { artifactId: string } }) => entry.proof.artifactId === first)).toBe(false);
-  } finally { await api.close(); }
+    expect(
+      last.recognitions.some((entry: { proof: { artifactId: string } }) => entry.proof.artifactId === first),
+    ).toBe(false);
+  } finally {
+    await api.close();
+  }
 });
 
-test("same-selection refresh preserves a focused proof then current withdrawal clears pinned help", async ({ page }) => {
+test("same-selection refresh preserves a focused proof then current withdrawal clears pinned help", async ({
+  page,
+}) => {
   const api = await service(page);
   try {
     await page.clock.install();
@@ -122,14 +145,18 @@ test("same-selection refresh preserves a focused proof then current withdrawal c
     await page.clock.fastForward(30_001);
     await expect.poll(() => api.requests.length).toBeGreaterThan(before);
     await expect(proof).toBeFocused();
-    api.current.controls.suppressedArtifactIds = [JSON.parse(api.requests.at(-1)!.body).recognitions[0].proof.artifactId];
+    api.current.controls.suppressedArtifactIds = [
+      JSON.parse(api.requests.at(-1)!.body).recognitions[0].proof.artifactId,
+    ];
     await page.clock.fastForward(30_001);
     await expect(region.getByText(/2 recorded events in this selection. Page 1./)).toBeVisible();
     api.current.controls.revokedSnapshotIds = ["fixture-help"];
     await page.clock.fastForward(30_001);
     await expect(page.getByRole("link", { name: "Read the immutable reviewed help statement" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Qualifying public artifact" })).toHaveCount(0);
-  } finally { await api.close(); }
+  } finally {
+    await api.close();
+  }
 });
 
 test("an obsolete category response cannot restore help after the selection changes", async ({ page }) => {
@@ -152,5 +179,8 @@ test("an obsolete category response cannot restore help after the selection chan
     expect(older?.status).toBe(200);
     expect(JSON.parse(older!.body).recognitions).toHaveLength(3);
     expect(new URL(page.url()).searchParams.get("category")).toBe("documentation");
-  } finally { release(); await api.close(); }
+  } finally {
+    release();
+    await api.close();
+  }
 });
