@@ -36,6 +36,13 @@ an 8 KiB candidate editor limit, and uses a bounded response reader. Absent host
 configuration or expired inputs produce an explicit unavailable state without
 blocking the rest of administration or substituting synthetic data.
 
+Retained actor and fact identities are nonblank strings without a per-identity
+length cap in the metric engine. The client preserves their exact bytes in audit
+entries, changed contributors, included/excluded facts and their causes, including
+when a saved comparison is reopened. It does not trim these identities or apply
+the separate 200-character label limit to them. Existing input/result byte budgets,
+response limits, contributor/fact counts and current privacy redaction still apply.
+
 ## Verification and remaining acceptance
 
 The client regression suite uses the real private SQLite comparison store and

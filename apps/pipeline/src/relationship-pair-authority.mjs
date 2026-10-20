@@ -269,7 +269,7 @@ async function retainedEntries(tx, options) {
   const rows = (
     await tx.query(
       pairReadQuery(
-        `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document AS source_document,
+        `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document - 'pullRequestDecisionHistory' AS source_document,
        f.document->>'evidence' AS source_evidence,f.observed_at,f.first_run_id
      FROM leaderboard_pipeline.normalizations n JOIN leaderboard_ingestion.source_facts f USING(fact_key)
      WHERE f.repository_id=ANY($1::bigint[]) AND (n.policy_signature=ANY($2::text[])
@@ -587,7 +587,7 @@ export async function readCapturedRelationshipPairAuthority(tx, value, options) 
   const rows = (
     await tx.query(
       pairReadQuery(
-        `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document AS source_document,
+        `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document - 'pullRequestDecisionHistory' AS source_document,
        f.document->>'evidence' AS source_evidence,f.observed_at,f.first_run_id
      FROM leaderboard_pipeline.normalizations n JOIN leaderboard_ingestion.source_facts f USING(fact_key)
      JOIN unnest($1::text[],$2::text[]) AS bound(fact_key,policy_signature) USING(fact_key,policy_signature)
