@@ -1,4 +1,5 @@
 import { createOperationsManager } from "./operations.mjs";
+import { safePublicGithubUrl } from "@pick-your-ai/contracts";
 import { bindOrderingReview } from "@pick-your-ai/github";
 import { createServer } from "node:http";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -184,7 +185,12 @@ export function createControlsServer({
     state.profiles[session.actorId] = {
       ...previous,
       bio: input.bio,
-      highlights: input.highlights.map(locator),
+      highlights: input.highlights.map((value) => {
+        requireThat(typeof value === "string");
+        const link = safePublicGithubUrl(value);
+        requireThat(link !== null, 400, "Unsupported public profile link");
+        return link;
+      }),
       public: input.public,
     };
   }

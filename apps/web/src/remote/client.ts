@@ -6,6 +6,9 @@ import { responseScope, scopeExportVersion, scopeReadVersion, selectionScope } f
 import { onlyExportKeys, parseExportJSON } from "./export-json.ts";
 import {
   canonicalPublicScope,
+  publicProfilePresentationSchema,
+  publicProfilePresentationMatches,
+  type PublicProfilePresentation,
   publicScopeParameters,
   supportsPullRequestMergeTarget,
   type PublicScope,
@@ -267,7 +270,13 @@ export function uiHref(
   params.set("ui", "api");
   if (rankComparisonPath(path)) comparisonParameters(params, value);
   if (value.timeZone && value.timeZone !== defaultDisplayTimeZone) params.set("tz", value.timeZone);
-  if ((path.startsWith("/contributors") || path === "/activity" || path.startsWith("/activity/")) && value.category)
+  if (
+    (path.startsWith("/contributors") ||
+      path.startsWith("/contributions/") ||
+      path === "/activity" ||
+      path.startsWith("/activity/")) &&
+    value.category
+  )
     params.set("category", value.category);
   if (path === "/contributors" && value.search) params.set("search", value.search);
   if (path === "/leaderboards" || path === "/methodology" || path === "/methodology/changes") {
@@ -290,8 +299,8 @@ function configuredServiceBase(raw: string): URL {
   if (
     url.username ||
     url.password ||
-    url.search ||
-    url.hash ||
+    url.href.includes("?") ||
+    url.href.includes("#") ||
     (url.protocol !== "https:" && url.origin !== window.location.origin) ||
     !/^\/(?!\/)[A-Za-z0-9/_-]+$/.test(url.pathname)
   )
@@ -1336,6 +1345,7 @@ export function portfolioParameters(value: Selection, directory = false): URLSea
   return params;
 }
 export interface Profile extends Metadata {
+  presentation: PublicProfilePresentation | null;
   actorId: string;
   actor: Actor;
   results: MetricResult[];
@@ -1394,10 +1404,15 @@ export function profile(value: unknown, selected: Selection): Profile {
       }))
   )
     throw new ReadFailure(502, "invalid_participation_response");
+  const presentation = Object.hasOwn(data, "presentation")
+    ? publicProfilePresentationSchema.nullable().safeParse(data.presentation)
+    : { success: true as const, data: null };
+  if (!presentation.success) throw new ReadFailure(502, "invalid_profile_presentation");
   const parsed = {
     ...meta,
     actorId: identity(data.actorId),
     actor: selectedActor(data.actor, selected),
+    presentation: presentation.data,
     results,
     activitySummary: participation?.success ? participation.data : null,
     diagnostics: diagnostics(data.diagnostics),
@@ -1411,6 +1426,11 @@ export function profile(value: unknown, selected: Selection): Profile {
     categories: categoryTotals(data.categories ?? []),
     evidenceCount: integer(data.evidenceCount),
   };
+  if (
+    parsed.presentation !== null &&
+    !publicProfilePresentationMatches(parsed.presentation, parsed.actorId, parsed.actor)
+  )
+    throw new ReadFailure(502, "api_actor_mismatch");
   if (parsed.timeline.some((entry) => entry.contribution.actorId !== parsed.actorId))
     throw new ReadFailure(502, "api_actor_mismatch");
   const category = selected.category;

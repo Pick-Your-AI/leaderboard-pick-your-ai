@@ -45,6 +45,7 @@ export function milestonePage(
       ...(requested.context !== undefined ? { context: requested.context } : {}),
       ...(requested.projects !== undefined ? { projects: requested.projects } : {}),
       ...(requested.roles !== undefined ? { roles: requested.roles } : {}),
+      ...(requested.branch !== undefined ? { branch: requested.branch } : {}),
     });
     if (publicScopeKey(scope) !== publicScopeKey(expected)) fail();
   } catch {

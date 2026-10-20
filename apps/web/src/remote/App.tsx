@@ -1,6 +1,6 @@
 import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
 import { FirstContributionsEntry } from "./OverviewDiscovery.tsx";
-import { PublicScopeControls, PublicScopeProvenance } from "./PublicScope.tsx";
+import { PublicScopeControls, PublicScopeProvenance, RequestedScope } from "./PublicScope.tsx";
 import { Programs } from "./Programs.tsx";
 import {
   programDirectoryAsset,
@@ -14,7 +14,7 @@ import { ContributorParticipation } from "./Participation.tsx";
 import { ContributorOrganizationHistory } from "./ParticipationHistory.tsx";
 import { EvidenceDrawer, EvidenceProof, Receipt } from "./Evidence.tsx";
 import { isProofTransition, proofHref, readProof, withoutProof } from "./proof.ts";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   actorFilterLabels,
   publicScopeKey,
@@ -41,6 +41,7 @@ import {
 } from "./Overview.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
+import { ContributionPolicies } from "./ContributionPolicies.tsx";
 import { ProjectGroups } from "./ProjectGroups.tsx";
 import { RankComparisonControls } from "./RankComparison.tsx";
 import { BoardTable } from "./BoardTable.tsx";
@@ -91,6 +92,7 @@ import {
 } from "./client.ts";
 
 type Data =
+  | { kind: "overview" }
   | { kind: "catalog" }
   | { kind: "programs"; directory: ProgramDirectory; program: ProgramRecord | null }
   | { kind: "method"; metricId: string }
@@ -454,6 +456,10 @@ function CategoryCounts({ categories, registry }: { categories: CategoryTotal[];
   );
 }
 
+// A completed snapshot batch owns one polite summary before another can advance.
+// This interval is an interface policy, not a source or privacy-read throttle.
+const applicationIntervalMs = 1_000;
+
 export function RemoteApp() {
   const [url, setUrl] = useState(() => ({ pathname: location.pathname, search: location.search }));
   const urlRef = useRef(url);
@@ -473,6 +479,27 @@ export function RemoteApp() {
     [pointerInside, setPointerInside] = useState(false),
     [focusInside, setFocusInside] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  type ApplyBatch = {
+    sequence: number;
+    location: typeof url;
+    snapshotId: string;
+    phase: "reading" | "committing";
+  };
+  const [applyBatch, setApplyBatch] = useState<ApplyBatch | null>(null);
+  const [requestedPin, setRequestedPin] = useState<{ location: typeof url; pin: string } | null>(null);
+  const [applyFocusLocation, setApplyFocusLocation] = useState<typeof url | null>(null);
+  const [updatesFocusLocation, setUpdatesFocusLocation] = useState<typeof url | null>(null);
+  const [applicationWake, setApplicationWake] = useState(0);
+  const applying = useRef<ApplyBatch | null>(null);
+  const applicationSequence = useRef(0);
+  const readGeneration = useRef(0);
+  const verifiedRead = useRef<{
+    location: typeof url;
+    snapshotId: string;
+    generation: number;
+  } | null>(null);
+  const lastApplication = useRef<{ location: typeof url; completedAt: number } | null>(null);
+  const applicationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [theme, setTheme] = useState<ThemePreference>(readThemePreference);
   const [reduced, setReduced] = useState(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
   const region = useRef<HTMLDivElement>(null),
@@ -482,6 +509,20 @@ export function RemoteApp() {
   const activeExport = useRef<AbortController | null>(null);
   const displayedPage = useRef<{ location: string; href: string } | null>(null);
   const lastVerified = useRef<(SnapshotReference & { location: typeof url }) | null>(null);
+  const cancelApplication = useCallback((restoreCommittedPin = true) => {
+    readGeneration.current += 1;
+    verifiedRead.current = null;
+    applying.current = null;
+    active.current?.abort();
+    activeExport.current?.abort();
+    if (applicationTimer.current !== null) clearTimeout(applicationTimer.current);
+    applicationTimer.current = null;
+    setApplyBatch(null);
+    setAnnouncement("");
+    // Failure keeps its request key stable so cleanup cannot trigger a hidden
+    // fallback read. A later authorized refresh selects the committed pin.
+    if (restoreCommittedPin) setRequestedPin(null);
+  }, []);
   const preserveDisplayedPage = useCallback(() => {
     // Make the previous page reproducible when Back is used after a new head arrives.
     // Store only the pin in the URL; no contributor response is kept in browser history.
@@ -492,8 +533,7 @@ export function RemoteApp() {
     (href: string) => {
       preserveDisplayedPage();
       history.pushState(null, "", href);
-      active.current?.abort();
-      activeExport.current?.abort();
+      cancelApplication();
       setOverviewActivity({ status: "loading" });
       setState({ status: "loading" });
       setHeldPin(null);
@@ -502,15 +542,24 @@ export function RemoteApp() {
       setUrl({ pathname: location.pathname, search: location.search });
       window.scrollTo(0, 0);
     },
-    [preserveDisplayedPage],
+    [preserveDisplayedPage, cancelApplication],
   );
-  useEffect(() => () => activeExport.current?.abort(), []);
+  useEffect(
+    () => () => {
+      readGeneration.current += 1;
+      applying.current = null;
+      verifiedRead.current = null;
+      active.current?.abort();
+      activeExport.current?.abort();
+      if (applicationTimer.current !== null) clearTimeout(applicationTimer.current);
+    },
+    [],
+  );
   useEffect(() => {
     const pop = () => {
       const next = { pathname: location.pathname, search: location.search };
       const drawerOnly = isProofTransition(urlRef.current, next);
-      active.current?.abort();
-      activeExport.current?.abort();
+      cancelApplication();
       setOverviewActivity({ status: "loading" });
       if (!drawerOnly) {
         setState({ status: "loading" });
@@ -521,7 +570,7 @@ export function RemoteApp() {
     };
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
-  }, []);
+  }, [cancelApplication]);
   useEffect(() => {
     const media = matchMedia("(prefers-reduced-motion: reduce)");
     const change = () => setReduced(media.matches);
@@ -592,12 +641,11 @@ export function RemoteApp() {
     }
   }, [selected, parsed.error]);
   const refresh = useCallback(() => {
-    active.current?.abort();
-    activeExport.current?.abort();
+    cancelApplication();
     setOverviewActivity({ status: "loading" });
     setChecking(true);
     setNonce((value) => value + 1);
-  }, []);
+  }, [cancelApplication]);
   // Registry-only pages do not require a source snapshot. Snapshot subscriptions
   // follow the current scope, never a historical pin, cursor or proof selection.
   const liveScope = parsed.liveScope;
@@ -629,8 +677,7 @@ export function RemoteApp() {
     const revalidate = () => {
       if (document.visibilityState === "visible") refresh();
       else {
-        active.current?.abort();
-        activeExport.current?.abort();
+        cancelApplication();
         setOverviewActivity({ status: "loading" });
         setState({ status: "loading" });
       }
@@ -643,21 +690,34 @@ export function RemoteApp() {
       removeEventListener("focus", revalidate);
       document.removeEventListener("visibilitychange", revalidate);
     };
-  }, [refresh]);
+  }, [refresh, cancelApplication]);
+  // The request key stays stable when a verified target becomes committed.
+  // Canceling an errored batch does not itself issue another request.
+  const readPin = selected.snapshot ?? (requestedPin?.location === url ? requestedPin.pin : heldPin);
   useEffect(() => {
     const controller = new AbortController();
+    const generation = ++readGeneration.current;
     active.current = controller;
+    verifiedRead.current = null;
     setOverviewActivity({ status: "loading" });
+    // A hidden overview may load registry navigation, never a source snapshot or contributor data.
+    const hiddenOverview = document.visibilityState !== "visible" && url.pathname === "/" && applying.current === null;
+    if (document.visibilityState !== "visible" && !hiddenOverview) return () => controller.abort();
     if (parsed.error) {
+      cancelApplication(false);
       setChecking(false);
       setState({ status: "error", error: parsed.error });
       return () => controller.abort();
     }
-    const pin = selected.snapshot ?? heldPin;
+    const pin = readPin;
+    const candidate = applying.current;
+    const batch =
+      candidate?.location === url && candidate.snapshotId === pin && candidate.phase === "reading" ? candidate : null;
     const exact: Selection = { ...selected, snapshot: pin };
     const qs = parameters(exact);
     const boardQuery = parameters(exact, { board: true, cursor: selected.cursor });
     const load = async (): Promise<Data> => {
+      if (hiddenOverview) return { kind: "overview" };
       const path = url.pathname;
       const programId = programRoute(path);
       if (programId !== false) {
@@ -745,12 +805,23 @@ export function RemoteApp() {
     };
     void Promise.all([request(parsed.base, "metrics", new URLSearchParams(), controller.signal).then(catalog), load()])
       .then(([registry, data]) => {
-        if (controller.signal.aborted) return;
+        if (
+          controller.signal.aborted ||
+          generation !== readGeneration.current ||
+          urlRef.current !== url ||
+          (document.visibilityState !== "visible" && data.kind !== "overview")
+        )
+          return;
+        if (batch && applying.current !== batch) return;
         if ("value" in data && registry.policy_version !== data.value.metricDefinitionVersion)
           throw new ReadFailure(409, "metric_definition_unavailable");
         if (data.kind === "method") registryMetric(registry, data.metricId);
         if (data.kind === "catalog") discoverMetrics(registry, selected);
         if (data.kind === "board") verifyBoardDefinition(registry, data.value.metric);
+        if (batch && (!("value" in data) || data.value.snapshotId !== batch.snapshotId))
+          throw new ReadFailure(502, "api_snapshot_mismatch");
+        verifiedRead.current =
+          "value" in data ? { location: url, snapshotId: data.value.snapshotId, generation } : null;
         // Retain only a dated reference after every response/registry check.
         // It belongs to this selection, never a cache of contributor content.
         lastVerified.current =
@@ -766,6 +837,13 @@ export function RemoteApp() {
             href: uiHref(url.pathname, selected, { snapshot: data.value.snapshotId, cursor: selected.cursor }),
           };
         else displayedPage.current = null;
+        if (batch) {
+          const committing: ApplyBatch = { ...batch, phase: "committing" };
+          applying.current = committing;
+          setApplyBatch(committing);
+          setHeldPin(batch.snapshotId);
+          setAnnouncement("Updated to snapshot " + batch.snapshotId + ".");
+        }
         setState({ status: "ready", registry, data });
         if ("value" in data && !selected.snapshot && !heldPin) setHeldPin(data.value.snapshotId);
         else if (data.kind === "health" && url.pathname === "/" && document.visibilityState === "visible") {
@@ -798,8 +876,8 @@ export function RemoteApp() {
         }
       })
       .catch((error) => {
-        if (!controller.signal.aborted) {
-          activeExport.current?.abort();
+        if (!controller.signal.aborted && generation === readGeneration.current && urlRef.current === url) {
+          cancelApplication(false);
           setOverviewActivity({ status: "loading" });
           setChecking(false);
           setState({
@@ -809,7 +887,7 @@ export function RemoteApp() {
         }
       });
     return () => controller.abort();
-  }, [parsed, heldPin, nonce, selected, url.pathname]);
+  }, [parsed, readPin, nonce, selected, url.pathname, cancelApplication]);
   useEffect(() => {
     if (state.status !== "loading" && focusOnLoad.current) {
       if (!selected.proof) heading.current?.focus();
@@ -823,18 +901,96 @@ export function RemoteApp() {
   }, [state, focusInside]);
   const data = state.status === "ready" ? state.data : null;
   const meta = data && "value" in data ? data.value : null;
+  const staticOverview = data?.kind === "health" || data?.kind === "overview";
   const previousSnapshot = lastVerified.current?.location === url ? lastVerified.current : null;
   const pending = meta && !selected.snapshot && meta.head.snapshotId !== meta.snapshotId ? meta.head.snapshotId : null;
+  // Retain the actual focused control and its section independently. Moving
+  // from Apply to Follow during a read must not remove the destination.
+  const retainApplyControl = applyFocusLocation === url;
+  const retainUpdates = updatesFocusLocation === url;
+  const activeBatch = applyBatch?.location === url ? applyBatch : null;
+  const completion = lastApplication.current;
+  const coolingDown =
+    completion?.location === url && performance.now() < completion.completedAt + applicationIntervalMs;
+  const currentRead =
+    verifiedRead.current?.location === url &&
+    verifiedRead.current.generation === readGeneration.current &&
+    verifiedRead.current.snapshotId === meta?.snapshotId &&
+    !checking;
+  const applyUnavailable = !pending || Boolean(selected.proof) || !currentRead || Boolean(activeBatch) || coolingDown;
+
+  useLayoutEffect(() => {
+    const batch = applying.current;
+    if (
+      !batch ||
+      batch.phase !== "committing" ||
+      batch !== applyBatch ||
+      batch.location !== url ||
+      state.status !== "ready" ||
+      !("value" in state.data) ||
+      state.data.value.snapshotId !== batch.snapshotId ||
+      announcement !== "Updated to snapshot " + batch.snapshotId + "." ||
+      verifiedRead.current?.generation !== readGeneration.current ||
+      document.visibilityState !== "visible"
+    )
+      return;
+    // This runs after the matching ready projection and summary reach the DOM.
+    lastApplication.current = { location: url, completedAt: performance.now() };
+    applying.current = null;
+    setApplyBatch(null);
+    setApplicationWake((value) => value + 1);
+  }, [applyBatch, state, url, announcement]);
+
+  useEffect(() => {
+    const last = lastApplication.current;
+    if (!currentRead || document.visibilityState !== "visible" || last?.location !== url) return;
+    const remaining = last.completedAt + applicationIntervalMs - performance.now();
+    if (remaining <= 0) return;
+    const timer = setTimeout(() => {
+      if (applicationTimer.current === timer) applicationTimer.current = null;
+      setApplicationWake((value) => value + 1);
+    }, remaining);
+    applicationTimer.current = timer;
+    return () => {
+      clearTimeout(timer);
+      if (applicationTimer.current === timer) applicationTimer.current = null;
+    };
+  }, [url, currentRead, applicationWake, nonce]);
+
   const apply = useCallback(() => {
-    if (pending) {
-      active.current?.abort();
-      activeExport.current?.abort();
-      setOverviewActivity({ status: "loading" });
-      setState({ status: "loading" });
-      setHeldPin(pending);
-      setAnnouncement(`Applying snapshot ${pending}.`);
-    }
-  }, [pending]);
+    const last = lastApplication.current;
+    if (
+      !pending ||
+      selected.proof ||
+      selected.snapshot ||
+      state.status !== "ready" ||
+      checking ||
+      applying.current ||
+      verifiedRead.current?.location !== url ||
+      verifiedRead.current.generation !== readGeneration.current ||
+      verifiedRead.current.snapshotId !== meta?.snapshotId ||
+      document.visibilityState !== "visible" ||
+      (last?.location === url && performance.now() < last.completedAt + applicationIntervalMs)
+    )
+      return;
+    const batch: ApplyBatch = {
+      sequence: ++applicationSequence.current,
+      location: url,
+      snapshotId: pending,
+      phase: "reading",
+    };
+    active.current?.abort();
+    activeExport.current?.abort();
+    readGeneration.current += 1;
+    verifiedRead.current = null;
+    applying.current = batch;
+    setApplyBatch(batch);
+    setRequestedPin({ location: url, pin: pending });
+    setOverviewActivity({ status: "loading" });
+    setState({ status: "loading" });
+    setAnnouncement("");
+  }, [pending, selected.proof, selected.snapshot, state.status, checking, url, meta?.snapshotId]);
+
   useEffect(() => {
     if (
       pending &&
@@ -847,7 +1003,7 @@ export function RemoteApp() {
       document.visibilityState === "visible"
     )
       apply();
-  }, [pending, selected.proof, follow, reduced, pointerInside, focusInside, apply]);
+  }, [pending, selected.proof, follow, reduced, pointerInside, focusInside, apply, applicationWake]);
   const pinned = { ...selected, snapshot: meta?.snapshotId ?? selected.snapshot };
   const link = (
     path: string,
@@ -861,10 +1017,11 @@ export function RemoteApp() {
   const closeProof = useCallback(() => {
     if (history.state?.apiProofDrawer === true) history.back();
     else {
+      cancelApplication();
       history.replaceState(null, "", withoutProof(urlRef.current));
       setUrl({ pathname: location.pathname, search: location.search });
     }
-  }, []);
+  }, [cancelApplication]);
   const download = async (format: "json" | "csv") => {
     activeExport.current?.abort();
     const controller = new AbortController();
@@ -888,7 +1045,7 @@ export function RemoteApp() {
       refresh();
     } catch (error) {
       if (!controller.signal.aborted) {
-        active.current?.abort();
+        cancelApplication(false);
         setOverviewActivity({ status: "loading" });
         setState({
           status: "error",
@@ -919,14 +1076,12 @@ export function RemoteApp() {
         // Normal same-tab navigation tears down this reader and its requests first.
         if (target.hasAttribute("data-window-entry") || new URL(target.href).pathname === "/live") {
           preserveDisplayedPage();
-          if (target.hasAttribute("data-window-entry")) {
-            active.current?.abort();
-            activeExport.current?.abort();
-          }
+          cancelApplication();
           return;
         }
         event.preventDefault();
         if (target.hasAttribute("data-api-proof")) {
+          cancelApplication();
           proofOpener.current = target;
           // Only a reproducible URL and a drawer marker enter history, never API data.
           // Switching proofs replaces the open panel, rather than growing a hidden panel stack.
@@ -993,6 +1148,8 @@ export function RemoteApp() {
           </h1>
           <p>Evidence-backed public reads. Unknown values and unavailable scopes remain explicit.</p>
         </header>
+        {(url.pathname === "/methodology" || url.pathname.startsWith("/methodology/")) && <ContributionPolicies />}
+        {!parsed.error && <RequestedScope selected={selected} />}
         <Filters key={`${url.pathname}${url.search}`} selected={selected} path={url.pathname} navigate={navigate} />
         {!parsed.error && (isCatalogPath(url.pathname) || rankComparisonPath(url.pathname)) && (
           <details className="method" open={windowsOpen} onToggle={(event) => setWindowsOpen(event.currentTarget.open)}>
@@ -1036,7 +1193,7 @@ export function RemoteApp() {
           {checking && <span className="muted"> Rechecking…</span>}
         </p>
         {liveScope !== null && <CurrentFreshness value={liveState} />}
-        {state.status === "loading" && <p role="status">Loading current public data…</p>}
+        {state.status === "loading" && <p role={activeBatch ? undefined : "status"}>Loading current public data…</p>}
         {state.status === "error" && (
           <section className="notice notice-error" role="alert">
             <h2>
@@ -1074,19 +1231,44 @@ export function RemoteApp() {
             correctionHref={uiHref("/corrections", pinned)}
           />
         )}
-        {meta && (
-          <section aria-label="Publication updates" className="update-control">
+        {(meta || retainUpdates) && (
+          <section
+            aria-label="Publication updates"
+            className="update-control"
+            onFocus={() => setUpdatesFocusLocation(url)}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+                setUpdatesFocusLocation((current) => (current === url ? null : current));
+            }}
+          >
             <p>
-              {selected.snapshot
-                ? `Pinned snapshot ${selected.snapshot}; current publication controls are still rechecked.`
-                : pending
-                  ? `Update held: snapshot ${pending} is available.`
-                  : "Showing the selected publication. Notices trigger a full read; publication controls are also rechecked every 20 seconds while visible."}
+              {state.status === "loading"
+                ? "Loading the selected publication."
+                : state.status === "error"
+                  ? "No current publication is available."
+                  : selected.snapshot
+                    ? `Pinned snapshot ${selected.snapshot}; current publication controls are still rechecked.`
+                    : pending
+                      ? `Update held: snapshot ${pending} is available.`
+                      : "Showing the selected publication. Notices trigger a full read; publication controls are also rechecked every 20 seconds while visible."}
             </p>
-            {pending && (
-              <button type="button" className="button" onClick={apply} disabled={Boolean(selected.proof)}>
+            {(pending || retainApplyControl) && (
+              <button
+                type="button"
+                className="button"
+                aria-disabled={applyUnavailable}
+                aria-describedby={pending && coolingDown ? "publication-apply-cooldown" : undefined}
+                onFocus={() => setApplyFocusLocation(url)}
+                onBlur={() => setApplyFocusLocation((current) => (current === url ? null : current))}
+                onClick={apply}
+              >
                 Apply new snapshot
               </button>
+            )}
+            {pending && coolingDown && (
+              <p id="publication-apply-cooldown" className="small muted">
+                Another snapshot is available. Apply will be ready shortly; each completed update has its own summary.
+              </p>
             )}
             {!selected.snapshot && (
               <label className="checkbox">
@@ -1110,11 +1292,11 @@ export function RemoteApp() {
             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusInside(false);
           }}
         >
-          {data?.kind === "health" && url.pathname === "/" && state.status === "ready" && (
+          {staticOverview && url.pathname === "/" && state.status === "ready" && (
             <>
               <OverviewNavigation registry={state.registry} selected={pinned} />
               <FirstContributionsEntry selected={pinned} />
-              <OverviewAcceptedWork state={overviewActivity} selected={pinned} />
+              {data?.kind === "health" && <OverviewAcceptedWork state={overviewActivity} selected={pinned} />}
             </>
           )}
           {data?.kind === "catalog" && state.status === "ready" && (
@@ -1333,6 +1515,28 @@ export function RemoteApp() {
                 Stable actor {data.value.actorId}; account kind {data.value.actor.kind}; execution mode{" "}
                 {data.value.actor.executionMode}.
               </p>
+              {data.value.presentation && (
+                <section aria-labelledby="contributor-presentation-title">
+                  <h3 id="contributor-presentation-title">From this contributor</h3>
+                  {data.value.presentation.bio && (
+                    <p style={{ overflowWrap: "anywhere" }}>{data.value.presentation.bio}</p>
+                  )}
+                  {data.value.presentation.highlights.length > 0 && (
+                    <>
+                      <p>Contributor-provided links; these are not verified contribution evidence.</p>
+                      <ul>
+                        {data.value.presentation.highlights.map((url, index) => (
+                          <li key={`${index}:${url}`}>
+                            <a href={url} rel="noreferrer nofollow" style={{ overflowWrap: "anywhere" }}>
+                              {url}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </section>
+              )}
               <h3>Independent category artifact counts</h3>
               <CategoryCounts categories={data.value.categories} registry={catalogEntries} />
               <h3>Measure results</h3>
@@ -1356,7 +1560,7 @@ export function RemoteApp() {
               </ul>
               <ContributorParticipation value={data.value.activitySummary} selected={pinned} metrics={catalogEntries} />
               <ContributorOrganizationHistory
-                key={`${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
+                key={`history:${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
                 base={parsed.base}
                 selected={selected}
                 parent={data.value}
@@ -1364,7 +1568,7 @@ export function RemoteApp() {
                 metrics={catalogEntries}
               />
               <ContributorRecognition
-                key={`${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
+                key={`recognition:${data.value.actorId}:${data.value.snapshotId}:${data.value.policyVersion}`}
                 base={parsed.base}
                 selected={selected}
                 snapshotId={data.value.snapshotId}
@@ -1418,7 +1622,7 @@ export function RemoteApp() {
             </>
           )}
           {data?.kind === "evidence" && <EvidenceProof value={data.value} selected={pinned} />}
-          {data?.kind === "unavailable" && (
+          {(url.pathname === "/corrections" || data?.kind === "unavailable") && (
             <section className="notice notice-info">
               <h2>This capability is not available in this UI</h2>
               <p>

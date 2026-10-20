@@ -294,3 +294,11 @@ export {
   discussionFeedbackPublicRevision,
   validateHelpfulFeedbackSource,
 } from "./discussion-feedback.js";
+
+export {
+  capturePullRequestDecisionHistory,
+  validatePullRequestDecisionHistory,
+  selectPullRequestDecisionAsOf,
+  type PullRequestDecisionHistoryOptions,
+  type PullRequestDecisionSelection,
+} from "./decision-history.js";

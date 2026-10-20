@@ -61,3 +61,33 @@ test("read and account configuration reject unsafe or malformed URL shapes with 
   ])
     for (const parse of [apiBase, controlsNavigationBase]) assert.throws(() => parse(raw), configurationFailure, raw);
 });
+
+test("public API configuration rejects empty query and fragment components", (t) => {
+  location(t, "https://leaderboard.example.invalid");
+  for (const [base, expected] of [
+    ["/api/v1", "https://leaderboard.example.invalid/api/v1"],
+    ["https://api.example.invalid/api/v1", "https://api.example.invalid/api/v1"],
+  ]) {
+    for (const slash of ["", "/"]) {
+      const raw = `${base}${slash}`;
+      assert.equal(apiBase(raw), expected, raw);
+      for (const suffix of ["?", "#", "?#"])
+        assert.throws(() => apiBase(`${raw}${suffix}`), configurationFailure, `${raw}${suffix}`);
+    }
+  }
+});
+
+test("account navigation configuration rejects empty query and fragment components", (t) => {
+  location(t, "https://leaderboard.example.invalid");
+  for (const [base, expected] of [
+    ["/controls", "https://leaderboard.example.invalid/controls"],
+    ["https://accounts.example.invalid/controls", "https://accounts.example.invalid/controls"],
+  ]) {
+    for (const slash of ["", "/"]) {
+      const raw = `${base}${slash}`;
+      assert.equal(controlsNavigationBase(raw), expected, raw);
+      for (const suffix of ["?", "#", "?#"])
+        assert.throws(() => controlsNavigationBase(`${raw}${suffix}`), configurationFailure, `${raw}${suffix}`);
+    }
+  }
+});

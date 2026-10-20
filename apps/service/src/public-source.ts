@@ -1,8 +1,13 @@
 import type { RankSnapshotHistory } from "./rank-comparison.js";
 import type { ParticipationHistoryRead } from "./participation-history.js";
 import { projectPhysicalContext } from "./physical-context.js";
+import { projectWorkstreamHelp } from "./workstream-help.js";
 import {
   canonicalPublicScope,
+  publicProfilePresentationSchema,
+  publicProfilePresentationMatches,
+  safePublicGithubUrl,
+  type PublicProfilePresentation,
   publicScopeKey,
   type PublicScope,
   type PublicWindowPeriod,
@@ -39,6 +44,7 @@ import {
   type MetricDefinition,
   type PendingCount,
   type Snapshot,
+  type PublicWorkstreamHelp,
 } from "@pick-your-ai/contracts";
 import { metricRegistryV1, stableJSON } from "@pick-your-ai/metrics";
 import { compareSourceInstants } from "./source-time.js";
@@ -88,6 +94,8 @@ export interface PublishedSnapshot {
   rows: PublicRow[];
   evidence: PublicEvidence[];
   portfolioEvidence?: PortfolioEvidence[];
+  /** Explicit reviewed help, dependent on this exact accepted portfolio and current controls. */
+  reviewedWorkstreamHelp?: PublicWorkstreamHelp[];
   /** Exact pending policy-unit receipts, separate from accepted and portfolio evidence. */
   pendingEvidence?: PortfolioEvidence[];
   /** Provider-private original LOC receipts and merge provenance. Never serialize. */
@@ -116,6 +124,8 @@ export interface PublicSourceHealth {
 }
 /** Current controls must be read atomically even for a historical snapshot. */
 export interface PublicRead {
+  /** At most one actor's current opted-in text, never part of the frozen snapshot. */
+  presentation?: PublicProfilePresentation | null;
   /** Must be scoped and read under the same current source authorization as selected. */
   currentSourceHealth?: PublicSourceHealth[];
   /** Applied only after current privacy projection; never a source authorization. */
@@ -148,12 +158,22 @@ export interface PublicWindowsRead {
   windows: { period: PublicWindowPeriod; read: PublicRead }[];
 }
 export interface PublicSnapshotSource {
+  /** Optional single-actor read with the same current authorization/privacy fence.
+   * A route ID is a selector only. Legacy sources may omit this capability.
+   */
+  readProfile?(
+    scope: PublicScope,
+    snapshotId: string | null,
+    actorId: string,
+    signal: AbortSignal,
+  ): Promise<PublicRead | null>;
   /** Enumerate only explicitly labeled, currently confirmed publication choices. */
   readWindows?(scope: PublicScope, signal: AbortSignal): Promise<PublicWindowsRead | null>;
   /** Optional trusted server capability. Read the selected input and full approved
    * organization history under one protected admission/source-lock boundary and
    * a final current privacy fence. Receipt strings are not authorization. Public
-   * requests cannot activate it; the stock pipeline intentionally omits it.
+   * requests cannot activate it. The pipeline exposes it only when protected host
+   * code supplies its separate participationHistoryAuthority capability.
    */
   readParticipationHistory?(
     scope: PublicScope,
@@ -204,6 +224,9 @@ export function filterPublicActors(read: PublicRead, filter: ActorFilter): Publi
   return {
     ...read,
     actorFilter: filter,
+    ...(read.presentation === undefined
+      ? {}
+      : { presentation: read.presentation && ids.has(read.presentation.actorId) ? read.presentation : null }),
     selected: {
       ...read.selected,
       actors,
@@ -212,6 +235,13 @@ export function filterPublicActors(read: PublicRead, filter: ActorFilter): Publi
       ...(read.selected.portfolioEvidence === undefined
         ? {}
         : { portfolioEvidence: read.selected.portfolioEvidence.filter(included) }),
+      ...(read.selected.reviewedWorkstreamHelp === undefined
+        ? {}
+        : {
+            reviewedWorkstreamHelp: read.selected.reviewedWorkstreamHelp.filter((entry) =>
+              ids.has(entry.statement.actorId),
+            ),
+          }),
       ...(read.selected.pendingEvidence === undefined
         ? {}
         : { pendingEvidence: read.selected.pendingEvidence.filter(included) }),
@@ -222,21 +252,7 @@ export function filterPublicActors(read: PublicRead, filter: ActorFilter): Publi
   };
 }
 export function safePublicUrl(value: string | null | undefined): string | null {
-  if (!value || value.length > 2048) return null;
-  try {
-    const url = new URL(value);
-    return url.origin === "https://github.com" &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      (!url.hash ||
-        /^#(?:issuecomment-\d+|pullrequestreview-\d+|discussion_r\d+|r\d+|discussioncomment-\d+)$/.test(url.hash)) &&
-      /^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_./~-]+)?$/.test(url.pathname)
-      ? url.href
-      : null;
-  } catch {
-    return null;
-  }
+  return safePublicGithubUrl(value);
 }
 const date = (value: string | null) => sourceEventSchema.shape.occurredAt.safeParse(value).success;
 const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,200}$/.test(value);
@@ -482,6 +498,18 @@ export function projectRead(
       (entry) =>
         entry.state === "public" && entry.actor.identityState === "resolved" && !suppressedActors.has(entry.actorId),
     );
+  let presentation: PublicProfilePresentation | null | undefined;
+  if (Object.hasOwn(input, "presentation")) {
+    const parsed = publicProfilePresentationSchema.nullable().safeParse(input.presentation);
+    if (!parsed.success) return reject();
+    presentation = parsed.data;
+    if (presentation !== null) {
+      const candidate = presentation;
+      const visible = actors.find((entry) => entry.actorId === candidate.actorId);
+      if (!visible) presentation = null;
+      else if (!publicProfilePresentationMatches(candidate, visible.actorId, visible.actor)) return reject();
+    }
+  }
   const actorIds = new Set(actors.map((actor) => actor.actorId));
   // Every supplied copy must agree before any public response can be returned.
   // Contribution IDs and known artifact IDs are separate identity namespaces.
@@ -905,6 +933,7 @@ export function projectRead(
     .filter((entry) => visibleRows.has(JSON.stringify([entry.actorId, entry.metricId])));
   if (new Set(diagnostics.map((entry) => JSON.stringify([entry.actorId, entry.metricId]))).size !== diagnostics.length)
     return reject();
+  const reviewedWorkstreamHelp = projectWorkstreamHelp(selected, portfolioEvidence, scope);
   // Raw exception strings and permission details never enter the public projection.
   const coverage = (value: MetricResult["coverage"]) => ({
     ...value,
@@ -913,6 +942,7 @@ export function projectRead(
   });
   return {
     head: { snapshotId: input.head.snapshotId, revision: input.head.revision, publishedAt: input.head.publishedAt },
+    ...(presentation === undefined ? {} : { presentation }),
     ...(currentSourceHealth === undefined ? {} : { currentSourceHealth }),
     controls: { version: controls.version, suppressedActorIds: [], suppressedArtifactIds: [], revokedSnapshotIds: [] },
     selected: {
@@ -941,6 +971,7 @@ export function projectRead(
       }),
       evidence,
       ...(selected.portfolioEvidence === undefined ? {} : { portfolioEvidence }),
+      ...(reviewedWorkstreamHelp === undefined ? {} : { reviewedWorkstreamHelp }),
       ...(selected.pendingEvidence === undefined
         ? {}
         : {

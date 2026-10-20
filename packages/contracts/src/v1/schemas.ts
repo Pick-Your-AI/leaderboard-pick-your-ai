@@ -482,12 +482,30 @@ const publicStewardshipDayGroupingPolicySchema = z
   })
   .strict();
 
+const projectFieldDayGroupingPolicySchema = z
+  .object({
+    version: z.literal("project-field-day/v1"),
+    metric_id: z.literal("project_field_updates"),
+    state: z.literal("observed"),
+    date_basis: z.literal("occurredAt"),
+    group_by: z.literal("actor_artifact_interval"),
+    grouping_seconds: z.literal(86400),
+    interval_origin: z.literal("1970-01-01T00:00:00Z"),
+    raw_state_rule: z.literal("field_facets_share_item_unit"),
+    repeated_state_rule: z.literal("one_actor_item_per_utc_day"),
+    missing_state_or_time: z.literal("exclude_unknown"),
+    semantic_classifier: z.literal("none"),
+    public_enabled: z.literal(false),
+  })
+  .strict();
+
 // Distinct strict versions may use the same grouping algorithm without
 // widening the metric IDs or semantics of a previously published profile.
 export const metricGroupingPolicySchema = z.discriminatedUnion("version", [
   rawTriageGroupingPolicySchema,
   definitionDayGroupingPolicySchema,
   publicStewardshipDayGroupingPolicySchema,
+  projectFieldDayGroupingPolicySchema,
 ]);
 
 export const metricRegistrySchema = z
@@ -580,7 +598,13 @@ export const metricRegistrySchema = z
       )
         problem("Unsupported or deferred metrics cannot expose measured selections.", path);
       if (
-        ["items_triaged", "label_taxonomy", "milestone_definitions", "public_moderation"].includes(entry.metric_id) &&
+        [
+          "items_triaged",
+          "label_taxonomy",
+          "milestone_definitions",
+          "public_moderation",
+          "project_field_updates",
+        ].includes(entry.metric_id) &&
         selectable
       ) {
         const grouping = registry.grouping_policies?.find((policy) => policy.metric_id === entry.metric_id);

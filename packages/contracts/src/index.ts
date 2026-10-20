@@ -1,3 +1,31 @@
+export {
+  publicProfilePresentationVersion,
+  publicProfilePresentationSchema,
+  publicProfilePresentationMatches,
+  safePublicGithubUrl,
+  type PublicProfilePresentation,
+} from "./public-profile-presentation.js";
+export {
+  workstreamHelpVersion,
+  workstreamHelpStatementVersion,
+  workstreamHelpMeaning,
+  workstreamHelpLimits,
+  workstreamHelpMetricIds,
+  workstreamHelpStatementSchema,
+  encodeWorkstreamHelpStatement,
+  parseWorkstreamHelpStatement,
+  reviewedWorkstreamHelpBindingSchema,
+  publicWorkstreamHelpSchema,
+  workstreamHelpUnit,
+  workstreamHelpEvidenceKey,
+  workstreamHelpRecognitionSchema,
+  workstreamHelpPageSchema,
+  type WorkstreamHelpStatement,
+  type ReviewedWorkstreamHelpBinding,
+  type PublicWorkstreamHelp,
+  type WorkstreamHelpRecognition,
+} from "./workstream-help.js";
+
 export { actorFilterSchema, actorFilterLabels, matchesActorFilter, type ActorFilter } from "./actor-filter.js";
 export {
   verifiedIdentityCorrectionVersion,
@@ -229,3 +257,22 @@ export {
   type GithubPullRequestMergeTargetCapture,
   type PrMergeTarget,
 } from "./pull-request-merge-target.js";
+
+export {
+  pullRequestDecisionHistoryVersion,
+  pullRequestDecisionHistoryLimits,
+  pullRequestDecisionInstantSchema,
+  pullRequestDecisionBindingSchema,
+  pullRequestDecisionGenerationSchema,
+  pullRequestDecisionHistoryPayloadSchema,
+  pullRequestDecisionHistorySchema,
+  pullRequestDecisionUnavailableReasons,
+  pullRequestDecisionClocksValid,
+  type PullRequestDecisionBinding,
+  type PullRequestDecisionGeneration,
+  type PullRequestDecisionHistory,
+  type PullRequestDecisionHistoryPayload,
+  type PullRequestDecisionEvent,
+  type PullRequestDecisionUnavailableReason,
+  type PullRequestDecisionUnavailable,
+} from "./pull-request-decision-history.js";

@@ -1,4 +1,5 @@
 import React from "react";
+import { describeMetricGrouping } from "../lib/metric-grouping.ts";
 import { prototypeNavigation } from "../lib/prototype-url.ts";
 import { PageHeader } from "../components/Layout.tsx";
 import { ReferenceScope } from "../components/ScopeBar.tsx";
@@ -91,6 +92,7 @@ export function MethodSheetPage({ metricId }: { metricId: string }) {
   const definition = metric.definition;
   const ui = getMetricUi(metric.id);
   const grouping = getMetricGroupingPolicy(metric.id);
+  const groupingDescription = grouping ? describeMetricGrouping(grouping) : null;
   const extra = Object.entries(definition).filter(
     ([key]) =>
       ![
@@ -142,28 +144,10 @@ export function MethodSheetPage({ metricId }: { metricId: string }) {
         </dd>
         <dt>Implementation limitations</dt>
         <dd>{ui?.limitations.join(" ")}</dd>
-        {grouping && (
+        {groupingDescription && (
           <>
-            <dt>
-              {grouping.group_by === "actor_artifact_state_interval"
-                ? "Raw triage grouping policy"
-                : "Definition-day grouping policy"}
-            </dt>
-            {grouping.group_by === "actor_artifact_state_interval" ? (
-              <dd>
-                {grouping.version}: one actor, artifact and exact raw source state per {grouping.grouping_seconds}
-                -second UTC interval anchored at {grouping.interval_origin}. Repeated state in that interval counts
-                once. Missing state or time is excluded as unknown. No semantic classifier.
-              </dd>
-            ) : (
-              <dd>
-                {grouping.version}: one actor and stable definition per UTC calendar day within its repository and
-                definition kind. Creation, edits and reversals share one daily unit. Observed changes require their
-                source day. Independently qualified receipts use a separately selected proven source or acceptance day.
-                Receipt time never replaces missing raw history. Missing identity or the selected clock remains unknown;
-                grouping alone does not prove correctness or enable publication.
-              </dd>
-            )}
+            <dt>{groupingDescription.label} policy</dt>
+            <dd>{groupingDescription.detail}</dd>
           </>
         )}
         <dt>What counts</dt>
