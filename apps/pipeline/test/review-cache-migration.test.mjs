@@ -552,6 +552,244 @@ test("legacy review authority and cache generations are denied across actual Pos
 });
 
 for (const oldVersion of ["review-source-identity/v1", "review-source-identity/v2"])
+  for (const sourceGeneration of ["current", "Projectv2"])
+    for (const defaultWrapper of [false, true])
+      test(`obsolete ${oldVersion} ${sourceGeneration} ${defaultWrapper ? "empty default" : "plain"} cache supplies only a validated migration hint`, async (t) => {
+        const h = await reviewHarness(t, { selectRelease: true });
+        const cutoff = clock();
+        await h.runtime.runOnce({ cutoff });
+        const currentSource = comparisonHash([
+          "github-release-inclusion/v1",
+          currentSignature(h.config),
+          h.config.releaseInclusionTargets,
+        ]);
+        const currentBase = comparisonHash([version, currentSource]);
+        const precedingBase = comparisonHash([
+          oldVersion,
+          sourceGeneration === "current" ? currentSource : projectSignature(h.config, "project-membership-context/v2"),
+        ]);
+        const deliveryVersion = "default-delivery-scope/v1";
+        const precedingSignature = defaultWrapper ? comparisonHash([deliveryVersion, precedingBase]) : precedingBase;
+        const expectedSignature = defaultWrapper ? comparisonHash([deliveryVersion, currentBase]) : currentBase;
+        const original = (
+          await h.db.query(
+            `SELECT n.* FROM leaderboard_pipeline.normalizations n
+             JOIN leaderboard_ingestion.source_facts f USING(fact_key) WHERE f.family='reviews'`,
+          )
+        ).rows[0];
+        assert.equal(original.policy_signature, currentBase);
+        // Explicitly reconstructed older review namespace. The empty delivery
+        // case proves that the key itself must carry the migration hint.
+        const document = structuredClone(original.document);
+        document.reviewSourceNormalizationVersion = oldVersion;
+        if (defaultWrapper) {
+          document.facts = [];
+          document.actors = [];
+          document.evidence = [];
+          document.defaultDeliveryNormalizationVersion = deliveryVersion;
+        }
+        const documentHash = comparisonHash(document);
+        await h.db.query(
+          `UPDATE leaderboard_pipeline.normalizations
+           SET policy_signature=$2,document=$3::jsonb,document_hash=$4
+           WHERE fact_key=$1 AND policy_signature=$5`,
+          [original.fact_key, precedingSignature, JSON.stringify(document), "0".repeat(64), original.policy_signature],
+        );
+        const sourceRows = (await h.db.query("SELECT * FROM leaderboard_ingestion.source_facts ORDER BY fact_key"))
+          .rows;
+        await restart(h, async (runtime) => {
+          const hydrations = h.state.hydrations;
+          const query = h.db.query;
+          const reads = [];
+          h.db.query = async (sql, values) => {
+            const result = await query.call(h.db, sql, values);
+            if (
+              sql.includes("FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=ANY") &&
+              values[0] === original.fact_key
+            )
+              reads.push({ keys: result.rows.map((row) => row.policy_signature), hydrations: h.state.hydrations });
+            return result;
+          };
+          try {
+            await assert.rejects(runtime.runOnce({ cutoff }), /normalization_integrity_error/);
+            assert.equal(h.state.hydrations, hydrations, "old review integrity is checked before native hydration");
+            assert.ok(reads.some((read) => read.keys.includes(precedingSignature) && read.hydrations === hydrations));
+            await h.db.query(
+              "UPDATE leaderboard_pipeline.normalizations SET document_hash=$3 WHERE fact_key=$1 AND policy_signature=$2",
+              [original.fact_key, precedingSignature, documentHash],
+            );
+            await runtime.runOnce({ cutoff });
+            assert.equal(h.state.hydrations, hydrations + 1, "old review facts are never a current cache hit");
+            const rows = (
+              await h.db.query(
+                "SELECT policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations WHERE fact_key=$1",
+                [original.fact_key],
+              )
+            ).rows;
+            assert.equal(rows.length, 2);
+            assert.deepEqual(
+              rows.find((row) => row.policy_signature === precedingSignature),
+              {
+                policy_signature: precedingSignature,
+                document,
+                document_hash: documentHash,
+              },
+            );
+            const current = rows.find((row) => row.policy_signature === expectedSignature);
+            assert.ok(current, "the current version preserves the validated historical delivery hint");
+            assert.equal(current.document.reviewSourceNormalizationVersion, version);
+            assert.equal(
+              current.document.defaultDeliveryNormalizationVersion,
+              defaultWrapper ? deliveryVersion : undefined,
+            );
+            await assertMetrics(runtime, { prs_reviewed: 1, review_rounds: 1, review_feedback: 1 });
+            assert.deepEqual(
+              (await h.db.query("SELECT * FROM leaderboard_ingestion.source_facts ORDER BY fact_key")).rows,
+              sourceRows,
+            );
+            // A valid v3 current cache must not hide corruption in an old key.
+            await h.db.query(
+              "UPDATE leaderboard_pipeline.normalizations SET document_hash=$3 WHERE fact_key=$1 AND policy_signature=$2",
+              [original.fact_key, precedingSignature, "0".repeat(64)],
+            );
+            await assert.rejects(runtime.runOnce({ cutoff }), /normalization_integrity_error/);
+            assert.equal(h.state.hydrations, hydrations + 1);
+          } finally {
+            h.db.query = query;
+          }
+        });
+      });
+
+for (const oldVersion of ["review-source-identity/v1", "review-source-identity/v2"])
+  for (const keepCurrent of [false, true])
+    test(`coexisting obsolete ${oldVersion} plain/default review caches both validate with current v3=${keepCurrent}`, async (t) => {
+      const h = await reviewHarness(t, { selectRelease: true });
+      const cutoff = clock();
+      const first = (await h.runtime.runOnce({ cutoff })).publications[0];
+      const currentSource = comparisonHash([
+        "github-release-inclusion/v1",
+        currentSignature(h.config),
+        h.config.releaseInclusionTargets,
+      ]);
+      const currentBase = comparisonHash([version, currentSource]);
+      const oldBase = comparisonHash([oldVersion, currentSource]);
+      const deliveryVersion = "default-delivery-scope/v1";
+      const oldDefault = comparisonHash([deliveryVersion, oldBase]);
+      const currentDefault = comparisonHash([deliveryVersion, currentBase]);
+      const original = (
+        await h.db.query(
+          `SELECT n.* FROM leaderboard_pipeline.normalizations n
+           JOIN leaderboard_ingestion.source_facts f USING(fact_key) WHERE f.family='reviews'`,
+        )
+      ).rows[0];
+      assert.equal(original.policy_signature, currentBase);
+      // Reconstructed obsolete namespaces deliberately coexist for one source.
+      // The valid default row must not hide corruption in the retained plain row.
+      const plain = { ...structuredClone(original.document), reviewSourceNormalizationVersion: oldVersion };
+      const delivery = {
+        ...structuredClone(plain),
+        facts: [],
+        actors: [],
+        evidence: [],
+        defaultDeliveryNormalizationVersion: deliveryVersion,
+      };
+      const predecessors = [
+        { policy_signature: oldBase, document: plain, document_hash: comparisonHash(plain) },
+        { policy_signature: oldDefault, document: delivery, document_hash: comparisonHash(delivery) },
+      ];
+      for (const row of predecessors)
+        await h.db.query(
+          "INSERT INTO leaderboard_pipeline.normalizations(fact_key,policy_signature,document,document_hash) VALUES($1,$2,$3::jsonb,$4)",
+          [original.fact_key, row.policy_signature, JSON.stringify(row.document), row.document_hash],
+        );
+      if (!keepCurrent)
+        await h.db.query("DELETE FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=$2", [
+          original.fact_key,
+          currentBase,
+        ]);
+      const setHash = (signature, hash) =>
+        h.db.query(
+          "UPDATE leaderboard_pipeline.normalizations SET document_hash=$3 WHERE fact_key=$1 AND policy_signature=$2",
+          [original.fact_key, signature, hash],
+        );
+      const sourceRows = (await h.db.query("SELECT * FROM leaderboard_ingestion.source_facts ORDER BY fact_key")).rows;
+      const frozenRows = (
+        await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [first.snapshotId])
+      ).rows;
+      await setHash(oldBase, "0".repeat(64));
+      await restart(h, async (runtime) => {
+        const hydrations = h.state.hydrations;
+        const query = h.db.query;
+        const reads = [];
+        h.db.query = async (sql, values) => {
+          const result = await query.call(h.db, sql, values);
+          if (
+            sql.includes("FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=ANY") &&
+            values[0] === original.fact_key
+          )
+            reads.push({ keys: result.rows.map((row) => row.policy_signature), hydrations: h.state.hydrations });
+          return result;
+        };
+        try {
+          await assert.rejects(runtime.runOnce({ cutoff }), /normalization_integrity_error/);
+          assert.equal(h.state.hydrations, hydrations);
+          assert.ok(
+            reads.some(
+              (read) =>
+                read.keys.includes(oldBase) &&
+                read.keys.includes(oldDefault) &&
+                read.keys.includes(currentBase) === keepCurrent &&
+                read.hydrations === hydrations,
+            ),
+            "both obsolete forms are read before hydration, even with a valid current cache",
+          );
+          await setHash(oldBase, predecessors[0].document_hash);
+          await runtime.runOnce({ cutoff });
+          assert.equal(h.state.hydrations, hydrations + 1);
+          const rows = (
+            await h.db.query(
+              "SELECT policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations WHERE fact_key=$1",
+              [original.fact_key],
+            )
+          ).rows;
+          for (const predecessor of predecessors)
+            assert.deepEqual(
+              rows.find((row) => row.policy_signature === predecessor.policy_signature),
+              predecessor,
+            );
+          const current = rows.find((row) => row.policy_signature === currentDefault);
+          assert.ok(current, "the valid historical default key still supplies the migration hint");
+          assert.equal(current.document.reviewSourceNormalizationVersion, version);
+          assert.equal(current.document.defaultDeliveryNormalizationVersion, deliveryVersion);
+          assert.deepEqual(
+            (await h.db.query("SELECT * FROM leaderboard_ingestion.source_facts ORDER BY fact_key")).rows,
+            sourceRows,
+          );
+          assert.deepEqual(
+            (
+              await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
+                first.snapshotId,
+              ])
+            ).rows,
+            frozenRows,
+          );
+          // Each retained form remains checked when a valid current default cache exists.
+          for (const predecessor of predecessors) {
+            await setHash(predecessor.policy_signature, "0".repeat(64));
+            await assert.rejects(runtime.runOnce({ cutoff }), /normalization_integrity_error/);
+            assert.equal(h.state.hydrations, hydrations + 1);
+            await setHash(predecessor.policy_signature, predecessor.document_hash);
+          }
+          await runtime.runOnce({ cutoff });
+          assert.equal(h.state.hydrations, hydrations + 1, "valid current v3 output can still be reused");
+          await assertMetrics(runtime, { prs_reviewed: 1, review_rounds: 1, review_feedback: 1 });
+        } finally {
+          h.db.query = query;
+        }
+      });
+    });
+
+for (const oldVersion of ["review-source-identity/v1", "review-source-identity/v2"])
   test(`${oldVersion} authority is retained unchanged and withheld until a scan-bound sequence is recomputed`, async (t) => {
     const h = await reviewHarness(t, { sequenceObservation: true });
     const first = (await h.runtime.runOnce()).publications[0];

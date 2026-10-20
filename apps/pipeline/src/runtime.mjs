@@ -42,8 +42,9 @@ import {
   conserveIssueCreations,
   projectIssueCreationCorrections,
 } from "./issue-transfers.mjs";
-import { requireThat } from "../../controls/src/store.mjs";
+import { ControlError, requireThat } from "../../controls/src/store.mjs";
 import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-metadata.mjs";
+import { createPublicProjectContextProjector } from "./public-project-context.mjs";
 import { createWebhookDispatcher } from "./webhook-dispatch.mjs";
 import { createMetadataEnrichment } from "./metadata-enrichment.mjs";
 import {
@@ -58,6 +59,8 @@ import {
   startGithubContentEditRun,
 } from "./content-edit-inventory.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
+import { retainPhysicalContext } from "./physical-context.mjs";
+import { capturePhysicalSources, selectPhysicalContexts } from "./physical-selection.mjs";
 import {
   defaultDeliveryNormalizationVersion,
   discussionSourceNormalizationVersion,
@@ -396,6 +399,12 @@ export async function createPipeline(options) {
   ].filter((signature) => signature !== typedHistoryNormalizationSignature);
   // Family-specific source rules have separate immutable cache generations.
   const reviewNormalizationSignature = digest([reviewSourceNormalizationVersion, normalizationSignature]);
+  // Obsolete review semantics cannot authorize a publication. Their validated
+  // plain/default keys still carry migration hints when fresh v3 output is empty.
+  const previousReviewNormalizationSignatures = ["review-source-identity/v1", "review-source-identity/v2"].flatMap(
+    (version) =>
+      [normalizationSignature, ...previousNormalizationSignatures].map((signature) => digest([version, signature])),
+  );
   const discussionNormalizationSignature = digest([discussionSourceNormalizationVersion, normalizationSignature]);
   const defaultDeliverySignature = (signature) => digest([defaultDeliveryNormalizationVersion, signature]);
   const frozenNormalizationSignatures = [
@@ -1540,6 +1549,7 @@ export async function createPipeline(options) {
       const previousBaseSignatures = [
         ...new Set([
           ...(typedHistory ? [normalizationSignature, ...previousTypedHistoryNormalizationSignatures] : []),
+          ...(row.family === "reviews" ? previousReviewNormalizationSignatures : []),
           ...previousNormalizationSignatures.map((signature) =>
             row.family === "reviews"
               ? digest([reviewSourceNormalizationVersion, signature])
@@ -1601,16 +1611,17 @@ export async function createPipeline(options) {
       });
       // Validate each selected predecessor even when another generation already
       // supplies delivery classification or a current cache can otherwise be used.
-      // Typed histories retain both plain and delivery documents independently.
-      const retainedPredecessors = typedHistory
-        ? candidates.filter((entry) =>
-            previousGenerations.some(
-              (generation) =>
-                entry.policy_signature === generation.baseSignature ||
-                entry.policy_signature === generation.deliverySignature,
-            ),
-          )
-        : previousCaches.map(({ cached }) => cached).filter(Boolean);
+      // Typed histories and reviews retain plain and delivery documents independently.
+      const retainedPredecessors =
+        typedHistory || row.family === "reviews"
+          ? candidates.filter((entry) =>
+              previousGenerations.some(
+                (generation) =>
+                  entry.policy_signature === generation.baseSignature ||
+                  entry.policy_signature === generation.deliverySignature,
+              ),
+            )
+          : previousCaches.map(({ cached }) => cached).filter(Boolean);
       for (const previousCached of retainedPredecessors) {
         if (digest(previousCached.document) !== previousCached.document_hash) fail("normalization_integrity_error");
         if (previousCached.document.isSynthetic !== (dataMode === "synthetic"))
@@ -1687,6 +1698,7 @@ export async function createPipeline(options) {
               fail("release_inclusion_frozen_normalization_unavailable");
           }
           normalizedProjectContext(cached.document, row, repository, projectWorkstreamMappings);
+          retainPhysicalContext(cached.document, row, repository, c.contracts, dataMode);
           await db.transaction(async (tx) => {
             await lockIssueTransferSources(tx, config.repositories, "update");
             const current = (
@@ -1704,9 +1716,9 @@ export async function createPipeline(options) {
             document: cached.document,
             source: sourceBinding(row),
             family: row.family,
-            reviewSequenceObserved: sequenceObserved(row),
             repositoryId: String(row.repository_id),
             selectedCurrentState: row.document.evidence === "current_state",
+            reviewSequenceObserved: sequenceObserved(row),
           });
           continue;
         }
@@ -1883,6 +1895,7 @@ export async function createPipeline(options) {
         ...(releaseInclusions === undefined ? {} : { releaseInclusions }),
         ...(syntheticFactIds === undefined ? {} : { syntheticFactIds }),
         ...privateAttribution(output, row),
+        ...retainPhysicalContext(output, row, repository, c.contracts, dataMode),
         ...normalizedProjectContext(output, row, repository, projectWorkstreamMappings),
         ...privateIssueTransferMetadata(output, row, repository, config.repositories, cached?.document),
         reasons: Array.isArray(output.reasons)
@@ -1914,9 +1927,9 @@ export async function createPipeline(options) {
         document,
         source: sourceBinding(row),
         family: row.family,
-        reviewSequenceObserved: sequenceObserved(row),
         repositoryId: String(row.repository_id),
         selectedCurrentState: row.document.evidence === "current_state",
+        reviewSequenceObserved: sequenceObserved(row),
       });
     }
     return outputs;
@@ -2203,6 +2216,9 @@ export async function createPipeline(options) {
       .map((entry) => ({ factKey: entry.source.factKey, documentHash: digest(entry.document) }))
       .sort((left, right) => left.factKey.localeCompare(right.factKey));
     const normalizationHashes = [...new Set(normalizationSources.map((entry) => entry.documentHash))].sort();
+    const physicalSources = config.policies.some((item) => c.contracts.physicalMetricIds.includes(item.policy.metricId))
+      ? capturePhysicalSources(normalized, normalizationSources, digest, dataMode)
+      : [];
     const suppressedArtifactIds = new Set([
       ...outputs.flatMap((output) => output.suppressArtifactIds ?? []),
       ...transferAuthority.removed,
@@ -2341,6 +2357,7 @@ export async function createPipeline(options) {
       actors: "all",
       context: scope.context ?? "event",
     };
+    const projectContextFor = createPublicProjectContextProjector(normalized, engineScope.context, observationCutoff);
     const state = controlsStore.read();
     assertRunConfiguration();
     for (const actor of actors.values()) if (state.profiles[actor.id]?.suppressed) actor.publicState = "suppressed";
@@ -2421,6 +2438,15 @@ export async function createPipeline(options) {
       }
     }
     const aggregates = config.policies.map((item) => c.metrics.aggregateMetric(frozen, item.policy, engineScope));
+    const physical = selectPhysicalContexts({
+      sources: physicalSources,
+      aggregates,
+      policies: config.policies,
+      contracts: c.contracts,
+      serialize: c.metrics.stableJSON,
+      policyDigest,
+      projectContextFor,
+    });
     const pendingFor = (aggregate, row) => ({
       schemaVersion: "leaderboard-pending/v1",
       state: aggregate.coverage === "complete" ? "measured" : row.pending > 0 ? "partial" : "unknown",
@@ -2479,6 +2505,7 @@ export async function createPipeline(options) {
               sourceRevision: original.sourceRevision,
               sourceRevisionUrl: original.sourceRevisionUrl,
               ...materializeEvidenceMetadata(original, fact),
+              ...projectContextFor(original, fact),
             },
           ];
         }),
@@ -2520,6 +2547,7 @@ export async function createPipeline(options) {
           sourceRevision: original.sourceRevision,
           sourceRevisionUrl: original.sourceRevisionUrl,
           ...materializeEvidenceMetadata(original, fact),
+          ...projectContextFor(original, fact),
         },
       ];
     });
@@ -2536,6 +2564,7 @@ export async function createPipeline(options) {
         entry.occurredAt =
           fact[config.policies.find((item) => item.policy.metricId === fact.metricId).policy.dateBasis];
         Object.assign(entry, materializeEvidenceMetadata(entry, fact));
+        Object.assign(entry, projectContextFor(entry, fact));
       }
     }
     const content = {
@@ -2549,11 +2578,13 @@ export async function createPipeline(options) {
       evidence: publicEvidence,
       portfolioEvidence,
       pendingEvidence,
+      ...physical,
       ranking: config.policies.map((item) => ({
         metricId: item.policy.metricId,
         direction: "descending",
         rank: item.policy.rank,
       })),
+      rankingPresentationPolicy: copy(c.contracts.currentRankingPresentationPolicy),
       diagnostics,
       methodology: config.policies.map((item) => ({
         metricId: item.policy.metricId,
@@ -2779,7 +2810,9 @@ export async function createPipeline(options) {
           evidence: publicEvidence,
           portfolioEvidence,
           pendingEvidence,
+          ...physical,
           ranking: content.ranking,
+          rankingPresentationPolicy: content.rankingPresentationPolicy,
           dataMode,
           diagnostics,
           methodology: content.methodology,
@@ -3251,11 +3284,44 @@ export async function createPipeline(options) {
           const currentSourceHealth = health
             ? await readCurrentSourceHealth(tx, healthRepositories, healthAt, healthReconciliation?.progress)
             : undefined;
+          let physicalInputsCurrent = true;
+          let physicalExplanationHash = null;
+          if (selected.document.physicalContexts?.some((entry) => entry.state === "available")) {
+            const confirmation = controlsStore.read().pipelinePublications?.[selected.selected_id];
+            if (!confirmationMatches(confirmation, scope, selected.selected_id, Number(selected.selected_revision)))
+              return null;
+            const saved = aggregateExplanations.verify(selected.selected_id, {
+              ...explanationBinding(scope, { revision: Number(selected.selected_revision) }),
+              digest: confirmation.aggregateExplanationHash,
+            });
+            physicalExplanationHash = saved.digest;
+            try {
+              // The optional context needs the original selected normalization
+              // copies, not a new hash over a replacement or a later cache entry.
+              requireThat(
+                Array.isArray(saved.document.authorization.identityEvidence?.normalizationSources),
+                409,
+                "Frozen physical source binding unavailable",
+              );
+              await withAuthorizedComparisonInputs([saved.document.authorization], () => true, tx);
+            } catch (error) {
+              // A missing/conflicting retained dependency removes the whole
+              // optional context. Unexpected database/authority failures retain
+              // their existing error path; metric quantities never change here.
+              if (!(error instanceof ControlError) || error.status !== 409) throw error;
+              physicalInputsCurrent = false;
+            }
+          }
           if (!(await approved(tx)) || signal.aborted || healthReconciliation?.confirmCurrent() === false) return null;
           // Read current private controls after all awaited I/O, even for pinned historical snapshots.
           const controls = controlsStore.read();
           const overlay = restrictConfiguration(controls);
           if (canonical(controls.pipelineHeads?.[scopeKey(scope)]) !== canonical(head)) return retry;
+          if (
+            physicalExplanationHash !== null &&
+            controls.pipelinePublications?.[selected.selected_id]?.aggregateExplanationHash !== physicalExplanationHash
+          )
+            return retry;
           if (
             !confirmationMatches(
               controls.pipelinePublications?.[selected.selected_id],
@@ -3291,6 +3357,18 @@ export async function createPipeline(options) {
             });
           }
           const document = copy(selected.document);
+          if (!physicalInputsCurrent) {
+            document.physicalContexts = document.physicalContexts.map((entry) => ({
+              schemaVersion: entry.schemaVersion,
+              actorId: entry.actorId,
+              metricId: entry.metricId,
+              policyVersion: entry.policyVersion,
+              policySignature: entry.policySignature,
+              state: "unknown",
+              reason: "current_context_unavailable",
+            }));
+            document.physicalEvidence = [];
+          }
           const authorityAt = utc(now());
           const reversion = reversionProjection(corrections.decisions, document.reversionAuthority, authorityAt);
           addReversionNotices(document, reversion.notices, c.contracts.publicEvidenceMetadataSchema);

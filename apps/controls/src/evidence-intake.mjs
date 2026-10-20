@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { bindOrderingReview } from "@pick-your-ai/github";
 import { hasRequiredParticipantConsent } from "./evidence-consent.mjs";
 
 const schemaVersion = "evidence-intake/v1";
@@ -341,6 +342,14 @@ export function hasReviewedEvidenceIntake(request) {
     rationale: review.rationale,
     references: review.references,
   });
+  if (request.category === "ordering") {
+    try {
+      if (!parsed) return false;
+      bindOrderingReview(decision.ordering, request, parsed.references);
+    } catch {
+      return false;
+    }
+  } else if (decision.ordering !== undefined) return false;
   return (
     parsed !== null &&
     same(

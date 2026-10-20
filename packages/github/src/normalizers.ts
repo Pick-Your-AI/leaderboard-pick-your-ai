@@ -19,7 +19,10 @@ import {
   type PublicEvidenceMetadata,
   type PublicEvidenceHistory,
   type PublicEvidenceAction,
+  physicalMetricIds,
+  type GithubPhysicalContextReceipt,
 } from "@pick-your-ai/contracts";
+import { physicalContextReceipt } from "./physical-context.js";
 import { GithubReadClient } from "./client.js";
 import { readGithubCommentSource, readGithubCommentIdentity } from "./comment-identity.js";
 import { consistentReviewCohortIdentities, reviewParentMatches, reviewSourceMatches } from "./review-cohort.js";
@@ -47,6 +50,12 @@ import {
   type GithubReleaseReviewTarget,
   type GithubReleaseMembership,
 } from "./release-recognition.js";
+import {
+  validateOrderingSource,
+  registerOrderingPlan,
+  type OrderingReview,
+  type OrderingSourceAuthority,
+} from "./ordering.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
 import { readIssueFieldEvent, issueFieldHistoryRevision } from "./issue-field-history.js";
 import {
@@ -315,6 +324,8 @@ export interface NormalizedGithubResult {
   issueCreationScopes: GithubIssueCreationScope[];
   suppressArtifactIds: string[];
   physicalDiff?: ClassifiedPhysicalDiff;
+  /** Private immutable integration context; absent legacy evidence stays unknown. */
+  physicalContext?: GithubPhysicalContextReceipt;
   /** Private current association; it never creates an action or historical attribution. */
   projectContext?: NormalizedProjectContext;
   participation: Array<{
@@ -1416,6 +1427,21 @@ export function normalizeGithubObservation(
       evidence.sourceRevision = integration.after;
       evidence.sourceRevisionUrl = `https://github.com/${repository.slug}/commit/${integration.after}`;
     }
+    if (author && at === mergedRevisionTime) {
+      const receipt = physicalContextReceipt({
+        repositoryId: String(repository.id),
+        artifactId: id,
+        actorId: author.id,
+        canonicalIntegrationId: integration.canonicalChangeId,
+        before: integration.before,
+        after: integration.after,
+        targetBranch: integration.targetBranch,
+        integratedAt: mergedRevisionTime,
+        diff: out.physicalDiff,
+        facts: out.facts.filter((fact) => (physicalMetricIds as readonly string[]).includes(fact.metricId)),
+      });
+      if (receipt) out.physicalContext = receipt;
+    }
   }
   if (documentationPolicy && envelope.family === "pull_request") {
     validateDocumentationPolicy(documentationPolicy);
@@ -1556,6 +1582,9 @@ export interface VerifiedRecognitionReceipt {
   maintenanceClassification?: MaintenanceClassificationRecord;
   /** Reviewed authored notes on this original pinned documentation PR; no new unit. */
   documentationPurpose?: "release_notes";
+  /** Audited manual-ordering claim and independently configured source scope. */
+  ordering?: OrderingReview;
+  orderingAuthority?: OrderingSourceAuthority;
 }
 const receiptMetrics = new Set([
   "catalog_proposals",
@@ -1599,6 +1628,33 @@ const receiptMetrics = new Set([
   "project_configuration",
   "issue_ordering",
 ]);
+function verifiedOrderingReceipt(
+  input: NormalizedGithubResult,
+  receipt: VerifiedRecognitionReceipt,
+  authorizedReviewerIds: readonly string[],
+) {
+  // Validate each receipt before plan deduplication, including duplicates whose
+  // source descriptor is otherwise valid. An earlier plan is not their authority.
+  if (
+    receipt.verified !== true ||
+    !text(receipt.id) ||
+    !time(receipt.acceptedAt) ||
+    !authorizedReviewerIds.includes(receipt.reviewerId) ||
+    receipt.reviewerId === receipt.actorId ||
+    receipt.evidenceIds.length !== 1 ||
+    receipt.evidenceIds[0] !== receipt.targetFactId
+  )
+    throw new Error("ordering_evidence_unverified");
+  const ordering = validateOrderingSource(
+    input,
+    receipt.targetFactId,
+    receipt.acceptedAt,
+    receipt.ordering,
+    receipt.orderingAuthority,
+  );
+  if (receipt.actorId !== ordering.review.actorId) throw new Error("ordering_evidence_unverified");
+  return ordering;
+}
 /** The host authenticates receipts. Source payload approval text is never a receipt. */
 export function applyRecognitionReceipt(
   input: NormalizedGithubResult,
@@ -1711,17 +1767,23 @@ export function applyRecognitionReceipt(
       : null;
   if (release && (receipt.evidenceIds.length !== 1 || receipt.evidenceIds[0] !== target.id))
     throw new Error("release_inclusion_source_unverified");
-  const unit = release
-    ? release.membershipUnit
-    : documentationUnit
-      ? documentationUnit
-      : mergedChange
-        ? mergedChange.unit
-        : stewardship
-          ? stewardship.unit
-          : receipt.metricId === "localization"
-            ? target.canonicalKey
-            : (receipt.changesetId ?? target.canonicalKey);
+  const ordering =
+    receipt.metricId === "issue_ordering" && receipt.decision === "accepted"
+      ? verifiedOrderingReceipt(input, receipt, authorizedReviewerIds)
+      : null;
+  const unit = ordering
+    ? ordering.unit
+    : release
+      ? release.membershipUnit
+      : documentationUnit
+        ? documentationUnit
+        : mergedChange
+          ? mergedChange.unit
+          : stewardship
+            ? stewardship.unit
+            : receipt.metricId === "localization"
+              ? target.canonicalKey
+              : (receipt.changesetId ?? target.canonicalKey);
   if (receipt.metricId === "localization" && target.state !== "observed")
     throw new Error("Localization acceptance must target its original observed source fact");
   if (
@@ -1882,6 +1944,11 @@ export interface GithubEvidenceNormalizerOptions {
   releaseInclusionTargets?: readonly { repositoryId: number; releaseId: number; pullRequestNumber: number }[];
 }
 
+function detachedCollectionInput(input: CollectionNormalizerInput): CollectionNormalizerInput {
+  const { issueFieldHistoryBatch, ...values } = input;
+  return { ...structuredClone(values), ...(issueFieldHistoryBatch ? { issueFieldHistoryBatch } : {}) };
+}
+
 /** Read-only collection-to-metric adapter. Lossy snapshots are hydrated rather than guessed. */
 export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizerOptions) {
   const releaseNow = options.now ?? (() => new Date().toISOString());
@@ -1889,7 +1956,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
   if (
     !Array.isArray(releaseTargets) ||
     releaseTargets.length > 1000 ||
-    releaseTargets.some(
+    Array.from(releaseTargets).some(
       (target) =>
         !object(target) ||
         Object.keys(target).sort().join(",") !== "pullRequestNumber,releaseId,repositoryId" ||
@@ -1931,6 +1998,9 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
   if (new Set(researchPolicies.map((policy) => policy.repositoryId)).size !== researchPolicies.length)
     throw new Error("Ambiguous research repository policy");
   return async (input: CollectionNormalizerInput): Promise<NormalizedGithubResult> => {
+    const reviewers = [...(options.authorizedReviewerIds ?? [])];
+    const acceptance = options.acceptance;
+    if (acceptance) input = detachedCollectionInput(input);
     const none = (reason: string) => ({ ...result(), isSynthetic: options.isSynthetic === true, reasons: [reason] });
     if (!options.allowedRepositoryIds.includes(input.repository.id))
       return none("repository_not_authorized_for_normalization");
@@ -2201,7 +2271,7 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         currentContext: { projects: [snapshot.projectId], workstreams: [] },
       });
     }
-    const enriched = options.enrich ? await options.enrich(input) : null;
+    const enriched = options.enrich ? await options.enrich(acceptance ? detachedCollectionInput(input) : input) : null;
     let normalized: NormalizedGithubResult;
     if (enriched) {
       if (
@@ -2344,9 +2414,10 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       if (!identities.includes(input.fact.subjectId)) return none("hydrated_subject_identity_mismatch");
       const revisionMatches = hasGithubRestSnapshotPrefix(input.fact.sourceRevision)
         ? verifyGithubRestSnapshotRevision(input.family, payload, input.fact.sourceRevision) &&
-          (!options.verifyRevision || (await options.verifyRevision(input, payload)))
+          (!options.verifyRevision ||
+            (await options.verifyRevision(acceptance ? detachedCollectionInput(input) : input, payload)))
         : options.verifyRevision
-          ? await options.verifyRevision(input, payload)
+          ? await options.verifyRevision(acceptance ? detachedCollectionInput(input) : input, payload)
           : timeline
             ? input.fact.sourceRevision === githubTimelineRevision(payload)
             : family === "review"
@@ -2517,10 +2588,38 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         normalized.releaseInclusions = records;
       }
     }
-    if (options.acceptance)
-      for (const receipt of await options.acceptance(input, normalized)) {
-        normalized = applyRecognitionReceipt(normalized, receipt, options.authorizedReviewerIds ?? []);
+    if (acceptance) {
+      // An asynchronous trusted receipt producer may inspect detached source,
+      // but cannot replace the source that will be qualified after it yields.
+      // Preserve the host's opaque native-history batch identity on its input.
+      const receipts = structuredClone(await acceptance(detachedCollectionInput(input), structuredClone(normalized)));
+      if (!Array.isArray(receipts)) throw new TypeError("Invalid recognition receipt batch");
+      const plans = new Map<string, { unit: string; identity: string }>();
+      const orderingSlots = new Map<string, number>();
+      const admitted: VerifiedRecognitionReceipt[] = [];
+      // Iterate every slot: sparse entries must fail like explicit undefined,
+      // rather than disappearing through an array predicate before validation.
+      for (const receipt of receipts) {
+        if (receipt.metricId !== "issue_ordering" || receipt.decision !== "accepted") {
+          admitted.push(receipt);
+          continue;
+        }
+        const ordering = verifiedOrderingReceipt(normalized, receipt, reviewers);
+        const duplicate = registerOrderingPlan(plans, ordering.review);
+        if (!duplicate) {
+          orderingSlots.set(ordering.unit, admitted.length);
+          admitted.push(receipt);
+          continue;
+        }
+        // A later duplicate cannot move accepted-at credit into another window.
+        // Keep unrelated receipt positions and use a stable ID for equal clocks.
+        const slot = orderingSlots.get(ordering.unit)!;
+        const retained = admitted[slot]!;
+        const chronology = compareSourceInstants(receipt.acceptedAt, retained.acceptedAt);
+        if (chronology < 0 || (chronology === 0 && receipt.id < retained.id)) admitted[slot] = receipt;
       }
+      for (const receipt of admitted) normalized = applyRecognitionReceipt(normalized, receipt, reviewers);
+    }
     return normalized;
   };
 }

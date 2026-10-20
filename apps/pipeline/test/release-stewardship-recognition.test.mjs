@@ -201,7 +201,7 @@ const historicalAuthority = JSON.parse(
   readFileSync(new URL("../../../tests/fixtures/release-stewardship-authority-v1.json", import.meta.url), "utf8"),
 );
 
-test("release stewardship pipeline: stewardship and manual Project destinations retire literal accepted-f80 authority", () => {
+test("release stewardship pipeline: literal accepted-f80 authority preserves independently reviewed destination fences", () => {
   assert.deepEqual(
     historicalAuthority.destinations.map(({ metricId }) => metricId),
     metricRegistryV1.metrics.map(({ id }) => id),
@@ -210,11 +210,12 @@ test("release stewardship pipeline: stewardship and manual Project destinations 
     for (const key of ["empty", "currentIntake"]) {
       const bindings = [{ ...historicalAuthority.binding, metricId: entry.metricId }];
       const actual = recognitionFingerprint(historicalAuthority.states[key], bindings);
-      if (
-        entry.metricId === "release_stewardship" ||
-        (entry.metricId === "project_configuration" && key === "currentIntake")
-      )
-        assert.notEqual(actual, entry[key]);
+      // These literal hashes predate the independently reviewed Project and
+      // ordering boundaries. Preserve every unaffected historical comparison.
+      const independentlyRetired =
+        entry.metricId === "issue_ordering" || (entry.metricId === "project_configuration" && key === "currentIntake");
+      if (entry.metricId === "release_stewardship" || independentlyRetired)
+        assert.notEqual(actual, entry[key], `${entry.metricId}:${key}`);
       else assert.equal(actual, entry[key], `${entry.metricId}:${key}`);
     }
   assert.equal(

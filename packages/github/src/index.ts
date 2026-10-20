@@ -19,6 +19,7 @@ export * from "./maintenance.js";
 export * from "./release-stewardship-source.js";
 export * from "./release-inclusion.js";
 export * from "./release-recognition.js";
+export * from "./ordering.js";
 
 export type EndpointOutcome =
   | { kind: "readable"; visibility: Visibility }

@@ -340,8 +340,7 @@ test("authored notes authority: all98 fingerprints preserve historical defaults 
       const actual = recognitionFingerprint(state, [binding]);
       const historical = previousPurposeAuthority(state, [binding]);
       const expected = previousPurposeAuthority(state, [binding], true);
-      // Release publication authority retires independently of the Project option.
-      if (metric.id === "release_stewardship") assert.notEqual(actual, expected, metric.id);
+      if (["issue_ordering", "release_stewardship"].includes(metric.id)) assert.notEqual(actual, expected, metric.id);
       else assert.equal(actual, expected, metric.id);
       if (metric.id === "project_configuration" && state === s.state) assert.notEqual(expected, historical, metric.id);
       else assert.equal(expected, historical, metric.id);
@@ -380,7 +379,13 @@ test("authored notes publication: current and pinned purposes survive real store
     markerFreeConfig: true,
     dataMode: "public",
     payloads: [s.envelope.payload.pull_request],
-    normalizerFactory: () => async () => structuredClone(s.input),
+    normalizerFactory:
+      () =>
+      async ({ observedAt }) => {
+        const output = components.github.normalizeGithubObservation({ ...s.envelope, observedAt }, s.pathPolicy);
+        assert.ok(output.physicalContext, "the stock adapter retains its source-bound physical receipt");
+        return output;
+      },
     defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
     configure(config) {
       config.repositories[0].families = ["pull_requests"];
@@ -489,8 +494,16 @@ for (const selectedRelease of [false, true])
         payloads: [s.envelope.payload.pull_request],
         authorizePolicyPreview: async () => true,
         defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
-        normalizerFactory: () => async () =>
-          normalizeGithubObservation(s.envelope, interpretPurpose ? s.pathPolicy : oldPolicy),
+        normalizerFactory:
+          () =>
+          async ({ observedAt }) => {
+            const output = normalizeGithubObservation(
+              { ...s.envelope, observedAt },
+              interpretPurpose ? s.pathPolicy : oldPolicy,
+            );
+            assert.ok(output.physicalContext, "both policy generations retain their source-bound physical receipt");
+            return output;
+          },
         configure(config) {
           config.repositories[0].families = ["pull_requests"];
           config.documentationPolicies = [s.pathPolicy];

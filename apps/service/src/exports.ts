@@ -1,7 +1,15 @@
 import type { PublicRankComparison, RankMovement } from "./rank-comparison.js";
-import type { Actor, MetricRegistry, MetricResult, PendingCount } from "@pick-your-ai/contracts";
+import type {
+  Actor,
+  MetricRegistry,
+  MetricResult,
+  PendingCount,
+  RankingPresentation,
+  PublicPhysicalContext,
+} from "@pick-your-ai/contracts";
 import { publicRoleScopeSchemaVersion } from "@pick-your-ai/contracts";
 import { PublicReadError, safePublicUrl, type PublicRead, type PublicDiagnostic } from "./public-source.js";
+import { rankingPresentation } from "./ranking-presentation.js";
 
 /** Serialization limits, not policy eligibility or source-publication approval. */
 export const PUBLIC_EXPORT_LIMITS = Object.freeze({
@@ -16,6 +24,7 @@ interface ExportBoard {
   comparison?: PublicRankComparison;
   metric: MetricRegistry["metrics"][number];
   ranking: PublicRead["selected"]["ranking"][number] | null;
+  rankingPresentation?: RankingPresentation | null;
   rows: {
     rank: number | null;
     actorId: string;
@@ -24,6 +33,7 @@ interface ExportBoard {
     evidenceIds: string[];
     pending?: PendingCount;
     movement?: RankMovement;
+    physicalContext?: PublicPhysicalContext;
   }[];
   totalRows: number;
   nextCursor: string | null;
@@ -112,7 +122,23 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
   const snapshot = read.selected.snapshot;
   const extendedScope = read.selected.scope.schemaVersion !== undefined;
   const roleScope = read.selected.scope.schemaVersion === publicRoleScopeSchemaVersion;
-  const exportVersion = roleScope ? "public-export/v3" : extendedScope ? "public-export/v2" : "public-export/v1";
+  const presentation = rankingPresentation(read, board.metric.id);
+  if (
+    (presentation !== null && presentation.totalContributors !== board.totalRows) ||
+    (presentation !== null &&
+      presentation.state !== "ranked" &&
+      board.rows.some((row) => row.rank !== null || (row.movement && row.movement.state !== "unavailable")))
+  )
+    unsafe();
+  const exportVersion =
+    presentation !== null
+      ? "public-export/v4"
+      : roleScope
+        ? "public-export/v3"
+        : extendedScope
+          ? "public-export/v2"
+          : "public-export/v1";
+  if (presentation === null && board.rows.some((row) => row.physicalContext !== undefined)) unsafe();
   // Deliberately omit raw/provider fields, display names, internal event IDs and control lists.
   const document = {
     ...(board.comparison === undefined ? {} : { comparison: board.comparison }),
@@ -128,6 +154,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     actorFilter: read.actorFilter ?? "all",
     metric: board.metric,
     ranking: board.ranking,
+    ...(presentation === null ? {} : { rankingPresentation: presentation }),
     coverage: snapshot.coverage,
     methodology: (read.selected.methodology ?? []).filter((entry) => entry.metricId === board.metric.id),
     totalRows: board.totalRows,
@@ -144,6 +171,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
       evidenceIds: [...row.evidenceIds],
       ...(row.pending === undefined ? {} : { pending: row.pending }),
       ...(row.movement === undefined ? {} : { movement: row.movement }),
+      ...(presentation === null ? {} : { physicalContext: row.physicalContext ?? null }),
     })),
     evidence,
     pendingEvidence,
@@ -174,6 +202,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     "unit",
     "metric_definition",
     "ranking",
+    ...(presentation === null ? [] : ["ranking_presentation"]),
     "coverage",
     "methodology",
     "total_rows",
@@ -197,6 +226,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     "p75",
     "pending",
     "pending_evidence",
+    ...(presentation === null ? [] : ["physical_context"]),
     ...(board.comparison === undefined ? [] : ["comparison", "movement"]),
   ];
   const s = document.scope;
@@ -220,6 +250,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     board.metric.definition.unit,
     boundedJson(board.metric),
     boundedJson(board.ranking),
+    ...(presentation === null ? [] : [boundedJson(presentation)]),
     boundedJson(document.coverage),
     boundedJson(document.methodology),
     board.totalRows,
@@ -264,6 +295,7 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
       diagnostic?.p75 ?? null,
       row.pending === undefined ? null : boundedJson(row.pending),
       boundedJson((row.pending?.evidenceIds ?? []).map(serializeEvidence)),
+      ...(presentation === null ? [] : [boundedJson(row.physicalContext ?? null)]),
       ...(board.comparison === undefined ? [] : [boundedJson(board.comparison), boundedJson(row.movement ?? null)]),
     ]);
   }

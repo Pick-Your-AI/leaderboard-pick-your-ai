@@ -229,6 +229,12 @@ test("unrelated disabled metrics preserve actual-service comparisons and explici
     true,
   );
   unavailable.ranking = null;
+  unavailable.rankingPresentation = {
+    ...unavailable.rankingPresentation,
+    state: "not_ranked",
+    comparableContributors: 0,
+    unrankableContributors: unavailable.totalRows,
+  };
   for (const row of unavailable.rows) row.rank = null;
   assert.equal(
     board(unavailable, h.selected).rows.every((row) => row.rank === null && row.movement.state === "unavailable"),
@@ -256,6 +262,8 @@ test("actual service rejects selected-disabled comparisons for boards and both e
 
 test("ordinary service responses remain compatible without comparison fields or CSV columns", async (t) => {
   const h = await documents(t);
+  // Preserve the actual pre-policy export contract rather than relabelling a v4 response.
+  delete h.pair.current.selected.rankingPresentationPolicy;
   const params = new URLSearchParams(h.params);
   for (const key of comparisonKeys) params.delete(key);
   const plain = selection(params.toString());
@@ -537,7 +545,18 @@ test("explicit unavailable states remain null and never accept filtered-cohort n
 
 test("CSV comparison cells remain repeated exact metadata with no hidden fields, duplicate keys or formulas", async (t) => {
   const h = await documents(t);
-  const column = 41;
+  let column;
+  rewriteCSV(h.csv, (rows) => {
+    column = rows[0].indexOf("comparison");
+    assert.equal(column, 43); // v4 includes policy and physical-context columns; movement is still adjacent.
+    assert.equal(rows[0][column - 1], "physical_context");
+    assert.equal(rows[1][column - 1], "", "the metadata record has no per-row physical context");
+    assert.ok(
+      rows.slice(2).every((row) => row[column - 1] === "null"),
+      "this non-LOC metric has explicit null context",
+    );
+    assert.equal(rows[0][column + 1], "movement");
+  });
   for (const mutate of [
     (rows) => {
       rows[0][column + 1] = "private_history";
@@ -606,7 +625,10 @@ for (const format of ["json", "csv"]) {
       format === "json"
         ? JSON.stringify(bad)
         : rewriteCSV(h.csv, (rows) => {
-            for (const row of rows) row.splice(41, 2);
+            const column = rows[0].indexOf("comparison");
+            assert.equal(column, 43);
+            assert.equal(rows[0][column + 1], "movement");
+            for (const row of rows) row.splice(column, 2);
           });
     t.mock.method(
       globalThis,

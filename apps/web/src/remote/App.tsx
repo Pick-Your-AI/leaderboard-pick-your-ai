@@ -35,6 +35,7 @@ import {
 } from "./Overview.tsx";
 import { MethodDefinition } from "./MethodDefinition.tsx";
 import { SnapshotCoverage } from "./Coverage.tsx";
+import { ProjectGroups } from "./ProjectGroups.tsx";
 import { RankComparisonControls } from "./RankComparison.tsx";
 import { BoardTable } from "./BoardTable.tsx";
 import { PublishedWindowPicker } from "./PublishedWindows.tsx";
@@ -1359,6 +1360,17 @@ export function RemoteApp() {
                   </li>
                 ))}
               </ul>
+              <ProjectGroups
+                key={JSON.stringify([
+                  data.value.actorId,
+                  data.value.snapshotId,
+                  data.value.policyVersion,
+                  portfolioParameters(pinned).toString(),
+                  data.value.timeline.map((entry) => [entry.contribution.contributionId, entry.projectContext ?? null]),
+                ])}
+                evidence={data.value.timeline}
+                selected={pinned}
+              />
               <h3>Published evidence</h3>
               <p>
                 {data.value.evidenceCount} public evidence records.{" "}

@@ -173,6 +173,7 @@ test("zero manual requests preserve unaffected prior authority and independently
         "deployment_work",
         "incidents",
         "release_changes",
+        "issue_ordering",
         "release_stewardship",
       ];
       if (bindings.some((entry) => receivedCategories.includes(entry.metricId)))
@@ -218,4 +219,17 @@ test("legacy owner-only intake is withheld without changing raw facts or inventi
   assert.deepEqual(legacy, original);
   assert.equal(apply(attachSyntheticEvidenceState(legacyState())).receipt.targetFactId, "synthetic-fact");
   assert.equal(receiptCalls, 1);
+});
+
+test("empty ordering destinations use the explicit reviewed-plan generation without changing other bindings", () => {
+  const state = { requests: {}, profiles: {}, audit: [] };
+  const ordering = { ...binding, metricId: "issue_ordering" };
+  for (const bindings of [[ordering], [binding, ordering], [ordering, binding]]) {
+    const expected = createHash("sha256")
+      .update(JSON.stringify(["localization-review-target/v1", [], [], [], bindings, "reviewed-ordering-plan/v1"]))
+      .digest("hex");
+    assert.equal(recognitionFingerprint(state, bindings), expected);
+    assert.notEqual(expected, beforeReceivedIntakeAuthority(state, bindings));
+  }
+  assert.equal(recognitionFingerprint(state, [binding]), beforeReceivedIntakeAuthority(state, [binding]));
 });

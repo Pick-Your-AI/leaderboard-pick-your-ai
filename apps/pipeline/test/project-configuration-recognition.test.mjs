@@ -886,7 +886,13 @@ test("project configuration persistence: withdrawal retires actual stored recogn
     dataMode: "public",
     payloads: [payload],
     defaultDeliveryNormalizationVersion,
-    normalizerFactory: () => async () => structuredClone(s.input),
+    normalizerFactory: () => async () => {
+      const input = structuredClone(s.input);
+      // This host seam supplies reviewed Project facts for an issues fixture.
+      // Its precomputed PR receipt is not bound to that collected issue source.
+      delete input.physicalContext;
+      return input;
+    },
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {

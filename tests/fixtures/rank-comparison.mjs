@@ -1,7 +1,11 @@
 // Synthetic retained engine inputs for Node and real-handler browser regressions.
 // Never import this fixture into a public runtime or seed it into real rankings.
 import { createHash } from "node:crypto";
-import { canonicalPublicScope, publicScopeParameters } from "../../packages/contracts/dist/index.js";
+import {
+  canonicalPublicScope,
+  publicScopeParameters,
+  currentRankingPresentationPolicy,
+} from "../../packages/contracts/dist/index.js";
 import {
   aggregateMetric,
   getMetricDefinition,
@@ -42,7 +46,9 @@ const coverage = {
   permissionsMissing: [],
   sourceErrors: [],
 };
-const actorIds = Object.fromEntries(["a", "b", "c", "d", "e"].map((letter) => [letter, `synthetic-rank-${letter}`]));
+const actorIds = Object.fromEntries(
+  ["a", "b", "c", "d", "e", "f", "g"].map((letter) => [letter, `synthetic-rank-${letter}`]),
+);
 const actors = Object.entries(actorIds).map(([letter, id]) => ({
   id,
   login: `synthetic-${letter}`,
@@ -78,6 +84,11 @@ const oldFacts = [
   fact("synthetic-b2", actorIds.b),
   fact("synthetic-d1", actorIds.d),
   fact("synthetic-e1", actorIds.e),
+  // Two baseline-only actors expire before the current snapshot. Six baseline actors
+  // preserve the existing history-withdrawal case above the five-actor display threshold;
+  // original current five-row values, ranks, entrant and tied continuation remain exact.
+  fact("synthetic-f1", actorIds.f, resolveMetricWindow("30d", beforeAt).from),
+  fact("synthetic-g1", actorIds.g, resolveMetricWindow("30d", beforeAt).from),
 ];
 const fresh = [
   fact("synthetic-b3", actorIds.b, "2026-10-17T12:00:00.000Z"),
@@ -196,6 +207,7 @@ function published(id, revision, cutoff, facts, filters) {
         })),
       ),
       ranking: [{ metricId: "pr_merged", direction: "descending", rank: true }],
+      rankingPresentationPolicy: structuredClone(currentRankingPresentationPolicy),
       methodology: [
         {
           metricId: "pr_merged",

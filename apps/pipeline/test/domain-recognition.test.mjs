@@ -1659,6 +1659,15 @@ test("specialist policy preserves canonical units and separates reviewed credit 
   }
 });
 
+// These domain fixtures remap their PR proofs through the issue-collection
+// harness. They retain every original fact/proof and mode marker, but do not
+// claim the original collected PR binding needed by an optional physical receipt.
+function domainNormalization(input) {
+  const output = structuredClone(input);
+  delete output.physicalContext;
+  return output;
+}
+
 test("the pipeline retains per-source synthetic provenance when flattening recognition inputs", async (t) => {
   const { harness, components } = await import("./harness.mjs");
   const s = scenario();
@@ -1680,7 +1689,7 @@ test("the pipeline retains per-source synthetic provenance when flattening recog
     payloads: [structuredClone(fixture.pull_request)],
     // These retained fictional inputs were produced by the current branch-checked normalizer.
     defaultDeliveryNormalizationVersion,
-    normalizerFactory: () => async () => ({ ...structuredClone(s.input), isSynthetic: true }),
+    normalizerFactory: () => async () => ({ ...domainNormalization(s.input), isSynthetic: true }),
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {
@@ -1726,7 +1735,7 @@ test("accepted documentation retains bounded domain reasons through primary and 
     payloads: [payload],
     // These retained fictional inputs were produced by the current branch-checked normalizer.
     defaultDeliveryNormalizationVersion,
-    normalizerFactory: () => async () => structuredClone(s.input),
+    normalizerFactory: () => async () => domainNormalization(s.input),
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {
@@ -1806,7 +1815,7 @@ test("data_quality: correction provenance stays private and obsolete generic aut
     payloads: [payload],
     // These retained fictional inputs were produced by the current branch-checked normalizer.
     defaultDeliveryNormalizationVersion,
-    normalizerFactory: () => async () => structuredClone(s.input),
+    normalizerFactory: () => async () => domainNormalization(s.input),
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {
@@ -1917,7 +1926,7 @@ test("reproductions: persisted accepted outcomes keep private proof bounded and 
     payloads: [payload],
     // These retained fictional inputs were produced by the current branch-checked normalizer.
     defaultDeliveryNormalizationVersion,
-    normalizerFactory: () => async () => structuredClone(s.input),
+    normalizerFactory: () => async () => domainNormalization(s.input),
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {
