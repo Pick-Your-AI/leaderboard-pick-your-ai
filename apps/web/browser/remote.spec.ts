@@ -1396,9 +1396,9 @@ for (const moveFocusDuringRead of [false, true])
         await expect(view.provenance).toContainText("Snapshot api-2");
         await expect(page.getByRole("row", { name: /Synthetic API A/ }).locator("strong")).toHaveText("10");
         await expect(view.summary).toHaveText(snapshotSummary("api-2"));
-        await expect.poll(async () => (await view.summaries()).map((entry) => entry.text)).toEqual([
-          snapshotSummary("api-2"),
-        ]);
+        await expect
+          .poll(async () => (await view.summaries()).map((entry) => entry.text))
+          .toEqual([snapshotSummary("api-2")]);
         await expect(view.follow).toBeChecked();
         expect(gate.count()).toBe(1);
         if (moveFocusDuringRead) {
@@ -1431,9 +1431,9 @@ test("automatic API batches coalesce only unstarted heads and give each applied 
     view.api.next(3);
     second.release();
     await expect(view.provenance).toContainText("Snapshot api-2");
-    await expect.poll(async () => (await view.summaries()).map((entry) => entry.text)).toEqual([
-      snapshotSummary("api-2"),
-    ]);
+    await expect
+      .poll(async () => (await view.summaries()).map((entry) => entry.text))
+      .toEqual([snapshotSummary("api-2")]);
     expect(view.boardReads("api-3")).toBe(0);
     view.api.next(4);
     await view.refresh();
@@ -1448,10 +1448,9 @@ test("automatic API batches coalesce only unstarted heads and give each applied 
     fourth.release();
     await expect(view.provenance).toContainText("Snapshot api-4");
     await expect(page.getByRole("row", { name: /Synthetic API A/ }).locator("strong")).toHaveText("30");
-    await expect.poll(async () => (await view.summaries()).map((entry) => entry.text)).toEqual([
-      snapshotSummary("api-2"),
-      snapshotSummary("api-4"),
-    ]);
+    await expect
+      .poll(async () => (await view.summaries()).map((entry) => entry.text))
+      .toEqual([snapshotSummary("api-2"), snapshotSummary("api-4")]);
     const summaries = await view.summaries();
     expect(summaries[1]!.at - summaries[0]!.at).toBeGreaterThanOrEqual(1000);
     expect(view.boardReads("api-3")).toBe(0);
@@ -1487,9 +1486,9 @@ test("a slow API batch starts the next announcement interval only after its matc
     expect(await view.summaries()).toEqual([]);
     second.release();
     await expect(view.provenance).toContainText("Snapshot api-2");
-    await expect.poll(async () => (await view.summaries()).map((entry) => entry.text)).toEqual([
-      snapshotSummary("api-2"),
-    ]);
+    await expect
+      .poll(async () => (await view.summaries()).map((entry) => entry.text))
+      .toEqual([snapshotSummary("api-2")]);
     await page.clock.runFor(999);
     expect(third.count()).toBe(0);
     await expect(view.provenance).toContainText("Snapshot api-2");
@@ -1497,10 +1496,9 @@ test("a slow API batch starts the next announcement interval only after its matc
     await third.requested;
     third.release();
     await expect(view.provenance).toContainText("Snapshot api-3");
-    await expect.poll(async () => (await view.summaries()).map((entry) => entry.text)).toEqual([
-      snapshotSummary("api-2"),
-      snapshotSummary("api-3"),
-    ]);
+    await expect
+      .poll(async () => (await view.summaries()).map((entry) => entry.text))
+      .toEqual([snapshotSummary("api-2"), snapshotSummary("api-3")]);
     const summaries = await view.summaries();
     expect(summaries[1]!.at - summaries[0]!.at).toBeGreaterThanOrEqual(1000);
     expect(second.count()).toBe(1);
@@ -1523,9 +1521,9 @@ test("manual API cooldown is visible, guards activation without queuing, and app
     await view.apply.focus();
     await page.keyboard.press("Enter");
     await expect(view.provenance).toContainText("Snapshot api-2");
-    await expect.poll(async () => (await view.summaries()).map((entry) => entry.text)).toEqual([
-      snapshotSummary("api-2"),
-    ]);
+    await expect
+      .poll(async () => (await view.summaries()).map((entry) => entry.text))
+      .toEqual([snapshotSummary("api-2")]);
     view.api.next(3);
     await view.refresh();
     await expect(view.apply).toHaveAttribute("aria-disabled", "true");
@@ -1551,10 +1549,9 @@ test("manual API cooldown is visible, guards activation without queuing, and app
     fourth.release();
     await expect(view.provenance).toContainText("Snapshot api-4");
     await expect(page.getByRole("row", { name: /Synthetic API A/ }).locator("strong")).toHaveText("30");
-    await expect.poll(async () => (await view.summaries()).map((entry) => entry.text)).toEqual([
-      snapshotSummary("api-2"),
-      snapshotSummary("api-4"),
-    ]);
+    await expect
+      .poll(async () => (await view.summaries()).map((entry) => entry.text))
+      .toEqual([snapshotSummary("api-2"), snapshotSummary("api-4")]);
     await expect(page.getByText("Update held: snapshot api-5 is available.")).toBeVisible();
     expect(view.boardReads("api-3")).toBe(0);
     expect(view.boardReads("api-5")).toBe(0);
@@ -1596,9 +1593,9 @@ test("source invalidation cancels an API application and applies current suppres
     await view.apply.focus();
     await page.keyboard.press("Enter");
     await expect(view.provenance).toContainText("Snapshot api-3");
-    await expect.poll(async () => (await view.summaries()).map((entry) => entry.text)).toEqual([
-      snapshotSummary("api-3"),
-    ]);
+    await expect
+      .poll(async () => (await view.summaries()).map((entry) => entry.text))
+      .toEqual([snapshotSummary("api-3")]);
     await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toHaveCount(0);
   } finally {
     second.release();
@@ -1638,9 +1635,9 @@ test("a failed API application remains an error until explicit recovery and neve
     await view.apply.focus();
     await page.keyboard.press("Enter");
     await expect(view.provenance).toContainText("Snapshot api-3");
-    await expect.poll(async () => (await view.summaries()).map((entry) => entry.text)).toEqual([
-      snapshotSummary("api-3"),
-    ]);
+    await expect
+      .poll(async () => (await view.summaries()).map((entry) => entry.text))
+      .toEqual([snapshotSummary("api-3")]);
   } finally {
     second.release();
     await view.api.close();
