@@ -1052,3 +1052,404 @@ test("a committed dispatch cannot acknowledge obsolete review authority after re
     await assertDenied(runtime, first.snapshotId, { current: false });
   });
 });
+
+const reviewProviderUnavailable = /review_normalizer_version_unverified/;
+const currentReviewMetrics = { prs_reviewed: 1, review_rounds: 1, review_feedback: 1 };
+const reviewCaches = async (h) =>
+  (
+    await h.db.query(
+      "SELECT fact_key,policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature",
+    )
+  ).rows;
+const reviewSnapshots = async (h) =>
+  (
+    await h.db.query(
+      "SELECT snapshot_id,document,document_hash FROM leaderboard_pipeline.snapshots ORDER BY snapshot_id",
+    )
+  ).rows;
+async function assertNoReviewPublication(h) {
+  assert.deepEqual(await reviewCaches(h), []);
+  assert.deepEqual(await reviewSnapshots(h), []);
+  assert.deepEqual(h.controlsStore.read().pipelinePublications ?? {}, {});
+  assert.deepEqual(h.controlsStore.read().pipelineHeads ?? {}, {});
+}
+const removeReviewCompatibility = (h, mode) => {
+  delete h.options[mode === "normalizer" ? "normalizer" : "githubEnrich"];
+  delete h.options.reviewSourceNormalizationVersion;
+};
+async function selectedReviewProvider(t, mode, after = async () => {}) {
+  let h;
+  const selected = { calls: 0 };
+  const extra =
+    mode === "normalizer"
+      ? {
+          normalizerFactory(options) {
+            const native = components.github.createGithubEvidenceNormalizer({
+              client: options.githubClient,
+              source: options.sourceId,
+              allowedRepositoryIds: [2],
+              isSynthetic: true,
+              // Fixture authority; the enclosing runtime checks its live authorization.
+              assertAuthorized: () => assert.equal(options.dataMode, "synthetic"),
+            });
+            return async (input) => {
+              selected.calls++;
+              const output = await native(input);
+              await after(h, input, output);
+              return output;
+            };
+          },
+        }
+      : {
+          githubEnrich: async (input) => {
+            selected.calls++;
+            const output = {
+              repository: { id: 2, slug, visibility: "public", defaultBranch: "main" },
+              proof: {
+                verified: true,
+                source: "github_rest",
+                revision: input.fact.sourceRevision,
+                isSynthetic: true,
+              },
+              family: "review",
+              observedAt: input.observedAt,
+              payload: { pull_request: structuredClone(h.state.parent), review: structuredClone(h.state.review) },
+              reviewParticipation: {
+                verified: true,
+                firstSubmittedAt: h.state.review.submitted_at,
+                roundFirstSubmittedAt: h.state.review.submitted_at,
+              },
+            };
+            await after(h, input, output);
+            return output;
+          },
+        };
+  h = await reviewHarness(t, { memoryDatabase: true, reviewSourceNormalizationVersion: version, ...extra });
+  return { h, selected };
+}
+function afterReviewTransaction(h, predicate, after) {
+  const transaction = h.db.transaction;
+  h.db.transaction = async (work) => {
+    let matched = false;
+    const result = await transaction((tx) =>
+      work({
+        query: async (sql, params) => {
+          const value = await tx.query(sql, params);
+          matched ||= predicate(sql);
+          return value;
+        },
+      }),
+    );
+    if (matched) after();
+    return result;
+  };
+}
+
+test("retained review callbacks cannot borrow built-in compatibility after their options are removed", async (t) => {
+  for (const mode of ["normalizer", "enrichment"])
+    await t.test(mode, async (subtest) => {
+      const { h, selected } = await selectedReviewProvider(subtest, mode);
+      removeReviewCompatibility(h, mode);
+      await assert.rejects(h.runtime.runOnce(), reviewProviderUnavailable);
+      assert.equal(selected.calls, 0);
+      await assertNoReviewPublication(h);
+      // The selected callback is still retained even though its option is absent.
+      h.options.reviewSourceNormalizationVersion = version;
+      assert.equal((await h.runtime.runOnce()).state, "published");
+      assert.equal(selected.calls, 1);
+      await assertMetrics(h.runtime, currentReviewMetrics);
+    });
+});
+
+test("review compatibility lost across the actual provider await cannot certify its returned facts", async (t) => {
+  for (const mode of ["normalizer", "enrichment"])
+    await t.test(mode, async (subtest) => {
+      const { h, selected } = await selectedReviewProvider(subtest, mode, async (current) => {
+        await Promise.resolve();
+        removeReviewCompatibility(current, mode);
+      });
+      await assert.rejects(h.runtime.runOnce(), reviewProviderUnavailable);
+      assert.equal(selected.calls, 1);
+      assert.equal(h.state.hydrations, mode === "normalizer" ? 1 : 0);
+      await assertNoReviewPublication(h);
+    });
+});
+
+test("review source-lock and dependency awaits cannot commit a newly uncertified normalization", async (t) => {
+  for (const [boundary, mode] of [
+    ["source lock", "normalizer"],
+    ["source artifact dependency", "enrichment"],
+  ])
+    await t.test(boundary, async (subtest) => {
+      let armed = false,
+        changed = false;
+      const { h, selected } = await selectedReviewProvider(subtest, mode, async () => {
+        armed = true;
+      });
+      const transaction = h.db.transaction;
+      h.db.transaction = (work) =>
+        transaction((tx) =>
+          work({
+            query: async (sql, params) => {
+              const value = await tx.query(sql, params);
+              if (
+                armed &&
+                (boundary === "source lock"
+                  ? sql.includes("leaderboard_ingestion.repository_access") && /FOR UPDATE/.test(sql)
+                  : /INSERT\s+INTO\s+leaderboard_pipeline\.source_artifacts/i.test(sql))
+              ) {
+                removeReviewCompatibility(h, mode);
+                armed = false;
+                changed = true;
+              }
+              return value;
+            },
+          }),
+        );
+      await assert.rejects(h.runtime.runOnce(), reviewProviderUnavailable);
+      assert.equal(changed, true, "the intended awaited boundary was actually reached");
+      assert.equal(selected.calls, 1);
+      await assertNoReviewPublication(h);
+      assert.equal(
+        (await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.source_artifacts")).rows[0].n,
+        0,
+        "dependency retention and the new cache roll back together",
+      );
+    });
+});
+
+test("a review candidate lookup cannot reuse a cache after its selected provider loses compatibility", async (t) => {
+  const { h, selected } = await selectedReviewProvider(t, "normalizer");
+  const cutoff = clock();
+  const first = (await h.runtime.runOnce({ cutoff })).publications[0];
+  const beforeCaches = await reviewCaches(h),
+    beforeSnapshots = await reviewSnapshots(h),
+    beforeControls = h.controlsStore.read();
+  assert.equal(selected.calls, 1);
+  let changed = false;
+  const query = h.db.query;
+  h.db.query = async (sql, params) => {
+    const result = await query(sql, params);
+    if (
+      !changed &&
+      sql.startsWith("SELECT policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations")
+    ) {
+      removeReviewCompatibility(h, "normalizer");
+      changed = true;
+    }
+    return result;
+  };
+  await assert.rejects(h.runtime.runOnce({ cutoff }), reviewProviderUnavailable);
+  assert.equal(changed, true);
+  assert.equal(selected.calls, 1);
+  assert.deepEqual(await reviewCaches(h), beforeCaches);
+  assert.deepEqual(await reviewSnapshots(h), beforeSnapshots);
+  assert.deepEqual(h.controlsStore.read().pipelinePublications, beforeControls.pipelinePublications);
+  assert.deepEqual(h.controlsStore.read().pipelineHeads, beforeControls.pipelineHeads);
+  // A live producer declaration is not retroactive authority over an immutable,
+  // already-confirmed snapshot whose retained proofs remain intact.
+  await assertMetrics(h.runtime, currentReviewMetrics, first.snapshotId);
+  h.options.reviewSourceNormalizationVersion = version;
+  assert.equal((await h.runtime.runOnce({ cutoff })).state, "published");
+  assert.equal(selected.calls, 1);
+  assert.deepEqual(await reviewCaches(h), beforeCaches);
+});
+
+test("a cached review result is withheld after its dependency transaction loses compatibility", async (t) => {
+  const { h, selected } = await selectedReviewProvider(t, "enrichment");
+  const cutoff = clock();
+  await h.runtime.runOnce({ cutoff });
+  const beforeCaches = await reviewCaches(h),
+    beforeSnapshots = await reviewSnapshots(h),
+    beforeControls = h.controlsStore.read();
+  let changed = false;
+  afterReviewTransaction(
+    h,
+    (sql) =>
+      sql.includes("SELECT document_hash FROM leaderboard_pipeline.normalizations") && sql.includes("FOR UPDATE"),
+    () => {
+      if (changed) return;
+      changed = true;
+      removeReviewCompatibility(h, "enrichment");
+    },
+  );
+  await assert.rejects(h.runtime.runOnce({ cutoff }), reviewProviderUnavailable);
+  assert.equal(changed, true);
+  assert.equal(selected.calls, 1);
+  assert.equal(h.state.hydrations, 0);
+  assert.deepEqual(await reviewCaches(h), beforeCaches);
+  assert.deepEqual(await reviewSnapshots(h), beforeSnapshots);
+  assert.deepEqual(h.controlsStore.read().pipelinePublications, beforeControls.pipelinePublications);
+  assert.deepEqual(h.controlsStore.read().pipelineHeads, beforeControls.pipelineHeads);
+});
+
+test("an unconfirmed SQL review publication requires restored compatibility before same-cutoff recovery", async (t) => {
+  const { h, selected } = await selectedReviewProvider(t, "normalizer");
+  const cutoff = clock();
+  let changed = false;
+  afterReviewTransaction(
+    h,
+    (sql) => /INSERT\s+INTO\s+leaderboard_pipeline\.snapshots/i.test(sql),
+    () => {
+      if (changed) return;
+      changed = true;
+      removeReviewCompatibility(h, "normalizer");
+    },
+  );
+  await assert.rejects(h.runtime.runOnce({ cutoff }), reviewProviderUnavailable);
+  assert.equal(changed, true);
+  const saved = await reviewSnapshots(h),
+    savedCaches = await reviewCaches(h);
+  assert.equal(saved.length, 1);
+  assert.equal(savedCaches.length, 1);
+  assert.equal(selected.calls, 1);
+  assert.deepEqual(h.controlsStore.read().pipelinePublications ?? {}, {});
+  assert.deepEqual(h.controlsStore.read().pipelineHeads ?? {}, {});
+  assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM policy_preview_inputs").get().n, 0);
+  assert.notEqual(
+    (await h.runtime.app.inject("/api/v1/boards?metric=prs_reviewed")).statusCode,
+    200,
+    "a committed SQL row alone cannot grant public visibility",
+  );
+  h.options.reviewSourceNormalizationVersion = version;
+  const recovered = (await h.runtime.runOnce({ cutoff })).publications[0];
+  assert.equal(recovered.snapshotId, saved[0].snapshot_id);
+  assert.equal(selected.calls, 1);
+  assert.deepEqual(await reviewSnapshots(h), saved);
+  assert.deepEqual(await reviewCaches(h), savedCaches);
+  await assertMetrics(h.runtime, currentReviewMetrics);
+});
+
+test("the synchronous review confirmation checks compatibility inside the visibility transaction", async (t) => {
+  const { h, selected } = await selectedReviewProvider(t, "enrichment");
+  const cutoff = clock();
+  let armed = false,
+    changed = false;
+  afterReviewTransaction(
+    h,
+    (sql) => /INSERT\s+INTO\s+leaderboard_pipeline\.snapshots/i.test(sql),
+    () => {
+      armed = true;
+    },
+  );
+  const transaction = h.controlsStore.transaction.bind(h.controlsStore);
+  h.controlsStore.transaction = (work) =>
+    transaction((state) => {
+      if (armed && !changed) {
+        changed = true;
+        removeReviewCompatibility(h, "enrichment");
+      }
+      return work(state);
+    });
+  await assert.rejects(h.runtime.runOnce({ cutoff }), reviewProviderUnavailable);
+  assert.equal(changed, true);
+  const saved = await reviewSnapshots(h);
+  assert.equal(saved.length, 1);
+  assert.deepEqual(h.controlsStore.read().pipelinePublications ?? {}, {});
+  assert.deepEqual(h.controlsStore.read().pipelineHeads ?? {}, {});
+  assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM policy_preview_inputs").get().n, 0);
+  h.options.reviewSourceNormalizationVersion = version;
+  const recovered = (await h.runtime.runOnce({ cutoff })).publications[0];
+  assert.equal(recovered.snapshotId, saved[0].snapshot_id);
+  assert.equal(selected.calls, 1);
+  assert.deepEqual(await reviewSnapshots(h), saved);
+  await assertMetrics(h.runtime, currentReviewMetrics);
+});
+
+test("a frozen review retry rechecks the retained provider without recollecting its source", async (t) => {
+  const { h, selected } = await selectedReviewProvider(t, "normalizer");
+  let pages = 0;
+  const readPage = h.options.source.readPage.bind(h.options.source);
+  h.options.source.readPage = async (request) => {
+    pages++;
+    return readPage(request);
+  };
+  let frozen = false;
+  afterReviewTransaction(
+    h,
+    (sql) => sql.includes("UPDATE leaderboard_pipeline.scan_continuations SET observation_cutoff"),
+    () => {
+      if (frozen) return;
+      frozen = true;
+      removeReviewCompatibility(h, "normalizer");
+      throw new Error("synthetic_stop_after_review_freeze");
+    },
+  );
+  await assert.rejects(h.runtime.runOnce(), /synthetic_stop_after_review_freeze/);
+  assert.equal(frozen, true);
+  assert.ok(pages > 0);
+  const collected = pages;
+  assert.equal(selected.calls, 0);
+  await assert.rejects(h.runtime.runOnce(), reviewProviderUnavailable);
+  assert.equal(pages, collected, "a frozen retry must use the completed collection");
+  await assertNoReviewPublication(h);
+  h.options.reviewSourceNormalizationVersion = version;
+  assert.equal((await h.runtime.runOnce()).state, "published");
+  assert.equal(pages, collected);
+  assert.equal(selected.calls, 1);
+  await assertMetrics(h.runtime, currentReviewMetrics);
+});
+
+test("declared review replacement and enrichment preserve native review metrics and source identities", async (t) => {
+  for (const mode of ["normalizer", "enrichment"])
+    await t.test(mode, async (subtest) => {
+      const { h, selected } = await selectedReviewProvider(subtest, mode);
+      assert.equal((await h.runtime.runOnce()).state, "published");
+      assert.equal(selected.calls, 1);
+      assert.equal(h.state.hydrations, mode === "normalizer" ? 1 : 0);
+      const saved = await reviewCaches(h);
+      assert.equal(saved.length, 1);
+      assert.equal(saved[0].document.reviewSourceNormalizationVersion, version);
+      for (const metricId of Object.keys(currentReviewMetrics)) {
+        const facts = saved[0].document.facts.filter((fact) => fact.metricId === metricId);
+        assert.equal(facts.length, 1, metricId);
+        assert.equal(facts[0].actorId, "303");
+        assert.equal(facts[0].artifactId, "PR_SYNTHETIC_10");
+        assert.equal(facts[0].occurredAt, h.state.review.submitted_at);
+      }
+      await assertMetrics(h.runtime, currentReviewMetrics);
+    });
+});
+
+test("unused replacement and enrichment options do not reclassify the captured built-in review provider", async (t) => {
+  const h = await reviewHarness(t, { memoryDatabase: true });
+  let unused = 0;
+  for (const name of ["normalizer", "githubEnrich"])
+    h.options[name] = async () => {
+      unused++;
+      throw new Error("unused review provider option");
+    };
+  assert.equal(h.options.reviewSourceNormalizationVersion, undefined);
+  assert.equal((await h.runtime.runOnce()).state, "published");
+  assert.equal(unused, 0);
+  assert.equal(h.state.hydrations, 1);
+  await assertMetrics(h.runtime, currentReviewMetrics);
+});
+
+test("configured review collection without review rows does not require an unused provider declaration", async (t) => {
+  let calls = 0;
+  const h = await reviewHarness(t, {
+    memoryDatabase: true,
+    normalizer: async () => {
+      calls++;
+      throw new Error("an empty collection cannot call the review provider");
+    },
+    source: {
+      async readPage(request) {
+        assert.equal(request.family, "reviews");
+        return {
+          repositoryId: 2,
+          visibility: "public",
+          isSynthetic: true,
+          nextCursor: null,
+          expectedCount: 0,
+          facts: [],
+        };
+      },
+    },
+  });
+  assert.equal(h.options.reviewSourceNormalizationVersion, undefined);
+  assert.equal((await h.runtime.runOnce()).state, "published");
+  assert.equal(calls, 0);
+  assert.deepEqual(await reviewCaches(h), []);
+});
