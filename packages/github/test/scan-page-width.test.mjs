@@ -232,3 +232,128 @@ for (const kind of ["REST", "GraphQL"]) {
     assert.equal(iterations, 1, "completed reuse does not traverse the selected iterator again");
   });
 }
+
+function nestedSelectedValue(depth, leaf = null) {
+  let value = leaf;
+  for (let index = 0; index < depth; index += 1) value = { child: value };
+  return value;
+}
+
+for (const kind of ["REST", "GraphQL"]) {
+  test(`${kind} validates materialized selected iterator identities at the nesting boundary`, async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "github-scan-iterator-"));
+    t.after(async () => {
+      assert.equal(dirname(resolve(directory)), resolve(tmpdir()));
+      assert.match(basename(directory), /^github-scan-iterator-/);
+      await rm(directory, { recursive: true, force: true });
+    });
+    const store = track(new FileCheckpointStore(directory));
+    const leaf = {
+      author: { id: 7, email: "synthetic-author@example.invalid" },
+      committer: { id: 8, email: "synthetic-committer@example.invalid" },
+      message: "synthetic-author@example.invalid is unchanged free text",
+    };
+    // The page array, 125 wrappers, row and identity object total 128 containers.
+    const value = nestedSelectedValue(125, leaf);
+    const before = structuredClone(value);
+    const selected = [];
+    let iterations = 0;
+    Object.defineProperty(selected, Symbol.iterator, {
+      value: function* () {
+        iterations += 1;
+        yield { id: "first-iterator-value" };
+        yield value;
+        yield undefined;
+        yield { id: "last-iterator-value" };
+      },
+    });
+    const reader = client(store, async () => response(kind, [], false));
+    const request = options(kind, "iterator-identity-boundary", (page) => withItems(kind, page, selected));
+    const expected = [
+      { id: "first-iterator-value" },
+      nestedSelectedValue(125, { author: { id: 7 }, committer: { id: 8 }, message: leaf.message }),
+      undefined,
+      { id: "last-iterator-value" },
+    ];
+    assert.deepEqual(await scan(kind, reader, request), expected);
+    assert.equal(iterations, 1);
+    assert.deepEqual(value, before, "minimization must not mutate the iterator's source value");
+    assert.equal(selected.length, 0, "indexed entries cannot stand in for actual iterator output");
+    assert.equal(store.saved.length, 1);
+    assert.deepEqual(store.saved[0].value.items, expected);
+    // JSON checkpoints preserve an explicit undefined array entry as null.
+    const persisted = structuredClone(expected);
+    persisted[2] = null;
+    const restartedStore = new FileCheckpointStore(directory);
+    assert.deepEqual((await restartedStore.load(store.saved[0].key)).items, persisted);
+    const restarted = new GithubReadClient({
+      apiOrigin: origin,
+      checkpoints: restartedStore,
+      token: async () => assert.fail("completed iterator checkpoint reuse must not resolve a token"),
+      fetch: async () => assert.fail("completed iterator checkpoint reuse must not repeat HTTP"),
+    });
+    assert.deepEqual(await scan(kind, restarted, request), persisted);
+    assert.equal(iterations, 1, "completed reuse must not traverse the selected iterator again");
+  });
+
+  for (const failure of ["excessive yielded nesting", "excessive omitted email", "late iterator error"]) {
+    test(`${kind} rejects a materialized selected iterator with ${failure} without advancing accepted progress`, async () => {
+      const store = track(syntheticCheckpointStore());
+      const calls = [];
+      const marker = new Error("synthetic materialized iterator failure");
+      const invalid =
+        failure === "excessive omitted email"
+          ? { author: { id: 9, email: nestedSelectedValue(128) } }
+          : nestedSelectedValue(128);
+      const before = structuredClone(invalid);
+      const selected = [];
+      let iterations = 0;
+      let rejectSelection = true;
+      Object.defineProperty(selected, Symbol.iterator, {
+        value: function* () {
+          iterations += 1;
+          yield { id: "not-admitted", committer: { id: 8, email: "synthetic@example.invalid" } };
+          if (failure === "late iterator error") throw marker;
+          yield invalid;
+        },
+      });
+      const reader = client(store, async (url, request) => {
+        const current = cursor(kind, url, request);
+        calls.push(current);
+        const first = current === firstCursor(kind);
+        return response(kind, first ? prefix : [{ id: "accepted-after-iterator-retry" }], first);
+      });
+      const request = options(kind, `materialized-${failure}`, (value) => {
+        if (selectedItems(kind, value)[0]?.id === -2 || !rejectSelection) return value;
+        return withItems(kind, value, selected);
+      });
+      await assert.rejects(
+        scan(kind, reader, request),
+        failure === "late iterator error"
+          ? (error) => {
+              assert.equal(error, marker);
+              return true;
+            }
+          : rejectedAs("invalid_response"),
+      );
+      assert.equal(iterations, 1);
+      assert.deepEqual(invalid, before);
+      assert.equal(selected.length, 0);
+      assert.equal(store.saved.length, 1, "the rejected iterator cannot publish a second checkpoint");
+      const accepted = store.saved[0];
+      assert.deepEqual(accepted.value.items, prefix);
+      assert.deepEqual(accepted.value.visited, visited(kind).slice(0, 1));
+      assert.equal(accepted.value.next, nextCursor(kind));
+      assert.equal(accepted.value.complete, false);
+      assert.deepEqual(store.references[0], accepted.value, "the already accepted object must remain unchanged");
+      assert.deepEqual(await store.load(accepted.key), accepted.value);
+      rejectSelection = false;
+      const expected = prefix.concat({ id: "accepted-after-iterator-retry" });
+      assert.deepEqual(await scan(kind, reader, request), expected);
+      assert.deepEqual(calls, [firstCursor(kind), nextCursor(kind), nextCursor(kind)]);
+      assert.deepEqual((await store.load(accepted.key)).items, expected);
+      assert.equal((await store.load(accepted.key)).complete, true);
+      assert.equal(iterations, 1);
+    });
+  }
+}
