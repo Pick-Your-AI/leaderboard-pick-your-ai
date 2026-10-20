@@ -4,6 +4,7 @@ import {
   fieldChangeNormalizationVersion,
   discussionSourceNormalizationVersion,
   reviewSourceNormalizationVersion,
+  relationshipPairNormalizationVersion,
 } from "@pick-your-ai/github";
 import {
   canonicalPublicScope,
@@ -38,6 +39,7 @@ const confirmationKeys = [
 ];
 const confirmationVersions = {
   reviewSourceNormalizationVersion,
+  relationshipPairNormalizationVersion,
   discussionSourceNormalizationVersion,
   defaultDeliveryNormalizationVersion,
   fieldChangeNormalizationVersion,
