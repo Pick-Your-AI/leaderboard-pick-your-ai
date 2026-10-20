@@ -2,6 +2,9 @@ import {
   publicMaintenanceClassificationReasons,
   documentationPurposeVersion,
   discussionFeedbackContentVersion,
+  publicProfilePresentationVersion,
+  publicProfilePresentationSchema,
+  publicProfilePresentationMatches,
 } from "@pick-your-ai/contracts";
 import {
   createDiscussionFeedbackAuthority,
@@ -3888,10 +3891,14 @@ export async function createPipeline(options) {
       // captured projections under the same current private authority.
       return result ? finalRead() : null;
     },
+    async readProfile(scope, pin, actorId, signal) {
+      // Select one visible actor; the route supplies no identity or consent authority.
+      return source.read(scope, pin, signal, undefined, false, false, actorId);
+    },
     async readHealth(scope, pin, signal) {
       return source.read(scope, pin, signal, undefined, true);
     },
-    async read(scope, pin, signal, transaction, health = false, historyBudget = false) {
+    async read(scope, pin, signal, transaction, health = false, historyBudget = false, profileActorId = null) {
       if (signal.aborted || !(await approved(transaction ?? db)) || !configuredScope(scope)) return null;
       // The SQL head allocates revisions, not visibility. Only this private
       // authority advances after confirmation. Bound retries if another runtime
@@ -4112,7 +4119,29 @@ export async function createPipeline(options) {
               document.diagnostics = document.diagnostics.filter((row) => !disabled.has(row.metricId));
             const evidenceIds = new Set(document.rows.flatMap((row) => row.evidenceIds));
             document.evidence = document.evidence.filter((entry) => evidenceIds.has(entry.contribution.contributionId));
+            let presentation = null;
+            if (profileActorId !== null) {
+              const visible = document.actors.find(
+                (entry) => entry.actorId === profileActorId && entry.state === "public",
+              );
+              const profile = Object.hasOwn(controls.profiles, profileActorId)
+                ? controls.profiles[profileActorId]
+                : null;
+              if (visible && profile?.public === true && !profile.suppressed) {
+                const parsed = publicProfilePresentationSchema.safeParse({
+                  schemaVersion: publicProfilePresentationVersion,
+                  actorId: profileActorId,
+                  bio: profile.bio,
+                  highlights: profile.highlights,
+                });
+                if (parsed.success && publicProfilePresentationMatches(parsed.data, visible.actorId, visible.actor))
+                  presentation = parsed.data;
+                // Unsafe legacy values are omitted from this optional presentation.
+                // Reads never rewrite controls or publish only its safe fragments.
+              }
+            }
             return {
+              ...(profileActorId === null ? {} : { presentation }),
               ...(currentSourceHealth === undefined ? {} : { currentSourceHealth }),
               head: {
                 snapshotId: selected.head_id,
