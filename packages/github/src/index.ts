@@ -20,6 +20,7 @@ export * from "./research.js";
 export * from "./maintenance.js";
 export * from "./release-stewardship-source.js";
 export * from "./release-inclusion.js";
+export * from "./pull-request-merge-target.js";
 export * from "./release-recognition.js";
 export * from "./ordering.js";
 

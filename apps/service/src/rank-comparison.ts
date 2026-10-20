@@ -55,6 +55,7 @@ function historyMetric(
     !sameTime(metric.scope.from, scope.start) ||
     (scope.end !== null && !sameTime(metric.scope.to, scope.end)) ||
     metric.scope.context !== (scope.context ?? "event") ||
+    metric.scope.branch !== scope.branch ||
     !sameSet(metric.scope.projects, scope.projects ?? []) ||
     !sameSet(metric.scope.workstreams, scope.workstream === null ? [] : [scope.workstream]) ||
     (scope.repository !== null && !sameSet(metric.scope.repos, [scope.repository])) ||
