@@ -96,7 +96,8 @@ test("keyboard sorting conserves API ranks, pinned proof, exact export order and
     const exact = await api.harness.app.inject({ method: "GET", url: exportRequest.pathname + exportRequest.search });
     expect(body).toBe(exact.body);
     expect(exportRequest.searchParams.get("snapshot")).toBe(api.harness.afterId);
-    await page.getByRole("link", { name: "Next cursor page", exact: true }).click();
+    await page.getByRole("link", { name: "Next cursor page", exact: true }).focus();
+    await page.keyboard.press("Enter");
     await expect(table(page).getByRole("rowheader")).toHaveText(["synthetic-e"]);
     await expect(row(page, "e").getByRole("cell").nth(0)).toHaveText("3");
     await expect(order(page)).toHaveValue("api");
