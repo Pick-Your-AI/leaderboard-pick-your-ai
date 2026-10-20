@@ -229,9 +229,10 @@ export async function restoreBackup({
     if (typeof callback !== "function") throw new Error("All isolated restore and suppression callbacks are required");
   }
   if (!expectedState || typeof expectedState !== "object") throw new Error("Expected restored state is required");
+  // Authenticate the selected backup before caller state serializers can change its envelope or key.
+  const decoded = decryptBackup(envelope, { key, now, expectedDumpSha256 });
   // Validate the comparison target before any database mutation.
   const expectedCanonical = canonical(expectedState);
-  const decoded = decryptBackup(envelope, { key, now, expectedDumpSha256 });
   const observed = Date.parse(timestamp(observedSourceCutoff));
   const cutoff = Date.parse(decoded.metadata.sourceCutoff);
   if (observed > Date.parse(now)) throw new Error("Observed source cutoff is from the future");
