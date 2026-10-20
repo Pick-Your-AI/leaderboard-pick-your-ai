@@ -1603,46 +1603,56 @@ test("source invalidation cancels an API application and applies current suppres
   }
 });
 
-test("a failed API application remains an error until explicit recovery and never silently reads the old pin", async ({
-  page,
-}) => {
-  const view = await pacedUpdatePage(page);
-  const second = await holdSnapshotRead(page, "api-2");
-  try {
-    view.api.next();
-    await view.refresh();
-    const oldReads = view.boardReads("api-1");
-    await view.apply.focus();
-    await page.keyboard.press("Enter");
-    await second.requested;
-    view.api.fail();
-    second.release();
-    await expect(page.getByRole("alert")).toContainText("public_projection_unavailable");
-    await expect(view.provenance).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toHaveCount(0);
-    expect(await view.summaries()).toEqual([]);
-    expect(view.boardReads("api-1")).toBe(oldReads);
-    await page.clock.runFor(1000);
-    await expect(page.getByRole("alert")).toContainText("public_projection_unavailable");
-    expect(view.boardReads("api-1")).toBe(oldReads);
-    view.api.recover();
-    view.api.next(3);
-    await page.getByRole("button", { name: "Retry this selection", exact: true }).click();
-    await expect(view.provenance).toContainText("Snapshot api-1");
-    await expect(page.getByText("Update held: snapshot api-3 is available.")).toBeVisible();
-    expect(second.count()).toBe(1);
-    expect(await view.summaries()).toEqual([]);
-    await view.apply.focus();
-    await page.keyboard.press("Enter");
-    await expect(view.provenance).toContainText("Snapshot api-3");
-    await expect
-      .poll(async () => (await view.summaries()).map((entry) => entry.text))
-      .toEqual([snapshotSummary("api-3")]);
-  } finally {
-    second.release();
-    await view.api.close();
-  }
-});
+for (const recovery of ["pointer", "keyboard"] as const)
+  test(
+    recovery === "pointer"
+      ? "a failed API application remains an error until explicit recovery and never silently reads the old pin"
+      : "keyboard Retry restores the committed pin after a failed API application before applying the current head",
+    async ({ page }) => {
+      const view = await pacedUpdatePage(page);
+      const second = await holdSnapshotRead(page, "api-2");
+      try {
+        view.api.next();
+        await view.refresh();
+        const oldReads = view.boardReads("api-1");
+        await view.apply.focus();
+        await page.keyboard.press("Enter");
+        await second.requested;
+        view.api.fail();
+        second.release();
+        await expect(page.getByRole("alert")).toContainText("public_projection_unavailable");
+        await expect(view.provenance).toHaveCount(0);
+        await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toHaveCount(0);
+        expect(await view.summaries()).toEqual([]);
+        expect(view.boardReads("api-1")).toBe(oldReads);
+        await page.clock.runFor(1000);
+        await expect(page.getByRole("alert")).toContainText("public_projection_unavailable");
+        expect(view.boardReads("api-1")).toBe(oldReads);
+        view.api.recover();
+        view.api.next(3);
+        const retry = page.getByRole("button", { name: "Retry this selection", exact: true });
+        if (recovery === "pointer") await retry.click();
+        else {
+          await retry.focus();
+          await page.keyboard.press("Enter");
+        }
+        await expect.poll(() => view.boardReads("api-1")).toBeGreaterThan(oldReads);
+        await expect(view.provenance).toContainText("Snapshot api-1");
+        await expect(page.getByText("Update held: snapshot api-3 is available.")).toBeVisible();
+        expect(second.count()).toBe(1);
+        expect(await view.summaries()).toEqual([]);
+        await view.apply.focus();
+        await page.keyboard.press("Enter");
+        await expect(view.provenance).toContainText("Snapshot api-3");
+        await expect
+          .poll(async () => (await view.summaries()).map((entry) => entry.text))
+          .toEqual([snapshotSummary("api-3")]);
+      } finally {
+        second.release();
+        await view.api.close();
+      }
+    },
+  );
 
 for (const cancel of ["navigation", "hidden"] as const)
   test(

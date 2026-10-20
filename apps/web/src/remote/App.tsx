@@ -502,6 +502,8 @@ export function RemoteApp() {
   const applicationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [theme, setTheme] = useState<ThemePreference>(readThemePreference);
   const [reduced, setReduced] = useState(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const updatesRegion = useRef<HTMLElement>(null);
+  const applyControl = useRef<HTMLButtonElement>(null);
   const region = useRef<HTMLDivElement>(null),
     heading = useRef<HTMLHeadingElement>(null),
     focusOnLoad = useRef(false);
@@ -899,6 +901,16 @@ export function RemoteApp() {
     // Keep surviving focus intact, but release a hold whose node is gone.
     if (focusInside && !region.current?.contains(document.activeElement)) setFocusInside(false);
   }, [state, focusInside]);
+  useEffect(() => {
+    if (state.status !== "ready") return;
+    // Error controls stay stable while Retry receives focus and activates.
+    // Release their retained layout after a verified read, preserving real focus.
+    const focused = document.activeElement;
+    if (!applyControl.current?.contains(focused))
+      setApplyFocusLocation((current) => (current === url ? null : current));
+    if (!updatesRegion.current?.contains(focused))
+      setUpdatesFocusLocation((current) => (current === url ? null : current));
+  }, [state.status, url]);
   const data = state.status === "ready" ? state.data : null;
   const meta = data && "value" in data ? data.value : null;
   const staticOverview = data?.kind === "health" || data?.kind === "overview";
@@ -1233,10 +1245,12 @@ export function RemoteApp() {
         )}
         {(meta || retainUpdates) && (
           <section
+            ref={updatesRegion}
             aria-label="Publication updates"
             className="update-control"
             onFocus={() => setUpdatesFocusLocation(url)}
             onBlur={(event) => {
+              if (state.status === "error") return;
               if (!event.currentTarget.contains(event.relatedTarget as Node | null))
                 setUpdatesFocusLocation((current) => (current === url ? null : current));
             }}
@@ -1254,12 +1268,15 @@ export function RemoteApp() {
             </p>
             {(pending || retainApplyControl) && (
               <button
+                ref={applyControl}
                 type="button"
                 className="button"
                 aria-disabled={applyUnavailable}
                 aria-describedby={pending && coolingDown ? "publication-apply-cooldown" : undefined}
                 onFocus={() => setApplyFocusLocation(url)}
-                onBlur={() => setApplyFocusLocation((current) => (current === url ? null : current))}
+                onBlur={() => {
+                  if (state.status !== "error") setApplyFocusLocation((current) => (current === url ? null : current));
+                }}
                 onClick={apply}
               >
                 Apply new snapshot
