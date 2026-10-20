@@ -19,6 +19,8 @@ import {
   readGithubContentEditParents,
   githubContentEditRevision,
 } from "../../../packages/github/dist/content-edit-history.js";
+import { minimizeDiscussionFeedback, discussionFeedbackRevision } from "@pick-your-ai/github";
+import { discussionFeedbackContentVersion, discussionFeedbackLimits } from "@pick-your-ai/contracts";
 
 /** Conservative scope-loss codes emitted by the trusted Project adapters. */
 export function isProjectSourceScopeFailure(error, family) {
@@ -114,6 +116,7 @@ export function createGithubCollectionSource({
   useRestSnapshotRevisions = () => false,
   includePullRequestReviewComments = () => false,
   includeContentEditMetadata = () => false,
+  discussionFeedback = null,
 }) {
   if (
     !readClient?.scanRest ||
@@ -129,6 +132,11 @@ export function createGithubCollectionSource({
     typeof includeContentEditMetadata !== "function"
   )
     throw new Error("invalid_github_collection_source");
+  if (
+    discussionFeedback !== null &&
+    (!discussionFeedback.authority?.current || !discussionFeedback.store?.begin || !discussionFeedback.store?.complete)
+  )
+    throw new Error("invalid_discussion_feedback_source");
   const approved = new Map(repositories.map((repository) => [repository.id, repository]));
   async function probeRepository(repository) {
     const scope = approved.get(repository.id);
@@ -467,10 +475,72 @@ export function createGithubCollectionSource({
       } else if (request.family === "discussions") {
         if (!client.scanGraphql) throw new Error("discussions_source_unavailable");
         const [owner, name] = repository.slug.split("/");
-        values = await client.scanGraphql({
-          source: sourceId,
-          key: `pipeline:${repository.id}:${request.runId}:discussions`,
-          query: `query($owner:String!, $name:String!, $first:Int!, $after:String) {
+        const feedback = discussionFeedback?.authority.current(repository.id) ?? null;
+        if (feedback) {
+          const authorizeFeedback = () => {
+            assertAuthorized();
+            if (discussionFeedback.authority.current(repository.id)?.authorityHash !== feedback.authorityHash)
+              throw new Error("discussion_feedback_authority_changed");
+          };
+          authorizeFeedback();
+          const start = await discussionFeedback.store.begin(request, feedback);
+          authorizeFeedback();
+          let observations = start.completed;
+          if (!observations) {
+            const descriptors = await client.scanGraphql({
+              source: sourceId,
+              key: `pipeline:${repository.id}:${request.runId}:${discussionFeedbackContentVersion}`,
+              first: discussionFeedbackLimits.pageSize,
+              query: `query($owner:String!, $name:String!, $first:Int!, $after:String) {
+                repository(owner:$owner, name:$name) {
+                  databaseId isPrivate hasDiscussionsEnabled
+                  discussions(first:$first, after:$after, orderBy:{field:CREATED_AT,direction:ASC}) {
+                    nodes { id url title body updatedAt createdAt lastEditedAt answerChosenAt
+                      author { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }
+                      answerChosenBy { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }
+                      answer { id isAnswer body createdAt updatedAt lastEditedAt deletedAt isMinimized
+                        author { __typename login ... on User { id databaseId } ... on Bot { id databaseId } }
+                      }
+                    }
+                    pageInfo { hasNextPage endCursor }
+                  }
+                }
+              }`,
+              variables: { owner, name },
+              maxPages,
+              assertAuthorized: authorizeFeedback,
+              select(data) {
+                authorizeFeedback();
+                const repo = data?.repository;
+                if (
+                  repo?.databaseId !== repository.id ||
+                  repo.isPrivate !== false ||
+                  repo.hasDiscussionsEnabled !== true
+                )
+                  throw new Error("discussion_feedback_public_scope_unverified");
+                if (
+                  !Array.isArray(repo.discussions?.nodes) ||
+                  repo.discussions.nodes.length > discussionFeedbackLimits.pageSize
+                )
+                  throw new Error("discussion_feedback_page_unverified");
+                // select runs before GithubReadClient writes its first checkpoint.
+                const nodes = repo.discussions.nodes.map((node) =>
+                  minimizeDiscussionFeedback(node, repository, githubDiscussionRevision(node)),
+                );
+                authorizeFeedback();
+                return { nodes, pageInfo: repo.discussions.pageInfo };
+              },
+            });
+            authorizeFeedback();
+            observations = await discussionFeedback.store.complete(start, descriptors);
+          }
+          authorizeFeedback();
+          values = observations.map((metadata) => ({ discussion_feedback: metadata }));
+        } else {
+          values = await client.scanGraphql({
+            source: sourceId,
+            key: `pipeline:${repository.id}:${request.runId}:discussions`,
+            query: `query($owner:String!, $name:String!, $first:Int!, $after:String) {
             repository(owner:$owner, name:$name) {
               databaseId isPrivate hasDiscussionsEnabled
               discussions(first:$first, after:$after, orderBy:{field:CREATED_AT,direction:ASC}) {
@@ -483,26 +553,27 @@ export function createGithubCollectionSource({
               }
             }
           }`,
-          variables: { owner, name },
-          maxPages,
-          assertAuthorized,
-          select(data) {
-            assertAuthorized();
-            const repo = data?.repository;
-            if (repo?.databaseId !== repository.id || repo.isPrivate !== false)
-              throw new Error("repository_identity_unverified");
-            if (repo.hasDiscussionsEnabled !== true) throw new Error("discussions_source_unavailable");
-            if (!Array.isArray(repo.discussions?.nodes)) throw new Error("source_array_required");
-            return { nodes: repo.discussions.nodes, pageInfo: repo.discussions.pageInfo };
-          },
-        });
-        values = values.map((value) => ({
-          source_revision: githubDiscussionRevision(value),
-          node_id: value.id,
-          html_url: value.url,
-          updated_at: value.updatedAt,
-          created_at: value.createdAt,
-        }));
+            variables: { owner, name },
+            maxPages,
+            assertAuthorized,
+            select(data) {
+              assertAuthorized();
+              const repo = data?.repository;
+              if (repo?.databaseId !== repository.id || repo.isPrivate !== false)
+                throw new Error("repository_identity_unverified");
+              if (repo.hasDiscussionsEnabled !== true) throw new Error("discussions_source_unavailable");
+              if (!Array.isArray(repo.discussions?.nodes)) throw new Error("source_array_required");
+              return { nodes: repo.discussions.nodes, pageInfo: repo.discussions.pageInfo };
+            },
+          });
+          values = values.map((value) => ({
+            source_revision: githubDiscussionRevision(value),
+            node_id: value.id,
+            html_url: value.url,
+            updated_at: value.updatedAt,
+            created_at: value.createdAt,
+          }));
+        }
       } else if (request.family === "reviews") {
         const pulls = await scan("review-pulls", routes.pull_requests);
         if (pulls.length > 10000) throw new Error("source_dataset_budget_exceeded");
@@ -575,6 +646,17 @@ export function createGithubCollectionSource({
       if (offset > expectedCount) throw new Error("invalid_source_cursor");
       const selected = projectSubjectCount === null ? values.slice(offset, offset + request.limit) : values;
       const facts = selected.map((value) => {
+        if (request.family === "discussions" && value.discussion_feedback !== undefined)
+          return {
+            subjectId: value.discussion_feedback.descriptor.discussionId,
+            sourceRevision: discussionFeedbackRevision(value.discussion_feedback),
+            sourceUrl: value.discussion_feedback.descriptor.threadUrl,
+            evidence: "current_state",
+            actorId: null,
+            occurredAt: null,
+            state: "present",
+            discussionFeedback: value.discussion_feedback,
+          };
         if (request.family === "content_edits")
           return {
             subjectId: value.parent.id,

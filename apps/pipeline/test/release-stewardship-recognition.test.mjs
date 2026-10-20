@@ -209,6 +209,13 @@ test("release stewardship pipeline: literal accepted-f80 authority preserves ind
   for (const entry of historicalAuthority.destinations)
     for (const key of ["empty", "currentIntake"]) {
       const bindings = [{ ...historicalAuthority.binding, metricId: entry.metricId }];
+      if (entry.metricId === "helpful_feedback") {
+        assert.throws(
+          () => recognitionFingerprint(historicalAuthority.states[key], bindings),
+          /invalid_discussion_feedback_contract/,
+        );
+        continue;
+      }
       const actual = recognitionFingerprint(historicalAuthority.states[key], bindings);
       // These literal hashes predate the independently reviewed Project and
       // ordering boundaries. Preserve every unaffected historical comparison.

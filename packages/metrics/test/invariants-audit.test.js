@@ -60,6 +60,12 @@ function policy(metric) {
           groupingPolicyVersion: "release-inclusion-units/v1",
         }
       : {}),
+    ...(metric.id === "helpful_feedback"
+      ? {
+          groupBy: "canonical",
+          groupingPolicyVersion: "accepted-feedback-threads/v1",
+        }
+      : {}),
     ...(grouping
       ? {
           dateBasis: grouping.date_basis,
