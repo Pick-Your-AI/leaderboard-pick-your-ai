@@ -734,8 +734,7 @@ test("proxy-backed retained decision data is rejected before selection or valida
     for (const boundary of ["receipt", "history", "event"])
       await t.test(mode + "/" + boundary, () => {
         const receipt = structuredClone(original);
-        const target =
-          boundary === "receipt" ? receipt : boundary === "history" ? receipt.history : receipt.history[0];
+        const target = boundary === "receipt" ? receipt : boundary === "history" ? receipt.history : receipt.history[0];
         const wrapped = hostileDecisionProxy(target, mode);
         if (boundary === "history") receipt.history = wrapped.value;
         if (boundary === "event") receipt.history[0] = wrapped.value;
