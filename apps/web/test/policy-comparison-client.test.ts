@@ -462,10 +462,11 @@ test("changed policy identities reject malformed values without relaxing labels 
         ...change,
         causes: {
           ...change.causes,
-          [direction]: Array.from(
-            { length: 10_001 },
-            () => ({ factId: "valid-fact", reasons: ["repeated_policy_unit"], revision: 0 }),
-          ),
+          [direction]: Array.from({ length: 10_001 }, () => ({
+            factId: "valid-fact",
+            reasons: ["repeated_policy_unit"],
+            revision: 0,
+          })),
         },
       });
       reject({
