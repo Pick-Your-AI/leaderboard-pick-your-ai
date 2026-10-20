@@ -8,14 +8,21 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { coverageSchema } from "@pick-your-ai/contracts";
 
 const source = new URL("../src/remote/Coverage.tsx", import.meta.url);
-const transformed = await transformWithOxc(await readFile(source, "utf8"), fileURLToPath(source), {
-  jsx: { runtime: "classic" },
-});
-const compiled = transformed.code.replace(/from "([^"]+)"/g, (_match, specifier) => {
-  const url = specifier.startsWith(".") ? new URL(specifier, source).href : import.meta.resolve(specifier);
-  return `from ${JSON.stringify(url)}`;
-});
-const { SnapshotCoverage } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+// Compile the real local TSX dependencies too, so this renderer exercises the
+// same policy component that the production coverage view imports.
+async function componentModuleUrl(source) {
+  const transformed = await transformWithOxc(await readFile(source, "utf8"), fileURLToPath(source), {
+    jsx: { runtime: "classic" },
+  });
+  let compiled = transformed.code;
+  for (const [statement, specifier] of transformed.code.matchAll(/from "([^"]+)"/g)) {
+    const dependency = specifier.startsWith(".") ? new URL(specifier, source) : new URL(import.meta.resolve(specifier));
+    const url = dependency.pathname.endsWith(".tsx") ? await componentModuleUrl(dependency) : dependency.href;
+    compiled = compiled.replace(statement, `from ${JSON.stringify(url)}`);
+  }
+  return `data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`;
+}
+const { SnapshotCoverage } = await import(await componentModuleUrl(source));
 const record = (overrides = {}) =>
   coverageSchema.parse({
     schemaVersion: "leaderboard/v1",
@@ -60,6 +67,14 @@ test("coverage keeps exact served windows, zero known gaps and unknown history d
   assert.doesNotMatch(html, /Reported history baselines/);
   assert.doesNotMatch(html, /0%|100%/);
   assert.match(html, /snapshot=served-snapshot&amp;repository=served-scope/);
+  assert.match(
+    html,
+    /href="https:\/\/github\.com\/Pick-Your-AI\/pick-your-ai-leaderboard\/blob\/main\/docs\/evidence-contributor-rights\.md"/,
+  );
+  assert.match(
+    html,
+    /href="https:\/\/github\.com\/Pick-Your-AI\/pick-your-ai-leaderboard\/blob\/main\/docs\/GOVERNANCE\.md"/,
+  );
   assert.deepEqual(input, before);
 });
 

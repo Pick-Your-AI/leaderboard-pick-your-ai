@@ -378,3 +378,82 @@ test("strict v2 client binds every award and shared-artifact proof to current sc
     assert.throws(() => achievements(changed, result.selected, "alex"));
   }
 });
+
+async function assertMergeTargetMilestoneScope(t, empty) {
+  const value = milestoneFixture();
+  if (empty) {
+    value.selected.snapshot.coverage[0].state = "partial";
+    value.selected.evidence = [];
+    value.selected.portfolioEvidence = [];
+    value.selected.rows = [];
+  }
+  const { app } = service(t, value);
+  const request = {
+    repository: "synthetic-repo",
+    branch: "release/one",
+    category: "pr_merged",
+    limit: "20",
+  };
+  const result = await read(app, request);
+  ok(result);
+  assert.equal(result.data.schemaVersion, "public-read/v4");
+  assert.equal(result.data.scope.schemaVersion, "public-scope/v4");
+  assert.equal(result.data.scope.branch, request.branch);
+  assert.equal(result.data.category, request.category);
+  assert.equal(milestoneParameters(result.selected, "synthetic-milestones").get("branch"), request.branch);
+  if (empty) {
+    assert.deepEqual(result.data.achievements, []);
+    assert.deepEqual(result.data.coContributions, []);
+    assert.equal(result.data.totalCoContributions, 0);
+    assert.equal(result.data.nextCursor, null);
+    assert.equal(result.data.coverage[0].state, "partial");
+  } else {
+    assert.deepEqual(
+      result.data.achievements.map((award) => award.id),
+      ["first-accepted-in-scope", "first-category-in-scope:pr_merged"],
+    );
+    assert.deepEqual(
+      result.data.coContributions.map((pair) => pair.peer.actorId),
+      ["bea"],
+    );
+    assert.equal(result.data.achievements[0].proof.contributionId, "alex-authored");
+    assert.equal(result.data.coContributions[0].peerProof.contributionId, "bea-authored");
+  }
+  const parsed = achievements(result.data, result.selected, "alex");
+  assert.deepEqual(parsed.scope, result.data.scope);
+  assert.deepEqual(parsed.achievements, result.data.achievements);
+  assert.deepEqual(parsed.coContributions, result.data.coContributions);
+
+  const wrongBranch = await read(app, { ...request, branch: "release/two" });
+  ok(wrongBranch);
+  assert.equal(wrongBranch.data.scope.branch, "release/two");
+  assert.throws(() => achievements(wrongBranch.data, result.selected, "alex"), {
+    status: 502,
+    code: "api_scope_mismatch",
+  });
+
+  const { branch: _branch, ...branchlessRequest } = request;
+  const missingBranch = await read(app, branchlessRequest);
+  ok(missingBranch);
+  assert.equal(missingBranch.data.schemaVersion, "leaderboard/v1");
+  assert.equal(Object.hasOwn(missingBranch.data.scope, "branch"), false);
+  assert.throws(() => achievements(missingBranch.data, result.selected, "alex"), {
+    status: 502,
+    code: "api_scope_mismatch",
+  });
+
+  const malformed = structuredClone(result.data);
+  delete malformed.scope.branch;
+  assert.throws(() => achievements(malformed, result.selected, "alex"), {
+    status: 502,
+    code: "api_scope_mismatch",
+  });
+}
+
+test("populated v4 milestones retain the exact merge target through the service and client", async (t) => {
+  await assertMergeTargetMilestoneScope(t, false);
+});
+
+test("empty v4 milestones retain the exact merge target with incomplete history", async (t) => {
+  await assertMergeTargetMilestoneScope(t, true);
+});

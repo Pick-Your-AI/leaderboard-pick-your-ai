@@ -1,3 +1,10 @@
+export {
+  publicProfilePresentationVersion,
+  publicProfilePresentationSchema,
+  publicProfilePresentationMatches,
+  safePublicGithubUrl,
+  type PublicProfilePresentation,
+} from "./public-profile-presentation.js";
 export { actorFilterSchema, actorFilterLabels, matchesActorFilter, type ActorFilter } from "./actor-filter.js";
 export {
   verifiedIdentityCorrectionVersion,

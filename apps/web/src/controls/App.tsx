@@ -138,8 +138,16 @@ function Profile({ run, profile }: { run: Run; profile: ProfileData }) {
           <input name="bio" maxLength={500} defaultValue={profile.bio} />
         </Field>
         <Field label="Public GitHub highlights (up to six, one URL per line)">
-          <textarea name="highlights" defaultValue={profile.highlights.join("\n")} />
+          <textarea
+            name="highlights"
+            defaultValue={profile.highlights.join("\n")}
+            aria-describedby="profile-link-help"
+          />
         </Field>
+        <p id="profile-link-help">
+          Use public https://github.com/owner/repository links without query strings. Issue, review and discussion
+          comment anchors are supported. These are contributor-provided links, not verified contribution evidence.
+        </p>
         <label>
           <input name="public" type="checkbox" defaultChecked={profile.public} /> Publish this optional profile
         </label>
