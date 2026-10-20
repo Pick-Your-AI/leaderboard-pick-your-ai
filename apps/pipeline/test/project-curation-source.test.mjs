@@ -747,8 +747,7 @@ test("curation metadata excludes content from every durable checkpoint even when
           for (const subject of connection.nodes) Object.assign(subject, { title: sentinel, body: sentinel });
           return respond({ data });
         }
-        if (variables.id)
-          return respond({ data: { node: { id: variables.id, public: true, unselected: sentinel } } });
+        if (variables.id) return respond({ data: { node: { id: variables.id, public: true, unselected: sentinel } } });
         const data = fixture.data(variables.number, query);
         const subject = data.repository[query.includes("pullRequest(number:") ? "pullRequest" : "issue"];
         subject.body = sentinel;
