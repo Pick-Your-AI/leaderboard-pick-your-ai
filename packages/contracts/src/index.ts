@@ -202,3 +202,22 @@ export {
   type AcceptedFeedbackThread,
   type DiscussionFeedbackCapture,
 } from "./discussion-feedback.js";
+
+export {
+  pullRequestDecisionHistoryVersion,
+  pullRequestDecisionHistoryLimits,
+  pullRequestDecisionInstantSchema,
+  pullRequestDecisionBindingSchema,
+  pullRequestDecisionGenerationSchema,
+  pullRequestDecisionHistoryPayloadSchema,
+  pullRequestDecisionHistorySchema,
+  pullRequestDecisionUnavailableReasons,
+  pullRequestDecisionClocksValid,
+  type PullRequestDecisionBinding,
+  type PullRequestDecisionGeneration,
+  type PullRequestDecisionHistory,
+  type PullRequestDecisionHistoryPayload,
+  type PullRequestDecisionEvent,
+  type PullRequestDecisionUnavailableReason,
+  type PullRequestDecisionUnavailable,
+} from "./pull-request-decision-history.js";
