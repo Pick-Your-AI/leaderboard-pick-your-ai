@@ -73,8 +73,8 @@ async function setup(t, extra = {}) {
     operationId: "synthetic-driver-retirement",
     repositoryId: 2,
     expectedGeneration: String(
-      (await h.db.query("SELECT generation FROM leaderboard_ingestion.repository_access WHERE repository_id=2"))
-        .rows[0].generation,
+      (await h.db.query("SELECT generation FROM leaderboard_ingestion.repository_access WHERE repository_id=2")).rows[0]
+        .generation,
     ),
     policyVersion: "synthetic-source-policy",
     authorizationReceipt: "synthetic-source-approval",
@@ -570,10 +570,7 @@ test("concurrent same-operation callers share one persisted batch identity and c
     h.db.transaction = transaction;
   }
   assert.equal(absent, 2);
-  assert.deepEqual(
-    results.map((result) => result.status).sort(),
-    ["in_progress", "retry"],
-  );
+  assert.deepEqual(results.map((result) => result.status).sort(), ["in_progress", "retry"]);
   const manifests = await pgRows(h, "derived_retirement_manifests");
   assert.equal(manifests.length, 1);
   assert.ok([1, 2].includes(manifests[0].batch_limit));

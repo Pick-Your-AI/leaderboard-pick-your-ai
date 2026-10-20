@@ -304,10 +304,7 @@ export async function advanceRepositoryRetirement(input, dependencies) {
       check(receipt.operationId === request.operationId && receipt.batchId === id);
       return derivedResult(receipt);
     } catch (error) {
-      if (
-        error?.message === "derived_batch_pending" ||
-        error?.message === "derived_scope_disposition_already_recorded"
-      )
+      if (error?.message === "derived_batch_pending" || error?.message === "derived_scope_disposition_already_recorded")
         return finish("discovering", "derived", makeCursor("derived", null, null, "discover"));
       if (error?.message === "derived_batch_conflict") {
         // Only the proven first-writer limit race is retryable. A same-limit
@@ -328,9 +325,7 @@ export async function advanceRepositoryRetirement(input, dependencies) {
         resume.scanAfter === null ? {} : { afterBatchId: resume.scanAfter },
       );
       const pending = page.entries.find((entry) => entry.receipt === null);
-      const terminal = page.entries.find((entry) =>
-        ["owned_scope_erased", "blocked"].includes(entry.receipt?.status),
-      );
+      const terminal = page.entries.find((entry) => ["owned_scope_erased", "blocked"].includes(entry.receipt?.status));
       const next = pending ?? terminal;
       if (next) return finish("in_progress", "derived", makeCursor("derived", next.batchId));
       if (page.nextCursor !== null)
