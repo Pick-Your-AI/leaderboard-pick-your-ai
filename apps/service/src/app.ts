@@ -1045,14 +1045,7 @@ export function createService(options: ServiceOptions = {}) {
   app.get<{ Params: { actorId: string } }>("/api/v1/contributors/:actorId/workstream-help", async (request, reply) => {
     const q = query(request);
     const actorId = request.params.actorId;
-    if (
-      !identifier.test(actorId) ||
-      actorId === "." ||
-      actorId === ".." ||
-      q.metric ||
-      q.search ||
-      q.format !== "json"
-    )
+    if (!identifier.test(actorId) || actorId === "." || actorId === ".." || q.metric || q.search || q.format !== "json")
       fail(400, "unsupported_filter");
     if (options.approvedWorkstreamHelpRuleVersion !== workstreamHelpVersion)
       fail(503, "workstream_help_policy_unapproved");

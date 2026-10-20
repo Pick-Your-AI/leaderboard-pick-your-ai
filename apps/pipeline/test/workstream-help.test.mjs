@@ -16,27 +16,24 @@ import {
 } from "../../../tests/fixtures/workstream-help.mjs";
 
 const invalid = /workstream_help_evidence_unverified/;
-test(
-  "reviewed help binds actual normalized source, exact independent review and immutable bytes without changing metric units",
-  () => {
-    const s = helpScenario();
-    const original = structuredClone(s.input);
-    const out = runHelp(s);
-    assert.equal(out.reviewedWorkstreamHelp.length, 1);
-    const help = out.reviewedWorkstreamHelp[0];
-    assert.equal(help.statement.sourceRevision, s.evidence.sourceRevision);
-    assert.notEqual(help.statement.sourceRevision, help.statementRevision);
-    assert.equal(help.statementHash, sha256(s.record.statement.content));
-    assert.equal(help.statement.actorId, "101");
-    assert.equal(out.facts.filter((fact) => fact.metricId === "maintenance").length, 1);
-    assert.deepEqual(out.facts.slice(0, original.facts.length), original.facts);
-    assert.deepEqual(s.input, original);
-    assert.doesNotMatch(
-      JSON.stringify(out.reviewedWorkstreamHelp),
-      /private-help|requestVersion|decisionId|reviewerId|validUntil|sourceUseReview/,
-    );
-  },
-);
+test("reviewed help binds actual normalized source, exact independent review and immutable bytes without changing metric units", () => {
+  const s = helpScenario();
+  const original = structuredClone(s.input);
+  const out = runHelp(s);
+  assert.equal(out.reviewedWorkstreamHelp.length, 1);
+  const help = out.reviewedWorkstreamHelp[0];
+  assert.equal(help.statement.sourceRevision, s.evidence.sourceRevision);
+  assert.notEqual(help.statement.sourceRevision, help.statementRevision);
+  assert.equal(help.statementHash, sha256(s.record.statement.content));
+  assert.equal(help.statement.actorId, "101");
+  assert.equal(out.facts.filter((fact) => fact.metricId === "maintenance").length, 1);
+  assert.deepEqual(out.facts.slice(0, original.facts.length), original.facts);
+  assert.deepEqual(s.input, original);
+  assert.doesNotMatch(
+    JSON.stringify(out.reviewedWorkstreamHelp),
+    /private-help|requestVersion|decisionId|reviewerId|validUntil|sourceUseReview/,
+  );
+});
 
 test("current Project membership and categories cannot supply a missing reviewed relationship", () => {
   const s = helpScenario();
@@ -359,75 +356,69 @@ test("help fingerprints bind exact proof and current decisions while an absent o
   assert.equal(Object.hasOwn(runHelp(s), "reviewedWorkstreamHelp"), false);
 });
 
-test(
-  "persisted help and proof are revoked after actual SQL and SQLite reopen, then recompute without credit",
-  async (t) => {
-    const { harness, components, publicScope } = await import("./harness.mjs");
-    const { createPipeline } = await import("../src/runtime.mjs");
-    const s = helpScenario();
-    const h = await harness(t, {
-      markerFreeConfig: true,
-      dataMode: "public",
-      payloads: [s.payload],
-      defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
-      normalizerFactory: () => async () => structuredClone(s.input),
-      configure(config) {
-        config.repositories[0].families = ["pull_requests"];
-        config.recognitionBindings = [s.binding];
-        config.approvedWorkstreamHelpRuleVersion = workstreamHelpVersion;
-        const policy = { ...config.policies[0].policy, ...s.policies[0].policy };
-        config.policies = [
-          { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "fixture-help-approval" },
-        ];
-      },
-    });
-    h.controlsStore.transaction((state) => {
-      state.requests = s.state.requests;
-      state.audit = s.state.audit;
-    });
-    const result = await h.runtime.runOnce({ cutoff: helpCutoff });
-    assert.equal(result.state, "published");
-    const pin = result.publications[0].snapshotId;
-    const path = "/api/v1/contributors/101/workstream-help?snapshot=" + pin;
-    const response = await h.runtime.app.inject(path);
-    assert.equal(response.statusCode, 200, response.body);
-    assert.equal(response.json().recognitions.length, 1);
-    assert.doesNotMatch(response.body, /private-help|requestVersion|decisionId|reviewerId|sourceUseReview|PRIVATE/);
-    const proofId = response.json().recognitions[0].proof.contributionId;
-    const proofPath = "/api/v1/evidence/" + proofId + "?snapshot=" + pin;
-    assert.equal((await h.runtime.app.inject(proofPath)).statusCode, 200);
-    const confirmation = structuredClone(h.controlsStore.read().pipelinePublications[pin]);
-    h.controlsStore.transaction((state) => {
-      state.requests[s.request.id].status = "withdrawn";
-      components.controls.record(state, state.requests[s.request.id], "101", "withdrawn", Date.parse(helpCutoff));
-    });
-    await h.runtime.stop();
-    await h.reopenDatabase();
-    h.controlsStore.close();
-    const { join } = await import("node:path");
-    h.controlsStore.db = new components.controls.ControlStore(join(h.directory, "controls.sqlite")).db;
-    const restarted = await createPipeline(h.options);
-    t.after(() => restarted.stop());
-    assert.deepEqual(h.controlsStore.read().pipelinePublications[pin], confirmation);
-    assert.equal(await restarted.source.read(publicScope, pin, new AbortController().signal), null);
-    for (const url of [path, proofPath]) {
-      const denied = await restarted.app.inject(url);
-      assert.equal(denied.statusCode, 410, denied.body);
-      assert.match(denied.headers["cache-control"], /no-store/);
-    }
-    const next = await restarted.runOnce({ cutoff: helpCutoff });
-    assert.equal(next.state, "published");
-    const fresh = await restarted.app.inject(
-      "/api/v1/contributors/101/workstream-help?snapshot=" + next.publications[0].snapshotId,
-    );
-    assert.equal(fresh.statusCode, 200, fresh.body);
-    assert.deepEqual(fresh.json().recognitions, []);
-    assert.equal(
-      (await h.db.query("SELECT count(*) AS n FROM leaderboard_pipeline.normalizations")).rows[0].n > 0,
-      true,
-    );
-  },
-);
+test("persisted help and proof are revoked after actual SQL and SQLite reopen, then recompute without credit", async (t) => {
+  const { harness, components, publicScope } = await import("./harness.mjs");
+  const { createPipeline } = await import("../src/runtime.mjs");
+  const s = helpScenario();
+  const h = await harness(t, {
+    markerFreeConfig: true,
+    dataMode: "public",
+    payloads: [s.payload],
+    defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
+    normalizerFactory: () => async () => structuredClone(s.input),
+    configure(config) {
+      config.repositories[0].families = ["pull_requests"];
+      config.recognitionBindings = [s.binding];
+      config.approvedWorkstreamHelpRuleVersion = workstreamHelpVersion;
+      const policy = { ...config.policies[0].policy, ...s.policies[0].policy };
+      config.policies = [
+        { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "fixture-help-approval" },
+      ];
+    },
+  });
+  h.controlsStore.transaction((state) => {
+    state.requests = s.state.requests;
+    state.audit = s.state.audit;
+  });
+  const result = await h.runtime.runOnce({ cutoff: helpCutoff });
+  assert.equal(result.state, "published");
+  const pin = result.publications[0].snapshotId;
+  const path = "/api/v1/contributors/101/workstream-help?snapshot=" + pin;
+  const response = await h.runtime.app.inject(path);
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().recognitions.length, 1);
+  assert.doesNotMatch(response.body, /private-help|requestVersion|decisionId|reviewerId|sourceUseReview|PRIVATE/);
+  const proofId = response.json().recognitions[0].proof.contributionId;
+  const proofPath = "/api/v1/evidence/" + proofId + "?snapshot=" + pin;
+  assert.equal((await h.runtime.app.inject(proofPath)).statusCode, 200);
+  const confirmation = structuredClone(h.controlsStore.read().pipelinePublications[pin]);
+  h.controlsStore.transaction((state) => {
+    state.requests[s.request.id].status = "withdrawn";
+    components.controls.record(state, state.requests[s.request.id], "101", "withdrawn", Date.parse(helpCutoff));
+  });
+  await h.runtime.stop();
+  await h.reopenDatabase();
+  h.controlsStore.close();
+  const { join } = await import("node:path");
+  h.controlsStore.db = new components.controls.ControlStore(join(h.directory, "controls.sqlite")).db;
+  const restarted = await createPipeline(h.options);
+  t.after(() => restarted.stop());
+  assert.deepEqual(h.controlsStore.read().pipelinePublications[pin], confirmation);
+  assert.equal(await restarted.source.read(publicScope, pin, new AbortController().signal), null);
+  for (const url of [path, proofPath]) {
+    const denied = await restarted.app.inject(url);
+    assert.equal(denied.statusCode, 410, denied.body);
+    assert.match(denied.headers["cache-control"], /no-store/);
+  }
+  const next = await restarted.runOnce({ cutoff: helpCutoff });
+  assert.equal(next.state, "published");
+  const fresh = await restarted.app.inject(
+    "/api/v1/contributors/101/workstream-help?snapshot=" + next.publications[0].snapshotId,
+  );
+  assert.equal(fresh.statusCode, 200, fresh.body);
+  assert.deepEqual(fresh.json().recognitions, []);
+  assert.equal((await h.db.query("SELECT count(*) AS n FROM leaderboard_pipeline.normalizations")).rows[0].n > 0, true);
+});
 
 for (const [name, make, asKey] of [
   ["escaped control value", () => "\u0000".repeat(1_333_334), false],

@@ -178,11 +178,7 @@ export function publicHelpFixture(count = 3) {
       })),
   );
   const actors = [
-    ...new Map(
-      outputs
-        .flatMap((output) => output.actors)
-        .map((actor) => [actor.id, actor]),
-    ).values(),
+    ...new Map(outputs.flatMap((output) => output.actors).map((actor) => [actor.id, actor])).values(),
   ].map((actor) => ({
     actorId: actor.id,
     state: "public",
