@@ -99,6 +99,12 @@ const variants: { version: string; columns: readonly Column[] }[] = [
 const formula = (value: string) => /^[\s\p{Cf}]*[=+@-]/u.test(value) || /^[\t\r\n]/u.test(value);
 const protectedText = (value: string) => (formula(value) ? `'${value}` : value);
 const originalText = (value: string) => (value.startsWith("'") && formula(value.slice(1)) ? value.slice(1) : value);
+function originalBranch(value: string): string {
+  const branch = value.startsWith("''") ? value.slice(1) : originalText(value);
+  const escaped = branch.startsWith("'") ? `'${branch}` : branch;
+  if (protectedText(escaped) !== value) invalid();
+  return branch;
+}
 function invalid(): never {
   throw new Error("invalid_export_csv");
 }
@@ -296,7 +302,7 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
             projects: parseExportJSON(at(metadata, "projects")),
           }),
       ...(columns.includes("roles") ? { roles: parseExportJSON(at(metadata, "roles")) } : {}),
-      ...(columns.includes("branch") ? { branch: originalText(at(metadata, "branch")) } : {}),
+      ...(columns.includes("branch") ? { branch: originalBranch(at(metadata, "branch")) } : {}),
     },
     actorFilter: at(metadata, "actor_filter"),
     metric: parseExportJSON(at(metadata, "metric_definition")),

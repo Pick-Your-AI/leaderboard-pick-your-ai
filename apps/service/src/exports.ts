@@ -246,7 +246,8 @@ export function renderPublicExport(read: PublicRead, board: ExportBoard, format:
     s.workstream,
     ...(extendedScope ? [s.schemaVersion!, s.context!, boundedJson(s.projects!)] : []),
     ...(roleScope ? [boundedJson(s.roles!)] : []),
-    ...(branchScope ? [s.branch!] : []),
+    // In v5, distinguish a literal leading apostrophe from csvCell's formula guard.
+    ...(branchScope ? [s.branch!.startsWith("'") ? `'${s.branch!}` : s.branch!] : []),
     s.start,
     s.end,
     board.metric.id,
