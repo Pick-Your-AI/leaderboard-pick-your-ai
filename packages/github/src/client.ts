@@ -637,8 +637,9 @@ export class GithubReadClient {
         if (!Array.isArray(page.items)) throw new GithubClientError({ kind: "invalid_response" }, source);
         // Validate indexed values, then validate the materialized iterator output
         // before mutating accepted scan state. An iterator can yield other values.
-        const selectedItems = minimizeIdentityEmails(page.items, source, "invalid_response") as unknown[];
-        const pageItems = minimizeIdentityEmails([...selectedItems], source, "invalid_response") as unknown[];
+        minimizeIdentityEmails(page.items, source, "invalid_response");
+        // Indexed minimization can copy the array and discard its custom iterator.
+        const pageItems = minimizeIdentityEmails([...page.items], source, "invalid_response") as unknown[];
         for (let index = 0; index < pageItems.length; index += 1) state.items.push(pageItems[index]);
         state.visited.push(next);
         state.next = page.next;

@@ -357,3 +357,76 @@ for (const kind of ["REST", "GraphQL"]) {
     });
   }
 }
+
+for (const kind of ["REST", "GraphQL"]) {
+  for (const failure of [false, true]) {
+    test(`${kind} retains the selected iterator after indexed email minimization: ${failure ? "late failure" : "ordered values"}`, async () => {
+      const selected = [{ id: "not-selected", author: { id: 101, email: "indexed@example.invalid" } }];
+      const originalIndexed = structuredClone(selected);
+      const yielded = {
+        id: "selected-first",
+        committer: { id: 202, email: "yielded@example.invalid" },
+        message: "yielded@example.invalid is retained free text",
+      };
+      const originalYielded = structuredClone(yielded);
+      const marker = new Error("synthetic selected iterator failure after indexed minimization");
+      let iterations = 0;
+      let repaired = false;
+      Object.defineProperty(selected, Symbol.iterator, {
+        value: function* () {
+          iterations += 1;
+          yield yielded;
+          if (failure && !repaired) throw marker;
+          yield undefined;
+          yield { id: "selected-last" };
+        },
+      });
+      const store = track(syntheticCheckpointStore());
+      const calls = [];
+      const reader = client(store, async (url, request) => {
+        const current = cursor(kind, url, request);
+        calls.push(current);
+        const first = current === firstCursor(kind);
+        return response(kind, first ? prefix : [], first);
+      });
+      const request = options(kind, `indexed-iterator-${failure}`, (value) => {
+        if (selectedItems(kind, value)[0]?.id === -2) return value;
+        return withItems(kind, value, selected);
+      });
+      const expected = prefix.concat(
+        { id: "selected-first", committer: { id: 202 }, message: yielded.message },
+        undefined,
+        { id: "selected-last" },
+      );
+      if (failure) {
+        await assert.rejects(scan(kind, reader, request), (error) => {
+          assert.equal(error, marker);
+          return true;
+        });
+        assert.equal(iterations, 1);
+        assert.equal(store.saved.length, 1);
+        const accepted = store.saved[0];
+        assert.deepEqual(accepted.value.items, prefix);
+        assert.deepEqual(accepted.value.visited, visited(kind).slice(0, 1));
+        assert.deepEqual(store.references[0], accepted.value);
+        assert.deepEqual(await store.load(accepted.key), accepted.value);
+        assert.equal(accepted.value.next, nextCursor(kind));
+        assert.equal(accepted.value.complete, false);
+        repaired = true;
+      }
+      assert.deepEqual(await scan(kind, reader, request), expected);
+      assert.equal(iterations, failure ? 2 : 1);
+      assert.deepEqual(selected, originalIndexed);
+      assert.deepEqual(yielded, originalYielded);
+      assert.deepEqual((await store.load(store.saved.at(-1).key)).items, expected);
+      assert.equal((await store.load(store.saved.at(-1).key)).complete, true);
+      const beforeReuse = iterations;
+      assert.deepEqual(await scan(kind, reader, request), expected);
+      assert.equal(iterations, beforeReuse, "completed reuse must not invoke the selected iterator again");
+      assert.deepEqual(
+        calls,
+        failure ? [firstCursor(kind), nextCursor(kind), nextCursor(kind)] : [firstCursor(kind), nextCursor(kind)],
+      );
+    });
+  }
+}
