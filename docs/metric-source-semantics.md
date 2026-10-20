@@ -70,13 +70,13 @@ the corresponding metric rather than marking its entire public definition done.
 
 ## Remaining acceptance and ownership
 
-The inventory now has 18 direct-suite entries, 61 existing-source mappings and
-19 explicit remaining dispositions. The references include specialized domain
+The inventory now has 18 direct-suite entries, 63 existing-source mappings and
+17 explicit remaining dispositions. The references include specialized domain
 receipt admission, localization, bug/answer recognition, typed history,
 participation history, physical diff eligibility, maintenance, automation and
 editorial consent. Each maps a literal positive and exclusion test; parameterized
 domain cases also name their metric input. These are bounded source-review
-references, not 61 new executions or a claim that every remaining facet is done.
+references, not 63 new executions or a claim that every remaining facet is done.
 The original 18/47/33 inventory and its semantic/cache executions remain attributed
 to the earlier source. The separately reviewed repository-net helper adds one
 reference backed by its own 20 synthetic source cases, producing the historical
