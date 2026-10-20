@@ -13,6 +13,17 @@ Unknown shapes fail closed and require operator/source reconciliation; no raw bo
 is retained. Schema-valid nullable accounts, optional repository and enterprise
 context remain supported. Tests exercise both confusion paths and legitimate shapes.
 
+Lifecycle actions must be literal strings before any suppression is attempted.
+Arrays and nested arrays cannot stand in for `deleted`, `suspend`, `privatized`
+or `transferred`; malformed and missing actions retain `unsupported_action` (422).
+The signed installation's `repository_selection` must likewise be the literal
+string `all` or `selected`, otherwise admission returns `invalid_payload` (400).
+HMAC validation still happens first. Rejected shapes invoke neither delivery
+insertion nor lifecycle suppression, and valid scalar events preserve their
+approved scope, restriction reason and duplicate/conflict acknowledgement.
+The synthetic signed-request regressions exercise the actual handler; they do
+not establish a real installation, observed GitHub schema drift or live access.
+
 Repository transfer is handled conservatively for an already-approved installation
 and repository. GitHub delivers this event to the new owner's installation; this
 alone does not guarantee old-installation removal. Installation removal events and
