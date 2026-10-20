@@ -1376,6 +1376,8 @@ for (const moveFocusDuringRead of [false, true])
         await view.apply.focus();
         const original = await view.apply.elementHandle();
         if (!original) throw new Error("The focused Apply control is missing.");
+        // Automatic resume requires the pointer outside the contributor content.
+        await page.mouse.move(0, 0);
         await page.emulateMedia({ reducedMotion: "no-preference" });
         await gate.requested;
         await expect(view.apply).toHaveAttribute("aria-disabled", "true");

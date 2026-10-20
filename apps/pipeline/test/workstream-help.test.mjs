@@ -505,3 +505,149 @@ test("ordinary escaped and multibyte public labels retain their exact reviewed s
   assert.equal(out.reviewedWorkstreamHelp[0].statement.from.label, label);
   assert.equal(out.reviewedWorkstreamHelp[0].statementHash, sha256(s.record.statement.content));
 });
+
+async function workstreamHelpConstructorHarness(t) {
+  const { harness, components } = await import("./harness.mjs");
+  const { createPipeline } = await import("../src/runtime.mjs");
+  const s = helpScenario();
+  s.record.validUntil = new Date(Date.now() + 86_400_000).toISOString();
+  const h = await harness(t, {
+    memoryDatabase: true,
+    markerFreeConfig: true,
+    dataMode: "public",
+    payloads: [s.payload],
+    defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
+    normalizerFactory: () => async () => structuredClone(s.input),
+    configure(config) {
+      config.repositories[0].families = ["pull_requests"];
+      const policy = { ...config.policies[0].policy, ...s.policies[0].policy };
+      config.policies = [
+        { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "fixture-help-approval" },
+      ];
+    },
+  });
+  // Prepare real storage and a legacy configuration before installing the extension.
+  assert.equal(Object.hasOwn(h.options.config, "recognitionBindings"), false);
+  await h.runtime.stop();
+  h.controlsStore.transaction((state) => {
+    state.requests = s.state.requests;
+    state.audit = s.state.audit;
+  });
+  const config = {
+    ...h.options.config,
+    recognitionBindings: [s.binding],
+    approvedWorkstreamHelpRuleVersion: workstreamHelpVersion,
+  };
+  return { s, h, createPipeline, options: { ...h.options, config } };
+}
+
+test("pipeline construction rejects a nested help accessor before reading or copying it", async (t) => {
+  const { s, createPipeline, options } = await workstreamHelpConstructorHarness(t);
+  const config = options.config;
+  const content = s.record.statement.content;
+  let getters = 0,
+    copies = 0,
+    parses = 0,
+    callbacks = 0;
+  Object.defineProperty(s.record.statement, "content", {
+    enumerable: true,
+    get() {
+      getters++;
+      return content;
+    },
+  });
+  const clone = globalThis.structuredClone;
+  t.mock.method(globalThis, "structuredClone", function (value, ...rest) {
+    if (value === config) copies++;
+    return Reflect.apply(clone, this, [value, ...rest]);
+  });
+  t.mock.method(reviewedWorkstreamHelpBindingSchema, "safeParse", () => {
+    parses++;
+    throw new Error("help schema admission reached");
+  });
+  options.components = {
+    ...options.components,
+    github: {
+      ...options.components.github,
+      applyRecognitionReceipt() {
+        callbacks++;
+        throw new Error("help receipt callback reached");
+      },
+    },
+  };
+  let candidate;
+  try {
+    await assert.rejects(async () => {
+      candidate = await createPipeline(options);
+    }, invalid);
+  } finally {
+    await candidate?.stop();
+  }
+  assert.deepEqual({ getters, copies, parses, callbacks }, { getters: 0, copies: 0, parses: 0, callbacks: 0 });
+});
+
+test("pipeline construction bounds escaped help bytes before configuration cloning or schema admission", async (t) => {
+  const { s, createPipeline, options } = await workstreamHelpConstructorHarness(t);
+  const config = options.config;
+  s.record.statement.content = "\u0000".repeat(1_333_334);
+  let copies = 0,
+    parses = 0,
+    callbacks = 0;
+  const clone = globalThis.structuredClone;
+  t.mock.method(globalThis, "structuredClone", function (value, ...rest) {
+    if (value === config) {
+      copies++;
+      throw new Error("oversized help configuration clone reached");
+    }
+    return Reflect.apply(clone, this, [value, ...rest]);
+  });
+  t.mock.method(reviewedWorkstreamHelpBindingSchema, "safeParse", () => {
+    parses++;
+    throw new Error("help schema admission reached");
+  });
+  options.components = {
+    ...options.components,
+    github: {
+      ...options.components.github,
+      applyRecognitionReceipt() {
+        callbacks++;
+        throw new Error("help receipt callback reached");
+      },
+    },
+  };
+  let candidate;
+  try {
+    await assert.rejects(async () => {
+      candidate = await createPipeline(options);
+    }, invalid);
+  } finally {
+    await candidate?.stop();
+  }
+  assert.deepEqual({ copies, parses, callbacks }, { copies: 0, parses: 0, callbacks: 0 });
+});
+
+test("pipeline construction captures one valid help configuration and publishes its reviewed proof", async (t) => {
+  const { s, createPipeline, options } = await workstreamHelpConstructorHarness(t);
+  const config = options.config;
+  let configurationReads = 0;
+  Object.defineProperty(options, "config", {
+    enumerable: true,
+    get() {
+      configurationReads++;
+      return config;
+    },
+  });
+  const candidate = await createPipeline(options);
+  t.after(() => candidate.stop());
+  assert.equal(configurationReads, 1);
+  const result = await candidate.runOnce({ cutoff: helpCutoff });
+  assert.equal(result.state, "published");
+  const pin = result.publications[0].snapshotId;
+  const response = await candidate.app.inject("/api/v1/contributors/101/workstream-help?snapshot=" + pin);
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().recognitions.length, 1);
+  assert.deepEqual(response.json().recognitions[0].help.statement, s.statement);
+  assert.equal(response.json().recognitions[0].help.statementHash, sha256(s.record.statement.content));
+  assert.doesNotMatch(response.body, /private-help|requestVersion|decisionId|reviewerId|sourceUseReview|PRIVATE/);
+  assert.equal(configurationReads, 1);
+});
