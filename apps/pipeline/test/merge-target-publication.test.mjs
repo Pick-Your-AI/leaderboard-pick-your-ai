@@ -423,3 +423,228 @@ test("invalid merge-target scopes reject at the approved run boundary before pro
       }
     });
 });
+
+const mergeProviderUnavailable = /merge_target_normalizer_version_unverified/;
+const mergeSnapshots = async (h) =>
+  (
+    await h.db.query(
+      "SELECT snapshot_id,document,document_hash FROM leaderboard_pipeline.snapshots ORDER BY snapshot_id",
+    )
+  ).rows;
+async function assertNoMergePublication(h) {
+  assert.deepEqual(await caches(h.db), []);
+  assert.deepEqual(await mergeSnapshots(h), []);
+  assert.deepEqual(h.controlsStore.read().pipelinePublications ?? {}, {});
+  assert.deepEqual(h.controlsStore.read().pipelineHeads ?? {}, {});
+}
+async function replacementSetup(t, after = async () => {}) {
+  const current = await setup(t, { memoryDatabase: true, configuredScopes: [scope] });
+  const { h, p } = current;
+  await h.runtime.stop();
+  const custom = { calls: 0 };
+  const normalize = components.github.createGithubEvidenceNormalizer({
+    client: p.client,
+    source: h.options.sourceId,
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+    pullRequestMergeTargetRepositoryIds: [2],
+    now: p.now,
+  });
+  h.options.defaultDeliveryNormalizationVersion = components.github.defaultDeliveryNormalizationVersion;
+  h.options.pullRequestMergeTargetNormalizationVersion = components.github.pullRequestMergeTargetNormalizationVersion;
+  h.options.normalizer = async (input) => {
+    custom.calls++;
+    const output = await normalize(input);
+    await after(h.options, input, output);
+    return output;
+  };
+  const runtime = await createPipeline(h.options);
+  t.after(() => runtime.stop());
+  return { ...current, runtime, custom };
+}
+function afterMergeTransaction(h, predicate, after) {
+  const transaction = h.db.transaction;
+  h.db.transaction = async (work) => {
+    let matched = false;
+    const result = await transaction((tx) =>
+      work({
+        query: async (sql, params) => {
+          const value = await tx.query(sql, params);
+          matched ||= predicate(sql);
+          return value;
+        },
+      }),
+    );
+    if (matched) after();
+    return result;
+  };
+}
+const removeMergeCompatibility = (options) => {
+  delete options.normalizer;
+  delete options.pullRequestMergeTargetNormalizationVersion;
+};
+
+test("a retained merge-target replacement cannot borrow built-in compatibility after its option is removed", async (t) => {
+  const { h, runtime, custom } = await replacementSetup(t);
+  removeMergeCompatibility(h.options);
+  await assert.rejects(runtime.runOnce({ cutoff: iso(Date.now() - 1000) }), mergeProviderUnavailable);
+  assert.equal(custom.calls, 0);
+  await assertNoMergePublication(h);
+});
+
+test("merge-target compatibility lost across the awaited replacement result cannot be persisted", async (t) => {
+  const { h, runtime, custom } = await replacementSetup(t, async (options) => {
+    await Promise.resolve();
+    removeMergeCompatibility(options);
+  });
+  await assert.rejects(runtime.runOnce({ cutoff: iso(Date.now() - 1000) }), mergeProviderUnavailable);
+  assert.equal(custom.calls, 1);
+  await assertNoMergePublication(h);
+});
+
+test("merge-target compatibility is checked after the source lock and before cache insertion", async (t) => {
+  let armed = false,
+    changed = false;
+  const { h, runtime, custom } = await replacementSetup(t, async () => {
+    armed = true;
+  });
+  const transaction = h.db.transaction;
+  h.db.transaction = (work) =>
+    transaction((tx) =>
+      work({
+        query: async (sql, params) => {
+          const value = await tx.query(sql, params);
+          if (armed && sql.includes("leaderboard_ingestion.repository_access") && /FOR UPDATE/.test(sql)) {
+            removeMergeCompatibility(h.options);
+            armed = false;
+            changed = true;
+          }
+          return value;
+        },
+      }),
+    );
+  await assert.rejects(runtime.runOnce({ cutoff: iso(Date.now() - 1000) }), mergeProviderUnavailable);
+  assert.equal(changed, true);
+  assert.equal(custom.calls, 1);
+  await assertNoMergePublication(h);
+});
+
+test("merge-target compatibility lost during new cache dependency retention rolls back the cache", async (t) => {
+  let armed = false,
+    changed = false;
+  const { h, runtime, custom } = await replacementSetup(t, async () => {
+    armed = true;
+  });
+  const transaction = h.db.transaction;
+  h.db.transaction = (work) =>
+    transaction((tx) =>
+      work({
+        query: async (sql, params) => {
+          const value = await tx.query(sql, params);
+          if (
+            armed &&
+            sql.includes("SELECT document_hash FROM leaderboard_pipeline.normalizations") &&
+            sql.includes("FOR UPDATE")
+          ) {
+            removeMergeCompatibility(h.options);
+            armed = false;
+            changed = true;
+          }
+          return value;
+        },
+      }),
+    );
+  await assert.rejects(runtime.runOnce({ cutoff: iso(Date.now() - 1000) }), mergeProviderUnavailable);
+  assert.equal(changed, true);
+  assert.equal(custom.calls, 1);
+  await assertNoMergePublication(h);
+});
+
+test("a retained merge-target cache is withheld when compatibility disappears during dependency capture", async (t) => {
+  const { h, p, runtime, custom } = await replacementSetup(t);
+  const cutoff = iso(Date.now() - 1000);
+  assert.equal((await runtime.runOnce({ cutoff })).state, "published");
+  assert.equal(custom.calls, 5);
+  const beforeCaches = await caches(h.db),
+    beforeSnapshots = await mergeSnapshots(h),
+    beforeControls = h.controlsStore.read();
+  let changed = false;
+  afterMergeTransaction(
+    h,
+    (sql) =>
+      sql.includes("SELECT document_hash FROM leaderboard_pipeline.normalizations") && sql.includes("FOR UPDATE"),
+    () => {
+      removeMergeCompatibility(h.options);
+      changed = true;
+    },
+  );
+  await assert.rejects(runtime.runOnce({ cutoff }), mergeProviderUnavailable);
+  assert.equal(changed, true);
+  assert.equal(custom.calls, 5);
+  assert.equal(p.state.graphql, 5);
+  assert.deepEqual(await caches(h.db), beforeCaches);
+  assert.deepEqual(await mergeSnapshots(h), beforeSnapshots);
+  assert.deepEqual(h.controlsStore.read().pipelinePublications, beforeControls.pipelinePublications);
+  assert.deepEqual(h.controlsStore.read().pipelineHeads, beforeControls.pipelineHeads);
+});
+
+test("SQL merge-target publication cannot gain SQLite visibility after provider compatibility is lost", async (t) => {
+  const { h, p, runtime, custom } = await replacementSetup(t);
+  const cutoff = iso(Date.now() - 1000);
+  let changed = false;
+  afterMergeTransaction(
+    h,
+    (sql) => /INSERT\s+INTO\s+leaderboard_pipeline\.snapshots/i.test(sql),
+    () => {
+      if (changed) return;
+      removeMergeCompatibility(h.options);
+      changed = true;
+    },
+  );
+  await assert.rejects(runtime.runOnce({ cutoff }), mergeProviderUnavailable);
+  assert.equal(changed, true);
+  const saved = await mergeSnapshots(h),
+    savedCaches = await caches(h.db);
+  assert.equal(saved.length, 1);
+  assert.equal(savedCaches.length, 5);
+  assert.deepEqual(h.controlsStore.read().pipelinePublications ?? {}, {});
+  assert.deepEqual(h.controlsStore.read().pipelineHeads ?? {}, {});
+  h.options.pullRequestMergeTargetNormalizationVersion = components.github.pullRequestMergeTargetNormalizationVersion;
+  assert.equal((await runtime.runOnce({ cutoff })).state, "published");
+  assert.equal(custom.calls, 5);
+  assert.equal(p.state.graphql, 5);
+  assert.deepEqual(await mergeSnapshots(h), saved);
+  assert.deepEqual(await caches(h.db), savedCaches);
+  const visible = await readScope(runtime);
+  assert.equal(visible.selected.snapshot.snapshotId, saved[0].snapshot_id);
+  assert.equal(visible.selected.rows.length, 5);
+});
+
+test("an explicitly compatible replacement preserves native merge proof and selected publication", async (t) => {
+  const { h, p, runtime, custom } = await replacementSetup(t);
+  assert.equal((await runtime.runOnce({ cutoff: iso(Date.now() - 1000) })).state, "published");
+  assert.equal(custom.calls, 5);
+  assert.equal(p.state.graphql, 5);
+  const saved = await caches(h.db);
+  assert.equal(saved.length, 5);
+  for (const row of saved) {
+    const record = row.document.pullRequestMergeTargets[0];
+    assert.equal(record.status, "known");
+    assert.equal(record.event.mergeRefName, target);
+    assert.deepEqual(await components.contracts.verifyGithubPullRequestMergeTargetCapture(record), record);
+  }
+  assert.equal((await readScope(runtime)).selected.rows.length, 5);
+});
+
+test("adding an unused replacement option does not reclassify the captured built-in merge provider", async (t) => {
+  const { h, p, runtime } = await setup(t, { memoryDatabase: true, configuredScopes: [scope] });
+  let unused = 0;
+  h.options.normalizer = async () => {
+    unused++;
+    throw new Error("unused merge-target replacement");
+  };
+  assert.equal((await runtime.runOnce({ cutoff: iso(Date.now() - 1000) })).state, "published");
+  assert.equal(unused, 0);
+  assert.equal(p.state.graphql, 5);
+  assert.equal((await readScope(runtime)).selected.rows.length, 5);
+});

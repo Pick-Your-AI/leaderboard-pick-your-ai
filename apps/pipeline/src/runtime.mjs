@@ -681,14 +681,25 @@ export async function createPipeline(options) {
     !hasDefaultDeliveryClaims(row.document) ||
     (digest(row.document) === row.document_hash &&
       row.document.defaultDeliveryNormalizationVersion === defaultDeliveryNormalizationVersion);
+  const assertMergeTargetNormalizer = () => {
+    // Compatibility follows the callback actually selected at construction.
+    // Its declaration remains live across awaits and the visibility commit.
+    if (
+      mergeTargetRepositoryIds.length &&
+      (providedNormalizer === undefined || providedNormalizer === null
+        ? c.github?.pullRequestMergeTargetNormalizationVersion
+        : options.pullRequestMergeTargetNormalizationVersion) !== mergeTargetNormalizationVersion
+    )
+      fail("merge_target_normalizer_version_unverified");
+  };
   const assertDefaultDeliveryNormalizer = () => {
     // Enrichment still passes through the loaded built-in normalizer. A host
     // option cannot bless an older component; a replacement normalizer must
     // explicitly take responsibility for the current source semantics.
     if (
-      (options.normalizer
-        ? options.defaultDeliveryNormalizationVersion
-        : c.github?.defaultDeliveryNormalizationVersion) !== defaultDeliveryNormalizationVersion
+      (providedNormalizer === undefined || providedNormalizer === null
+        ? c.github?.defaultDeliveryNormalizationVersion
+        : options.defaultDeliveryNormalizationVersion) !== defaultDeliveryNormalizationVersion
     )
       fail("default_delivery_normalizer_version_unverified");
   };
@@ -1192,6 +1203,7 @@ export async function createPipeline(options) {
       fail("recognition_changed_during_run");
     if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
     if (feedbackAuthority.enabled) feedbackAuthority.assert(runFeedbackAuthority);
+    assertMergeTargetNormalizer();
   };
   const scanContext = (mode, sources, revision, fingerprint) => ({
     key: digest(["bounded-scan/v1", config, dataMode, mode]),
@@ -1267,8 +1279,11 @@ export async function createPipeline(options) {
   if (options.webhookDispatch !== undefined && typeof options.webhookDispatch !== "boolean")
     fail("invalid_webhook_dispatch_option");
   if (options.webhookDispatch && dataMode !== "synthetic") fail("public_webhook_dispatch_not_approved");
+  // Capture the same provider choice used by the callback. Host option changes
+  // cannot turn a retained replacement callback into the loaded builtin.
+  const providedNormalizer = options.normalizer;
   const normalizer =
-    options.normalizer ??
+    providedNormalizer ??
     (options.githubClient && c.github.createGithubEvidenceNormalizer
       ? c.github.createGithubEvidenceNormalizer({
           client: options.githubClient,
@@ -1704,14 +1719,10 @@ export async function createPipeline(options) {
       const mergeTargetSource =
         row.family === "pull_requests" && mergeTargetRepositoryIds.includes(Number(row.repository_id));
       if (mergeTargetPass?.only && !mergeTargetSource) continue;
-      if (
-        mergeTargetSource &&
-        (!mergeTargetPass ||
-          (options.normalizer
-            ? options.pullRequestMergeTargetNormalizationVersion
-            : c.github?.pullRequestMergeTargetNormalizationVersion) !== mergeTargetNormalizationVersion)
-      )
-        fail("merge_target_normalizer_version_unverified");
+      if (mergeTargetSource) {
+        if (!mergeTargetPass) fail("merge_target_normalizer_version_unverified");
+        assertMergeTargetNormalizer();
+      }
       const typedHistory = ["relationships", "project_history", "issue_field_history"].includes(row.family);
       const sourceBaseSignature =
         row.family === "reviews"
@@ -1788,6 +1799,7 @@ export async function createPipeline(options) {
           ],
         )
       ).rows;
+      if (mergeTargetSource) assertMergeTargetNormalizer();
       const deliveryCache = candidates.find((entry) => entry.policy_signature === deliverySignature);
       const cached = deliveryCache ?? candidates.find((entry) => entry.policy_signature === baseSignature);
       const previousCaches = previousGenerations.map((generation) => {
@@ -1880,6 +1892,7 @@ export async function createPipeline(options) {
               repository,
               mergeTargetPass.collect ? null : cutoff,
             );
+            assertMergeTargetNormalizer();
           }
           if (releaseTargets.length && !releasePass?.collect) {
             const records = cached.document.releaseInclusions;
@@ -1906,6 +1919,7 @@ export async function createPipeline(options) {
           retainPhysicalContext(cached.document, row, repository, c.contracts, dataMode);
           await db.transaction(async (tx) => {
             await lockIssueTransferSources(tx, config.repositories, "update");
+            if (mergeTargetSource) assertMergeTargetNormalizer();
             const current = (
               await tx.query(
                 "SELECT document_hash FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=$2 FOR UPDATE",
@@ -1916,7 +1930,9 @@ export async function createPipeline(options) {
               fail("normalization_changed_before_dependency_capture");
             await retainSourceArtifacts(tx, row.fact_key, cached.document);
             await retainIssueTransferIndex(tx, row, cached.policy_signature, cached.document);
+            if (mergeTargetSource) assertMergeTargetNormalizer();
           });
+          if (mergeTargetSource) assertMergeTargetNormalizer();
           outputs.push({
             document: cached.document,
             source: sourceBinding(row),
@@ -2133,6 +2149,7 @@ export async function createPipeline(options) {
       };
       await db.transaction(async (tx) => {
         await lockIssueTransferSources(tx, config.repositories, "update");
+        if (mergeTargetSource) assertMergeTargetNormalizer();
         await tx.query(
           `INSERT INTO leaderboard_pipeline.normalizations (fact_key,policy_signature,document,document_hash)
         VALUES ($1,$2,$3::jsonb,$4) ON CONFLICT (fact_key,policy_signature) DO UPDATE
@@ -2155,7 +2172,9 @@ export async function createPipeline(options) {
         if (current?.document_hash !== digest(document)) fail("normalization_changed_before_dependency_capture");
         await retainSourceArtifacts(tx, row.fact_key, document);
         await retainIssueTransferIndex(tx, row, signature, document);
+        if (mergeTargetSource) assertMergeTargetNormalizer();
       });
+      if (mergeTargetSource) assertMergeTargetNormalizer();
       outputs.push({
         document,
         source: sourceBinding(row),
@@ -2213,6 +2232,7 @@ export async function createPipeline(options) {
     /^[a-f0-9]{64}$/.test(confirmation.aggregateExplanationHash);
   function confirmPublication(scope, publication, comparisonInput, publicPeriods = []) {
     controlsStore.transaction((state) => {
+      assertMergeTargetNormalizer();
       if (feedbackAuthority.enabled) feedbackAuthority.assert(runFeedbackAuthority);
       const overlay = restrictConfiguration(state);
       if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
