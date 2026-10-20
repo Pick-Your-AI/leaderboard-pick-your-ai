@@ -69,10 +69,11 @@ async function nativeObservation(scan, completedAt) {
     }).status,
     "validated",
   );
-  assert.deepEqual(
-    fixture.state.calls.map((call) => call.operation),
-    ["PullRequestDecisionAnchor", "PullRequestDecisionHistory", "PullRequestDecisionAnchor"],
-  );
+  assert.deepEqual(fixture.state.calls.map((call) => call.operation), [
+    "PullRequestDecisionAnchor",
+    "PullRequestDecisionHistory",
+    "PullRequestDecisionAnchor",
+  ]);
   return parsePullRequestDecisionObservation({
     schemaVersion: pullRequestDecisionObservationVersion,
     sourceRevision,
@@ -94,30 +95,27 @@ function fact(observation) {
   };
 }
 
-test(
-  "decision persistence compares native nanoseconds with exact SQL microseconds and rejects missing clocks",
-  async () => {
-    const scan = request("synthetic-decision-precise-clock");
-    const observedAt = "2026-01-08T00:00:00.123456Z";
-    for (const [label, completedAt, admitted] of [
-      ["before", "2026-01-08T00:00:00.123455999Z", true],
-      ["equal", "2026-01-08T00:00:00.123456000Z", true],
-      ["after", "2026-01-08T00:00:00.123456001Z", false],
-    ]) {
-      const observation = await nativeObservation(scan, completedAt);
-      assert.equal(observation.result.receipt.capture.completedAt, completedAt);
-      const check = () => assertPullRequestDecisionPersistence(observation, scan, observedAt, scan.runId);
-      if (admitted) assert.doesNotThrow(check, label);
-      else assert.throws(check, { message: "pull_request_decision_persistence_binding_changed" }, label);
-      for (const invalid of [undefined, null, "", "not-an-instant", "2026-01-08T00:00:00.1234567890Z"])
-        assert.throws(
-          () => assertPullRequestDecisionPersistence(observation, scan, invalid, scan.runId),
-          { message: "pull_request_decision_persistence_binding_changed" },
-          label + ": invalid database clock",
-        );
-    }
-  },
-);
+test("decision persistence compares native nanoseconds with exact SQL microseconds and rejects missing clocks", async () => {
+  const scan = request("synthetic-decision-precise-clock");
+  const observedAt = "2026-01-08T00:00:00.123456Z";
+  for (const [label, completedAt, admitted] of [
+    ["before", "2026-01-08T00:00:00.123455999Z", true],
+    ["equal", "2026-01-08T00:00:00.123456000Z", true],
+    ["after", "2026-01-08T00:00:00.123456001Z", false],
+  ]) {
+    const observation = await nativeObservation(scan, completedAt);
+    assert.equal(observation.result.receipt.capture.completedAt, completedAt);
+    const check = () => assertPullRequestDecisionPersistence(observation, scan, observedAt, scan.runId);
+    if (admitted) assert.doesNotThrow(check, label);
+    else assert.throws(check, { message: "pull_request_decision_persistence_binding_changed" }, label);
+    for (const invalid of [undefined, null, "", "not-an-instant", "2026-01-08T00:00:00.1234567890Z"])
+      assert.throws(
+        () => assertPullRequestDecisionPersistence(observation, scan, invalid, scan.runId),
+        { message: "pull_request_decision_persistence_binding_changed" },
+        label + ": invalid database clock",
+      );
+  }
+});
 
 test(
   "completed empty runs cannot acquire or change trusted decision provenance or data mode",

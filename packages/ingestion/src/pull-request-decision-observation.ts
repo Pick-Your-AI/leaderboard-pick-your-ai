@@ -63,11 +63,7 @@ function copyObservation(value: unknown): unknown {
       const keys = Reflect.ownKeys(item);
       if (keys.length > 150_000 - nodes || keys.some((key) => typeof key !== "string")) return invalid();
       if (Array.isArray(item)) {
-        if (
-          Object.getPrototypeOf(item) !== Array.prototype ||
-          item.length > 10_000 ||
-          keys.length !== item.length + 1
-        )
+        if (Object.getPrototypeOf(item) !== Array.prototype || item.length > 10_000 || keys.length !== item.length + 1)
           return invalid();
         const entries: unknown[] = [];
         for (let index = 0; index < item.length; index++) {

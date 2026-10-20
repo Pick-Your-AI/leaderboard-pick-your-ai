@@ -244,8 +244,7 @@ export class CollectionStore {
 
   #assertProducer(row: Record<string, unknown>, source?: ReadOnlySource): string | null {
     const expected = this.#producerFor({ repositoryId: Number(row.repository_id), family: String(row.family) });
-    if ((row.decision_producer ?? null) !== expected)
-      throw new Error("pull_request_decision_producer_binding_changed");
+    if ((row.decision_producer ?? null) !== expected) throw new Error("pull_request_decision_producer_binding_changed");
     if (expected !== null) {
       if (
         (source !== undefined && source !== this.#decisionSource) ||

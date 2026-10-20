@@ -35,9 +35,16 @@ const canonical = (value) =>
   value && typeof value === "object"
     ? Array.isArray(value)
       ? value.map(canonical)
-      : Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]))
+      : Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map((key) => [key, canonical(value[key])]),
+        )
     : value;
-const digest = (value) => createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
+const digest = (value) =>
+  createHash("sha256")
+    .update(JSON.stringify(canonical(value)))
+    .digest("hex");
 const exact = (value, names) =>
   value &&
   typeof value === "object" &&
@@ -236,10 +243,7 @@ export async function readDecisionGenerations(
   )
     fail("decision_history_selected_run_invalid");
   const saved = expected === null ? null : parseDecisionGenerationCapture(expected);
-  if (
-    saved &&
-    (saved.source !== source || saved.asOf !== asOf || saved.observationCutoff !== observationCutoff)
-  )
+  if (saved && (saved.source !== source || saved.asOf !== asOf || saved.observationCutoff !== observationCutoff))
     fail("decision_history_capture_binding_changed");
   assertAuthorized();
   const runs = (

@@ -1687,9 +1687,10 @@ export async function createPipeline(options) {
       // The controls overlay can change while an earlier probe/page is pending.
       // Recheck before collection and reject results that lost authorization.
       assertRunConfiguration();
-      const page = decisionRepositoryIds.length
-        ? await readCollectionPage.call(collectionSource, request)
-        : await collectionSource.readPage(request);
+      const page =
+        decisionRepositoryIds.length
+          ? await readCollectionPage.call(collectionSource, request)
+          : await collectionSource.readPage(request);
       assertRunConfiguration();
       assertDataMode(page);
       return page;
@@ -5058,9 +5059,9 @@ export async function createPipeline(options) {
               mode,
               dataMode,
               ...(family === "pull_requests" && decisionRepositoryIds.includes(repo.id)
-                 ? [pullRequestDecisionGenerationVersion, decisionSourceId]
-                 : []),
-               ...(family === "discussions" && feedbackAuthority.repositoryIds.includes(repo.id)
+                ? [pullRequestDecisionGenerationVersion, decisionSourceId]
+                : []),
+              ...(family === "discussions" && feedbackAuthority.repositoryIds.includes(repo.id)
                 ? [discussionFeedbackContentVersion, feedbackAuthority.current(repo.id).authorityHash]
                 : []),
               ...(scan ? [scan.token] : []),
