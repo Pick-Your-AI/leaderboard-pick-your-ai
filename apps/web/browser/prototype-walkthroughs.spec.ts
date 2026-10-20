@@ -201,9 +201,15 @@ for (const mode of ["keyboard", "touch"] as const) {
       await expect(users).toBeChecked();
       await journey.guide("Held update (publishes immediately with arrive=now)");
       await page.clock.runFor(20_200);
-      await journey.activate(page.getByRole("button", { name: "Apply updates", exact: true }));
-      await expect(page.getByRole("button", { name: "Apply updates", exact: true })).toHaveCount(0);
+      const apply = page.getByRole("button", { name: "Apply updates", exact: true });
+      const button = await apply.elementHandle();
+      if (!button) throw new Error("The pending prototype Apply control is missing.");
+      await journey.activate(apply);
+      await expect(apply).toBeFocused();
+      await expect(apply).toHaveAttribute("aria-disabled", "true");
+      expect(await button.evaluate((element) => element.isConnected && document.activeElement === element)).toBe(true);
       await journey.guide("Wall configurator");
+      await expect(apply).toHaveCount(0);
       await expect(page.getByRole("radio", { name: /^Cycling live boards/ })).toBeChecked();
       await journey.activate(page.getByRole("link", { name: "Open the wall", exact: true }));
       const heading = page.getByRole("heading", { level: 1 });
