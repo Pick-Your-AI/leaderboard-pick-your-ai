@@ -153,7 +153,8 @@ export interface PublicSnapshotSource {
   /** Optional trusted server capability. Read the selected input and full approved
    * organization history under one protected admission/source-lock boundary and
    * a final current privacy fence. Receipt strings are not authorization. Public
-   * requests cannot activate it; the stock pipeline intentionally omits it.
+   * requests cannot activate it. The pipeline exposes it only when protected host
+   * code supplies its separate participationHistoryAuthority capability.
    */
   readParticipationHistory?(
     scope: PublicScope,

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   defaultDeliveryNormalizationVersion,
   fieldChangeNormalizationVersion,
+  triageMetadataNormalizationVersion,
   discussionSourceNormalizationVersion,
   reviewSourceNormalizationVersion,
   relationshipPairNormalizationVersion,
@@ -43,6 +44,7 @@ const confirmationVersions = {
   discussionSourceNormalizationVersion,
   defaultDeliveryNormalizationVersion,
   fieldChangeNormalizationVersion,
+  triageMetadataNormalizationVersion,
 };
 const digest = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const filterScope = (scope) => canonicalPublicScope({ ...scope, start: null, end: null });
