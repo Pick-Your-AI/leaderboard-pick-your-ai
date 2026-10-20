@@ -192,12 +192,17 @@ export function createWebhookHandler(options: WebhookOptions): (request: Request
         if (!scope.has(installationId)) throw new IntakeError(403, "outside_scope");
         let ids: number[];
         let reason: "private" | "removed" | "revoked";
-        if (event === "installation" && ["deleted", "suspend"].includes(String(data.action))) {
+        if (
+          event === "installation" &&
+          typeof data.action === "string" &&
+          ["deleted", "suspend"].includes(data.action)
+        ) {
           // HMAC authenticates bytes, not the event header. Require the signed
           // full-installation shape before applying an installation-wide change.
           const installation = object(data.installation);
           if (
-            !["all", "selected"].includes(String(installation.repository_selection)) ||
+            typeof installation.repository_selection !== "string" ||
+            !["all", "selected"].includes(installation.repository_selection) ||
             typeof installation.target_type !== "string" ||
             installation.target_type.length === 0
           )
@@ -213,7 +218,11 @@ export function createWebhookHandler(options: WebhookOptions): (request: Request
             .map((value) => integer(object(value).id))
             .filter((value) => scope.get(installationId)!.has(value));
           reason = "removed";
-        } else if (event === "repository" && ["privatized", "deleted", "transferred"].includes(String(data.action))) {
+        } else if (
+          event === "repository" &&
+          typeof data.action === "string" &&
+          ["privatized", "deleted", "transferred"].includes(data.action)
+        ) {
           // Signed child-object deletions cannot become repository-wide changes.
           const keys = new Set([
             "action",
