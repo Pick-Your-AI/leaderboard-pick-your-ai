@@ -291,7 +291,6 @@
         "cross_workstream_reviews",
         "evidence_reviews",
         "project_items_curated",
-        "helpful_feedback",
         "outreach",
         "commit_attributed_lines",
         "retained_lines"
@@ -301,15 +300,12 @@
     {
       "id": "additional-semantic-cases",
       "metric_ids": [
-        "direct_changes",
         "accepted_suggestions",
         "accepted_findings",
         "issue_resolution",
         "issue_clarifications",
         "duplicate_resolution",
         "title_scope_edits",
-        "reference_links",
-        "closing_links",
         "project_field_updates",
         "project_updates",
         "routing_handoffs",
@@ -756,6 +752,36 @@
       "positive_test": "accepted source authors, verified coauthors and reviewers produce distinct evidenced peers",
       "negative_test": "ordinary source observations and actual unreviewed PR/review facts cannot create accepted peers",
       "limitation": "Actual normalized PR/review facts with independently accepted synthetic receipts produce two evidenced peers with exact roles, source artifact and pair-formation times. Replacing them with actual unreviewed facts yields unknown/no peers; additional cases reject either side's missing acceptance or self review. Incomplete coverage, null rank and publicEnabled false remain explicit; no real consent, complete peer history or public activation is established."
+    },
+    {
+      "metric_id": "reference_links",
+      "path": "packages/metrics/test/reference-closing-source.test.js",
+      "positive_test": "${metricId} retains only the first independently identified pair event and its actor",
+      "negative_test": "${metricId} does not move an old pair into a later reporting window or actor lens",
+      "limitation": "Synthetic protected enrichment verifies typed endpoint bindings and conserves one directed source/target pair in authorized known history. Missing or conflicting attribution remains unavailable; partial observations do not prove first-ever history, native event collection, approved source capability or public activation.",
+      "case_parameter": "reference_links"
+    },
+    {
+      "metric_id": "closing_links",
+      "path": "packages/metrics/test/reference-closing-source.test.js",
+      "positive_test": "${metricId} retains only the first independently identified pair event and its actor",
+      "negative_test": "${metricId} does not move an old pair into a later reporting window or actor lens",
+      "limitation": "Synthetic protected enrichment verifies typed endpoint bindings and conserves one canonical PR/issue closing pair in authorized known history. Missing or conflicting attribution remains unavailable; partial observations do not prove first-ever history, native event collection, approved source capability or public activation.",
+      "case_parameter": "closing_links"
+    },
+    {
+      "metric_id": "direct_changes",
+      "path": "packages/metrics/test/direct-changes-source-semantics.test.js",
+      "positive_test": "direct changes use the witnessed first integration and half-open windows, not Git or collection dates",
+      "negative_test": "PR delivery and an ordinarily classified integrated commit do not manufacture an additional direct change",
+      "limitation": "Synthetic protected-host integration witnesses exercise the actual normalizer and engine, conserving one repository/SHA at the supplied first-integration clock and separating linked author, committer and pusher. The host supplies direct-versus-PR classification. These cases do not implement a push/DAG collector, complete PR-overlap resolution, independent acceptance or public activation; coverage remains incomplete and ranking/public output disabled."
+    },
+    {
+      "metric_id": "helpful_feedback",
+      "path": "apps/pipeline/test/helpful-feedback-recognition.test.mjs",
+      "positive_test": "the metric uses independent acceptance windows while native facts, distinct authors and definition-only maturity remain intact",
+      "negative_test": "self-review, an unenrolled reviewer, a duplicated audit and an ambiguous source target cannot earn feedback",
+      "limitation": "Actual Discussion normalization, exact original/current source validation and synthetic intake whose enrolled reviewer is distinct from the source author feed receipt application and aggregation. Inclusion checks acceptance-time windows, distinct authors and unchanged native facts; exclusion rejects self or unenrolled reviewers, duplicate audits and ambiguous targets before callbacks. No real participant consent, live source-use permission or public metric approval is established; maturity remains definition_only and publicEnabled remains false."
     }
   ]
 }

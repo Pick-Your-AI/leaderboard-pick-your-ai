@@ -72,6 +72,7 @@ function dataSnapshot(value: unknown): unknown {
   const active = new Set<object>();
   const visit = (entry: unknown, depth: number): unknown => {
     if (++entries > 150_000 || depth > 16) fail("budget_exceeded");
+    if (nativeTypes.isProxy(entry)) fail("invalid_receipt");
     if (entry === null || typeof entry === "boolean") return entry;
     if (typeof entry === "number") {
       if (!Number.isFinite(entry)) fail("invalid_receipt");
@@ -397,7 +398,7 @@ export async function capturePullRequestDecisionHistory(
   options: PullRequestDecisionHistoryOptions,
 ): Promise<Captured | PullRequestDecisionUnavailable> {
   try {
-    if (!object(options)) fail("invalid_request");
+    if (nativeTypes.isProxy(options) || !object(options)) fail("invalid_request");
     const descriptors = Object.getOwnPropertyDescriptors(options);
     const allowed = [
       "client",

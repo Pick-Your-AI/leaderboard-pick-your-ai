@@ -694,3 +694,73 @@ test("unsupported timestamp profiles, unsafe identifiers and non-JSON retained d
   huge.digest = "a".repeat(2_000_001);
   assert.equal(select(huge).reason, "budget_exceeded");
 });
+
+function hostileDecisionProxy(target, mode) {
+  let calls = 0;
+  const trap = () => {
+    calls++;
+    throw new Error("Decision data proxy must not be inspected");
+  };
+  const wrapped = Proxy.revocable(target, {
+    get: trap,
+    getPrototypeOf: trap,
+    ownKeys: trap,
+    getOwnPropertyDescriptor: trap,
+  });
+  if (mode === "revoked") wrapped.revoke();
+  return { value: wrapped.proxy, calls: () => calls };
+}
+
+test("proxy-backed decision request data is rejected before inspection or transport", async (t) => {
+  for (const mode of ["trapping", "revoked"])
+    for (const boundary of ["options", "repository", "expectedSubject"])
+      await t.test(mode + "/" + boundary, async () => {
+        const h = decisionFixture();
+        const wrapped = hostileDecisionProxy(boundary === "options" ? h.options : h.options[boundary], mode);
+        const options = boundary === "options" ? wrapped.value : { ...h.options, [boundary]: wrapped.value };
+        assert.deepEqual(await capture(options), {
+          status: "unavailable",
+          reason: boundary === "options" ? "invalid_request" : "invalid_receipt",
+        });
+        assert.equal(wrapped.calls(), 0);
+        assert.equal(h.state.calls.length, 0);
+        assert.equal((await captured(decisionFixture())).schemaVersion, "github-pr-decision-history/v1");
+      });
+});
+
+test("proxy-backed retained decision data is rejected before selection or validation inspection", async (t) => {
+  const original = await captured(decisionFixture([event("closed", t2)], closedAnchor(t2)));
+  for (const mode of ["trapping", "revoked"])
+    for (const boundary of ["receipt", "history", "event"])
+      await t.test(mode + "/" + boundary, () => {
+        const receipt = structuredClone(original);
+        const target =
+          boundary === "receipt" ? receipt : boundary === "history" ? receipt.history : receipt.history[0];
+        const wrapped = hostileDecisionProxy(target, mode);
+        if (boundary === "history") receipt.history = wrapped.value;
+        if (boundary === "event") receipt.history[0] = wrapped.value;
+        const input = boundary === "receipt" ? wrapped.value : receipt;
+        assert.deepEqual(select(input), { status: "unavailable", reason: "invalid_receipt" });
+        assert.deepEqual(validate(input, expected(original)), { status: "unavailable", reason: "invalid_receipt" });
+        assert.equal(wrapped.calls(), 0);
+        assert.equal(select(original).outcome, "closed_unmerged");
+        assert.equal(validate(original, expected(original)).status, "validated");
+      });
+});
+
+test("proxy-backed expected decision bindings are rejected before inspection", async (t) => {
+  const receipt = await captured(decisionFixture());
+  for (const mode of ["trapping", "revoked"])
+    for (const boundary of ["expected", "binding", "generation"])
+      await t.test(mode + "/" + boundary, () => {
+        const binding = structuredClone(expected(receipt));
+        const wrapped = hostileDecisionProxy(boundary === "expected" ? binding : binding[boundary], mode);
+        if (boundary !== "expected") binding[boundary] = wrapped.value;
+        assert.deepEqual(validate(receipt, boundary === "expected" ? wrapped.value : binding), {
+          status: "unavailable",
+          reason: "invalid_receipt",
+        });
+        assert.equal(wrapped.calls(), 0);
+        assert.equal(validate(receipt, expected(receipt)).status, "validated");
+      });
+});
