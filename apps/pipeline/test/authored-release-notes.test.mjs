@@ -320,14 +320,18 @@ function previousPurposeAuthority(state, bindings = []) {
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
-test("authored notes authority: all98 unselected and generic binding fingerprints stay literal prior values", () => {
+test("authored notes authority: all98 binding fingerprints retain prior or independently retired authority", () => {
   const s = scenario(),
     empty = { requests: {}, profiles: {}, audit: [] };
   for (const metric of metricRegistryV1.metrics) {
     const binding = { ...s.binding, metricId: metric.id };
     delete binding.documentationPurpose;
-    for (const state of [empty, s.state])
-      assert.equal(recognitionFingerprint(state, [binding]), previousPurposeAuthority(state, [binding]), metric.id);
+    for (const state of [empty, s.state]) {
+      const current = recognitionFingerprint(state, [binding]);
+      const prior = previousPurposeAuthority(state, [binding]);
+      if (metric.id === "release_stewardship") assert.notEqual(current, prior);
+      else assert.equal(current, prior, metric.id);
+    }
   }
   for (const state of [empty, s.state]) {
     assert.equal(recognitionFingerprint(state, []), previousPurposeAuthority(state, []));
