@@ -259,7 +259,10 @@ test("real repository-scoped checkpoints paginate, refresh and refuse native cur
   const first = await readProjectCurationHistory(options);
   const second = await readProjectCurationHistory(options);
   assert.deepEqual(second, first);
-  assert.deepEqual(first.map((record) => record.event.id), ["PVE_PAGE_1", "PVE_PAGE_2"]);
+  assert.deepEqual(
+    first.map((record) => record.event.id),
+    ["PVE_PAGE_1", "PVE_PAGE_2"],
+  );
   assert.equal(timelineReads, 4, "the completed native scan is refreshed on the same key");
   await assert.rejects(
     readProjectCurationHistory({ ...options, scanId: "synthetic-bounded-scan", maxPages: 1 }),

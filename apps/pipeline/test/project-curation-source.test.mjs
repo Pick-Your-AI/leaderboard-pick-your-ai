@@ -133,7 +133,10 @@ test("the existing planner admits full curation audits without adding a recent s
       { ...progress, lastFullAuditAt: "2026-10-02T00:00:00.000Z" },
     ],
   });
-  assert.deepEqual(next.map((entry) => [entry.family, entry.mode, entry.since]), [["issues", "audit", null]]);
+  assert.deepEqual(
+    next.map((entry) => [entry.family, entry.mode, entry.since]),
+    [["issues", "audit", null]],
+  );
 });
 
 test("curation collector retains minimized native bindings and unknown total history across output pages", async () => {
@@ -176,7 +179,10 @@ test("curation full reads honor the exact upper source cutoff without certifying
   ]);
   fixture.state.events.set(2, []);
   const page = await source(fixture).readPage({ ...request, mode: "reconcile" });
-  assert.deepEqual(page.facts.map((fact) => fact.subjectId), ["PVE_AT"]);
+  assert.deepEqual(
+    page.facts.map((fact) => fact.subjectId),
+    ["PVE_AT"],
+  );
   assert.equal(page.expectedCount, null);
 });
 
@@ -204,7 +210,10 @@ test("invalid curation inventory bindings reach the Project denial callback befo
     );
     assert.deepEqual(denied, ["project_scope_unavailable"]);
     if (fixture.state.subjects[0].node_id === undefined || fixture.state.subjects[0].pull_request === "unproved")
-      assert.equal(fixture.state.reads.some((read) => read.kind === "timeline"), false);
+      assert.equal(
+        fixture.state.reads.some((read) => read.kind === "timeline"),
+        false,
+      );
   }
   assert.equal(
     isProjectSourceScopeFailure(new Error("project_curation_event_unavailable"), "project_curation_history"),
@@ -222,7 +231,10 @@ test("real curation publication revalidates cached native sources and survives d
   const cutoff = clock();
   const first = await h.runtime.runOnce({ cutoff, mode: "audit" });
   assert.equal(first.state, "published");
-  assert.deepEqual((await board(h.runtime)).rows.map((row) => [row.actorId, row.result.value]), [["202", 2]]);
+  assert.deepEqual(
+    (await board(h.runtime)).rows.map((row) => [row.actorId, row.result.value]),
+    [["202", 2]],
+  );
   const saved = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations ORDER BY fact_key")).rows;
   assert.equal(saved.length, 2);
   assert.ok(saved.every((row) => row.document.projectCurationNormalizationVersion === "project-curation-history/v1"));
@@ -259,7 +271,10 @@ test("real curation publication revalidates cached native sources and survives d
     [2],
   );
   assert.equal((await reopened.runOnce({ cutoff, mode: "audit" })).state, "published");
-  assert.deepEqual((await board(reopened)).rows.map((row) => row.result.value), [2]);
+  assert.deepEqual(
+    (await board(reopened)).rows.map((row) => row.result.value),
+    [2],
+  );
 });
 
 for (const loss of ["private_project", "missing_event", "changed_subject"]) {
@@ -319,7 +334,10 @@ for (const loss of ["private_project", "missing_event", "changed_subject"]) {
     });
     t.after(() => recovered.stop());
     assert.equal((await recovered.runOnce({ mode: "audit" })).state, "published");
-    assert.deepEqual((await board(recovered)).rows.map((row) => row.result.value), [2]);
+    assert.deepEqual(
+      (await board(recovered)).rows.map((row) => row.result.value),
+      [2],
+    );
     assert.notEqual(
       (await recovered.app.inject(boardUrl + "&snapshot=" + first.publications[0].snapshotId)).statusCode,
       200,
@@ -356,10 +374,7 @@ test("curation output cursors bind exact sorted native semantics and reject shif
   ]) {
     const original = structuredClone(fixture.state.events);
     change(fixture.state);
-    await assert.rejects(
-      reader.readPage({ ...request, limit: 1, cursor }),
-      /source_project_curation_cursor_changed/,
-    );
+    await assert.rejects(reader.readPage({ ...request, limit: 1, cursor }), /source_project_curation_cursor_changed/);
     fixture.state.events = original;
   }
   for (const change of [
@@ -434,7 +449,10 @@ test("protected curation account classification survives fresh hydration and dat
     operatorId: "201",
   };
   const preview = await h.runtime.previewPolicy(previewRequest);
-  assert.deepEqual(preview.comparison.before.rows.map((row) => row.actorId), ["202"]);
+  assert.deepEqual(
+    preview.comparison.before.rows.map((row) => row.actorId),
+    ["202"],
+  );
   assert.deepEqual(preview.comparison.changes, []);
   async function checkExports(runtime) {
     for (const filter of ["all", "user", "automation"]) {
@@ -519,16 +537,10 @@ test("real scan checkpoints refresh the curation subject inventory before every 
     html_url: "https://github.com/" + fixture.repository.slug + "/issues/3",
   });
   fixture.state.events.set(3, [curationEvent("PVE_NEW_SUBJECT")]);
-  await assert.rejects(
-    reader.readPage({ ...request, limit: 1, cursor }),
-    /source_project_curation_cursor_changed/,
-  );
+  await assert.rejects(reader.readPage({ ...request, limit: 1, cursor }), /source_project_curation_cursor_changed/);
   assert.equal(inventoryReads, 3);
   fixture.state.subjects = retainedSubjects.filter((subject) => subject.number !== 1);
-  await assert.rejects(
-    reader.readPage({ ...request, limit: 1, cursor }),
-    /source_project_curation_cursor_changed/,
-  );
+  await assert.rejects(reader.readPage({ ...request, limit: 1, cursor }), /source_project_curation_cursor_changed/);
   assert.equal(inventoryReads, 4);
   fixture.state.subjects = retainedSubjects;
   fixture.state.events.delete(3);
@@ -560,7 +572,10 @@ test("curation frozen previews and authorized corrections survive database reope
     operatorId: "201",
   };
   const preview = await h.runtime.previewPolicy(previewRequest);
-  assert.deepEqual(preview.comparison.before.rows.map((row) => [row.actorId, row.value, row.rank]), [["202", 2, null]]);
+  assert.deepEqual(
+    preview.comparison.before.rows.map((row) => [row.actorId, row.value, row.rank]),
+    [["202", 2, null]],
+  );
   assert.deepEqual(preview.comparison.changes, []);
   await assert.rejects(
     h.runtime.previewPolicy({ ...previewRequest, operatorId: "202" }),
@@ -628,7 +643,10 @@ test("curation frozen previews and authorized corrections survive database reope
   const receipts = await h.runtime.receipts();
   assert.deepEqual(await h.runtime.applyCorrection(decision), applied);
   assert.deepEqual(await h.runtime.receipts(), receipts);
-  assert.deepEqual((await board(h.runtime, "&snapshot=" + snapshotId)).rows.map((row) => row.result.value), [1]);
+  assert.deepEqual(
+    (await board(h.runtime, "&snapshot=" + snapshotId)).rows.map((row) => row.result.value),
+    [1],
+  );
 
   await h.runtime.stop();
   await h.reopenDatabase();
@@ -636,7 +654,10 @@ test("curation frozen previews and authorized corrections survive database reope
   t.after(() => reopened.stop());
   assert.deepEqual(await reopened.applyCorrection(decision), applied);
   assert.equal((await reopened.runOnce({ mode: "audit" })).state, "published");
-  assert.deepEqual((await board(reopened)).rows.map((row) => row.result.value), [1]);
+  assert.deepEqual(
+    (await board(reopened)).rows.map((row) => row.result.value),
+    [1],
+  );
   assert.deepEqual(
     (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [snapshotId])).rows,
     frozen,

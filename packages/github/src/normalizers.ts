@@ -1031,20 +1031,13 @@ export function normalizeGithubObservation(
     // display labels. Contradictory versions share an identity and fail the
     // engine's semantic-conflict gate; they cannot create two observed credits.
     const canonicalKey = stable("project-curation/v1", String(repository.id), id, project.id, nativeEventId);
-    emit(
-      "project_items_curated",
-      sender,
-      curationEvent.wasAutomated ? "automation" : "triager",
-      at,
+    emit("project_items_curated", sender, curationEvent.wasAutomated ? "automation" : "triager", at, canonicalKey, {
       canonicalKey,
-      {
-        canonicalKey,
-        rawState: sourceAction + ":" + project.id,
-        subjectActorId: null,
-        eventContext: { projects: [project.id], projectScope: [project.id], workstreams: [], workstreamsKnown: false },
-        currentContext: null,
-      },
-    );
+      rawState: sourceAction + ":" + project.id,
+      subjectActorId: null,
+      eventContext: { projects: [project.id], projectScope: [project.id], workstreams: [], workstreamsKnown: false },
+      currentContext: null,
+    });
   } else if (envelope.family === "pull_request") {
     const created = time(resource.created_at ?? resource.createdAt);
     emit("pr_opened", author, "author", created, `${id}:opened`);

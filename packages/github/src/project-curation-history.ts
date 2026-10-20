@@ -48,7 +48,9 @@ function actor(value: unknown): Record<string, unknown> | null {
 }
 
 export function projectCurationHistoryRevision(record: ProjectCurationRecord): string {
-  return createHash("sha256").update(JSON.stringify([projectCurationNormalizationVersion, record])).digest("hex");
+  return createHash("sha256")
+    .update(JSON.stringify([projectCurationNormalizationVersion, record]))
+    .digest("hex");
 }
 
 /** Native add/remove events have no ProjectV2Item ID. Bind the actual subject,
@@ -119,8 +121,7 @@ export async function readProjectCurationHistory(options: {
       typeof value.wasAutomated !== "boolean"
     )
       throw new Error("project_curation_event_unverified");
-    if (!object(value.project) || !nativeId(value.project.id))
-      throw new Error("project_curation_scope_unverified");
+    if (!object(value.project) || !nativeId(value.project.id)) throw new Error("project_curation_scope_unverified");
     if (!allowedProjectIds.includes(value.project.id)) return null;
     if (value.project.public !== true) throw new Error("project_curation_scope_unverified");
     return {
