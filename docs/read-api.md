@@ -337,6 +337,45 @@ The existing twenty-second visible-page privacy recheck and focus recheck remain
 active. Hidden pages pause the transport, abort reads and remove displayed source
 data; resuming checks the current publication and selected snapshot again.
 
+### Applying a paced public update
+
+An applied batch selects one exact snapshot and produces one compact polite
+summary after that snapshot's matching public response and metric definitions
+have been validated and committed to the page. The first eligible batch can start
+immediately. A later batch waits until the previous read has completed and at least
+one second has passed since its ready result and summary reached the page. This
+one-second interval is an engineering policy for this interface, not a timing
+requirement imposed by the accessibility criteria.
+
+Automatic Follow coalesces newer observed heads only before the next batch starts;
+it does not change an already admitted target. Source, privacy and Controls
+rechecks remain immediate during that interval. A recheck of the same displayed
+snapshot is not another applied batch and does not generate another update summary.
+
+Manual Apply shows a brief, explained `aria-disabled` cooldown and guards click and
+keyboard activation while busy or cooling down. It does not silently queue those
+activations. When eligible, an activation captures the displayed pending snapshot.
+The actual focused Apply node remains connected through loading and completion,
+including automatic Follow resumed after reduced motion; deliberate focus moves
+remain with their destination. Once Apply loses focus and has no pending target,
+the inactive control can disappear.
+
+Navigation, invalidation, an error, hiding the page or unmounting cancels an
+unfinished batch and its summary. A later read must validate fresh state before a
+new batch can start. Cancellation does not replay the old target, and failure
+cleanup does not silently fetch an older snapshot to replace the error. Visible
+loading text remains, but an identified Apply batch does not also announce that
+loading text through a second live region. Initial loading and genuine error
+alerts keep their existing behavior. An initially hidden overview can load the
+public metric catalog for navigation; snapshot and contributor activity reads wait
+until the page becomes visible.
+
+The paced-update browser cases use controlled time and synthetic provider inputs
+through the real service handler. They cover delayed reads, advancing heads,
+manual cooldown, current suppression, cancellation and exact focus ownership.
+Their DOM summary observations do not establish assistive-technology speech,
+physical-device acceptance or production source availability.
+
 The visible **Current source freshness** section separates connection state from
 `recently_reconciled`, `stale_or_degraded` or unknown source health. It names the
 last successful health check without representing that time as a source-event or

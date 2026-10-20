@@ -58,7 +58,7 @@ The synthetic service/client suite covers v1 compatibility, category isolation, 
 
 This delivery defines these milestone and shared-credit rules rather than leaving their engineering choices unassigned. It does not claim the following remaining work:
 
-- Cross-workstream help requires a versioned, explicitly sourced workstream-to-artifact relationship and qualifying contribution conditions. No such relationship is inferred from categories, repository names or the selected filter.
+- The separate [reviewed cross-workstream help adapter](reviewed-workstream-help.md) now defines an explicitly sourced authored-merge relationship, dual current source/help review bindings and its own opt-in rule. It preserves these v1/v2 milestone conditions. Real factual review, source authority and public activation remain required; categories, repository names and current Project associations never supply the relationship.
 - Newcomer eligibility requires a separately defined organization-origin and complete historical-evidence protocol; it remains unavailable through the existing participation API when history is insufficient. A first-in-scope milestone cannot substitute for that protocol.
 - Public use requires actual approved source inputs and activation, independently reviewed real examples, and contributor/accessibility acceptance of the intended production journey. An editorial spotlight additionally keeps its existing nomination, consent, independent review and current source-authority checks.
 

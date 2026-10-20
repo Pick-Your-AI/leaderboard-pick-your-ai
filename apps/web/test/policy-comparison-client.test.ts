@@ -292,3 +292,206 @@ for (const boundary of ["fact", "actor"] as const)
           rmSync(directory, { recursive: true, force: true });
         }
       });
+
+async function changedIdentityRoundTrip(
+  boundary: "actor" | "fact",
+  direction: "included" | "excluded",
+  length: number,
+) {
+  const { privatePolicyFixture } = await import(
+    new URL("../../../tests/fixtures/private-policy-preview.mjs", import.meta.url).href
+  );
+  const { ControlStore } = await import(new URL("../../controls/src/store.mjs", import.meta.url).href);
+  const { PolicyComparisonStore, comparisonHash, comparisonLimitsV1 } = await import(
+    new URL("../../controls/src/policy-comparison.mjs", import.meta.url).href
+  );
+  const metrics = await import(new URL("../../../packages/metrics/dist/index.js", import.meta.url).href);
+  const fixture = privatePolicyFixture();
+  // A trailing space is part of the retained opaque ID, not normalization input.
+  const identity = ("z-synthetic-" + boundary + "-").padEnd(length - 1, "x") + " ";
+  const actorId = boundary === "actor" ? identity : "101";
+  const factId = boundary === "fact" ? identity : "z-short-fact";
+  assert.equal(identity.length, length);
+  fixture.input.actors[0].id = actorId;
+  fixture.input.facts = fixture.input.facts.map((fact: any, index: number) => ({
+    ...fact,
+    id: index === 0 ? "a-short-fact" : factId,
+    actorId,
+  }));
+  fixture.policies[0].unit = metrics.getMetricDefinition("issues_opened").definition.unit;
+  fixture.policies[0].groupBy = direction === "included" ? "actor_artifact" : "canonical";
+  const candidate = {
+    ...fixture.policies[0],
+    version: "synthetic-preview/v2",
+    groupBy: direction === "included" ? "canonical" : "actor_artifact",
+  };
+  const directory = mkdtempSync(join(tmpdir(), "synthetic-changed-identity-"));
+  const database = join(directory, "controls.sqlite");
+  let store = new ControlStore(database);
+  try {
+    let comparisons = new PolicyComparisonStore(store, metrics);
+    const retained = store.transaction((current: unknown) => comparisons.capture(current, fixture));
+    assert.equal(retained.state, "retained");
+    let record = comparisons.input(retained.inputId);
+    const unchanged = store.transaction(() => comparisons.compare(record, structuredClone(fixture.policies[0])));
+    assert.deepEqual(unchanged.document.changes, []);
+    const saved = store.transaction(() => comparisons.compare(record, candidate));
+    const expectedChange = {
+      actorId,
+      beforeValue: direction === "included" ? 1 : 2,
+      afterValue: direction === "included" ? 2 : 1,
+      beforeRank: 1,
+      afterRank: 1,
+      included: direction === "included" ? [factId] : [],
+      excluded: direction === "excluded" ? [factId] : [],
+      causes: {
+        changedPolicyFields: ["groupBy"],
+        included: direction === "included" ? [{ factId, reasons: ["repeated_policy_unit"], revision: 0 }] : [],
+        excluded: direction === "excluded" ? [{ factId, reasons: ["repeated_policy_unit"], revision: 0 }] : [],
+        value: "recalculated_on_identical_frozen_input",
+        rank: null,
+      },
+    };
+    assert.deepEqual(saved.document.changes, [expectedChange]);
+    const rows = () => ({
+      inputs: store.db.prepare("SELECT * FROM policy_preview_inputs ORDER BY id").all(),
+      results: store.db.prepare("SELECT * FROM policy_previews ORDER BY id").all(),
+    });
+    const stored = rows();
+    assert.equal(stored.inputs.length, 1);
+    assert.equal(stored.results.length, 2);
+    for (const row of [...stored.inputs, ...stored.results]) {
+      assert.equal(comparisonHash(JSON.parse(row.document)), row.digest);
+      const maximum = stored.inputs.includes(row) ? comparisonLimitsV1.inputBytes : comparisonLimitsV1.resultBytes;
+      assert.ok(Buffer.byteLength(row.document) <= maximum);
+    }
+    store.close();
+    store = new ControlStore(database);
+    comparisons = new PolicyComparisonStore(store, metrics);
+    record = comparisons.input(retained.inputId);
+    assert.deepEqual(record.input, fixture.input);
+    assert.deepEqual(rows(), stored);
+    const restored = comparisons.verifiedResult(saved.document.comparisonId, record);
+    assert.deepEqual(restored, saved);
+    const restoredUnchanged = comparisons.verifiedResult(unchanged.document.comparisonId, record);
+    assert.deepEqual(restoredUnchanged, unchanged);
+    const input = checkedPolicyInputs({
+      status: "candidate_preview",
+      inputs: [comparisons.metadata(record)],
+    })[0]!;
+    const same = checkedPolicyPreview(
+      comparisons.redact(restoredUnchanged, record, store.read(), []),
+      input,
+      fixture.policies[0],
+    );
+    assert.deepEqual(same.changes, []);
+    const result = comparisons.redact(restored, record, store.read(), []);
+    const original = JSON.stringify(result);
+    assert.ok(Buffer.byteLength(original) < 2_000_000);
+    const value = checkedPolicyPreview(result, input, candidate);
+    assert.deepEqual(value, result);
+    assert.deepEqual(value.changes, [expectedChange]);
+    assert.equal(JSON.stringify(result), original);
+    assert.deepEqual(rows(), stored);
+    store.transaction((current: any) => {
+      current.profiles[actorId] = { suppressed: true };
+    });
+    const hidden = checkedPolicyPreview(comparisons.redact(restored, record, store.read(), []), input, candidate);
+    assert.equal(hidden.redactionsApplied, true);
+    assert.deepEqual(hidden.changes, []);
+    assert.deepEqual(hidden.before.rows, []);
+    assert.deepEqual(hidden.after.rows, []);
+    assert.deepEqual(hidden.before.audit, []);
+    assert.deepEqual(hidden.after.audit, []);
+    assert.ok(!JSON.stringify(hidden).includes(factId));
+    assert.ok(!JSON.stringify(hidden).includes(identity));
+    assert.deepEqual(rows(), stored);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+for (const boundary of ["actor", "fact"] as const) {
+  for (const direction of ["included", "excluded"] as const) {
+    for (const length of [200, 201]) {
+      test(`${length}-character ${boundary} survives ${direction} policy changes and SQLite reopen`, async () => {
+        await changedIdentityRoundTrip(boundary, direction, length);
+      });
+    }
+  }
+}
+
+test("changed policy identities reject malformed values without relaxing labels or result cardinality", async () => {
+  const e = await example();
+  try {
+    const original = JSON.stringify(e.result);
+    const change = e.result.changes[0];
+    const reject = (value: unknown) =>
+      assert.throws(
+        () => checkedPolicyPreview({ ...e.result, changes: [value] }, e.input, e.candidate),
+        /Invalid private policy comparison response/,
+      );
+    for (const invalid of ["", " \t\n", null, false, 0, [], {}]) {
+      reject({ ...change, actorId: invalid });
+      for (const direction of ["included", "excluded"] as const) {
+        reject({ ...change, [direction]: [invalid] });
+        reject({
+          ...change,
+          causes: {
+            ...change.causes,
+            [direction]: [{ factId: invalid, reasons: ["repeated_policy_unit"], revision: 0 }],
+          },
+        });
+      }
+    }
+    const entry = e.result.before.audit[0];
+    for (const patch of [{ actorId: " \t\n" }, { factIds: [" \t\n"] }])
+      assert.throws(
+        () =>
+          checkedPolicyPreview(
+            { ...e.result, before: { ...e.result.before, audit: [{ ...entry, ...patch }] } },
+            e.input,
+            e.candidate,
+          ),
+        /Invalid private policy comparison response/,
+      );
+    for (const direction of ["included", "excluded"] as const) {
+      reject({ ...change, [direction]: Array.from({ length: 10_001 }, () => "valid-fact") });
+      reject({
+        ...change,
+        causes: {
+          ...change.causes,
+          [direction]: Array.from({ length: 10_001 }, () => ({
+            factId: "valid-fact",
+            reasons: ["repeated_policy_unit"],
+            revision: 0,
+          })),
+        },
+      });
+      reject({
+        ...change,
+        causes: {
+          ...change.causes,
+          [direction]: [{ factId: "valid-fact", reasons: ["x".repeat(201)], revision: 0 }],
+        },
+      });
+    }
+    for (const field of ["value", "rank"] as const)
+      reject({ ...change, causes: { ...change.causes, [field]: "x".repeat(201) } });
+    reject({ ...change, causes: { ...change.causes, changedPolicyFields: ["x".repeat(201)] } });
+    assert.throws(() => readCandidatePolicy(JSON.stringify({ ...e.candidate, version: "x".repeat(201) }), e.input));
+    assert.throws(
+      () =>
+        checkedPolicyPreview(
+          { ...e.result, changes: Array.from({ length: 2001 }, () => change) },
+          e.input,
+          e.candidate,
+        ),
+      /Invalid private policy comparison response/,
+    );
+    assert.equal(JSON.stringify(e.result), original);
+  } finally {
+    e.close();
+  }
+});

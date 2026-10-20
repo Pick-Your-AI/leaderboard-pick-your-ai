@@ -704,3 +704,145 @@ for (const definition of kinds) {
     assert.equal(stableJSON(input), before);
   });
 }
+
+// Frozen JSON facts can omit unknown contexts. Keep two independently supported
+// native events here so canonical replay deduplication cannot hide the pair tie.
+function tiedPairInput(definition) {
+  const outputs = ["a", "b"].map((suffix) =>
+    normalizeGithubObservation(source(definition, { eventId: `synthetic-context-tie-${suffix}` })),
+  );
+  assert.notEqual(outputs[0].observations[0].id, outputs[1].observations[0].id);
+  const input = frozen(outputs);
+  assert.equal(input.facts.length, 2);
+  const [first, second] = input.facts;
+  assert.notEqual(first.id, second.id);
+  assert.notEqual(first.canonicalKey, second.canonicalKey);
+  assert.notEqual(first.relationshipPair.eventId, second.relationshipPair.eventId);
+  assert.deepEqual(first.relationshipPair.from, second.relationshipPair.from);
+  assert.deepEqual(first.relationshipPair.to, second.relationshipPair.to);
+  assert.equal(first.occurredAt, second.occurredAt);
+  for (const fact of input.facts) {
+    for (const field of ["eventContext", "currentContext"]) {
+      assert.equal(Object.hasOwn(fact, field), true);
+      assert.equal(fact[field], null);
+    }
+  }
+  return input;
+}
+
+function aggregatePairInput(input, metricId, selectedScope = scope) {
+  const before = structuredClone(input);
+  const result = aggregateMetric(input, policy(metricId), selectedScope);
+  assert.deepEqual(input, before);
+  for (const [index, fact] of input.facts.entries()) {
+    for (const field of ["eventContext", "currentContext"]) {
+      assert.equal(Object.hasOwn(fact, field), Object.hasOwn(before.facts[index], field));
+    }
+  }
+  return result;
+}
+
+function assertConservedPair(input, result) {
+  const ids = input.facts.map((fact) => fact.id).sort();
+  assert.deepEqual(quantity(result), [["202", 1, "partial", null]]);
+  assert.deepEqual(result.rows[0].evidenceIds, [ids[0]]);
+  assert.deepEqual(result.audit, [
+    { factIds: [ids[0]], actorId: "202", reason: "included_count_observed" },
+    { factIds: [ids[1]], actorId: "202", reason: "repeated_relationship_pair" },
+  ]);
+  assert.equal(result.coverage, "incomplete");
+  assert.equal(result.publicEnabled, false);
+}
+
+for (const definition of kinds) {
+  const { metricId } = definition;
+  for (const fields of [["eventContext"], ["currentContext"], ["eventContext", "currentContext"]]) {
+    test(`${metricId} conserves tied independent events with omitted ${fields.join(" and ")}`, () => {
+      const input = tiedPairInput(definition);
+      const control = aggregatePairInput(input, metricId);
+      assertConservedPair(input, control);
+      for (const omittedIndex of [0, 1]) {
+        const candidate = structuredClone(input);
+        for (const field of fields) {
+          delete candidate.facts[omittedIndex][field];
+          assert.equal(Object.hasOwn(candidate.facts[omittedIndex], field), false);
+        }
+        for (const facts of [candidate.facts, [...candidate.facts].reverse()]) {
+          assert.deepEqual(aggregatePairInput({ ...candidate, facts }, metricId), control);
+        }
+      }
+    });
+  }
+
+  for (const field of ["eventContext", "currentContext"]) {
+    test(`${metricId} withholds tied events with conflicting known or unknown ${field}`, () => {
+      const input = tiedPairInput(definition);
+      const context = {
+        projects: ["synthetic-project-a"],
+        workstreams: ["synthetic-workstream-a"],
+        workstreamsKnown: true,
+      };
+      for (const fact of input.facts) fact[field] = structuredClone(context);
+      assertConservedPair(input, aggregatePairInput(input, metricId));
+      for (const conflict of ["different", "null", "omitted"]) {
+        const candidate = structuredClone(input);
+        if (conflict === "different") {
+          candidate.facts[1][field].projects = ["synthetic-project-b"];
+          candidate.facts[1][field].workstreams = ["synthetic-workstream-b"];
+        } else if (conflict === "null") candidate.facts[1][field] = null;
+        else delete candidate.facts[1][field];
+        const expectedAudit = [
+          {
+            factIds: candidate.facts.map((fact) => fact.id).sort(),
+            actorId: "202",
+            reason: "ambiguous_relationship_pair",
+          },
+        ];
+        for (const facts of [candidate.facts, [...candidate.facts].reverse()]) {
+          const result = aggregatePairInput({ ...candidate, facts }, metricId);
+          assert.deepEqual(result.rows, [], conflict);
+          assert.deepEqual(result.audit, expectedAudit, conflict);
+          assert.equal(result.coverage, "incomplete", conflict);
+          assert.equal(result.publicEnabled, false, conflict);
+        }
+      }
+    });
+
+    test(`${metricId} keeps unknown ${field} unavailable to selected membership lenses`, () => {
+      const input = tiedPairInput(definition);
+      delete input.facts[1][field];
+      assert.equal(Object.hasOwn(input.facts[1], field), false);
+      assertConservedPair(input, aggregatePairInput(input, metricId));
+      const ids = input.facts.map((fact) => fact.id).sort();
+      const known = structuredClone(input);
+      for (const fact of known.facts) {
+        fact[field] = {
+          projects: ["synthetic-project-a"],
+          workstreams: ["synthetic-workstream-a"],
+          workstreamsKnown: true,
+        };
+      }
+      for (const [filter, value] of [
+        ["projects", "synthetic-project-a"],
+        ["workstreams", "synthetic-workstream-a"],
+      ]) {
+        const selectedScope = {
+          ...scope,
+          context: field === "eventContext" ? "event" : "current",
+          [filter]: [value],
+        };
+        assertConservedPair(known, aggregatePairInput(known, metricId, selectedScope));
+        for (const facts of [input.facts, [...input.facts].reverse()]) {
+          const result = aggregatePairInput({ ...input, facts }, metricId, selectedScope);
+          assert.deepEqual(result.rows, []);
+          assert.deepEqual(result.audit, [
+            { factIds: [ids[1]], actorId: "202", reason: "repeated_relationship_pair" },
+            { factIds: [ids[0]], actorId: "202", reason: "unknown_membership_context" },
+          ]);
+          assert.equal(result.coverage, "incomplete");
+          assert.equal(result.publicEnabled, false);
+        }
+      }
+    });
+  }
+}

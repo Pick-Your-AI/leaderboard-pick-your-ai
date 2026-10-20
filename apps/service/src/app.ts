@@ -11,6 +11,10 @@ import {
   supportsPullRequestMergeTarget,
   achievementMilestoneVersion,
   achievementMilestonesPageSchema,
+  workstreamHelpVersion,
+  workstreamHelpMeaning,
+  workstreamHelpLimits,
+  workstreamHelpPageSchema,
   participationHistoryResponseByteLimit,
   metricRegistrySchema,
   type ActorFilter,
@@ -21,6 +25,7 @@ import { comparePublishedRanks, type ComparedRanks } from "./rank-comparison.js"
 import { rankingPresentation } from "./ranking-presentation.js";
 import { acceptedAchievements, ACHIEVEMENT_RULE_VERSION } from "./achievements.js";
 import { acceptedMilestones } from "./achievement-milestones.js";
+import { acceptedWorkstreamHelp } from "./workstream-help.js";
 import { activityBurstIndex, activityCompactionVersion, activityGroupPreviewLimit } from "./activity-bursts.js";
 import { renderContributorCard, renderContributorCardImage } from "./cards.js";
 import { renderPublicExport } from "./exports.js";
@@ -57,6 +62,7 @@ export interface ServiceOptions {
   cursorSecret?: string;
   serviceVersion?: string;
   approvedAchievementRuleVersion?: typeof ACHIEVEMENT_RULE_VERSION | typeof achievementMilestoneVersion;
+  approvedWorkstreamHelpRuleVersion?: typeof workstreamHelpVersion;
 }
 const allowed = new Set([
   "actors",
@@ -677,6 +683,7 @@ export function createService(options: ServiceOptions = {}) {
         "cards/:actorId",
         "cards/:actorId/image",
         "contributors/:actorId/achievements",
+        "contributors/:actorId/workstream-help",
         "activity",
         "activity/:groupId",
         "activity-bursts",
@@ -1039,6 +1046,45 @@ export function createService(options: ServiceOptions = {}) {
       "application/json; charset=utf-8",
       "no-store",
     );
+  });
+  app.get<{ Params: { actorId: string } }>("/api/v1/contributors/:actorId/workstream-help", async (request, reply) => {
+    const q = query(request);
+    const actorId = request.params.actorId;
+    if (!identifier.test(actorId) || actorId === "." || actorId === ".." || q.metric || q.search || q.format !== "json")
+      fail(400, "unsupported_filter");
+    if (options.approvedWorkstreamHelpRuleVersion !== workstreamHelpVersion)
+      fail(503, "workstream_help_policy_unapproved");
+    const cursor = q.cursor ? decodeCursor(q.cursor) : null;
+    const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors);
+    if (!read.selected.actors.some((actor) => actor.actorId === actorId)) fail(404, "profile_unavailable");
+    if (read.selected.disabledMetrics?.some((entry) => entry.id === q.category)) fail(503, "metric_disabled");
+    const recognitions = acceptedWorkstreamHelp(read, actorId, q.category, registry.metrics);
+    const digest = createHash("sha256");
+    for (const entry of recognitions) digest.update(JSON.stringify(entry)).update("\n");
+    const binding = JSON.stringify([
+      workstreamHelpVersion,
+      actorId,
+      cursorScope(q.scope),
+      q.category,
+      q.limit,
+      q.actors,
+      digest.digest("hex"),
+    ]);
+    boundCursor(q, binding);
+    const { entries, nextCursor } = page(recognitions, q, read, cursor, binding, 1_000_000);
+    const extension = workstreamHelpPageSchema.parse({
+      ruleVersion: workstreamHelpVersion,
+      category: q.category,
+      meaning: workstreamHelpMeaning,
+      recognitions: entries,
+      totalRecognitions: recognitions.length,
+      pageSize: q.limit,
+      nextCursor,
+    });
+    const body = { ...meta(read), actorId, ...extension };
+    if (Buffer.byteLength(JSON.stringify(body)) > workstreamHelpLimits.responseBytes)
+      fail(503, "workstream_help_response_too_large");
+    return send(request, reply, body, "application/json; charset=utf-8", "no-store");
   });
   app.get<{ Params: { actorId: string } }>("/api/v1/cards/:actorId/image", async (request, reply) => {
     const q = query(request);
