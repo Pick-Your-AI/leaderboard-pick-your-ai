@@ -2,7 +2,7 @@
 
 Refs [LB-07.01 / #65](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/65).
 
-The private github-pr-decision-history/v1 producer captures a pull request's complete API-visible close, reopen and merge sequence. Its selector returns one historical state before an exclusive event cutoff. The runtime does not yet collect this receipt, normalize it into a metric, or publish an acceptance rate or pending count. The metric registry and existing public behavior are unchanged.
+The private github-pr-decision-history/v1 producer captures a pull request's complete API-visible close, reopen and merge sequence. Its selector returns one historical state before an exclusive event cutoff. The [private generation bridge](private-decision-generation-bridge.md) retains the actual selected producer result. An already configured ratio policy can use the [decided-PR publication projection](public-decided-pull-requests.md); neither the producer nor host enrollment activates a public policy.
 
 ## Interfaces and authority
 
@@ -14,7 +14,7 @@ The private github-pr-decision-history/v1 producer captures a pull request's com
 
 The caller supplies the protected repository-scoped GithubReadClient, the exact selected native PR identity, its current collector semantic revision, a durable scan identity, an event cutoff, a trusted clock and a live synchronous authorization callback. Data and callback identities are captured before asynchronous work. Proxy-backed request containers, nested data, retained receipts and expected bindings are rejected before reflective inspection, including revoked proxies. The protected client and callback objects remain trusted host capabilities. The original callback remains live before and after each awaited request and trusted-clock call. A throwing clock still triggers the final authority check. Returned or thrown native Promise rejections are observed and rejected as invalid synchronous callback values; foreign thenable getters are never invoked.
 
-The SHA-256 digest binds the version, selected source, PR identity and author, generation, cutoff, original capture clocks, before/after anchors, complete minimized events and pagination metadata. The strict validator replays and verifies the retained sequence as well as checking the digest. A digest is an integrity identifier. Anyone can hash data; schema validity or a matching digest alone confers no protected-host authority. A future runtime must admit these receipts through the actual protected producer and its immutable selected-run persisted source row, not through a caller-supplied verified flag or arbitrary callback result.
+The SHA-256 digest binds the version, selected source, PR identity and author, generation, cutoff, original capture clocks, before/after anchors, complete minimized events and pagination metadata. The strict validator replays and verifies the retained sequence as well as checking the digest. A digest is an integrity identifier. Anyone can hash data; schema validity or a matching digest alone confers no protected-host authority. The runtime admits these receipts through the actual protected producer and its immutable selected-run persisted source row, not through a caller-supplied verified flag or arbitrary callback result.
 
 The receipt retains native IDs, timestamps and explicitly nullable author/merge-commit identity. It collects no title, body, email, branch, actor login, coauthor, diff or arbitrary native payload. A missing author remains null; the merge operator is never substituted as the author.
 
@@ -51,13 +51,13 @@ A transition exactly at the cutoff is excluded. Equal instants with different fr
 
 Selection happens before any subsequent reporting-window filter. An earlier in-window close cannot survive a later reopen or be resurrected when the final decision is outside a selected window. Native merged state does not establish historical default-branch integration or conserved physical delivery. A nullable native merge commit remains nullable.
 
-## Remaining runtime and public work
+## Runtime selection and remaining acceptance
 
 The future collector must preserve the clock order: event cutoff E <= capture completion C <= persisted observation O <= frozen observation cutoff F. The receipt's E is explicit and exclusive. Neither original capture time nor stored observation time may be rewritten to equal F, and a retry of a frozen snapshot must not perform a newer native lookup and backdate it.
 
-Production integration must bind the proof and version into persisted source revisions, normalized cache generations and final publication authorization. It must choose one PR state per selected generation, including pending, before deciding which final merged/closed decisions fall in a reporting window. Historical branch scopes need their own evidence.
+The private bridge binds original generations to selected source rows and final publication authorization. The public projection chooses one native state at each reporting window's exclusive end, which must not exceed the captured cutoff. The optional selector argument never changes the original receipt, generation, clocks or digest. Historical branch scopes still need their own evidence and remain unsupported for this ratio.
 
-Pending backlog needs an explicit coverage-aware contract through the metric engine, persisted dependencies, public projector, client and exports. In particular, an old PR still open at E must not disappear merely because it was created before the reporting window. A lower-bound change in the engine alone is insufficient: the current public evidence projector also applies ordinary occurrence-time filtering. An unavailable or partial source cannot establish zero pending PRs. This private producer deliberately emits no public count or ranking.
+The projection carries exact pending dependencies through the engine, frozen input, public service, strict client and exports. A known PR still pending at the selected end can predate the reporting window. Its private end binding admits that backlog without changing ordinary occurrence-time rules for other metrics. Unavailable or partial history cannot establish zero pending PRs. The ratio remains descriptive and unranked; real source coverage and policy acceptance remain separate.
 
 The existing minimized REST/webhook rows do not contain complete lifecycle history and cannot reconstruct it from a hash. The readiness, target-branch and organization-participation producers retain their separate contracts and ownership.
 

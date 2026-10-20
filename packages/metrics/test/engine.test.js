@@ -747,3 +747,129 @@ test("named UTC publication windows keep DST boundary events half-open", () => {
   assert.equal(result.coverage, "complete");
   assert.deepEqual(result.rows[0].evidenceIds, ["inside", "start"]);
 });
+
+test("native pending selection includes pre-window backlog without changing ordinary pending rules", () => {
+  const configured = policy({
+    metricId: "pr_accepted_rate",
+    aggregation: "ratio",
+    rank: false,
+    rankedStates: ["observed"],
+    minimumSamples: 2,
+  });
+  const selected = (id, patch) =>
+    fact(id, {
+      metricId: "pr_accepted_rate",
+      state: "observed",
+      acceptanceReceipt: null,
+      acceptedBy: null,
+      decisionAsOf: to,
+      ...patch,
+    });
+  const decidedAt = "2026-10-10T00:00:00Z";
+  const retained = [
+    selected("merged", { outcome: "merged", occurredAt: decidedAt, acceptedAt: decidedAt }),
+    selected("closed", { outcome: "closed_unmerged", occurredAt: decidedAt, acceptedAt: decidedAt }),
+    selected("older", {
+      outcome: "pending",
+      state: "pending",
+      occurredAt: "2026-09-01T00:00:00Z",
+      acceptedAt: null,
+    }),
+  ];
+  const result = aggregateMetric(input(retained), configured, scope());
+  assert.equal(result.rows[0].value, 0.5);
+  assert.equal(result.rows[0].numerator, 1);
+  assert.equal(result.rows[0].denominator, 2);
+  assert.equal(result.rows[0].pending, 1);
+  assert.equal(result.rows[0].rank, null);
+  assert.deepEqual(
+    result.rows[0].pendingEvidence.map((value) => value.id),
+    ["older"],
+  );
+  assert.ok(selectPortfolioFacts(input(retained), configured, scope()).some((value) => value.id === "older"));
+  const ordinary = retained.map(({ decisionAsOf: _asOf, ...value }) => value);
+  assert.equal(aggregateMetric(input(ordinary), configured, scope()).rows[0].pending, 0);
+  const excluded = {
+    ...retained[2],
+    revision: 1,
+    state: "excluded",
+    correctionReceipt: "synthetic-reviewed-pending-exclusion",
+  };
+  assert.equal(aggregateMetric(input([...retained, excluded]), configured, scope()).rows[0].pending, 0);
+  assert.equal(
+    board([fact("older", { state: "pending", occurredAt: "2026-09-01T00:00:00Z", acceptedAt: null })]).rows.length,
+    0,
+  );
+});
+
+test("native decisions preserve exact half-open clocks and reject another window's selection", () => {
+  const configured = policy({
+    metricId: "pr_accepted_rate",
+    aggregation: "ratio",
+    rank: false,
+    rankedStates: ["observed"],
+  });
+  const selected = (id, at, patch = {}) =>
+    fact(id, {
+      metricId: "pr_accepted_rate",
+      state: "observed",
+      outcome: "merged",
+      occurredAt: at,
+      acceptedAt: at,
+      observedAt: to,
+      acceptanceReceipt: null,
+      acceptedBy: null,
+      decisionAsOf: to,
+      ...patch,
+    });
+  const retained = [
+    selected("before", "2026-09-30T23:59:59.999999999Z"),
+    selected("start", from),
+    selected("last", "2026-10-31T23:59:59.999999999Z"),
+    selected("end", to),
+  ];
+  const result = aggregateMetric(input(retained), configured, scope());
+  assert.deepEqual(result.rows[0].evidenceIds.sort(), ["last", "start"]);
+  assert.equal(result.rows[0].denominator, 2);
+  assert.throws(
+    () => aggregateMetric(input(retained), configured, scope({ to: "2026-10-31T00:00:00Z" })),
+    /Decision selection must match the reporting window/,
+  );
+  assert.throws(
+    () =>
+      aggregateMetric(input([selected("future", from, { decisionAsOf: "2026-11-02T00:00:00Z" })]), configured, scope()),
+    /Decision selection must match the reporting window/,
+  );
+  assert.throws(
+    () => aggregateMetric(input([selected("bad", from, { outcome: "pending" })]), configured, scope()),
+    /Invalid decision selection state/,
+  );
+});
+
+test("only known native pending units survive incomplete coverage and never become decided zero", () => {
+  const configured = policy({
+    metricId: "pr_accepted_rate",
+    aggregation: "ratio",
+    rank: false,
+    rankedStates: ["observed"],
+  });
+  const retained = fact("pending", {
+    metricId: "pr_accepted_rate",
+    state: "pending",
+    outcome: "pending",
+    occurredAt: "2026-09-01T00:00:00Z",
+    acceptedAt: null,
+    decisionAsOf: to,
+    acceptanceReceipt: null,
+    acceptedBy: null,
+  });
+  const partial = input([retained], {
+    coverage: [coverage({ state: "partial", sourceErrors: ["synthetic_incomplete_inventory"] })],
+  });
+  const row = aggregateMetric(partial, configured, scope()).rows[0];
+  assert.equal(row.value, null);
+  assert.equal(row.denominator, 0);
+  assert.equal(row.pending, 1);
+  assert.equal(row.rank, null);
+  assert.equal(aggregateMetric({ ...partial, facts: [] }, configured, scope()).rows.length, 0);
+});

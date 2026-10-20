@@ -64,6 +64,8 @@ export interface MetricFact {
   /** Literal source state, never an inferred classification. */
   rawState?: string;
   outcome?: "merged" | "closed_unmerged" | "pending";
+  /** Private native-decision selection bound to this exact exclusive reporting end. */
+  decisionAsOf?: string;
   readyAt?: string | null;
   firstReviewAt?: string | null;
   /** Exact observed locale fact whose accepted representation replaces current portfolio display. */
@@ -624,6 +626,25 @@ function prepare(
       continue;
     }
     for (const at of [fact.occurredAt, fact.acceptedAt, fact.readyAt, fact.firstReviewAt]) if (at != null) instant(at);
+    if (fact.decisionAsOf !== undefined) {
+      if (
+        fact.metricId !== "pr_accepted_rate" ||
+        fact.role !== "author" ||
+        !["merged", "closed_unmerged", "pending"].includes(fact.outcome ?? "") ||
+        compareSourceInstants(fact.decisionAsOf, scope.to) !== 0 ||
+        compareSourceInstants(fact.decisionAsOf, input.cutoff) > 0
+      )
+        throw new Error("Decision selection must match the reporting window");
+      if (
+        (fact.outcome === "pending" &&
+          ((fact.revision === 0 && fact.state !== "pending") || fact.acceptedAt !== null)) ||
+        (fact.outcome !== "pending" &&
+          (fact.acceptedAt === null ||
+            fact.occurredAt === null ||
+            compareSourceInstants(fact.acceptedAt, fact.occurredAt) !== 0))
+      )
+        throw new Error("Invalid decision selection state");
+    }
     if (fact.quantity !== undefined) number(fact.quantity, "Quantity");
     if (policy.aggregation === "sum" && fact.quantity !== undefined && !Number.isSafeInteger(fact.quantity))
       throw new Error("Line quantities require exact safe integers");
@@ -816,12 +837,15 @@ function prepare(
           ? fact.occurredAt
           : fact[policy.dateBasis];
     if (!reason && at == null && policy.aggregation !== "duration") reason = "unknown_effective_time";
-    if (
-      !reason &&
-      at != null &&
-      ((scope.from !== null && instant(at) < instant(scope.from)) || instant(at) >= instant(scope.to))
-    )
-      reason = "outside_window";
+    if (!reason && at != null) {
+      const selectedDecision = fact.decisionAsOf !== undefined;
+      const pendingAtEnd = selectedDecision && fact.outcome === "pending";
+      const beforeStart =
+        scope.from !== null &&
+        (selectedDecision ? compareSourceInstants(at, scope.from) < 0 : instant(at) < instant(scope.from));
+      const afterEnd = selectedDecision ? compareSourceInstants(at, scope.to) >= 0 : instant(at) >= instant(scope.to);
+      if ((!pendingAtEnd && beforeStart) || afterEnd) reason = "outside_window";
+    }
     if (
       !reason &&
       fact.acceptedAt !== null &&

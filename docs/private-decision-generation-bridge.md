@@ -59,8 +59,9 @@ failure rolls back the actual collection transaction; it cannot leave an item or
 observation.
 
 Unavailable results have no invented capture clock or proof. They still bind the selected run, PR, native revision,
-actual O, and F. The bridge preserves the producer's distinction between unavailable and a valid pending decision; it
-does not turn either into a public count or rate.
+actual O, and F. The bridge preserves the producer's distinction between unavailable and a valid pending decision.
+The optional [decided-PR publication projection](public-decided-pull-requests.md) consumes this retained selection
+only for an already configured ratio policy; enrollment alone does not activate a public metric.
 
 ## Selected completed runs and frozen replay
 

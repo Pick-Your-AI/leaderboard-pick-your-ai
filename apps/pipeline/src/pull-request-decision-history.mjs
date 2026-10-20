@@ -196,10 +196,42 @@ export function parseDecisionGenerationCapture(value) {
   return capture;
 }
 
+export const pullRequestDecidedProjectionVersion = "pipeline-pr-decided-projection/v1";
+
+/** Private window selection and fact hashes, never native events or public authority. */
+export function parseDecisionProjection(value, capture) {
+  const projection = copyParticipationHistoryJSON(value);
+  const retained = parseDecisionGenerationCapture(capture);
+  if (
+    !exact(projection, ["schemaVersion", "asOf", "captureHash", "factHashes"]) ||
+    projection.schemaVersion !== pullRequestDecidedProjectionVersion ||
+    !instant(projection.asOf) ||
+    compareSourceInstants(projection.asOf, retained.asOf) > 0 ||
+    projection.captureHash !== digest(retained) ||
+    !Array.isArray(projection.factHashes) ||
+    projection.factHashes.length > 10000 ||
+    projection.factHashes.some((value) => !hash(value)) ||
+    new Set(projection.factHashes).size !== projection.factHashes.length ||
+    JSON.stringify(projection.factHashes) !== JSON.stringify([...projection.factHashes].sort())
+  )
+    fail("decision_history_projection_invalid");
+  return projection;
+}
+
 export function decisionGenerationAuthorization(authorization) {
-  return authorization.pullRequestDecisionEvidence === undefined
-    ? {}
-    : { pullRequestDecisionEvidence: parseDecisionGenerationCapture(authorization.pullRequestDecisionEvidence) };
+  if (authorization.pullRequestDecisionEvidence === undefined) {
+    if (authorization.pullRequestDecisionProjection !== undefined) fail("decision_history_projection_invalid");
+    return {};
+  }
+  const capture = parseDecisionGenerationCapture(authorization.pullRequestDecisionEvidence);
+  return {
+    pullRequestDecisionEvidence: capture,
+    ...(authorization.pullRequestDecisionProjection === undefined
+      ? {}
+      : {
+          pullRequestDecisionProjection: parseDecisionProjection(authorization.pullRequestDecisionProjection, capture),
+        }),
+  };
 }
 
 const payloadColumns = [
@@ -220,7 +252,17 @@ const payloadColumns = [
  * The bound is admitted SQL-text payload, not database work or total JS heap. */
 export async function readDecisionGenerations(
   tx,
-  { selectedRuns, repositories, source, asOf, observationCutoff, dataMode, assertAuthorized, expected = null },
+  {
+    selectedRuns,
+    repositories,
+    source,
+    asOf,
+    observationCutoff,
+    dataMode,
+    assertAuthorized,
+    expected = null,
+    selectionAsOf = asOf,
+  },
 ) {
   const selected = copyParticipationHistoryJSON(selectedRuns);
   if (
@@ -228,6 +270,8 @@ export async function readDecisionGenerations(
     selected.length === 0 ||
     selected.length > 1000 ||
     !instant(asOf) ||
+    !instant(selectionAsOf) ||
+    compareSourceInstants(selectionAsOf, asOf) > 0 ||
     !instant(observationCutoff) ||
     compareSourceInstants(asOf, observationCutoff) > 0 ||
     !token(source) ||
@@ -401,7 +445,7 @@ export async function readDecisionGenerations(
       if (observation.result.status === "captured") {
         const verified = validatePullRequestDecisionHistory(observation.result.receipt, { binding, generation });
         if (verified.status !== "validated") fail("decision_history_retained_receipt_invalid");
-        selection = selectPullRequestDecisionAsOf(verified.receipt);
+        selection = selectPullRequestDecisionAsOf(verified.receipt, selectionAsOf);
         if (selection.status === "unavailable") fail("decision_history_retained_receipt_invalid");
       } else {
         selection = { status: "unavailable", reason: observation.result.reason };
@@ -413,7 +457,20 @@ export async function readDecisionGenerations(
         observedAt,
         observationHash: digest(observation),
       });
-      selections.push({ repositoryId: repository.id, runId: run.run_id, factKey: row.fact_key, selection });
+      selections.push({
+        repositoryId: repository.id,
+        runId: run.run_id,
+        factKey: row.fact_key,
+        selection,
+        source: {
+          subjectId: row.subject_id,
+          sourceUrl: document.sourceUrl,
+          sourceRevision: row.source_revision,
+          createdAt: binding.subject.createdAt,
+          author: binding.subject.author,
+          observedAt,
+        },
+      });
     }
     captured.push({
       repositoryId: repository.id,

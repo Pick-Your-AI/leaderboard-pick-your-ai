@@ -242,18 +242,26 @@ export function validatePullRequestDecisionHistory(
   });
 }
 
-/** Select one historical state before filtering decisions into any reporting window. */
-export function selectPullRequestDecisionAsOf(value: unknown): PullRequestDecisionSelection {
+/** Select one historical state before filtering decisions into any reporting window.
+ * An earlier window reuses the original capture; it never changes its generation or digest.
+ */
+export function selectPullRequestDecisionAsOf(value: unknown, asOf?: string): PullRequestDecisionSelection {
   return result(() => {
     const receipt = parsedReceipt(value);
     const { binding, generation } = receipt;
-    if (compareSourceInstants(binding.subject.createdAt, generation.asOf) >= 0)
+    const target = asOf === undefined ? generation.asOf : asOf;
+    if (
+      !pullRequestDecisionInstantSchema.safeParse(target).success ||
+      compareSourceInstants(target, generation.asOf) > 0
+    )
+      fail("invalid_request");
+    if (compareSourceInstants(binding.subject.createdAt, target) >= 0)
       return { status: "not_yet_created" as const, proofDigest: receipt.digest };
-    const selected = replay(receipt.history, generation.asOf);
+    const selected = replay(receipt.history, target);
     return {
       status: "selected" as const,
       unitKey: "github:" + binding.repository.id + ":pull_request:" + binding.subject.id,
-      asOf: generation.asOf,
+      asOf: target,
       cutoffMode: "exclusive" as const,
       outcome: selected.outcome,
       decisionAt: selected.decisionAt,
