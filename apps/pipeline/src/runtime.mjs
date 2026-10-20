@@ -38,6 +38,7 @@ import {
 } from "./reconciliation-plan.mjs";
 import { readReconciliationProgress, leastReconciliationTime } from "./reconciliation-progress.mjs";
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
+import { selectWorkstreamHelp, validateWorkstreamHelpBindings } from "./workstream-help.mjs";
 import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
 import { AggregateExplanationStore } from "./aggregate-explanations.mjs";
 import { assertPipelineSourcesNotRetired } from "./derived-retirement.mjs";
@@ -366,7 +367,10 @@ export async function createPipeline(options) {
     if (value?.isSynthetic === true || /synthetic[_.:-]|synthetic\.example/i.test(serialized))
       fail("synthetic_data_forbidden_in_public_runtime");
   };
-  const config = copy(options.config ?? { version: "unconfigured", repositories: [], policies: [], scopes: [] });
+  const configured = options.config ?? { version: "unconfigured", repositories: [], policies: [], scopes: [] };
+  // Admit the optional protected extension before copying host configuration.
+  validateWorkstreamHelpBindings(configured.recognitionBindings ?? []);
+  const config = copy(configured);
   const feedbackAuthority = createDiscussionFeedbackAuthority(
     config,
     dataMode,
@@ -3151,6 +3155,10 @@ export async function createPipeline(options) {
         context: scope.context ?? "event",
       },
     ).outputs;
+    let reviewedWorkstreamHelp = recognitionBindings.some((binding) => Object.hasOwn(binding, "workstreamHelp"))
+      ? []
+      : null;
+    let workstreamHelpSourceDecisions = [];
     if (recognitionBindings.length && scope.branch === undefined) {
       const combined = {
         facts: outputs.flatMap((o) => o.facts),
@@ -3194,6 +3202,15 @@ export async function createPipeline(options) {
         observationCutoff,
         c.contracts.publicDocumentationReasons,
       );
+      if (reviewedWorkstreamHelp !== null) {
+        if (
+          !Array.isArray(recognized.reviewedWorkstreamHelp) ||
+          recognized.reviewedWorkstreamHelp.some((entry) => entry.statement.organization !== scope.organization)
+        )
+          fail("workstream_help_evidence_unverified");
+        reviewedWorkstreamHelp = recognized.reviewedWorkstreamHelp;
+        workstreamHelpSourceDecisions = recognized.workstreamHelpSourceDecisions;
+      }
       outputs = [
         ...outputs,
         {
@@ -3512,6 +3529,16 @@ export async function createPipeline(options) {
       evidence: publicEvidence,
       portfolioEvidence,
       pendingEvidence,
+      ...(reviewedWorkstreamHelp === null
+        ? {}
+        : {
+            reviewedWorkstreamHelp: selectWorkstreamHelp(
+              reviewedWorkstreamHelp,
+              portfolioFacts,
+              evidence,
+              workstreamHelpSourceDecisions,
+            ),
+          }),
       ...physical,
       ranking: selectedPolicies.map((item) => ({
         metricId: item.policy.metricId,
@@ -3766,6 +3793,11 @@ export async function createPipeline(options) {
           evidence: publicEvidence,
           portfolioEvidence,
           pendingEvidence,
+          ...(content.reviewedWorkstreamHelp === undefined
+            ? {}
+            : {
+                reviewedWorkstreamHelp: content.reviewedWorkstreamHelp,
+              }),
           ...physical,
           ranking: content.ranking,
           rankingPresentationPolicy: content.rankingPresentationPolicy,
@@ -4822,6 +4854,7 @@ export async function createPipeline(options) {
     source,
     registry: c.metrics.metricRegistryV1,
     cursorSecret: options.cursorSecret,
+    approvedWorkstreamHelpRuleVersion: config.approvedWorkstreamHelpRuleVersion,
     now: () => Date.parse(now()),
   });
   async function runOnceInternal(options) {

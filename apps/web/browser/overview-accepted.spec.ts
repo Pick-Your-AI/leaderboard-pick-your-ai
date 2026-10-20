@@ -362,6 +362,7 @@ test("an initially hidden overview defers contributor activity until the page be
   try {
     await page.goto(`/?ui=api&snapshot=${pin}`);
     await expect(page.getByRole("region", { name: "Explore contribution departments" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Snapshot provenance" })).toHaveCount(0);
     expect(api.activityCalls()).toHaveLength(0);
     await expect(page.getByText(/Synthetic contributor/)).toHaveCount(0);
     await page.evaluate(() => {

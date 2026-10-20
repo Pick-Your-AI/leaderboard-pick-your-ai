@@ -1,6 +1,7 @@
 import type { RankSnapshotHistory } from "./rank-comparison.js";
 import type { ParticipationHistoryRead } from "./participation-history.js";
 import { projectPhysicalContext } from "./physical-context.js";
+import { projectWorkstreamHelp } from "./workstream-help.js";
 import {
   canonicalPublicScope,
   publicProfilePresentationSchema,
@@ -43,6 +44,7 @@ import {
   type MetricDefinition,
   type PendingCount,
   type Snapshot,
+  type PublicWorkstreamHelp,
 } from "@pick-your-ai/contracts";
 import { metricRegistryV1, stableJSON } from "@pick-your-ai/metrics";
 import { compareSourceInstants } from "./source-time.js";
@@ -92,6 +94,8 @@ export interface PublishedSnapshot {
   rows: PublicRow[];
   evidence: PublicEvidence[];
   portfolioEvidence?: PortfolioEvidence[];
+  /** Explicit reviewed help, dependent on this exact accepted portfolio and current controls. */
+  reviewedWorkstreamHelp?: PublicWorkstreamHelp[];
   /** Exact pending policy-unit receipts, separate from accepted and portfolio evidence. */
   pendingEvidence?: PortfolioEvidence[];
   /** Provider-private original LOC receipts and merge provenance. Never serialize. */
@@ -231,6 +235,13 @@ export function filterPublicActors(read: PublicRead, filter: ActorFilter): Publi
       ...(read.selected.portfolioEvidence === undefined
         ? {}
         : { portfolioEvidence: read.selected.portfolioEvidence.filter(included) }),
+      ...(read.selected.reviewedWorkstreamHelp === undefined
+        ? {}
+        : {
+            reviewedWorkstreamHelp: read.selected.reviewedWorkstreamHelp.filter((entry) =>
+              ids.has(entry.statement.actorId),
+            ),
+          }),
       ...(read.selected.pendingEvidence === undefined
         ? {}
         : { pendingEvidence: read.selected.pendingEvidence.filter(included) }),
@@ -922,6 +933,7 @@ export function projectRead(
     .filter((entry) => visibleRows.has(JSON.stringify([entry.actorId, entry.metricId])));
   if (new Set(diagnostics.map((entry) => JSON.stringify([entry.actorId, entry.metricId]))).size !== diagnostics.length)
     return reject();
+  const reviewedWorkstreamHelp = projectWorkstreamHelp(selected, portfolioEvidence, scope);
   // Raw exception strings and permission details never enter the public projection.
   const coverage = (value: MetricResult["coverage"]) => ({
     ...value,
@@ -959,6 +971,7 @@ export function projectRead(
       }),
       evidence,
       ...(selected.portfolioEvidence === undefined ? {} : { portfolioEvidence }),
+      ...(reviewedWorkstreamHelp === undefined ? {} : { reviewedWorkstreamHelp }),
       ...(selected.pendingEvidence === undefined
         ? {}
         : {
