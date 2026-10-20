@@ -1,6 +1,6 @@
 import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
 import { FirstContributionsEntry } from "./OverviewDiscovery.tsx";
-import { PublicScopeControls, PublicScopeProvenance } from "./PublicScope.tsx";
+import { PublicScopeControls, PublicScopeProvenance, RequestedScope } from "./PublicScope.tsx";
 import { Programs } from "./Programs.tsx";
 import {
   programDirectoryAsset,
@@ -974,6 +974,7 @@ export function RemoteApp() {
           </h1>
           <p>Evidence-backed public reads. Unknown values and unavailable scopes remain explicit.</p>
         </header>
+        {!parsed.error && <RequestedScope selected={selected} />}
         <Filters key={`${url.pathname}${url.search}`} selected={selected} path={url.pathname} navigate={navigate} />
         {!parsed.error && (isCatalogPath(url.pathname) || rankComparisonPath(url.pathname)) && (
           <details className="method" open={windowsOpen} onToggle={(event) => setWindowsOpen(event.currentTarget.open)}>
