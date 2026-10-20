@@ -3930,8 +3930,7 @@ export async function createPipeline(options) {
   }
   async function participationPublicActors(tx, input, read, restored) {
     const authorization = input.document.identityAuthorization;
-    if (authorization.relationshipPairEvidence === undefined)
-      fail("participation_history_actor_binding_changed");
+    if (authorization.relationshipPairEvidence === undefined) fail("participation_history_actor_binding_changed");
     const rows = await readNormalizationEvidence(tx, authorization, true);
     if (rows === null) fail("participation_history_actor_binding_changed");
     // Current reads may filter disabled rows. Reproduce the original publication
@@ -3960,9 +3959,7 @@ export async function createPipeline(options) {
       publication.snapshot?.revision !== read.selected.snapshot.revision ||
       Number(row.revision) !== read.selected.snapshot.revision ||
       canonical(publication.actors) !== canonical(read.selected.actors) ||
-      !["rows", "evidence", "portfolioEvidence", "pendingEvidence"].every((key) =>
-        Array.isArray(publication[key]),
-      )
+      !["rows", "evidence", "portfolioEvidence", "pendingEvidence"].every((key) => Array.isArray(publication[key]))
     )
       fail("participation_history_actor_binding_changed");
     const publicActorIds = new Set([
@@ -4056,8 +4053,7 @@ export async function createPipeline(options) {
         const actors = projected
           ? await participationPublicActors(tx, input, read, restored[index])
           : actorContracts(restored[index].actors);
-        if (canonical(actors) !== canonical(read.selected.actors))
-          fail("participation_history_actor_binding_changed");
+        if (canonical(actors) !== canonical(read.selected.actors)) fail("participation_history_actor_binding_changed");
       }
       if (!(await approved(tx)) || signal.aborted || participationAuthority.epoch(request) !== epoch) return null;
       const repositoryIds = config.repositories.map((repo) => repo.id);
