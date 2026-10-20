@@ -46,6 +46,9 @@ export interface PolicyPreview {
 }
 const object = (v: unknown): v is ObjectValue => !!v && typeof v === "object" && !Array.isArray(v);
 const text = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 200;
+// Engine identities are nonblank but have no field-length cap; preserve their exact retained bytes.
+const identity = (v: unknown): v is string => typeof v === "string" && v.trim().length > 0;
+const identities = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 10_000 && v.every(identity);
 const hash = (v: unknown): v is string => typeof v === "string" && /^[a-f0-9]{64}$/.test(v);
 const date = (v: unknown): v is string => typeof v === "string" && Number.isFinite(Date.parse(v));
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 10_000 && v.every(text);
@@ -118,15 +121,13 @@ function causes(value: unknown): boolean {
     value.every(
       (c) =>
         object(c) &&
-        text(c.factId) &&
+        identity(c.factId) &&
         strings(c.reasons) &&
         (c.revision === null || (Number.isSafeInteger(c.revision) && Number(c.revision) >= 0)),
     )
   );
 }
 function audit(value: unknown): value is PolicyAuditEntry[] {
-  // Retained engine identities have no field-length cap; transport and cardinality bounds still apply.
-  const identity = (v: unknown): v is string => typeof v === "string" && v.length > 0;
   if (!Array.isArray(value) || value.length > 10_000) return false;
   let facts = 0;
   return value.every((entry) => {
@@ -198,13 +199,13 @@ export function checkedPolicyPreview(value: unknown, input: FrozenPolicyInput, c
     !value.changes.every(
       (c) =>
         object(c) &&
-        text(c.actorId) &&
+        identity(c.actorId) &&
         numberOrNull(c.beforeValue) &&
         numberOrNull(c.afterValue) &&
         rank(c.beforeRank) &&
         rank(c.afterRank) &&
-        strings(c.included) &&
-        strings(c.excluded) &&
+        identities(c.included) &&
+        identities(c.excluded) &&
         object(c.causes) &&
         strings(c.causes.changedPolicyFields) &&
         causes(c.causes.included) &&
