@@ -88,7 +88,8 @@ for (const [beforeWidth, afterWidth] of [
     for (const read of readers)
       if (admitted) assert.doesNotThrow(read);
       else assert.throws(read, /invalid_physical_context/);
-    assert.deepEqual(changedBoard.rows[0].value, h.board.rows[0].value);
+    assert.equal(h.board.rows[0].result.value, 17);
+    assert.equal(changedBoard.rows[0].result.value, h.board.rows[0].result.value);
     assert.deepEqual(changedBoard.rows[0].physicalContext.summary, h.board.rows[0].physicalContext.summary);
   });
 
