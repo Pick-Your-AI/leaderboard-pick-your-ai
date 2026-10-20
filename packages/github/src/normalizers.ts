@@ -54,6 +54,7 @@ import {
 import { validateAutomationSource, validateMaintenanceSource } from "./maintenance.js";
 import { validateReleaseStewardshipSource } from "./release-stewardship-source.js";
 import { documentationRecognitionUnit, validateDocumentationPurposeSource } from "./documentation-purpose.js";
+import { validateDocumentationReviewSource, type DocumentationReviewProof } from "./documentation-review.js";
 import {
   validateMaintenanceClassification,
   type MaintenanceClassificationRecord,
@@ -1706,6 +1707,8 @@ export interface VerifiedRecognitionReceipt {
   orderingAuthority?: OrderingSourceAuthority;
   /** Closed original observation reviewed through the protected evidence intake. */
   helpfulFeedback?: AcceptedFeedbackThread;
+  /** Exact original reviewer/head and independently reviewed documentation checklist. */
+  documentationReview?: DocumentationReviewProof;
 }
 const receiptMetrics = new Set([
   "catalog_proposals",
@@ -1796,7 +1799,11 @@ export function applyRecognitionReceipt(
     !target ||
     target.actorId !== receipt.actorId ||
     !input.actors.some((candidate) => candidate.id === receipt.actorId) ||
-    !(receiptMetrics.has(receipt.metricId) || receipt.metricId === target.metricId)
+    !(
+      receiptMetrics.has(receipt.metricId) ||
+      receipt.metricId === target.metricId ||
+      (receipt.metricId === "evidence_reviews" && receipt.documentationReview !== undefined)
+    )
   ) {
     throw new Error("Independent verified recognition receipt is required");
   }
@@ -1907,21 +1914,35 @@ export function applyRecognitionReceipt(
     (receipt.decision !== "accepted" || receipt.evidenceIds.length !== 1 || receipt.evidenceIds[0] !== target.id)
   )
     throw new Error("discussion_feedback_source_unverified");
-  const unit = feedback
-    ? feedback.unit
-    : ordering
-      ? ordering.unit
-      : release
-        ? release.membershipUnit
-        : documentationUnit
-          ? documentationUnit
-          : mergedChange
-            ? mergedChange.unit
-            : stewardship
-              ? stewardship.unit
-              : receipt.metricId === "localization"
-                ? target.canonicalKey
-                : (receipt.changesetId ?? target.canonicalKey);
+  if (
+    receipt.documentationReview !== undefined &&
+    (receipt.metricId !== "evidence_reviews" ||
+      receipt.decision !== "accepted" ||
+      receipt.evidenceIds.length !== 1 ||
+      receipt.evidenceIds[0] !== target.id)
+  )
+    throw new Error("documentation_review_unverified");
+  const documentationReview =
+    receipt.documentationReview === undefined
+      ? null
+      : validateDocumentationReviewSource(input, target.id, receipt.acceptedAt, receipt.documentationReview);
+  const unit = documentationReview
+    ? documentationReview.unit
+    : feedback
+      ? feedback.unit
+      : ordering
+        ? ordering.unit
+        : release
+          ? release.membershipUnit
+          : documentationUnit
+            ? documentationUnit
+            : mergedChange
+              ? mergedChange.unit
+              : stewardship
+                ? stewardship.unit
+                : receipt.metricId === "localization"
+                  ? target.canonicalKey
+                  : (receipt.changesetId ?? target.canonicalKey);
   if (receipt.metricId === "localization" && target.state !== "observed")
     throw new Error("Localization acceptance must target its original observed source fact");
   if (
@@ -1972,6 +1993,12 @@ export function applyRecognitionReceipt(
         ? {
             sourceRevision: release.record.tag.commitSha,
             sourceRevisionUrl: `https://github.com/${release.record.repository.slug}/commit/${release.record.tag.commitSha}`,
+          }
+        : {}),
+      ...(documentationReview
+        ? {
+            sourceRevision: documentationReview.record.head,
+            sourceRevisionUrl: documentationReview.revisionUrl,
           }
         : {}),
       ...(evidence.evidenceMetadata

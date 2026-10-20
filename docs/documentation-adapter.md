@@ -1,6 +1,6 @@
 # Revision-bound documentation participation
 
-Refs #81 (LB-09.04). This implements documentation and explicitly configured locale participation. External tutorial consent, reviewer participation, affected-owner acceptance and live-source gates remain separate.
+Refs #81 (LB-09.04). This implements documentation and explicitly configured locale participation. Separate [documentation reviewer participation](documentation-review-participation.md) is an optional protected specialization of the existing evidence-review metric. External tutorial consent, actual reviewer enrollment, affected-owner acceptance and live-source gates remain separate.
 
 ## Source and runtime wiring
 
@@ -120,7 +120,7 @@ The state is **observed merged documentation participation**, not accepted quali
 | --- | --- | --- |
 | Classify merged docs, examples, guides and translated content | Explicit documentation and locale/category paths with complete revision-bound merged PR diff | Actual language-specific policy and classification acceptance |
 | Count accepted artifacts/substantive revisions under reviewed policy | Stable observed PR/category unit; existing independent receipt can separately qualify it | Actual classification/acceptance policy approval and real reviewed examples |
-| Author and reviewer participation separate | Stable PR author only; no reviewer or merger credit inferred | Dedicated reviewed documentation reviewer participation |
+| Author and reviewer participation separate | Stable PR author plus separate opt-in reviewer/head/checklist qualification; no reviewer or merger credit inferred | Actual reviewer enrollment, approved checklist, source permission and policy acceptance |
 | External tutorials require consent/public evidence | External tutorials are not collected by this adapter | Consent and verified public-artifact intake |
 | Generated docs cannot masquerade as authored prose | Known generated/imported content excluded and diagnosed; observation does not certify prose authorship | Actual configured classification completeness review |
 | Recognition does not depend on code LOC | One PR/category unit; source-diff size never weights the result | Metric-owner acceptance |
