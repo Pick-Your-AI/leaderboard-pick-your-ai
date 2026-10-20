@@ -3,6 +3,7 @@ import test from "node:test";
 import { ago, clock, components, fixtureId, harness, publicScope } from "./harness.mjs";
 import { currentSignature, pairPolicy, restart, version } from "./relationship-pair-fixtures.mjs";
 import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
+import { validateRelationshipPairCapture } from "../src/relationship-pair-authority.mjs";
 
 const sourceSlug = "synthetic-org/synthetic-pair-issues";
 const peerSlug = "synthetic-org/synthetic-pair-pulls";
@@ -31,6 +32,8 @@ async function crossRepositoryHarness(
     repositoryOnly = false,
     conflictingPeerAuthor = false,
     memoryDatabase = true,
+    reviewedPeerHistory = false,
+    independentPair = false,
   } = {},
 ) {
   const at = ago(2);
@@ -40,9 +43,44 @@ async function crossRepositoryHarness(
   const sourceUrl = `https://github.com/${sourceSlug}/issues/20`;
   const peerUrl = `https://github.com/${peerSlug}/pull/10`;
   const calls = { probes: [], pages: [], hydrations: 0 };
+  const history = { revision: "v1", pair: "bound", reviewedRevision: 0, target: issueId };
+  let originalPeerFact;
   const h = await harness(t, {
     memoryDatabase,
     authorizePolicyPreview: async () => true,
+    ...(reviewedPeerHistory
+      ? {
+          relationshipPairNormalizationVersion: version,
+          normalizerFactory(options) {
+            const builtin = components.github.createGithubEvidenceNormalizer({
+              client: options.githubClient,
+              source: options.sourceId,
+              allowedRepositoryIds: [2, 3],
+              isSynthetic: true,
+              enrich: options.githubEnrich,
+            });
+            return async (input) => {
+              const output = await builtin(input);
+              if (input.repository.id !== 3) return output;
+              for (const fact of output.facts.filter((fact) => fact.metricId === metric)) {
+                originalPeerFact ??= structuredClone(fact);
+                const previousId = fact.id;
+                fact.id = originalPeerFact.id;
+                fact.canonicalKey = originalPeerFact.canonicalKey;
+                fact.revision = history.reviewedRevision;
+                fact.correctionReceipt = history.reviewedRevision ? "synthetic-reviewed-pair-revision" : null;
+                for (const entry of output.evidence.filter(
+                  (entry) => entry.contribution.contributionId === previousId,
+                )) {
+                  entry.contribution.contributionId = fact.id;
+                  entry.contribution.canonicalEventId = fact.canonicalKey;
+                }
+              }
+              return output;
+            };
+          },
+        }
+      : {}),
     configure(config) {
       config.repositories = [
         {
@@ -98,12 +136,25 @@ async function crossRepositoryHarness(
                   occurredAt: null,
                   state: "present",
                 },
+                ...(independentPair
+                  ? [
+                      {
+                        subjectId: "I_SYNTHETIC_CROSS_PAIR_21",
+                        sourceRevision: "synthetic-independent-pair-source-v1",
+                        sourceUrl: `https://github.com/${sourceSlug}/issues/21`,
+                        evidence: "current_state",
+                        actorId: null,
+                        occurredAt: null,
+                        state: "present",
+                      },
+                    ]
+                  : []),
               ]
             : earlierPeerHistory
               ? [
                   {
                     subjectId: pullId,
-                    sourceRevision: "synthetic-cross-pair-earlier-source-v1",
+                    sourceRevision: `synthetic-cross-pair-earlier-source-${history.revision}`,
                     sourceUrl: peerUrl,
                     evidence: "current_state",
                     actorId: null,
@@ -125,13 +176,16 @@ async function crossRepositoryHarness(
     async githubEnrich(input) {
       calls.hydrations++;
       const peer = input.repository.id === 3;
+      const independent = independentPair && input.fact.subjectId === "I_SYNTHETIC_CROSS_PAIR_21";
+      const currentIssueId = independent ? "I_SYNTHETIC_CROSS_PAIR_21" : issueId;
+      const currentIssueUrl = independent ? `https://github.com/${sourceSlug}/issues/21` : sourceUrl;
       assert.ok(!peer || earlierPeerHistory);
-      assert.equal(input.fact.subjectId, peer ? pullId : issueId);
-      assert.equal(input.fact.sourceUrl, peer ? peerUrl : sourceUrl);
+      assert.equal(input.fact.subjectId, peer ? pullId : currentIssueId);
+      assert.equal(input.fact.sourceUrl, peer ? peerUrl : currentIssueUrl);
       const repositoryId = peer ? 3 : 2;
       const slug = peer ? peerSlug : sourceSlug;
       const occurredAt = peer ? peerAt : at;
-      const nativeEventId = peer ? `${eventId}-earlier` : eventId;
+      const nativeEventId = peer ? `${eventId}-earlier` : independent ? `${eventId}-independent` : eventId;
       return {
         repository: { id: repositoryId, slug, visibility: "public", defaultBranch: "main" },
         proof: {
@@ -148,10 +202,10 @@ async function crossRepositoryHarness(
         payload: {
           repository: { id: repositoryId, private: false, full_name: slug },
           [peer ? "pull_request" : "issue"]: {
-            id: peer ? 10 : 20,
-            node_id: peer ? pullId : issueId,
-            number: peer ? 10 : 20,
-            html_url: peer ? peerUrl : sourceUrl,
+            id: peer ? 10 : independent ? 21 : 20,
+            node_id: peer ? pullId : currentIssueId,
+            number: peer ? 10 : independent ? 21 : 20,
+            html_url: peer ? peerUrl : currentIssueUrl,
             created_at: occurredAt,
             updated_at: occurredAt,
             state: "open",
@@ -161,23 +215,26 @@ async function crossRepositoryHarness(
           relationship: {
             kind,
             from: pullId,
-            to: issueId,
+            to: peer ? history.target : currentIssueId,
             intentional: true,
-            publicEndpointsVerified: true,
-            pair: {
-              version,
-              kind,
-              action: kind === "reference" ? "reference" : "connect",
-              eventId: nativeEventId,
-              from: { repositoryId: "3", artifactId: pullId, kind: "pull_request" },
-              to: { repositoryId: "2", artifactId: issueId, kind: "issue" },
-            },
+            publicEndpointsVerified: !(peer && history.pair === "empty"),
+            pair:
+              peer && history.pair === "unbound"
+                ? undefined
+                : {
+                    version,
+                    kind,
+                    action: kind === "reference" ? "reference" : "connect",
+                    eventId: nativeEventId,
+                    from: { repositoryId: "3", artifactId: pullId, kind: "pull_request" },
+                    to: { repositoryId: "2", artifactId: peer ? history.target : currentIssueId, kind: "issue" },
+                  },
           },
         },
       };
     },
   });
-  return { ...h, calls, metric };
+  return { ...h, calls, metric, history };
 }
 
 const query = (metric, repository = null, snapshot = null) =>
@@ -231,6 +288,178 @@ async function assertWithdrawn(h, entries) {
 }
 
 for (const metric of ["reference_links", "closing_links"]) {
+  for (const scenario of ["native-unbound", "native-empty", "reviewed-unbound"]) {
+    test(`${metric}: displaced ${scenario} pair history cannot promote a later event`, async (t) => {
+      const h = await crossRepositoryHarness(t, metric, {
+        earlierPeerHistory: true,
+        reviewedPeerHistory: scenario === "reviewed-unbound",
+        memoryDatabase: scenario !== "native-empty",
+      });
+      await published(h);
+      const prior = await board(h.runtime, metric);
+      assert.deepEqual(values(prior), [["303", 1]], "the original earlier event owns the known pair");
+      const originalRows = (
+        await h.db.query(
+          "SELECT fact_key,policy_signature,document_hash,document FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature",
+        )
+      ).rows;
+      h.history.revision = "v2";
+      h.history.pair = scenario === "native-empty" ? "empty" : "unbound";
+      h.history.reviewedRevision = scenario === "reviewed-unbound" ? 1 : 0;
+      await published(h);
+      const current = await board(h.runtime, metric);
+      t.diagnostic(
+        JSON.stringify({ scenario, rows: current.rows.map((row) => ({ actorId: row.actorId, result: row.result })) }),
+      );
+      assert.deepEqual(values(current), [], "losing the earlier supported descriptor must not elect the later actor");
+      assert.deepEqual(
+        values(await board(h.runtime, metric, 2)),
+        [],
+        "repository filtering cannot bypass the same uncertainty",
+      );
+      const frozen = await frozenInput(h, current.snapshotId);
+      const later = frozen.frozen.facts.find((fact) => fact.metricId === metric && fact.actorId === "202");
+      assert.equal(later.state, "unknown", "retain qualification uncertainty instead of a measured later contribution");
+      const aggregate = components.metrics.aggregateMetric(
+        frozen.frozen,
+        h.config.policies[0].policy,
+        frozen.engineScope,
+      );
+      assert.deepEqual(aggregate.rows, [], "unknown facts create neither positive credit nor a measured zero row");
+      assert.ok(
+        aggregate.audit.some((entry) => entry.reason === "unknown_qualification" && entry.factIds.includes(later.id)),
+      );
+      assert.equal(
+        frozen.identityAuthorization.relationshipPairEvidence.schemaVersion,
+        "pipeline-relationship-pair-authority/v2",
+      );
+      const obsolete = structuredClone(frozen.identityAuthorization.relationshipPairEvidence);
+      obsolete.schemaVersion = "pipeline-relationship-pair-authority/v1";
+      assert.throws(() => validateRelationshipPairCapture(obsolete), /relationship_pair_frozen_binding_invalid/);
+      const obsoleteAuthorization = { ...frozen.identityAuthorization, relationshipPairEvidence: obsolete };
+      await assert.rejects(
+        h.runtime.policyComparisons.withAuthorizedInputs([obsoleteAuthorization], () =>
+          assert.fail("old capture must not reach private restoration"),
+        ),
+        /relationship_pair_frozen_binding_invalid/,
+      );
+      const rowsAfter = (
+        await h.db.query(
+          "SELECT fact_key,policy_signature,document_hash,document FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature",
+        )
+      ).rows;
+      for (const row of originalRows) {
+        assert.deepEqual(
+          rowsAfter.find(
+            (candidate) => candidate.fact_key === row.fact_key && candidate.policy_signature === row.policy_signature,
+          ),
+          row,
+          "original current-generation normalizations remain immutable",
+        );
+      }
+      const request = {
+        snapshotId: current.snapshotId,
+        policy: { ...h.config.policies[0].policy, version: "synthetic-unresolved-history-preview" },
+        operatorId: "201",
+      };
+      const preview = await h.runtime.previewPolicy(request);
+      assert.equal(
+        preview.comparison.before.rows.some((row) => row.value > 0),
+        false,
+      );
+      assert.deepEqual(await h.runtime.previewPolicy(request), preview, "private replay keeps the frozen uncertainty");
+      if (scenario === "native-empty") {
+        await restart(h, async (runtime) => {
+          assert.deepEqual(
+            await runtime.previewPolicy(request),
+            preview,
+            "actual database reopen preserves v2 uncertainty",
+          );
+          assert.deepEqual(values(await board(runtime, metric, null, current.snapshotId)), []);
+        });
+      }
+    });
+  }
+
+  test(`${metric}: equivalent current history can recover after an unbound observation`, async (t) => {
+    const h = await crossRepositoryHarness(t, metric, { earlierPeerHistory: true });
+    await published(h);
+    h.history.revision = "v2";
+    h.history.pair = "unbound";
+    await published(h);
+    assert.deepEqual(values(await board(h.runtime, metric)), []);
+    h.history.revision = "v3";
+    h.history.pair = "bound";
+    await published(h);
+    assert.deepEqual(
+      values(await board(h.runtime, metric)),
+      [["303", 1]],
+      "a later equivalent verified binding restores its original unit",
+    );
+    assert.deepEqual(
+      values(await board(h.runtime, metric, 2)),
+      [],
+      "the later repository view does not become the first contribution",
+    );
+  });
+
+  test(`${metric}: a higher reviewed bound revision can correct the earlier pair`, async (t) => {
+    const h = await crossRepositoryHarness(t, metric, { earlierPeerHistory: true, reviewedPeerHistory: true });
+    await published(h);
+    h.history.revision = "v2";
+    h.history.reviewedRevision = 1;
+    h.history.target = "I_SYNTHETIC_CROSS_PAIR_21";
+    await published(h);
+    assert.deepEqual(
+      values(await board(h.runtime, metric)).sort(),
+      [
+        ["202", 1],
+        ["303", 1],
+      ],
+      "the admitted correction establishes its new pair without resurrecting its old binding",
+    );
+    assert.deepEqual(values(await board(h.runtime, metric, 2)), [["202", 1]]);
+  });
+
+  test(`${metric}: an unreviewed same-event endpoint change cannot discharge known history`, async (t) => {
+    const h = await crossRepositoryHarness(t, metric, { earlierPeerHistory: true });
+    await published(h);
+    h.history.revision = "v2";
+    h.history.target = "I_SYNTHETIC_CROSS_PAIR_21";
+    await published(h);
+    assert.deepEqual(
+      values(await board(h.runtime, metric)),
+      [],
+      "changing a native event's meaning does not resolve either connected pair",
+    );
+    const current = await board(h.runtime, metric, 2);
+    assert.deepEqual(values(current), []);
+    const input = await frozenInput(h, current.snapshotId);
+    assert.ok(input.frozen.facts.filter((fact) => fact.metricId === metric).every((fact) => fact.state === "unknown"));
+  });
+
+  test(`${metric}: history uncertainty preserves an independent pair sharing its peer endpoint`, async (t) => {
+    const h = await crossRepositoryHarness(t, metric, { earlierPeerHistory: true, independentPair: true });
+    await published(h);
+    assert.deepEqual(values(await board(h.runtime, metric)).sort(), [
+      ["202", 1],
+      ["303", 1],
+    ]);
+    h.history.revision = "v2";
+    h.history.pair = "empty";
+    await published(h);
+    const current = await board(h.runtime, metric);
+    assert.deepEqual(values(current), [["202", 1]], "only the independent pair remains eligible");
+    const input = await frozenInput(h, current.snapshotId);
+    const facts = input.frozen.facts.filter((fact) => fact.actorId === "202" && fact.metricId === metric);
+    assert.equal(facts.find((fact) => fact.relationshipPair.to.artifactId === issueId).state, "unknown");
+    assert.equal(
+      facts.find((fact) => fact.relationshipPair.to.artifactId === "I_SYNTHETIC_CROSS_PAIR_21").state,
+      "observed",
+    );
+    assert.ok(facts.every((fact) => fact.relationshipPair.from.artifactId === pullId));
+  });
+
   test(`${metric}: repository display retains an approved public peer's pair authority`, async (t) => {
     const h = await crossRepositoryHarness(t, metric);
     await published(h);

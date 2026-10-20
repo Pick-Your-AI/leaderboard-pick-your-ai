@@ -2,13 +2,16 @@ import {
   relationshipPairKey,
   relationshipPairSchema,
   relationshipPairNormalizationVersion,
+  compareSourceInstants,
 } from "@pick-your-ai/contracts";
 import { issueTransferDigest as digest } from "./issue-transfer-store.mjs";
 import { issueTransferClosure, issueTransferLimits } from "./issue-transfer-privacy.mjs";
 import { selectIssueTransferSources } from "./issue-transfers.mjs";
 import { hasRelationshipPairMarker, isRelationshipPairMetric } from "./relationship-pair-generation.mjs";
 
-export const relationshipPairAuthorityVersion = "pipeline-relationship-pair-authority/v1";
+// v2 also binds the conservative interpretation of displaced known history.
+// A v1 frozen result may have promoted a later event after losing its original.
+export const relationshipPairAuthorityVersion = "pipeline-relationship-pair-authority/v2";
 const check = (value, code = "relationship_pair_authority_integrity_error") => {
   if (!value) throw new Error(code);
 };
@@ -177,18 +180,20 @@ function retainedEntry(row, { dataMode, generationsFor }) {
     document: row.document,
     repositoryId: String(row.repository_id),
     family: row.family,
+    subjectId: row.subject_id,
+    selectedCurrentState: row.source_evidence === "current_state",
     source: { factKey: row.fact_key, observedAt: new Date(row.observed_at).toISOString(), runId: row.first_run_id },
     policySignature: row.policy_signature,
   };
 }
 
-/** These retained rows supply dependency and withdrawal identity only. They
- * never replace normalizeStored's current/cutoff selection of calculation facts.
+/** Retained rows supply dependency, withdrawal and unresolved-history identity.
+ * They never replace normalizeStored's current/cutoff calculation facts.
  * All configured source gates are held before these normalization read locks. */
 async function retainedEntries(tx, { repositories, cutoff, dataMode, generationsFor, signatures }) {
   const rows = (
     await tx.query(
-      `SELECT n.*,f.repository_id,f.family,f.observed_at,f.first_run_id
+      `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document->>'evidence' AS source_evidence,f.observed_at,f.first_run_id
      FROM leaderboard_pipeline.normalizations n JOIN leaderboard_ingestion.source_facts f USING(fact_key)
      WHERE f.repository_id=ANY($1::bigint[]) AND n.policy_signature=ANY($2::text[])
        AND ($3::timestamptz IS NULL OR f.observed_at<=$3)
@@ -270,6 +275,75 @@ async function privacy(tx, selection, { repositories, transfer, mode = "share" }
   };
 }
 
+function unresolvedHistory(current, retained) {
+  const subject = (entry) => JSON.stringify([entry.repositoryId, entry.family, entry.subjectId]);
+  const source = (entry) => JSON.stringify([subject(entry), entry.source.factKey]);
+  const admitted = ({ fact, pair }) =>
+    pair !== null &&
+    typeof fact.canonicalKey === "string" &&
+    fact.canonicalKey.trim().length > 0 &&
+    fact.state !== "unknown" &&
+    Number.isSafeInteger(fact.revision) &&
+    fact.revision >= 0 &&
+    (fact.revision === 0 || (typeof fact.correctionReceipt === "string" && fact.correctionReceipt.trim().length > 0));
+  const clock = (value) => {
+    if (value === null) return null;
+    check(compareSourceInstants(value, value) === 0, "relationship_pair_history_time_invalid");
+    // Same equality as compareSourceInstants, including sub-millisecond clocks.
+    return [Date.parse(value), (value.match(/\.(\d+)/)?.[1] ?? "").replace(/0+$/, "")];
+  };
+  const meaning = ({ fact, pair, key }) =>
+    JSON.stringify([
+      key,
+      pair.eventId,
+      pair.action,
+      fact.metricId,
+      fact.artifactId,
+      fact.repoId,
+      fact.role,
+      fact.actorId,
+      clock(fact.occurredAt),
+    ]);
+  const identity = ({ fact }) => JSON.stringify([fact.metricId, fact.id]);
+  const groups = new Map(),
+    latest = new Map();
+  for (const record of current) {
+    const key = source(record.entry);
+    if (!groups.has(key)) groups.set(key, { entry: record.entry, equivalent: new Map(), reviewed: new Map() });
+    const group = groups.get(key);
+    if (record.entry.selectedCurrentState) {
+      const subjectKey = subject(record.entry);
+      check(!latest.has(subjectKey) || latest.get(subjectKey) === group, "relationship_pair_current_source_ambiguous");
+      latest.set(subjectKey, group);
+    }
+    if (!admitted(record)) continue;
+    const meaningKey = meaning(record);
+    group.equivalent.set(meaningKey, Math.max(group.equivalent.get(meaningKey) ?? -1, record.fact.revision));
+    if (record.fact.revision > 0) {
+      const identityKey = identity(record);
+      group.reviewed.set(identityKey, Math.max(group.reviewed.get(identityKey) ?? -1, record.fact.revision));
+    }
+  }
+  return retained.records.filter((prior) => {
+    if (!prior.pair || prior.pair.action === "disconnect") return false;
+    const meaningKey = meaning(prior),
+      identityKey = identity(prior);
+    const resolves = (group) =>
+      group !== undefined &&
+      ((group.equivalent.get(meaningKey) ?? -1) >= prior.fact.revision ||
+        (group.reviewed.get(identityKey) ?? -1) > prior.fact.revision);
+    // At most two indexed checks per retained fact, not a historical cross-product.
+    if (resolves(groups.get(source(prior.entry)))) return false;
+    const successor = latest.get(subject(prior.entry));
+    return !(
+      prior.entry.selectedCurrentState &&
+      successor &&
+      compareSourceInstants(successor.entry.source.observedAt, prior.entry.source.observedAt) > 0 &&
+      resolves(successor)
+    );
+  });
+}
+
 /** Display selection is deliberately unchanged. Only related pair history is
  * added to its calculation sources; full documents remain the identity proof. */
 function activeSources(normalized, transfer, selected, retained) {
@@ -279,6 +353,18 @@ function activeSources(normalized, transfer, selected, retained) {
   const initial = selectIssueTransferSources(normalized, transfer.transfers, selected).normalized;
   const initialKeys = new Set(initial.map((entry) => keys.get(entry)));
   const all = records(normalized);
+  // Absence never restores old credit. The retained supported original is
+  // enough to withhold its connected unit when no admitted current successor
+  // proves the same binding. Empty current output need not become new evidence.
+  const unresolved = unresolvedHistory(all, retained);
+  const uncertain = closure([...retained.records, ...all], unresolved);
+  const uncertainBySource = new Map();
+  for (const record of uncertain.records) {
+    if (!keys.has(record.entry)) continue;
+    const key = keys.get(record.entry);
+    if (!uncertainBySource.has(key)) uncertainBySource.set(key, new Set());
+    uncertainBySource.get(key).add(record.factHash);
+  }
   const selectedRecords = closure(
     all,
     all.filter((record) => initialKeys.has(keys.get(record.entry))),
@@ -292,21 +378,42 @@ function activeSources(normalized, transfer, selected, retained) {
   }
   return normalized.flatMap((entry) => {
     const key = keys.get(entry);
-    if (initialKeys.has(key)) return [entry];
+    const uncertainFacts = uncertainBySource.get(key);
+    const projected = uncertainFacts
+      ? { ...entry, relationshipPairUncertainFactHashes: sorted([...uncertainFacts]) }
+      : entry;
+    if (initialKeys.has(key)) return [projected];
     const factHashes = wanted.get(key);
-    return factHashes ? [{ ...entry, relationshipPairFactHashes: [...factHashes] }] : [];
+    return factHashes ? [{ ...projected, relationshipPairFactHashes: [...factHashes] }] : [];
   });
 }
 
 export function relationshipPairCalculationDocument(entry) {
-  if (entry.relationshipPairFactHashes === undefined) return entry.document;
-  const wanted = new Set(entry.relationshipPairFactHashes);
-  const facts = entry.document.facts.filter((fact) => wanted.has(digest(fact)));
+  const projected = entry.relationshipPairFactHashes !== undefined;
+  const uncertain = new Set(entry.relationshipPairUncertainFactHashes ?? []);
+  if (!projected && !uncertain.size) return entry.document;
+  const wanted = new Set(entry.relationshipPairFactHashes ?? []);
+  const original = projected ? entry.document.facts.filter((fact) => wanted.has(digest(fact))) : entry.document.facts;
   check(
-    facts.every((fact) => isRelationshipPairMetric(fact.metricId)) &&
-      same(sorted(facts.map(digest)), sorted(entry.relationshipPairFactHashes)),
+    !projected ||
+      (original.every((fact) => isRelationshipPairMetric(fact.metricId)) &&
+        same(sorted(original.map(digest)), sorted(entry.relationshipPairFactHashes))),
     "relationship_pair_projection_integrity_error",
   );
+  check(
+    same(
+      sorted(
+        original.filter((fact) => isRelationshipPairMetric(fact.metricId) && uncertain.has(digest(fact))).map(digest),
+      ),
+      sorted([...uncertain]),
+    ),
+    "relationship_pair_uncertainty_projection_integrity_error",
+  );
+  const facts = original.map((fact) => (uncertain.has(digest(fact)) ? { ...fact, state: "unknown" } : fact));
+  const reasons = uncertain.size
+    ? [...entry.document.reasons, "relationship_pair_history_unresolved"]
+    : entry.document.reasons;
+  if (!projected) return { ...entry.document, facts, reasons };
   const factIds = new Set(facts.map((fact) => fact.id));
   const artifactIds = new Set(facts.map((fact) => fact.artifactId));
   const actors = new Set(facts.map((fact) => fact.actorId));
@@ -317,7 +424,7 @@ export function relationshipPairCalculationDocument(entry) {
     actors: entry.document.actors.filter((actor) => actors.has(actor.id)),
     evidence: entry.document.evidence.filter((entry) => factIds.has(entry.contribution.contributionId)),
     suppressArtifactIds: (entry.document.suppressArtifactIds ?? []).filter((id) => artifactIds.has(id)),
-    reasons: entry.document.reasons,
+    reasons,
     ...(entry.document.projectContext && artifactIds.has(entry.document.projectContext.subjectId)
       ? { projectContext: entry.document.projectContext }
       : {}),
@@ -374,7 +481,7 @@ export async function readCapturedRelationshipPairAuthority(tx, value, options) 
     check(same(saved.selectedRepositoryIds, ids(options.repositoryIds)), "relationship_pair_frozen_scope_changed");
   const rows = (
     await tx.query(
-      `SELECT n.*,f.repository_id,f.family,f.observed_at,f.first_run_id
+      `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document->>'evidence' AS source_evidence,f.observed_at,f.first_run_id
      FROM leaderboard_pipeline.normalizations n JOIN leaderboard_ingestion.source_facts f USING(fact_key)
      JOIN unnest($1::text[],$2::text[]) AS bound(fact_key,policy_signature) USING(fact_key,policy_signature)
      ORDER BY n.fact_key,n.policy_signature LIMIT 20001 FOR SHARE OF n`,

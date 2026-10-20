@@ -2021,6 +2021,7 @@ export async function createPipeline(options) {
             source: sourceBinding(row),
             family: row.family,
             repositoryId: String(row.repository_id),
+            subjectId: row.subject_id,
             selectedCurrentState: row.document.evidence === "current_state",
             reviewSequenceObserved: sequenceObserved(row),
           });
@@ -2238,6 +2239,7 @@ export async function createPipeline(options) {
         source: sourceBinding(row),
         family: row.family,
         repositoryId: String(row.repository_id),
+        subjectId: row.subject_id,
         selectedCurrentState: row.document.evidence === "current_state",
         reviewSequenceObserved: sequenceObserved(row),
       });
