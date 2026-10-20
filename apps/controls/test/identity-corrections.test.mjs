@@ -645,6 +645,56 @@ for (const mode of ["expires", "backwards"]) {
   });
 }
 
+for (const stage of ["first", "final"]) {
+  for (const value of ["fulfilled", "rejected", "foreign-thenable"]) {
+    test(`the ${stage} clock rejects ${value} without an escaped rejection or partial application`, async (t) => {
+      const unhandled = [];
+      const onUnhandled = (error) => unhandled.push(error);
+      process.on("unhandledRejection", onUnhandled);
+      t.after(() => process.removeListener("unhandledRejection", onUnhandled));
+      let thenCalls = 0;
+      const clockValue = () => {
+        if (value === "fulfilled") return Promise.resolve(at);
+        if (value === "rejected") return Promise.reject(new Error("synthetic rejected clock"));
+        return {
+          then() {
+            thenCalls++;
+          },
+        };
+      };
+      let h;
+      let tentative;
+      h = fixture(t, authority(), {
+        readAuthority(context, read, count) {
+          const current = read(context);
+          if (stage === "final" && count === 1) {
+            tentative = h.snapshot();
+            h.setClock(clockValue());
+          }
+          return current;
+        },
+      });
+      if (stage === "first") h.setClock(clockValue());
+      const before = h.snapshot();
+      assert.throws(() => h.consumer.apply("synthetic-decision-1"), {
+        status: 409,
+        message: "Invalid identity application clock",
+      });
+      await new Promise(setImmediate);
+      assert.equal(h.reads, stage === "first" ? 0 : 2);
+      if (stage === "final") {
+        assert.equal(tentative.revision[0].revision, 1);
+        assert.equal(tentative.overlays.length, 1);
+        assert.equal(tentative.receipts.length, 1);
+      }
+      assert.equal(thenCalls, 0);
+      assert.deepEqual(unhandled, []);
+      assert.deepEqual(h.snapshot(), before);
+      assert.equal(h.store.db.isTransaction, false);
+    });
+  }
+}
+
 test("same-database authority writes cannot race the locked reader", (t) => {
   let other;
   const h = fixture(t, authority(), {
