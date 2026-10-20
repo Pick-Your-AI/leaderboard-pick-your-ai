@@ -161,6 +161,7 @@ export function parseDecisionGenerationCapture(value) {
       !exact(run, ["repositoryId", "runId", "accessGeneration", "completedAt", "observations"]) ||
       !positive(run.repositoryId) ||
       !token(run.runId) ||
+      typeof run.accessGeneration !== "string" ||
       !/^[1-9][0-9]{0,30}$/.test(run.accessGeneration) ||
       !instant(run.completedAt) ||
       compareSourceInstants(capture.asOf, run.completedAt) > 0 ||

@@ -105,9 +105,10 @@ function validateScanRequest(request: ScanRequest): void {
     throw new Error("invalid_scan_scope");
 }
 function normalizeFact(value: SourceFact, family: SourceFamily, repositoryId: number): SourceFact {
+  // Reject proxy facts and prototype chains before the legacy optional readers.
+  const pullRequestDecisionHistory = collectionPullRequestDecisionObservation(value, family, repositoryId);
   const contentEditMetadata = collectionContentEditMetadata(value, family, repositoryId);
   const discussionFeedback = collectionDiscussionFeedback(value, family);
-  const pullRequestDecisionHistory = collectionPullRequestDecisionObservation(value, family, repositoryId);
   id(value.subjectId);
   if (value.historySubjectId !== undefined) id(value.historySubjectId);
   if (value.issueFieldId !== undefined) {

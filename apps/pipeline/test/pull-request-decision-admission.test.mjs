@@ -8,7 +8,12 @@ import {
   pullRequestDecisionObservationVersion,
   pullRequestDecisionProducerBinding,
 } from "../../../packages/ingestion/dist/pull-request-decision-observation.js";
-import { migrateDecisionHistoryRuns, readDecisionGenerations } from "../src/pull-request-decision-history.mjs";
+import {
+  migrateDecisionHistoryRuns,
+  parseDecisionGenerationCapture,
+  pullRequestDecisionGenerationVersion,
+  readDecisionGenerations,
+} from "../src/pull-request-decision-history.mjs";
 import { decisionFixture, decisionRepository } from "../../../tests/fixtures/pull-request-decision-history.mjs";
 import { components, harness } from "./harness.mjs";
 
@@ -398,5 +403,147 @@ test(
       /pull_request_decision_authorization_invalid/,
     );
     assert.equal(await row(h.db, asynchronous.runId), undefined);
+  },
+);
+
+test("decision capture identifiers require complete strings without coercion or line terminators", async () => {
+  const capture = {
+    schemaVersion: pullRequestDecisionGenerationVersion,
+    source: sourceId,
+    asOf: eventCutoff,
+    observationCutoff: "2026-01-08T00:00:00.000Z",
+    runs: [
+      {
+        repositoryId: 2,
+        runId: "synthetic-decision-strict-identifiers",
+        accessGeneration: "1",
+        completedAt: "2026-01-07T00:00:00.000Z",
+        observations: [
+          {
+            factKey: "a".repeat(64),
+            subjectId: "PR_SYNTHETIC_7",
+            sourceRevision,
+            observedAt: "2026-01-06T00:00:00.000Z",
+            observationHash: "b".repeat(64),
+          },
+        ],
+      },
+    ],
+  };
+  assert.deepEqual(parseDecisionGenerationCapture(capture), capture);
+  const invalidCapture = { message: "decision_history_capture_invalid" };
+  for (const accessGeneration of [1, ["1"], [["1"]], null, true, "", "0", "01"]) {
+    const changed = structuredClone(capture);
+    changed.runs[0].accessGeneration = accessGeneration;
+    assert.throws(() => parseDecisionGenerationCapture(changed), invalidCapture);
+  }
+  const paths = [
+    ["source"],
+    ["runs", 0, "runId"],
+    ["runs", 0, "accessGeneration"],
+    ["runs", 0, "observations", 0, "factKey"],
+    ["runs", 0, "observations", 0, "subjectId"],
+    ["runs", 0, "observations", 0, "sourceRevision"],
+    ["runs", 0, "observations", 0, "observationHash"],
+  ];
+  const observation = await nativeObservation(request("synthetic-decision-strict-source"), "2026-01-08T00:00:00.000Z");
+  assert.deepEqual(parsePullRequestDecisionObservation(observation), observation);
+  assert.equal(JSON.parse(pullRequestDecisionProducerBinding(sourceId, "synthetic")).source, sourceId);
+  for (const suffix of ["\n", "\r", "\r\n", "\u2028", "\u2029"]) {
+    for (const path of paths) {
+      const changed = structuredClone(capture);
+      const parent = path.slice(0, -1).reduce((value, key) => value[key], changed);
+      const key = path.at(-1);
+      parent[key] += suffix;
+      assert.throws(() => parseDecisionGenerationCapture(changed), invalidCapture, path.join("."));
+    }
+    assert.throws(
+      () => pullRequestDecisionProducerBinding(sourceId + suffix, "synthetic"),
+      /invalid_pull_request_decision_producer/,
+    );
+    assert.throws(
+      () => parsePullRequestDecisionObservation({ ...observation, sourceRevision: sourceRevision + suffix }),
+      /invalid_pull_request_decision_observation/,
+    );
+  }
+});
+
+test(
+  "collection rejects proxy facts and prototype chains before optional readers while preserving ordinary legacy facts",
+  { timeout: 60_000 },
+  async (t) => {
+    const h = await harness(t, { memoryDatabase: true });
+    await h.runtime.stop();
+    const store = new components.ingestion.CollectionStore(h.db);
+    assert.equal(await store.verifyPublic(2, 1, null), true);
+    const observation = await nativeObservation(
+      request("synthetic-decision-proxy-fixture"),
+      "2026-01-08T00:00:00.000Z",
+    );
+    const legacy = fact(observation);
+    delete legacy.pullRequestDecisionHistory;
+    for (const position of ["outer", "prototype", "ancestor"]) {
+      for (const revoked of [false, true]) {
+        const label = position + (revoked ? "-revoked" : "-trapping");
+        await t.test(label, async () => {
+          let hooks = 0;
+          const trap = () => {
+            hooks++;
+            throw new Error("synthetic proxy hook must not run");
+          };
+          const candidate = { ...legacy };
+          const pair = Proxy.revocable(position === "outer" ? candidate : {}, {
+            get: trap,
+            has: trap,
+            ownKeys: trap,
+            getOwnPropertyDescriptor: trap,
+            getPrototypeOf: trap,
+          });
+          if (revoked) pair.revoke();
+          let value = pair.proxy;
+          if (position !== "outer") {
+            Object.setPrototypeOf(candidate, position === "prototype" ? pair.proxy : Object.create(pair.proxy));
+            value = candidate;
+          }
+          const scan = request("synthetic-decision-proxy-" + label);
+          await store.start(scan);
+          assert.equal(
+            await store.step(scan.runId, {
+              readPage: async () => ({ ...emptyPage(), expectedCount: 1, facts: [value] }),
+            }),
+            "failed",
+          );
+          assert.equal((await row(h.db, scan.runId)).reason, "source_schema_drift");
+          assert.deepEqual(await counts(h.db, scan.runId), { facts: 0, items: 0, pages: 0 });
+          assert.equal(hooks, 0, "neither this boundary nor the older metadata readers may invoke a proxy");
+        });
+      }
+    }
+    for (const kind of ["plain", "accessor", "inherited"]) {
+      const value = { ...legacy, subjectId: legacy.subjectId + "_" + kind };
+      let reads = 0;
+      if (kind === "accessor") {
+        Object.defineProperty(value, "sourceRevision", {
+          enumerable: true,
+          get() {
+            reads++;
+            return sourceRevision;
+          },
+        });
+      } else if (kind === "inherited") {
+        delete value.sourceRevision;
+        Object.setPrototypeOf(value, { sourceRevision });
+      }
+      const scan = request("synthetic-decision-legacy-" + kind);
+      await store.start(scan);
+      assert.equal(
+        await store.step(scan.runId, {
+          readPage: async () => ({ ...emptyPage(), expectedCount: 1, facts: [value] }),
+        }),
+        "complete",
+      );
+      assert.deepEqual(await counts(h.db, scan.runId), { facts: 1, items: 1, pages: 1 });
+      assert.equal(reads, kind === "accessor" ? 2 : 0);
+    }
   },
 );

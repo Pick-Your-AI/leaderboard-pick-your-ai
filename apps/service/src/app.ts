@@ -304,12 +304,15 @@ export function createService(options: ServiceOptions = {}) {
     pin: string | null,
     actors: ActorFilter,
     health = false,
+    profileActorId: string | null = null,
   ): Promise<PublicRead> {
     return project(
       await boundedRead((signal) => {
         // Providers receive detached inputs. Their normalization/mutation cannot
         // replace the request that later authorizes the returned projection.
         const selectedScope = canonicalPublicScope(scope);
+        if (profileActorId !== null && source.readProfile)
+          return source.readProfile(selectedScope, pin, profileActorId, signal);
         return health && source.readHealth
           ? source.readHealth(selectedScope, pin, signal)
           : source.read(selectedScope, pin, signal);
@@ -687,7 +690,7 @@ export function createService(options: ServiceOptions = {}) {
   );
   app.get("/api/v1/windows", async (request, reply) => {
     const params = new URL(request.url, "http://localhost").searchParams;
-    const dimensions = new Set(["organization", "repository", "workstream", "context", "project", "role"]);
+    const dimensions = new Set(["organization", "repository", "workstream", "context", "project", "role", "branch"]);
     for (const key of params.keys())
       if (!dimensions.has(key) || params.getAll(key).length !== 1) fail(400, "invalid_window_query");
     const { scope } = query(request);
@@ -879,9 +882,10 @@ export function createService(options: ServiceOptions = {}) {
       q.actors,
     ]);
     const cursor = boundCursor(q, binding);
-    const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors);
+    const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors, false, request.params.actorId);
     const actor = read.selected.actors.find((actor) => actor.actorId === request.params.actorId);
     if (!actor) fail(404, "profile_unavailable");
+    if (read.presentation && read.presentation.actorId !== actor.actorId) fail(503, "public_projection_unavailable");
     const rows = read.selected.rows.filter(
       (row) => row.actorId === actor.actorId && (category === null || row.result.metricId === category),
     );
@@ -902,6 +906,7 @@ export function createService(options: ServiceOptions = {}) {
       ...meta(read),
       actor: actor.actor,
       actorId: actor.actorId,
+      presentation: read.presentation ?? null,
       category,
       results: rows.map((row) => row.result),
       activitySummary: publicParticipation(read, actor.actorId, category),

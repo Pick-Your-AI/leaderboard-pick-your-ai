@@ -95,6 +95,12 @@ SQL reader bounds projected rows to 10,000 and projected payload to 8,000,000 by
 JavaScript. It then applies structural admission before recursive hashes. These are admission limits, not a bound on
 PostgreSQL's internal query work or the process's total heap.
 
+Outer collection admission checks up to 20 prototype links and rejects trapping or revoked proxies before inherited
+lookups or the older optional metadata readers. Unmarked legacy facts retain their ordinary accessor and inherited
+field behavior. A present decision observation still requires a closed own-data fact. Source IDs, native revisions,
+fact hashes, and access generations must match their complete string grammar; access generations are never coerced
+from numbers or arrays, and a trailing line terminator is invalid.
+
 Ordinary normalization and pair-history SQL projections omit the raw private observation. Only the explicit bounded
 selected-generation reader loads it. Capture-bearing frozen inputs and publication receipts are withheld in SQL when
 their payload exceeds 8,000,000 bytes, then structurally admitted before hashing. Existing explanation and comparison
@@ -110,7 +116,11 @@ configuration, privacy, or final confirmation checks.
 
 The admission suite exercises exact microsecond/nanosecond ordering, missing database clocks, immutable producer
 bindings, complete-empty legacy/custom conflicts, data-mode mismatch, actual insertion rollback, and captured
-authorization-method replacement. The pipeline generation suite uses the real native producer, default GitHub source,
+authorization-method replacement. It also exercises trapping and revoked proxies at the outer fact, prototype, and
+ancestor positions through the real collection path, with zero hook calls and no persisted facts, items, or pages.
+Positive plain, accessor, and inherited legacy facts remain collectible. Complete-string and non-coercing generation
+checks retain valid controls while rejecting line terminators and non-string access generations. The pipeline
+generation suite uses the real native producer, default GitHub source,
 CollectionStore, cache, and protected restore path with synthetic network and storage fixtures. Its cases distinguish
 later-generation reuse, unavailable and empty histories, frozen A/B resume, same-content reuse, and current
 authorization withdrawal.
