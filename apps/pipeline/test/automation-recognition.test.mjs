@@ -562,6 +562,8 @@ test("automation: configuration fences preserve automatic sources while manual i
         "release_changes",
         "issue_ordering",
         "release_stewardship",
+        "performance",
+        "regressions_prevented",
       ].includes(metric.id)
     )
       assert.notEqual(recognitionFingerprint(empty, bindings), previousAuthority(empty, bindings));

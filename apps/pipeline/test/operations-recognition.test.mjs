@@ -802,7 +802,11 @@ test("operations: unaffected automatic metrics retain prior fingerprints while m
       continue;
     }
     assert.notEqual(recognitionFingerprint(s.state, bindings), priorAuthority(s.state, bindings));
-    if (["release_changes", "issue_ordering", "release_stewardship"].includes(definition.id))
+    if (
+      ["release_changes", "issue_ordering", "release_stewardship", "performance", "regressions_prevented"].includes(
+        definition.id,
+      )
+    )
       assert.notEqual(recognitionFingerprint(empty, bindings), priorAuthority(empty, bindings));
     else assert.equal(recognitionFingerprint(empty, bindings), priorAuthority(empty, bindings), definition.id);
   }

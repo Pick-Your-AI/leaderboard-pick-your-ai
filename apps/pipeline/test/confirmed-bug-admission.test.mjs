@@ -323,6 +323,8 @@ test("confirmed_bugs: configuration fences preserve automatic sources while manu
         "release_changes",
         "issue_ordering",
         "release_stewardship",
+        "performance",
+        "regressions_prevented",
       ].includes(metric.id)
     )
       assert.notEqual(current, prior);

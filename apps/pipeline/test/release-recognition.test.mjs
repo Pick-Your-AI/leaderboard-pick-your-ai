@@ -762,7 +762,11 @@ test("release inclusion: affected release destinations retire preceding authorit
     assert.notEqual(recognitionFingerprint(s.state, bindings), previousAuthority(s.state, bindings));
     const previous = previousAuthority(empty, bindings),
       current = recognitionFingerprint(empty, bindings);
-    if (["release_changes", "issue_ordering", "release_stewardship"].includes(metric.id))
+    if (
+      ["release_changes", "issue_ordering", "release_stewardship", "performance", "regressions_prevented"].includes(
+        metric.id,
+      )
+    )
       assert.notEqual(current, previous);
     else assert.equal(current, previous, metric.id);
   }
