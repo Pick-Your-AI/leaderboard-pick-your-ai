@@ -148,27 +148,108 @@ protected consumer must calculate and compare the digest for the reviewed
 proposal. Encoding or matching a digest does not authenticate evidence, authorize
 a correction, apply an overlay or satisfy LB-17.03's operational acceptance.
 
-## Application boundary and remaining implementation
+## Private accepted-decision consumer
 
-`verifiedGithubIdentitySchema`,
-`verifiedIdentityCorrectionProposalSchema` and
+`verifiedGithubIdentitySchema`, `verifiedIdentityCorrectionProposalSchema` and
 `verifiedIdentityCorrectionDecisionSchema` validate record structure and
-cross-field invariants. Successful parsing does **not** verify account control,
-consent, evidence authenticity, authorization, the supplied digest, the complete
-review history or live provider data. None of these schemas apply a correction.
-The current exclusion-only correction handler does not consume this definition.
+cross-field invariants. Parsing does **not** verify account control, consent,
+evidence authenticity, authorization, complete history or live provider data.
+The explicitly configured [private consumer](../apps/controls/src/identity-corrections.mjs)
+uses those schemas and the canonical proposal encoder inside a `ControlStore`
+transaction. The existing exclusion-only HTTP handler remains separate; no
+server route, caller-supplied authority object or operational activation is added.
 
-The application work tracked by LB-17.03 must resolve protected proofs, verify
-the exact proposal digest and retained source revision, recheck current
-authority and revocation, and compare the reviewed proposal revision and current
-attribution revision atomically before any write. A prior application receipt
-makes a retry idempotent; a different proposal or intervening decision requires a
-new review. A stale review must fail without modifying attribution. The protected
-writer and reviewer must use the canonical proposal encoding above and verify
-the reviewed digest before an executor is enabled.
+`createVerifiedIdentityCorrectionConsumer({ store, readAuthority, now })` returns
+`apply(decisionId)`. Its sole request input is a bounded opaque decision ID.
+`store` must be a private `ControlStore`; `readAuthority` and the synchronous
+clock are trusted host configuration. Configuring the consumer creates three
+private SQLite tables: `identity_correction_revision`,
+`identity_correction_overlays` and `identity_correction_receipts`. Their revision
+is independent of the existing public projection revision.
 
-Application retains original source attribution and appends a versioned overlay
-and durable operation receipt. It recomputes only affected derived results while
+### What establishes a current authority snapshot
+
+After `BEGIN IMMEDIATE` acquires the database write lock, the consumer calls
+`readAuthority({ database, decisionId })` using that **same** `DatabaseSync`
+connection. The integration must read the canonical protected decision, proposal,
+complete review history, provider identities, verified proof records, retained
+source bindings, reason receipt and current authorization through that
+connection. Every writer of those records, including revocation and source
+replacement, must participate in the same SQLite transaction discipline. A
+precomputed snapshot, eventually consistent cache, separate database or network
+lookup cannot satisfy this contract. The consumer does not infer that a supplied
+boolean or callback establishes real-world proof verification.
+
+The reader returns a strict `leaderboard-private-identity-authority/v1` record:
+
+| Field | Required protected content |
+| --- | --- |
+| `revision`, `validUntil` | A positive safe authority revision and an exclusive validity deadline from the canonical protected authority. |
+| `decision`, `currentProposal`, `currentDecisionId` | The retained decision, exact current proposal and latest decision ID for its lineage. The proposal digest is recomputed with SHA-256 over the existing canonical bytes. |
+| `priorDecisions` | Every earlier retained decision in order, with matching correction lineage and canonical digest. Each record's prior references must equal its complete earlier prefix; the current decision must name the entire history. Duplicate reviewer identities and inconsistent provider mappings are rejected. |
+| `identities` | Exactly the requester, affected accounts, current reviewer and prior reviewers. Each record has an exact `identity`, current `expiresAt`, literal `verified: true` and `revoked: false`; the actor/node mapping must remain one-to-one. |
+| `proofs` | Exactly the proposed proof descriptors, with literal verified/nonrevoked status. Each source proof's `attributions` binds the exact contribution, event, source revision, original attribution digest, role and original/result actor pair. Account proofs have no contribution bindings. |
+| `sources` | Exactly the retained original source bindings for the proposed assignments, with literal verified/nonrevoked status. An original binding has all assignment fields except `evidenceIds` and `resultActorId`. |
+| `authorization` | The immutable authorization receipt ID, `scope: private_identity_correction`, decision ID, proposal digest, exact reviewer, policy and operation kind, reviewed `attributionRevision`, grant time, exclusive expiry and literal nonrevoked status. The grant must exist by review time. The digest binds the complete actor, evidence and contribution scope. |
+| `reason` | The verified, retained, nonrevoked reason receipt bound to this decision and proposal digest. Actual private reason/proof contents are not copied into these records. |
+
+The synchronous reader is called again before commit. Both parsed snapshots
+must be identical. The reader also cannot omit or rewrite an applied decision
+already retained in this store: every such decision in the lineage must match
+the resolved history in full. Every relevant deadline must still be current under the
+final clock read. Clock reversal is rejected. Timestamp comparisons retain
+fractional precision. Asynchronous functions, returned promises and foreign
+thenables cannot supply authority. The retained decision must have outcome
+`accepted`; rejection, information requests and reversal do not acquire write
+permission through this consumer.
+
+### Atomic application and retry
+
+For a new application, the protected authorization's reviewed attribution
+revision must equal the current private revision. No caller-provided revision
+can replace it. A link appends its private association and moves no contributions;
+a merge or split appends only the exact named assignments, preserving their
+roles. An original contribution already present in an accepted overlay is
+superseded and cannot be assigned again through this consumer. Reversal and
+review of a subsequent attribution generation require their separate protected
+implementation; reusing the old original-source binding cannot bypass it.
+
+One transaction appends the overlay, retains the complete decision and immutable
+authorization, stores its application receipt and advances the private revision
+once. Original source records and existing private/public profile state are not
+rewritten. A failed authority read, append, receipt write, revision update,
+final guard or database commit rolls back the entire transaction. The consumer
+performs no network, cache or other external side effects inside that transaction.
+
+An exact retry still requires the current protected read and nonrevoked scope.
+It must match the entire retained decision and authorization, not merely the
+proposal hash. It checks the durable overlay/receipt pair and binds the receipt's before-revision
+to the immutable authorization's reviewed attribution revision. Its authority
+revision must be positive, and its application time must lie between the retained
+review time and the current read. It returns a detached copy of the original
+receipt without advancing the revision or appending again.
+It can acknowledge that receipt after an unrelated private application has
+advanced the revision. Reusing a decision ID with different content, replacing
+its reviewed authorization revision/lifetime, or presenting a partial receipt
+fails. Modifying a returned object cannot change stored state or later retries.
+
+The [synthetic SQLite suite](../apps/controls/test/identity-corrections.test.mjs)
+exercises all three accepted operations, closed authority/source/history scope,
+current revocation and precise expiry, source replacement, independent-connection
+write contention, failures at each durable write and deferred commit, throwing
+first/final readers, reopening and repeated delivery. These are local engineering
+controls; they are not real identity decisions or live propagation evidence.
+
+## Remaining application and acceptance
+
+The protected authority provider and its real proof/source admission must be
+integrated and independently qualified before this consumer is enabled for any
+operational identity decision. Authenticated intake, private request delivery,
+reviewer custody, reversal and public propagation retain their separate gates.
+Whole LB-17.03 remains open.
+
+Downstream application must consume the private overlay and durable receipt,
+then recompute only affected derived results while
 preserving unrelated contributors and role distinctions. Current suppression
 and deletion controls apply across public reads, search, caches, exports,
 historical and frozen replay; a link must not reveal an opted-out identity or
