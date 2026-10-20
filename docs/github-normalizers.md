@@ -77,6 +77,36 @@ Native REST `issue_type_added` and `issue_type_removed` events map to the existi
 
 Native issue fields, Project item custom fields, Project status transitions and Project progress publications have four separate dispatch paths and tests. Each requires exact event ID, sender/time and before/after change evidence. Project snapshots produce context only, never historical editor credit. Body/title edits likewise require a real before/after difference and actor-bearing event; semantic clarification/correction remains receipt-based.
 
+Field-change before/after values follow the JSON value model: object member order
+is irrelevant recursively, while array order, member presence and scalar types
+remain significant. This matches [RFC 8259](https://www.rfc-editor.org/rfc/rfc8259#section-4).
+The comparison uses the existing JSON serialization projection; it does not
+change source revision fingerprints or retain raw field values. Reordered object
+members therefore preserve the source observation without creating an update
+fact. Genuine changes still use the evidenced editor, source clock and raw
+observed state, with no invented acceptance receipt.
+
+The `field-change-json-values/v1` normalization generation also covers persisted
+claims for these four field metrics, including authorized enrichment collected
+under another source family. Current normalization rehydrates an older affected
+cache even when its source revision and observation clock are unchanged. The new
+generation remains selected if the corrected output contains no field facts;
+an obsolete positive cache cannot regain authority. Historical normalization
+documents and frozen inputs remain intact. Affected current, pinned and private
+publication reads require the current generation before exposing those results;
+unrelated metric publications retain their existing authority.
+
+The built-in package exports `fieldChangeNormalizationVersion`. A custom
+normalizer must explicitly declare this compatible generation in the protected
+runtime options. An enrichment callback still passes through the built-in field
+comparator, so its host cannot label an older built-in package as compatible.
+The [source-to-metric cases](../packages/metrics/test/field-change-source-semantics.test.js)
+and [persisted-generation cases](../apps/pipeline/test/field-change-generation.test.mjs)
+use synthetic envelopes and local databases. They establish neither a native
+Project change capability nor metric enablement, approved grouping or completion
+of [#72](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/72) or
+[#79](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/79).
+
 Relationship types retain parent/child and blocked-by direction. Related/information links do not become blockers. The collector must independently verify both endpoints are public and set `relationship.publicEndpointsVerified`; a public container alone does not establish a linked private item's visibility. Reverse representations of an intentional symmetric link share one canonical unit; automatic cross-references do not create intentional-link merit. Public transfer lineage preserves issue identity and grants no new issue creation/authorship credit. Private, unknown or unapproved destinations produce suppression directives; historical projections must obey those controls. Current ordering cannot identify who reordered items.
 
 An enriched public transfer must identify an issue at each endpoint, with complete

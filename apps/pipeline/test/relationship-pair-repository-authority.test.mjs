@@ -34,6 +34,7 @@ async function crossRepositoryHarness(
     memoryDatabase = true,
     reviewedPeerHistory = false,
     independentPair = false,
+    peerSemanticHistory = null,
   } = {},
 ) {
   const at = ago(2);
@@ -44,11 +45,28 @@ async function crossRepositoryHarness(
   const peerUrl = `https://github.com/${peerSlug}/pull/10`;
   const calls = { probes: [], pages: [], hydrations: 0 };
   const history = { revision: "v1", pair: "bound", reviewedRevision: 0, target: issueId };
+  // Explicit synthetic source-adapter semantics. No native GitHub capability or
+  // reviewed correction is inferred from these deliberately contradictory facts.
+  history.semanticObservations = [];
+  const membership = () => ({
+    projects: ["synthetic-semantic-project-a", "synthetic-semantic-project-b"],
+    workstreams: ["synthetic-semantic-workstream-a", "synthetic-semantic-workstream-b"],
+    workstreamsKnown: true,
+    projectScope: ["synthetic-semantic-project-a", "synthetic-semantic-project-b"],
+    workstreamScope: ["synthetic-semantic-workstream-a", "synthetic-semantic-workstream-b"],
+  });
+  const reverseMembership = (context) => ({
+    workstreamScope: [...context.workstreamScope].reverse(),
+    projectScope: [...context.projectScope].reverse(),
+    workstreamsKnown: context.workstreamsKnown,
+    workstreams: [...context.workstreams].reverse(),
+    projects: [...context.projects].reverse(),
+  });
   let originalPeerFact;
   const h = await harness(t, {
     memoryDatabase,
     authorizePolicyPreview: async () => true,
-    ...(reviewedPeerHistory
+    ...(reviewedPeerHistory || peerSemanticHistory
       ? {
           relationshipPairNormalizationVersion: version,
           normalizerFactory(options) {
@@ -65,10 +83,35 @@ async function crossRepositoryHarness(
               for (const fact of output.facts.filter((fact) => fact.metricId === metric)) {
                 originalPeerFact ??= structuredClone(fact);
                 const previousId = fact.id;
-                fact.id = originalPeerFact.id;
+                fact.id =
+                  peerSemanticHistory === "equivalent-order" && history.revision !== "v1"
+                    ? originalPeerFact.id + ":synthetic-equivalent-" + history.revision
+                    : originalPeerFact.id;
                 fact.canonicalKey = originalPeerFact.canonicalKey;
                 fact.revision = history.reviewedRevision;
                 fact.correctionReceipt = history.reviewedRevision ? "synthetic-reviewed-pair-revision" : null;
+                if (peerSemanticHistory) {
+                  fact.eventContext = membership();
+                  fact.currentContext = membership();
+                  if (history.revision !== "v1") {
+                    if (peerSemanticHistory === "event-context")
+                      fact.eventContext.projects = ["synthetic-semantic-project-b"];
+                    else if (peerSemanticHistory === "current-context")
+                      fact.currentContext.workstreams = ["synthetic-semantic-workstream-b"];
+                    else if (peerSemanticHistory === "canonical-key")
+                      fact.canonicalKey = `${originalPeerFact.canonicalKey}:synthetic-unreviewed-drift`;
+                    else if (peerSemanticHistory === "state") fact.state = "pending";
+                    else if (peerSemanticHistory === "acceptance") {
+                      fact.acceptedAt = at;
+                      fact.acceptedBy = "201";
+                      fact.acceptanceReceipt = "synthetic-unreviewed-acceptance-metadata";
+                    } else if (peerSemanticHistory === "equivalent-order") {
+                      fact.eventContext = reverseMembership(fact.eventContext);
+                      fact.currentContext = reverseMembership(fact.currentContext);
+                    } else assert.fail("unknown synthetic semantic scenario");
+                  }
+                  history.semanticObservations.push(structuredClone(fact));
+                }
                 for (const entry of output.evidence.filter(
                   (entry) => entry.contribution.contributionId === previousId,
                 )) {
@@ -331,18 +374,20 @@ for (const metric of ["reference_links", "closing_links"]) {
       );
       assert.equal(
         frozen.identityAuthorization.relationshipPairEvidence.schemaVersion,
-        "pipeline-relationship-pair-authority/v2",
+        "pipeline-relationship-pair-authority/v3",
       );
-      const obsolete = structuredClone(frozen.identityAuthorization.relationshipPairEvidence);
-      obsolete.schemaVersion = "pipeline-relationship-pair-authority/v1";
-      assert.throws(() => validateRelationshipPairCapture(obsolete), /relationship_pair_frozen_binding_invalid/);
-      const obsoleteAuthorization = { ...frozen.identityAuthorization, relationshipPairEvidence: obsolete };
-      await assert.rejects(
-        h.runtime.policyComparisons.withAuthorizedInputs([obsoleteAuthorization], () =>
-          assert.fail("old capture must not reach private restoration"),
-        ),
-        /relationship_pair_frozen_binding_invalid/,
-      );
+      for (const oldVersion of ["v1", "v2"]) {
+        const obsolete = structuredClone(frozen.identityAuthorization.relationshipPairEvidence);
+        obsolete.schemaVersion = `pipeline-relationship-pair-authority/${oldVersion}`;
+        assert.throws(() => validateRelationshipPairCapture(obsolete), /relationship_pair_frozen_binding_invalid/);
+        const obsoleteAuthorization = { ...frozen.identityAuthorization, relationshipPairEvidence: obsolete };
+        await assert.rejects(
+          h.runtime.policyComparisons.withAuthorizedInputs([obsoleteAuthorization], () =>
+            assert.fail("old capture must not reach private restoration"),
+          ),
+          /relationship_pair_frozen_binding_invalid/,
+        );
+      }
       const rowsAfter = (
         await h.db.query(
           "SELECT fact_key,policy_signature,document_hash,document FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature",
@@ -373,7 +418,7 @@ for (const metric of ["reference_links", "closing_links"]) {
           assert.deepEqual(
             await runtime.previewPolicy(request),
             preview,
-            "actual database reopen preserves v2 uncertainty",
+            "actual database reopen preserves v3 uncertainty",
           );
           assert.deepEqual(values(await board(runtime, metric, null, current.snapshotId)), []);
         });
@@ -1046,3 +1091,595 @@ for (const metric of ["reference_links", "closing_links"]) {
     }
   });
 }
+
+// These cases use the same explicit synthetic source-adapter revision fixture
+// as the reviewed-history cases above. They retain native normalization bytes;
+// they do not manufacture a correction receipt or change the pair unit policy.
+async function semanticNormalizationRows(h) {
+  const rows = (
+    await h.db.query(
+      "SELECT fact_key,policy_signature,document_hash,document FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature",
+    )
+  ).rows;
+  for (const row of rows) {
+    assert.equal(comparisonHash(row.document), row.document_hash, "verify each original normalization hash");
+    assert.equal(row.document.relationshipPairNormalizationVersion, version);
+    assert.equal(row.document.isSynthetic, true);
+  }
+  return rows;
+}
+
+function retainedSemanticPeer(rows, metric) {
+  const matches = rows.flatMap((row) =>
+    row.document.facts
+      .filter((fact) => fact.metricId === metric && fact.actorId === "303")
+      .map((fact) => ({ row, fact })),
+  );
+  assert.equal(matches.length, 1, "exactly one peer observation supplies this fixture phase");
+  return matches[0];
+}
+
+function preserveSemanticRows(before, after) {
+  for (const row of before) {
+    assert.deepEqual(
+      after.find(
+        (candidate) => candidate.fact_key === row.fact_key && candidate.policy_signature === row.policy_signature,
+      ),
+      row,
+      "stored normalization documents, hashes and source keys remain immutable",
+    );
+  }
+}
+
+async function assertSemanticCapture(h, input) {
+  const capture = input.identityAuthorization.relationshipPairEvidence;
+  assert.equal(capture.schemaVersion, "pipeline-relationship-pair-authority/v3");
+  assert.deepEqual(validateRelationshipPairCapture(capture), capture);
+  for (const oldVersion of ["v1", "v2"]) {
+    const obsolete = {
+      ...structuredClone(capture),
+      schemaVersion: `pipeline-relationship-pair-authority/${oldVersion}`,
+    };
+    assert.throws(() => validateRelationshipPairCapture(obsolete), /relationship_pair_frozen_binding_invalid/);
+    await assert.rejects(
+      h.runtime.policyComparisons.withAuthorizedInputs(
+        [{ ...input.identityAuthorization, relationshipPairEvidence: obsolete }],
+        () => assert.fail("obsolete semantic interpretation must not reach private restoration"),
+      ),
+      /relationship_pair_frozen_binding_invalid/,
+    );
+  }
+}
+
+for (const metric of ["reference_links", "closing_links"]) {
+  for (const changedMeaning of ["event-context", "current-context", "canonical-key", "state", "acceptance"]) {
+    test(`${metric}: same-revision ${changedMeaning} drift leaves the pair explicitly uncertain`, async (t) => {
+      const h = await crossRepositoryHarness(t, metric, {
+        earlierPeerHistory: true,
+        peerSemanticHistory: changedMeaning,
+      });
+      await published(h);
+      assert.deepEqual(values(await board(h.runtime, metric)), [["303", 1]], "the initial source is admissible");
+      assert.deepEqual(
+        values(await board(h.runtime, metric, 2)),
+        [],
+        "display filtering does not promote the later actor",
+      );
+      const originalRows = await semanticNormalizationRows(h);
+      const original = retainedSemanticPeer(originalRows, metric);
+
+      h.history.revision = "v2";
+      await published(h);
+      const allRows = await semanticNormalizationRows(h);
+      preserveSemanticRows(originalRows, allRows);
+      const oldKeys = new Set(originalRows.map((row) => JSON.stringify([row.fact_key, row.policy_signature])));
+      const addedRows = allRows.filter((row) => !oldKeys.has(JSON.stringify([row.fact_key, row.policy_signature])));
+      const currentPeer = retainedSemanticPeer(addedRows, metric);
+      assert.equal(currentPeer.fact.id, original.fact.id, "the semantic conflict has the same fact identity");
+      assert.equal(currentPeer.fact.revision, 0, "the observation is not a reviewed correction");
+      assert.equal(original.fact.revision, 0);
+      assert.equal(currentPeer.fact.correctionReceipt, null);
+      assert.deepEqual(currentPeer.fact.relationshipPair, original.fact.relationshipPair);
+      assert.equal(currentPeer.fact.actorId, original.fact.actorId);
+      assert.equal(currentPeer.fact.occurredAt, original.fact.occurredAt);
+      const changedField = {
+        "event-context": "eventContext",
+        "current-context": "currentContext",
+        "canonical-key": "canonicalKey",
+        state: "state",
+        acceptance: "acceptedAt",
+      }[changedMeaning];
+      assert.notDeepEqual(currentPeer.fact[changedField], original.fact[changedField]);
+
+      const current = await board(h.runtime, metric);
+      const selected = await board(h.runtime, metric, 2);
+      assert.deepEqual(values(current), [], "contradictory same-revision meaning cannot retain positive credit");
+      assert.deepEqual(values(selected), [], "the selected repository cannot promote its later actor");
+      assert.ok(
+        [...current.rows, ...selected.rows].every((row) => row.result.value === null),
+        "uncertainty is not a zero",
+      );
+      const input = await frozenInput(h, current.snapshotId);
+      const peer = input.frozen.facts.find((fact) => fact.id === currentPeer.fact.id && fact.metricId === metric);
+      const later = input.frozen.facts.find((fact) => fact.actorId === "202" && fact.metricId === metric);
+      assert.ok(peer && later, "the calculation keeps the current pair participants");
+      assert.equal(peer.state, "unknown");
+      assert.equal(later.state, "unknown");
+      assert.deepEqual(peer.eventContext, currentPeer.fact.eventContext);
+      assert.deepEqual(peer.currentContext, currentPeer.fact.currentContext);
+      const aggregate = components.metrics.aggregateMetric(
+        input.frozen,
+        h.config.policies[0].policy,
+        input.engineScope,
+      );
+      assert.deepEqual(aggregate.rows, []);
+      assert.ok(
+        aggregate.audit.some((entry) => entry.reason === "unknown_qualification" && entry.factIds.includes(peer.id)),
+        "the earliest current pair remains uncertain",
+      );
+      assert.ok(
+        aggregate.audit.some(
+          (entry) => entry.reason === "repeated_relationship_pair" && entry.factIds.includes(later.id),
+        ),
+        "the later event stays a repeated pair rather than becoming first",
+      );
+      await assertSemanticCapture(h, input);
+
+      const request = {
+        snapshotId: current.snapshotId,
+        policy: { ...h.config.policies[0].policy, version: `synthetic-${changedMeaning}-uncertainty-preview` },
+        operatorId: "201",
+      };
+      const preview = await h.runtime.previewPolicy(request);
+      assert.deepEqual(preview.comparison.before.rows, []);
+      assert.deepEqual(await h.runtime.previewPolicy(request), preview, "replay preserves the frozen uncertainty");
+      preserveSemanticRows(allRows, await semanticNormalizationRows(h));
+    });
+  }
+
+  test(`${metric}: reordered context memberships and keys preserve equivalent source observations`, async (t) => {
+    const h = await crossRepositoryHarness(t, metric, {
+      earlierPeerHistory: true,
+      peerSemanticHistory: "equivalent-order",
+    });
+    await published(h);
+    assert.deepEqual(values(await board(h.runtime, metric)), [["303", 1]]);
+    const originalRows = await semanticNormalizationRows(h);
+    const original = retainedSemanticPeer(originalRows, metric);
+    h.history.revision = "v2";
+    await published(h);
+    const allRows = await semanticNormalizationRows(h);
+    preserveSemanticRows(originalRows, allRows);
+    const oldKeys = new Set(originalRows.map((row) => JSON.stringify([row.fact_key, row.policy_signature])));
+    const addedRows = allRows.filter((row) => !oldKeys.has(JSON.stringify([row.fact_key, row.policy_signature])));
+    const currentPeer = retainedSemanticPeer(addedRows, metric);
+    assert.notEqual(
+      currentPeer.fact.id,
+      original.fact.id,
+      "distinct synthetic adapter observations may share one canonical action",
+    );
+    assert.equal(currentPeer.fact.canonicalKey, original.fact.canonicalKey);
+    assert.equal(currentPeer.fact.revision, 0);
+    assert.equal(currentPeer.fact.correctionReceipt, null);
+    const originalObserved = h.history.semanticObservations.find(
+      (fact) => comparisonHash(fact) === comparisonHash(original.fact),
+    );
+    const currentObserved = h.history.semanticObservations.find(
+      (fact) => comparisonHash(fact) === comparisonHash(currentPeer.fact),
+    );
+    assert.ok(originalObserved && currentObserved, "the exact emitted adapter facts bind the stored observations");
+    for (const field of ["eventContext", "currentContext"]) {
+      const before = original.fact[field],
+        after = currentPeer.fact[field];
+      assert.notDeepEqual(
+        Object.keys(currentObserved[field]),
+        Object.keys(originalObserved[field]),
+        "the emitted source key order actually changed",
+      );
+      for (const member of ["projects", "workstreams", "projectScope", "workstreamScope"]) {
+        assert.notDeepEqual(after[member], before[member], "the source membership order actually changed");
+        assert.deepEqual([...after[member]].sort(), [...before[member]].sort(), "membership sets remain exact");
+      }
+      assert.equal(after.workstreamsKnown, before.workstreamsKnown);
+    }
+    const current = await board(h.runtime, metric);
+    assert.deepEqual(values(current), [["303", 1]], "semantic equivalence restores the original first actor");
+    assert.deepEqual(values(await board(h.runtime, metric, 2)), [], "the later actor is still not first");
+    const input = await frozenInput(h, current.snapshotId);
+    const peer = input.frozen.facts.find((fact) => fact.id === currentPeer.fact.id && fact.metricId === metric);
+    assert.equal(peer.state, "observed", "equivalent ordering is not unresolved history");
+    await assertSemanticCapture(h, input);
+    const request = {
+      snapshotId: current.snapshotId,
+      policy: { ...h.config.policies[0].policy, version: "synthetic-equivalent-context-preview" },
+      operatorId: "201",
+    };
+    const preview = await h.runtime.previewPolicy(request);
+    assert.deepEqual(
+      preview.comparison.before.rows.filter((row) => row.value > 0).map((row) => [row.actorId, row.value]),
+      [["303", 1]],
+    );
+    assert.deepEqual(await h.runtime.previewPolicy(request), preview);
+    preserveSemanticRows(allRows, await semanticNormalizationRows(h));
+  });
+}
+
+// Explicit synthetic migration of one collected source that has both a real
+// builtin relationship observation and a builtin field-change observation.
+// Reconstructing predecessor wrappers below does not claim old executable
+// output or authorize real GitHub input.
+const combinedFieldVersion = "field-change-json-values/v1";
+
+async function combinedPairFieldHarness(t) {
+  const { pairHarness } = await import("./relationship-pair-fixtures.mjs");
+  const state = { equalField: false, normalizations: 0 };
+  const h = await pairHarness(t, {
+    memoryDatabase: true,
+    relationshipPairNormalizationVersion: version,
+    fieldChangeNormalizationVersion: combinedFieldVersion,
+    configure(config) {
+      const pair = pairPolicy("closing_links");
+      const field = {
+        ...pair,
+        metricId: "issue_field_updates",
+        version: "synthetic-combined-field-policy-v1",
+        unit: components.metrics.getMetricDefinition("issue_field_updates").definition.unit,
+        groupBy: "actor_artifact",
+        sources: ["github_rest"],
+      };
+      delete field.groupingPolicyVersion;
+      config.policies = [
+        {
+          policy: pair,
+          signature: components.metrics.stableJSON(pair),
+          approvalReceipt: "synthetic-combined-pair-policy",
+        },
+        {
+          policy: field,
+          signature: components.metrics.stableJSON(field),
+          approvalReceipt: "synthetic-combined-field-policy",
+        },
+      ];
+      config.scopes = [publicScope];
+    },
+    normalizerFactory(options) {
+      const builtin = components.github.createGithubEvidenceNormalizer({
+        client: options.githubClient,
+        source: options.sourceId,
+        allowedRepositoryIds: [2],
+        isSynthetic: true,
+        enrich: options.githubEnrich,
+      });
+      return async (input) => {
+        state.normalizations++;
+        const pair = await builtin(input);
+        const pairFacts = pair.facts.filter((fact) => fact.metricId === "closing_links");
+        assert.equal(pairFacts.length, 1, "the stock pair envelope must remain admitted");
+        const at = pairFacts[0].occurredAt;
+        const field = components.github.normalizeGithubObservation({
+          repository: { id: 2, slug: "synthetic-org/synthetic-repo", visibility: "public" },
+          proof: {
+            verified: true,
+            source: "github_rest",
+            revision: input.fact.sourceRevision,
+            eventId: "synthetic-combined-field-event",
+            isSynthetic: true,
+          },
+          family: "field_change",
+          action: "issue_field_changed",
+          occurredAt: at,
+          observedAt: input.observedAt,
+          payload: {
+            issue: {
+              id: 20,
+              node_id: input.fact.subjectId,
+              number: 20,
+              html_url: input.fact.sourceUrl,
+              user: { id: 101, node_id: "U_SYNTHETIC_PAIR_101", login: "synthetic-author", type: "User" },
+              created_at: at,
+              updated_at: at,
+              state: "open",
+            },
+            id: input.fact.subjectId,
+            url: input.fact.sourceUrl,
+            sender: { id: 202, node_id: "U_SYNTHETIC_PAIR_202", login: "synthetic-linker", type: "User" },
+            change: {
+              before: { alpha: 1, beta: 2 },
+              after: state.equalField ? { beta: 2, alpha: 1 } : { alpha: 1, beta: 3 },
+            },
+          },
+        });
+        assert.equal(
+          field.facts.filter((fact) => fact.metricId === "issue_field_updates").length,
+          state.equalField ? 0 : 1,
+          "field output comes from the builtin JSON comparator",
+        );
+        return {
+          ...pair,
+          facts: [...pair.facts, ...field.facts],
+          actors: [...new Map([...pair.actors, ...field.actors].map((entry) => [entry.id, entry])).values()],
+          evidence: [...pair.evidence, ...field.evidence],
+          reasons: [...(pair.reasons ?? []), ...(field.reasons ?? [])],
+        };
+      };
+    },
+  });
+  return { ...h, combinedState: state };
+}
+
+async function combinedNormalizationRows(h) {
+  return (
+    await h.db.query(
+      "SELECT fact_key,policy_signature,document,document_hash,document::text AS document_text FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature",
+    )
+  ).rows;
+}
+
+// Match the accepted field-generation fixture's complete SQL/SQLite binding
+// reconstruction. The pair-only predecessor retains its exact v3 pair capture;
+// its field claims deliberately predate field-version authority.
+async function retainSeparatePairFieldPredecessors(h, publication) {
+  const { AggregateExplanationStore, buildAggregateExplanation } = await import("../src/aggregate-explanations.mjs");
+  const rows = await combinedNormalizationRows(h);
+  assert.equal(rows.length, 1);
+  const current = rows[0];
+  const base = currentSignature(h.config);
+  const pairSignature = comparisonHash([version, base]);
+  const fieldSignature = comparisonHash([combinedFieldVersion, base]);
+  const combinedSignature = comparisonHash([version, fieldSignature]);
+  assert.equal(current.policy_signature, combinedSignature);
+  assert.equal(current.document_hash, comparisonHash(current.document));
+  assert.equal(current.document.relationshipPairNormalizationVersion, version);
+  assert.equal(current.document.fieldChangeNormalizationVersion, combinedFieldVersion);
+  assert.deepEqual(current.document.facts.map((fact) => fact.metricId).sort(), [
+    "closing_links",
+    "issue_field_updates",
+  ]);
+  const pairDocument = structuredClone(current.document);
+  delete pairDocument.fieldChangeNormalizationVersion;
+  const fieldDocument = structuredClone(current.document);
+  delete fieldDocument.relationshipPairNormalizationVersion;
+  const pairHash = comparisonHash(pairDocument);
+  await h.db.query(
+    "UPDATE leaderboard_pipeline.normalizations SET policy_signature=$2,document=$3::jsonb,document_hash=$4 WHERE fact_key=$1 AND policy_signature=$5",
+    [current.fact_key, pairSignature, JSON.stringify(pairDocument), pairHash, combinedSignature],
+  );
+  await h.db.query(
+    "INSERT INTO leaderboard_pipeline.normalizations(fact_key,policy_signature,document,document_hash) VALUES($1,$2,$3::jsonb,$4)",
+    [current.fact_key, fieldSignature, JSON.stringify(fieldDocument), comparisonHash(fieldDocument)],
+  );
+  const replaceBinding = (authorization) => {
+    const identity = authorization.identityEvidence;
+    assert.ok(identity.normalizationHashes.includes(current.document_hash));
+    identity.normalizationHashes = identity.normalizationHashes
+      .map((hash) => (hash === current.document_hash ? pairHash : hash))
+      .sort();
+    identity.normalizationSources = identity.normalizationSources.map((source) => {
+      if (source.factKey !== current.fact_key) return source;
+      assert.equal(source.documentHash, current.document_hash);
+      return { ...source, documentHash: pairHash };
+    });
+    const capture = authorization.relationshipPairEvidence;
+    const binding = capture.bindings.find((entry) => entry.factKey === current.fact_key);
+    assert.ok(binding);
+    assert.equal(binding.policySignature, combinedSignature);
+    assert.equal(binding.documentHash, current.document_hash);
+    binding.policySignature = pairSignature;
+    binding.documentHash = pairHash;
+    assert.deepEqual(validateRelationshipPairCapture(capture), capture);
+  };
+  const frozen = await frozenInput(h, publication.snapshotId);
+  replaceBinding(frozen.identityAuthorization);
+  await h.db.query(
+    "UPDATE leaderboard_pipeline.frozen_inputs SET document=$2::jsonb,document_hash=$3 WHERE snapshot_id=$1",
+    [publication.snapshotId, JSON.stringify(frozen), comparisonHash(frozen)],
+  );
+  const capture = {
+    input: frozen.frozen,
+    scope: frozen.engineScope,
+    policies: frozen.policies.map((entry) => entry.policy),
+    aggregates: frozen.policies.map((entry) =>
+      components.metrics.aggregateMetric(frozen.frozen, entry.policy, frozen.engineScope),
+    ),
+    snapshot: { snapshotId: publication.snapshotId, revision: publication.revision },
+    authorization: frozen.identityAuthorization,
+  };
+  const oldExplanation = new AggregateExplanationStore(h.controlsStore).read(publication.snapshotId).document;
+  const explanation = buildAggregateExplanation(capture, {
+    scopeKey: oldExplanation.scopeKey,
+    computationVersion: oldExplanation.snapshot.computationVersion,
+  });
+  const explanationHash = comparisonHash(explanation);
+  h.controlsStore.db
+    .prepare("UPDATE pipeline_aggregate_explanations SET document=?,digest=? WHERE snapshot_id=?")
+    .run(JSON.stringify(explanation), explanationHash, publication.snapshotId);
+  const oldInput = h.controlsStore.db
+    .prepare("SELECT * FROM policy_preview_inputs WHERE id=?")
+    .get(publication.comparisonInput.inputId);
+  const input = JSON.parse(oldInput.document);
+  replaceBinding(input.authorization);
+  const inputId = comparisonHash(input);
+  h.controlsStore.db
+    .prepare("UPDATE policy_preview_inputs SET id=?,document=?,digest=? WHERE id=?")
+    .run(inputId, JSON.stringify(input), inputId, oldInput.id);
+  const receipt = (
+    await h.db.query("SELECT receipt_id,document FROM leaderboard_pipeline.receipts WHERE kind='snapshot_published'")
+  ).rows.find((entry) => entry.document.snapshotId === publication.snapshotId);
+  assert.ok(receipt);
+  receipt.document.comparisonInputHash = comparisonHash(capture);
+  await h.db.query("UPDATE leaderboard_pipeline.receipts SET document=$2::jsonb,document_hash=$3 WHERE receipt_id=$1", [
+    receipt.receipt_id,
+    JSON.stringify(receipt.document),
+    comparisonHash(receipt.document),
+  ]);
+  h.controlsStore.transaction((state) => {
+    for (const confirmation of [
+      state.pipelinePublications[publication.snapshotId],
+      ...Object.values(state.pipelineHeads),
+    ]) {
+      if (confirmation.snapshotId !== publication.snapshotId) continue;
+      delete confirmation.fieldChangeNormalizationVersion;
+      confirmation.aggregateExplanationHash = explanationHash;
+    }
+  });
+  assert.equal(new AggregateExplanationStore(h.controlsStore).read(publication.snapshotId).digest, explanationHash);
+  assert.equal(h.runtime.policyComparisons.comparisons.input(inputId).id, inputId);
+  const predecessors = await combinedNormalizationRows(h);
+  assert.equal(predecessors.length, 2);
+  for (const row of predecessors) {
+    assert.equal(row.fact_key, current.fact_key);
+    assert.equal(row.document_hash, comparisonHash(row.document));
+    assert.equal(row.document.isSynthetic, true);
+  }
+  const pairRow = predecessors.find((row) => row.policy_signature === pairSignature);
+  const fieldRow = predecessors.find((row) => row.policy_signature === fieldSignature);
+  assert.deepEqual(pairRow.document.facts, current.document.facts);
+  assert.deepEqual(fieldRow.document.facts, current.document.facts);
+  return {
+    factKey: current.fact_key,
+    pairSignature,
+    fieldSignature,
+    combinedSignature,
+    predecessors,
+    frozen: await frozenInput(h, publication.snapshotId),
+    inputId,
+    privateInput: h.controlsStore.db.prepare("SELECT * FROM policy_preview_inputs WHERE id=?").get(inputId),
+  };
+}
+
+async function migratedPairFieldHarness(t) {
+  const h = await combinedPairFieldHarness(t);
+  const cutoff = clock();
+  const initial = await h.runtime.runOnce({ cutoff });
+  assert.equal(initial.state, "published", JSON.stringify(initial));
+  const first = initial.publications[0];
+  assert.deepEqual(values(await board(h.runtime, "closing_links")), [["202", 1]]);
+  assert.deepEqual(values(await board(h.runtime, "issue_field_updates")), [["202", 1]]);
+  const old = await retainSeparatePairFieldPredecessors(h, first);
+  const sources = (await h.db.query("SELECT * FROM leaderboard_ingestion.source_facts ORDER BY fact_key")).rows;
+  assert.equal(sources.length, 1);
+  const calls = { normalizations: h.combinedState.normalizations, hydrations: h.state.hydrations };
+  h.combinedState.equalField = true;
+  const result = await h.runtime.runOnce({ cutoff });
+  assert.equal(result.state, "published", JSON.stringify(result));
+  const fresh = result.publications[0];
+  assert.notEqual(fresh.snapshotId, first.snapshotId);
+  assert.equal(h.combinedState.normalizations, calls.normalizations + 1);
+  assert.equal(h.state.hydrations, calls.hydrations + 1);
+  const rows = await combinedNormalizationRows(h);
+  assert.equal(rows.length, 3, "two retained predecessors plus exactly one composed generation");
+  for (const row of old.predecessors)
+    assert.deepEqual(
+      rows.find((entry) => entry.policy_signature === row.policy_signature),
+      row,
+    );
+  const current = rows.find((row) => row.policy_signature === old.combinedSignature);
+  assert.ok(current);
+  assert.equal(current.document_hash, comparisonHash(current.document));
+  assert.equal(current.document.relationshipPairNormalizationVersion, version);
+  assert.equal(current.document.fieldChangeNormalizationVersion, combinedFieldVersion);
+  assert.deepEqual(
+    current.document.facts.map((fact) => fact.metricId),
+    ["closing_links"],
+  );
+  assert.ok(current.document.reasons.includes("no_op_field_change"));
+  assert.deepEqual(
+    (await h.db.query("SELECT * FROM leaderboard_ingestion.source_facts ORDER BY fact_key")).rows,
+    sources,
+  );
+  assert.deepEqual(await frozenInput(h, first.snapshotId), old.frozen);
+  assert.deepEqual(
+    h.controlsStore.db.prepare("SELECT * FROM policy_preview_inputs WHERE id=?").get(old.inputId),
+    old.privateInput,
+  );
+  assert.deepEqual(values(await board(h.runtime, "closing_links", null, fresh.snapshotId)), [["202", 1]]);
+  assert.deepEqual(values(await board(h.runtime, "issue_field_updates", null, fresh.snapshotId)), []);
+  return { h, cutoff, first, fresh, old, current };
+}
+
+test("combined pair and field generations retain both predecessors and replay corrected field-empty authority", async (t) => {
+  const { h, cutoff, fresh, old, current } = await migratedPairFieldHarness(t);
+  const frozen = await frozenInput(h, fresh.snapshotId);
+  const capture = frozen.identityAuthorization.relationshipPairEvidence;
+  assert.deepEqual(validateRelationshipPairCapture(capture), capture);
+  assert.equal(capture.schemaVersion, "pipeline-relationship-pair-authority/v3");
+  assert.ok(capture.bindings.some((binding) => binding.policySignature === old.pairSignature));
+  assert.ok(capture.bindings.some((binding) => binding.policySignature === old.combinedSignature));
+  const rows = await combinedNormalizationRows(h);
+  for (const binding of capture.bindings) {
+    const row = rows.find(
+      (entry) => entry.fact_key === binding.factKey && entry.policy_signature === binding.policySignature,
+    );
+    assert.ok(row, "each exact private pair binding has its own retained normalization");
+    assert.equal(binding.documentHash, row.document_hash);
+  }
+  const stored = h.runtime.policyComparisons.comparisons.input(fresh.comparisonInput.inputId);
+  assert.deepEqual(stored.authorization.relationshipPairEvidence, capture);
+  const restored = await h.runtime.policyComparisons.withAuthorizedInputs(
+    [stored.authorization],
+    (removed, authority) => {
+      assert.deepEqual(removed, []);
+      return authority.restoreInput(stored.input, stored.authorization);
+    },
+  );
+  assert.deepEqual(
+    restored.facts.map((fact) => fact.metricId),
+    ["closing_links"],
+  );
+  const request = {
+    snapshotId: fresh.snapshotId,
+    policy: { ...h.config.policies[0].policy, version: "synthetic-combined-pair-preview" },
+    operatorId: "201",
+  };
+  const explanation = await h.runtime.aggregateExplanations.read(fresh.snapshotId);
+  assert.deepEqual(explanation.document.authorization.relationshipPairEvidence, capture);
+  const preview = await h.runtime.previewPolicy(request);
+  assert.deepEqual(await h.runtime.previewPolicy(request), preview, "private replay retains the composed generation");
+  const calls = { normalizations: h.combinedState.normalizations, hydrations: h.state.hydrations };
+  const reused = await h.runtime.runOnce({ cutoff });
+  assert.equal(reused.publications[0].snapshotId, fresh.snapshotId);
+  assert.equal(h.combinedState.normalizations, calls.normalizations);
+  assert.equal(h.state.hydrations, calls.hydrations);
+  assert.deepEqual(await combinedNormalizationRows(h), rows);
+  assert.deepEqual(
+    (await combinedNormalizationRows(h)).find((row) => row.policy_signature === old.combinedSignature),
+    current,
+  );
+});
+
+async function rejectCorruptPairFieldPredecessor(t, predecessor, mutation) {
+  const { h, cutoff, old, current } = await migratedPairFieldHarness(t);
+  const signature = predecessor === "pair" ? old.pairSignature : old.fieldSignature;
+  const before = old.predecessors.find((row) => row.policy_signature === signature);
+  const bad = structuredClone(before.document);
+  if (mutation === "hash") bad.reasons = [...bad.reasons, "synthetic-integrity-corruption"];
+  else bad.isSynthetic = false;
+  await h.db.query(
+    "UPDATE leaderboard_pipeline.normalizations SET document=$3::jsonb,document_hash=$4 WHERE fact_key=$1 AND policy_signature=$2",
+    [before.fact_key, signature, JSON.stringify(bad), mutation === "hash" ? before.document_hash : comparisonHash(bad)],
+  );
+  const calls = h.combinedState.normalizations;
+  const snapshots = (await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n;
+  await assert.rejects(
+    h.runtime.runOnce({ cutoff }),
+    mutation === "hash" ? /normalization_integrity_error/ : /normalization_data_mode_mismatch/,
+  );
+  assert.equal(h.combinedState.normalizations, calls, "integrity is checked before any provider classification");
+  assert.equal(
+    (await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n,
+    snapshots,
+  );
+  assert.deepEqual(
+    (await combinedNormalizationRows(h)).find((row) => row.policy_signature === old.combinedSignature),
+    current,
+    "a valid composed cache never masks or rewrites its corrupted predecessor",
+  );
+}
+
+test("combined pair-field cache does not hide a hash-corrupt pair-only predecessor", async (t) => {
+  await rejectCorruptPairFieldPredecessor(t, "pair", "hash");
+});
+
+test("combined pair-field cache does not hide a field-only predecessor from another data mode", async (t) => {
+  await rejectCorruptPairFieldPredecessor(t, "field", "mode");
+});

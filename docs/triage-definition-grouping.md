@@ -103,8 +103,11 @@ installation permission, complete history or recognition-review authority.
 explicit reviewed policy version, positive adjacency interval and positive
 cooldown. It has no silent interval default. Its exact procedure is:
 
-1. Deduplicate exact event IDs. Conflicting records with one event ID reject the
-   input; the helper does not pick a convenient copy.
+1. Deduplicate records with the same event ID and equal JSON-projected values.
+   Object-member order does not create a conflict; array order, scalar values and
+   member presence within that projection remain significant. Genuine conflicting
+   records reject the input; the helper does not pick a convenient copy. Existing
+   JSON serialization errors during duplicate comparison remain errors.
 2. Keep events with a known actor, stable artifact and supported occurrence time.
    Unknown events remain named in `unknownEventIds` and in the global raw count.
    They cannot create an actor or distinct-artifact total.

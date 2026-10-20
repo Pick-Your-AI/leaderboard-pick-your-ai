@@ -9,6 +9,7 @@ test("an issues-only configuration preserves retained legacy Project-history cac
     configure(config) {
       config.version = "synthetic-after-project-family-removal-v2";
     },
+    fieldChangeNormalizationVersion: components.github.fieldChangeNormalizationVersion,
     normalizerFactory(options) {
       const ordinary = components.github.createGithubEvidenceNormalizer({
         client: options.githubClient,

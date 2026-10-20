@@ -8,6 +8,7 @@ const normalizationVersionFields = [
   "discussionFeedbackNormalizationVersion",
   "defaultDeliveryNormalizationVersion",
   "relationshipPairNormalizationVersion",
+  "fieldChangeNormalizationVersion",
 ];
 
 const unavailable = () => {

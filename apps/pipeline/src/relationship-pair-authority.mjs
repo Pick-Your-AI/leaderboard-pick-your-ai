@@ -9,9 +9,9 @@ import { issueTransferClosure, issueTransferLimits } from "./issue-transfer-priv
 import { selectIssueTransferSources } from "./issue-transfers.mjs";
 import { hasRelationshipPairMarker, isRelationshipPairMetric } from "./relationship-pair-generation.mjs";
 
-// v2 also binds the conservative interpretation of displaced known history.
-// A v1 frozen result may have promoted a later event after losing its original.
-export const relationshipPairAuthorityVersion = "pipeline-relationship-pair-authority/v2";
+// v3 also binds all semantic fields of displaced known history.
+// Earlier captures may have credited a missing or contradictory original.
+export const relationshipPairAuthorityVersion = "pipeline-relationship-pair-authority/v3";
 const check = (value, code = "relationship_pair_authority_integrity_error") => {
   if (!value) throw new Error(code);
 };
@@ -292,18 +292,28 @@ function unresolvedHistory(current, retained) {
     // Same equality as compareSourceInstants, including sub-millisecond clocks.
     return [Date.parse(value), (value.match(/\.(\d+)/)?.[1] ?? "").replace(/0+$/, "")];
   };
-  const meaning = ({ fact, pair, key }) =>
-    JSON.stringify([
-      key,
-      pair.eventId,
-      pair.action,
-      fact.metricId,
-      fact.artifactId,
-      fact.repoId,
-      fact.role,
-      fact.actorId,
-      clock(fact.occurredAt),
-    ]);
+  const membership = (context) =>
+    context == null
+      ? context
+      : {
+          ...context,
+          projects: [...context.projects].sort(),
+          workstreams: [...context.workstreams].sort(),
+          ...(context.projectScope === undefined ? {} : { projectScope: [...context.projectScope].sort() }),
+          ...(context.workstreamScope === undefined ? {} : { workstreamScope: [...context.workstreamScope].sort() }),
+        };
+  const meaning = ({ fact, pair, key }) => {
+    // Match canonical fact semantics, preserving membership and revision identity.
+    // Observation IDs and collection times do not change contribution meaning.
+    const { id, observedAt, relationshipPair, ...semantic } = fact;
+    return digest({
+      ...semantic,
+      relationshipPair: [key, pair.eventId, pair.action],
+      occurredAt: clock(fact.occurredAt),
+      eventContext: membership(fact.eventContext),
+      currentContext: membership(fact.currentContext),
+    });
+  };
   const identity = ({ fact }) => JSON.stringify([fact.metricId, fact.id]);
   const groups = new Map(),
     latest = new Map();
