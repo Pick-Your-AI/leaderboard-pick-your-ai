@@ -7,11 +7,13 @@ export function Amendment({
   receipt,
   categories,
   terms,
+  tutorialTerms = null,
   run,
 }: {
   receipt: Receipt;
   categories: string[];
   terms: EvidenceTerms | null;
+  tutorialTerms?: EvidenceTerms | null;
   run: (path: string, input: unknown) => Promise<boolean>;
 }) {
   const { errors, showErrors } = useControlFormErrors();
@@ -32,7 +34,7 @@ export function Amendment({
           event.preventDefault();
           const form = event.currentTarget;
           const data = new FormData(form);
-          const evidence = evidenceSubmissionInput(data, terms, receipt.owner, categories);
+          const evidence = evidenceSubmissionInput(data, terms, receipt.owner, categories, tutorialTerms);
           showErrors(form, evidence.ok ? {} : evidence.errors);
           if (!evidence.ok || !form.reportValidity()) return;
           await run(`/controls/requests/${receipt.id}/amend`, {
@@ -45,6 +47,7 @@ export function Amendment({
         <EvidenceIntakeFields
           actorId={receipt.owner}
           terms={terms}
+          tutorialTerms={tutorialTerms}
           categories={categories}
           receipt={receipt}
           errors={errors}

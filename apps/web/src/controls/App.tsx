@@ -9,6 +9,7 @@ import {
   evidenceSubmissionInput,
   sourceUseReviewInput,
   verifiedEvidenceTerms,
+  verifiedExternalTutorialTerms,
   verifiedSession,
   type EvidenceInvitation,
   type EvidenceTerms,
@@ -48,7 +49,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </label>
   );
 }
-function RequestForm({ run, actorId, terms }: { run: Run; actorId: string; terms: EvidenceTerms | null }) {
+function RequestForm({
+  run,
+  actorId,
+  terms,
+  tutorialTerms,
+}: {
+  run: Run;
+  actorId: string;
+  terms: EvidenceTerms | null;
+  tutorialTerms: EvidenceTerms | null;
+}) {
   const [kind, setKind] = useState("correction");
   const { errors, showErrors } = useControlFormErrors();
   return (
@@ -65,7 +76,7 @@ function RequestForm({ run, actorId, terms }: { run: Run; actorId: string; terms
           const form = e.currentTarget;
           const data = new FormData(form);
           if (kind === "evidence") {
-            const evidence = evidenceSubmissionInput(data, terms, actorId, categories);
+            const evidence = evidenceSubmissionInput(data, terms, actorId, categories, tutorialTerms);
             showErrors(form, evidence.ok ? {} : evidence.errors);
             if (!evidence.ok) return;
             if (await run("/controls/requests", { kind, ...evidence.value })) form.reset();
@@ -88,7 +99,13 @@ function RequestForm({ run, actorId, terms }: { run: Run; actorId: string; terms
           </select>
         </Field>
         {kind === "evidence" ? (
-          <EvidenceIntakeFields actorId={actorId} terms={terms} categories={categories} errors={errors} />
+          <EvidenceIntakeFields
+            actorId={actorId}
+            terms={terms}
+            tutorialTerms={tutorialTerms}
+            categories={categories}
+            errors={errors}
+          />
         ) : (
           <>
             <Field label="Details">
@@ -188,12 +205,14 @@ function ReceiptCard({
   run,
   admin,
   terms,
+  tutorialTerms,
 }: {
   receipt: Receipt;
   session: Session;
   run: Run;
   admin: boolean;
   terms: EvidenceTerms | null;
+  tutorialTerms: EvidenceTerms | null;
 }) {
   const [decision, setDecision] = useState("reject");
   const { errors, showErrors } = useControlFormErrors();
@@ -218,7 +237,7 @@ function ReceiptCard({
         <pre>{JSON.stringify(r.history, null, 2)}</pre>
       </details>
       {own && r.kind === "evidence" && !["withdrawn", "merged"].includes(r.status) && (
-        <Amendment receipt={r} categories={categories} terms={terms} run={run} />
+        <Amendment receipt={r} categories={categories} terms={terms} tutorialTerms={tutorialTerms} run={run} />
       )}
       {own && r.kind === "evidence" && r.status === "accepted" && r.intakeEligibility?.state === "eligible" && (
         <form
@@ -350,6 +369,7 @@ export function ControlsApp() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [invitations, setInvitations] = useState<EvidenceInvitation[]>([]);
   const [terms, setTerms] = useState<EvidenceTerms | null>(null);
+  const [tutorialTerms, setTutorialTerms] = useState<EvidenceTerms | null>(null);
   const [termsError, setTermsError] = useState("");
   const [configuration, setConfiguration] = useState<unknown>(null);
   const [nominations, setNominations] = useState<Nomination[]>([]);
@@ -377,6 +397,7 @@ export function ControlsApp() {
     setReceipts([]);
     setInvitations([]);
     setTerms(null);
+    setTutorialTerms(null);
     setTermsError("");
     setConfiguration(null);
     setProfile(null);
@@ -395,12 +416,20 @@ export function ControlsApp() {
         control<{ requests: Receipt[] }>("/controls/requests"),
         control<{ invitations: typeof invitations }>("/controls/invitations"),
         control<{ nominations: Nomination[] }>("/controls/spotlights/queue"),
-        control<{ terms: unknown }>("/controls/evidence-terms")
-          .then((result) => ({ terms: verifiedEvidenceTerms(result.terms), error: "" }))
+        control<{ terms: unknown; externalTutorialTerms?: unknown }>("/controls/evidence-terms")
+          .then((result) => ({
+            terms: verifiedEvidenceTerms(result.terms),
+            tutorialTerms:
+              result.externalTutorialTerms === undefined
+                ? null
+                : verifiedExternalTutorialTerms(result.externalTutorialTerms),
+            error: "",
+          }))
           .catch((error: unknown) => {
             if (error instanceof ControlsFailure && [401, 403].includes(error.status)) throw error;
             return {
               terms: null,
+              tutorialTerms: null,
               error:
                 "Current submission terms could not be loaded. Reload before submitting or amending evidence. Other requests, decline and withdrawal remain available.",
             };
@@ -428,6 +457,7 @@ export function ControlsApp() {
       setReceipts(r.requests);
       setInvitations(i.invitations);
       setTerms(evidenceTerms.terms);
+      setTutorialTerms(evidenceTerms.tutorialTerms);
       setTermsError(evidenceTerms.error);
       setConfiguration(c);
       return true;
@@ -561,7 +591,7 @@ export function ControlsApp() {
               {!admin && (
                 <>
                   {profile && <Profile run={run} profile={profile} />}
-                  <RequestForm run={run} actorId={session.actorId} terms={terms} />
+                  <RequestForm run={run} actorId={session.actorId} terms={terms} tutorialTerms={tutorialTerms} />
                   <section>
                     <h2>Attribution invitations</h2>
                     {invitations.length === 0 && <p>No invitations.</p>}
@@ -590,6 +620,7 @@ export function ControlsApp() {
                       run={run}
                       admin={admin}
                       terms={terms}
+                      tutorialTerms={tutorialTerms}
                     />
                   ))}
               </section>
