@@ -131,6 +131,58 @@ It must be synchronous; a thrown error or a returned thenable rolls back the
 transaction. Configuration activation uses that boundary for its final authority
 check and rejects publisher changes to its expected configuration/audit state.
 
+## Optional presentation on an ordinary contributor profile
+
+The public contributor response can carry a separate, nullable `presentation`
+object with version `public-profile-presentation/v1`, the selected numeric
+`actorId`, a bounded plain-text `bio`, and up to six ordered `highlights` URLs.
+This object does not alter the frozen `Actor` schema, metric results, evidence,
+reviewed participation history or independently selected editorial spotlights.
+The displayed links are contributor-provided references, not verified evidence
+or earned recognition. The renderer treats the bio as text and does not fetch
+link previews or interpret Markdown or HTML.
+
+The pipeline's optional `readProfile(scope, snapshotId, actorId, signal)` selects
+at most one account's current saved profile. The requested ID is only a selector:
+publication visibility, resolved numeric GitHub database identity, current
+public opt-in and current suppression must all permit the returned text. A shared
+login or node-only identity cannot bind this account-owned presentation. The
+read uses the same source authorization and final controls check after the read
+transaction as the ordinary public projection, including for a historical
+snapshot. It does not write controls, mutate a publication or join private
+profiles into the contributor directory. Changing the optional presentation
+changes the profile response's existing ETag; an old ETag does not authorize
+retaining text after withdrawal. The complete envelope remains subject to the
+existing profile response-byte and timeline-page limits.
+
+Profile saves admit canonical HTTPS `github.com/owner/repository` links under
+the existing public URL rule: no credentials, query, unsupported fragment,
+foreign origin or nondefault port. Supported issue/review/comment anchors remain
+available. This validates URL shape, not upstream visibility, source rights or
+link content. An invalid save rejects the whole mutation. Existing stored text
+or links outside the new presentation schema are left unchanged and the whole
+optional presentation is withheld from this ordinary profile until corrected;
+this does not rewrite historical controls output or editorial spotlight data.
+Generic evidence/request locator behavior is unchanged.
+
+A legacy source may omit `readProfile` and the optional field; the current
+service and client then retain the ordinary contribution profile with
+`presentation: null`. A present malformed field fails with a fixed projection
+error. A valid field for a different numeric actor is never attached to the
+selected profile. The existing client refresh, navigation, hidden-document and
+request-cancellation boundaries also retire the optional section and its links.
+The older web parser selects known outer response fields, but this additive
+change is not a compatibility claim for every external client.
+
+The contract, controls, pipeline and service `profile-presentation` suites,
+web `profile-binding` suite and browser `profile-presentation` suite specify the
+synthetic validation boundaries. They include exact Unicode, link admission,
+owner/CSRF denial, immutable snapshots, reopened SQLite storage, a controls
+change at the real read COMMIT boundary, old ETags, missing legacy fields and
+late browser responses. Synthetic sessions and source fixtures establish no live
+OAuth grant, real participant consent, deployed accessibility acceptance or
+production-wide suppression. The remaining release evidence below still applies.
+
 ## Validation and remaining acceptance
 
 Run `node --test apps/controls/test/controls.test.mjs` or the root test command. `npm run build --workspace @pick-your-ai/controls` checks JavaScript syntax; no TypeScript typecheck is claimed. Tests exercise actual loopback HTTP requests and SQLite files with fictional identities/provider responses: callback/state/PKCE/replay, fixation/expiry/revocation, direct role/CSRF bypass attempts, ownership and private receipt boundaries, collaborator declines, independent review/appeal/rollback/duplicate handling, withdrawal, suppression, reopened storage and transactional publisher failure. Provider tests assert exact endpoints, no requested scope, rejection of broader returned scopes, bounded responses, redirect policy and token revocation. Synthetic reviews do not establish real source rights or metric approval.

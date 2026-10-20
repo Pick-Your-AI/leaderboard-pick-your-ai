@@ -129,3 +129,62 @@ test("profile binds every legacy result metric without depending on the optional
     rejects(value, selected, "api_filter_mismatch");
   }
 });
+
+function presentationInput() {
+  const input = readFixture();
+  for (const entry of input.selected.actors) entry.actor.githubDatabaseId = Number(entry.actorId);
+  input.presentation = {
+    schemaVersion: "public-profile-presentation/v1",
+    actorId: "101",
+    bio: "Synthetic cafe\u0301 日本語 & plain text",
+    highlights: ["https://github.com/synthetic/repo/issues/1#issuecomment-2"],
+  };
+  return input;
+}
+
+test("profile parses exact optional presentation while absent legacy and explicit null remain compatible", async (t) => {
+  const input = presentationInput();
+  const value = await response(t, input);
+  assert.deepEqual(parseUnchanged(value, selected).presentation, input.presentation);
+  const older = structuredClone(value);
+  delete older.presentation;
+  assert.equal(parseUnchanged(older, selected).presentation, null);
+  older.presentation = null;
+  assert.equal(parseUnchanged(older, selected).presentation, null);
+  const parsed = parseUnchanged(value, selected);
+  parsed.presentation.highlights.push("https://github.com/synthetic/another-repo");
+  assert.deepEqual(value.presentation, input.presentation);
+});
+
+test("profile rejects malformed present optional fields without falling back to legacy absence", async (t) => {
+  const original = await response(t, presentationInput());
+  for (const presentation of [
+    undefined,
+    { ...original.presentation, schemaVersion: "unknown/v1" },
+    { ...original.presentation, privateReceipt: "PRIVATE_INPUT_MARKER" },
+    { ...original.presentation, bio: "otherwise safe\n" },
+    { ...original.presentation, bio: "<img src=x onerror=alert(1)>" },
+    { ...original.presentation, highlights: ["javascript:alert(1)"] },
+    { ...original.presentation, highlights: ["https://github.com/synthetic/repo?secret=1"] },
+  ])
+    rejects({ ...structuredClone(original), presentation }, selected, "invalid_profile_presentation");
+});
+
+test("profile optional text binds the actual numeric actor even when login and node strings coincide", async (t) => {
+  const original = await response(t, presentationInput());
+  for (const change of [
+    (value) => {
+      value.presentation.actorId = "102";
+    },
+    (value) => {
+      value.actor.githubDatabaseId = 102;
+    },
+    (value) => {
+      delete value.actor.githubDatabaseId;
+    },
+  ]) {
+    const value = structuredClone(original);
+    change(value);
+    rejects(value, selected, "api_actor_mismatch");
+  }
+});

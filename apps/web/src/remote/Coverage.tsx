@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { compareSourceInstants, type Coverage } from "@pick-your-ai/contracts";
+import { ContributionPolicies } from "./ContributionPolicies.tsx";
 
 const pageSize = 20;
 function Instant({ value }: { value: string | null }) {
@@ -59,6 +60,7 @@ export function SnapshotCoverage({
         not supply a total expected source population. Zero known missing pages alone does not establish complete
         coverage or zero activity.
       </p>
+      <ContributionPolicies />
       <dl>
         <dt>Observed since</dt>
         <dd>
