@@ -322,3 +322,370 @@ test("recent windows, malformed new identities and old gc2 choices never select 
   assert.equal(admission.allows({ ...request(), runId: "gc2:" + request().runId }), false);
   assert.equal(admission.allows({ ...request(), runId: "gce1:" + request().runId }), false);
 });
+
+const selectComments = (input = request(), guard = () => {}) =>
+  startGithubContentEditRun(db, collection, input, guard, true);
+const allSaved = async () =>
+  (await db.query("SELECT * FROM leaderboard_ingestion.collection_runs ORDER BY run_id")).rows;
+const retainedContent = async () => ({
+  facts: (await db.query("SELECT * FROM leaderboard_ingestion.source_facts ORDER BY fact_key")).rows,
+  items: (await db.query("SELECT * FROM leaderboard_ingestion.collection_items ORDER BY run_id,fact_key")).rows,
+  pages: (await db.query("SELECT * FROM leaderboard_ingestion.collection_pages ORDER BY run_id,page_number")).rows,
+});
+const legacyPage = (subjectId, nextCursor) => ({
+  repositoryId: 2,
+  visibility: "public",
+  nextCursor,
+  expectedCount: 2,
+  facts: [
+    {
+      subjectId,
+      sourceRevision: "synthetic-retained-inventory-v1",
+      sourceUrl: `https://github.com/${repository.slug}/issues/11`,
+      evidence: "current_state",
+      actorId: null,
+      occurredAt: null,
+      state: "present",
+    },
+  ],
+});
+
+test("comment metadata v2 changes only the enabled content context and preserves the supplied gc2 context", () => {
+  const comments = githubCommentsContext([3, null, [{ repositoryId: 2, generation: "1" }]], true);
+  const before = structuredClone(comments);
+  assert.deepEqual(githubContentEditsContext(comments, true, true), [...comments, "github-content-edits/metadata-v2"]);
+  assert.deepEqual(githubContentEditsContext(comments, true, false), [...comments, "github-content-edits/metadata-v1"]);
+  assert.equal(githubContentEditsContext(comments, false, true), comments);
+  assert.deepEqual(comments, before);
+  for (const invalid of [null, "true", 1])
+    assert.throws(() => githubContentEditsContext(comments, true, invalid), /invalid_content_edit_inventory_context/);
+});
+
+test("fresh comment inventories converge on gce2 and admit only the captured complete tuple", async () => {
+  const input = request("fresh-comment-inventory");
+  const [chosen, concurrent] = await Promise.all([selectComments(input), selectComments(input)]);
+  assert.deepEqual(concurrent, chosen);
+  assert.deepEqual(chosen, { ...input, runId: "gce2:" + input.runId });
+  assert.equal(Object.isFrozen(chosen), true);
+  assert.equal(await count(), 1);
+  assert.equal(await saved(input.runId), undefined);
+  assert.equal(await saved("gce1:" + input.runId), undefined);
+
+  const admission = createGithubContentEditAdmission();
+  assert.equal(admission.allows(chosen), false);
+  assert.equal(admission.allowsComments(chosen), false, "a parseable gce2 prefix alone is not admission");
+  const supplied = { ...chosen };
+  assert.equal(admission.recordSelected(supplied), true);
+  supplied.until = "2026-10-02T12:00:00.000Z";
+  assert.equal(admission.allows(chosen), true);
+  assert.equal(admission.allowsComments(chosen), true);
+  for (const changed of [
+    supplied,
+    { ...chosen, repositoryId: 3 },
+    { ...chosen, family: "comments" },
+    { ...chosen, mode: "backfill" },
+    { ...chosen, runId: "gce2:" + hash("different-operation") },
+    { ...chosen, runId: "gce1:" + input.runId },
+  ]) {
+    assert.equal(admission.allows(changed), false);
+    assert.equal(admission.allowsComments(changed), false);
+  }
+  assert.throws(() => admission.recordSelected(supplied), /invalid_content_edit_inventory_request/);
+  assert.equal(admission.allowsComments(chosen), true, "a conflicting tuple does not overwrite its prior admission");
+  admission.clear();
+  assert.equal(admission.allows(chosen), false);
+  assert.equal(admission.allowsComments(chosen), false);
+});
+
+for (const prefix of ["", "gce1:"])
+  for (const state of ["pending", "failed", "complete"])
+    test(`v2 selection preserves the exact ${prefix || "legacy"} ${state} row, cursor and observations`, async () => {
+      const input = request(`retained-${prefix}-${state}`);
+      const retained = { ...input, runId: prefix + input.runId };
+      await collection.start(retained);
+      assert.equal(
+        await collection.step(
+          retained.runId,
+          { readPage: async () => legacyPage("I_RETAINED_11", "retained:page-2") },
+          1,
+        ),
+        "progress",
+      );
+      if (state === "failed")
+        assert.equal(
+          await collection.step(retained.runId, {
+            readPage: async () => {
+              throw new Error("synthetic retained source unavailable");
+            },
+          }),
+          "failed",
+        );
+      if (state === "complete")
+        assert.equal(
+          await collection.step(
+            retained.runId,
+            {
+              readPage: async (selected) => {
+                assert.equal(selected.cursor, "retained:page-2");
+                return legacyPage("I_RETAINED_12", null);
+              },
+            },
+            1,
+          ),
+          "complete",
+        );
+      const before = await saved(retained.runId);
+      const content = await retainedContent();
+      assert.equal(before.state, state);
+      assert.equal(before.cursor, state === "complete" ? null : "retained:page-2");
+      assert.equal(before.page_count, state === "complete" ? 2 : 1);
+      assert.equal(before.item_count, state === "complete" ? 2 : 1);
+      assert.equal(before.expected_count, 2);
+      if (state === "failed") assert.equal(before.reason, "source_read_failed");
+
+      const chosen = await startGithubContentEditRun(db, new CollectionStore(db), input, () => {}, true);
+      assert.deepEqual(chosen, retained);
+      const admission = createGithubContentEditAdmission();
+      assert.equal(admission.recordSelected(chosen), prefix === "gce1:");
+      assert.equal(admission.allows(chosen), prefix === "gce1:");
+      assert.equal(admission.allowsComments(chosen), false);
+      if (state === "complete")
+        assert.equal(
+          await collection.step(chosen.runId, {
+            readPage() {
+              throw new Error("completed retained inventory must not be recollected");
+            },
+          }),
+          "complete",
+        );
+      assert.deepEqual(await saved(retained.runId), before);
+      assert.deepEqual(await retainedContent(), content);
+      assert.equal(await saved("gce2:" + input.runId), undefined);
+      assert.equal(await count(), 1);
+    });
+
+test("an existing gce2 selection wins over later legacy and gce1 rows without rewriting any row", async () => {
+  const input = request("retained-gce2-precedence");
+  const chosen = await selectComments(input);
+  assert.equal(await collection.step(chosen.runId, empty), "complete");
+  await collection.start(input);
+  await collection.start({ ...input, runId: "gce1:" + input.runId });
+  const rows = await allSaved();
+  const content = await retainedContent();
+  assert.deepEqual(await selectComments(input), chosen);
+  assert.deepEqual(await allSaved(), rows);
+  assert.deepEqual(await retainedContent(), content);
+  assert.equal(await count(), 3);
+  const admission = createGithubContentEditAdmission();
+  admission.recordSelected(chosen);
+  assert.equal(admission.allowsComments(chosen), true);
+});
+
+test("a parent-only helper rejects an existing gce2 format without allocating a parallel parent run", async () => {
+  const input = request("parent-helper-cannot-downgrade");
+  const chosen = await selectComments(input);
+  const before = await saved(chosen.runId);
+  await assert.rejects(select(input), /content_edit_inventory_format_unavailable/);
+  assert.deepEqual(await saved(chosen.runId), before);
+  assert.equal(await saved(input.runId), undefined);
+  assert.equal(await saved("gce1:" + input.runId), undefined);
+  assert.equal(await count(), 1);
+});
+
+for (const commentsFirst of [false, true])
+  test(`concurrent ${commentsFirst ? "gce2-first" : "gce1-first"} requests share the gce1 advisory key and keep one winner`, async () => {
+    const input = request(`shared-lock-${commentsFirst}`);
+    const locked = Promise.withResolvers();
+    const release = Promise.withResolvers();
+    const locks = [];
+    const orderedDb = (label) => ({
+      transaction: (work) =>
+        db.transaction((tx) =>
+          work({
+            async query(sql, values) {
+              const result = await tx.query(sql, values);
+              if (sql.includes("pg_advisory_xact_lock(hashtextextended")) {
+                locks.push({ label, key: values[0] });
+                if (label === "first") {
+                  locked.resolve();
+                  await release.promise;
+                }
+              }
+              return result;
+            },
+          }),
+        ),
+    });
+    const first = startGithubContentEditRun(orderedDb("first"), collection, input, () => {}, commentsFirst);
+    await locked.promise;
+    const second = startGithubContentEditRun(orderedDb("second"), collection, input, () => {}, !commentsFirst);
+    const completion = Promise.allSettled([first, second]);
+    release.resolve();
+    const [firstResult, secondResult] = await completion;
+    assert.equal(firstResult.status, "fulfilled");
+    const expectedId = `${commentsFirst ? "gce2" : "gce1"}:${input.runId}`;
+    assert.equal(firstResult.value.runId, expectedId);
+    if (commentsFirst) {
+      assert.equal(secondResult.status, "rejected");
+      assert.match(secondResult.reason.message, /content_edit_inventory_format_unavailable/);
+    } else {
+      assert.equal(secondResult.status, "fulfilled");
+      assert.deepEqual(secondResult.value, firstResult.value);
+    }
+    assert.deepEqual(locks, [
+      { label: "first", key: "gce1:" + input.runId },
+      { label: "second", key: "gce1:" + input.runId },
+    ]);
+    assert.equal(await count(), 1);
+    assert.equal((await saved(expectedId)).state, "pending");
+    assert.equal((await saved(expectedId)).page_count, 0);
+    assert.equal(await saved(input.runId), undefined);
+    assert.equal(await saved(`${commentsFirst ? "gce1" : "gce2"}:${input.runId}`), undefined);
+  });
+
+test("v2 tuple conflicts and every authorization fence preserve retained rows and roll back new allocation", async () => {
+  const input = request("v2-conflicts");
+  await selectComments(input);
+  await db.query(
+    "INSERT INTO leaderboard_ingestion.repository_access(repository_id,installation_id,state) VALUES(3,1,'public')",
+  );
+  const rows = await allSaved();
+  for (const changed of [
+    { ...input, repositoryId: 3 },
+    { ...input, mode: "backfill" },
+    { ...input, until: "2026-10-02T12:00:00.000Z" },
+  ]) {
+    await assert.rejects(selectComments(changed), /scan_id_conflict/);
+    assert.deepEqual(await allSaved(), rows);
+  }
+  for (const changed of [
+    { ...input, family: "comments" },
+    { ...input, since: "2026-09-01T00:00:00.000Z" },
+    { ...input, runId: input.runId + "\n" },
+  ]) {
+    await assert.rejects(selectComments(changed), /invalid_content_edit_inventory_request/);
+    assert.deepEqual(await allSaved(), rows);
+  }
+  for (const failedFence of [1, 2, 3]) {
+    let calls = 0;
+    await assert.rejects(
+      selectComments(request(`v2-revoked-at-${failedFence}`), () => {
+        if (++calls === failedFence) throw new Error("synthetic comment inventory authorization withdrawn");
+      }),
+      /authorization withdrawn/,
+    );
+    assert.equal(calls, failedFence);
+    assert.deepEqual(await allSaved(), rows);
+  }
+  await db.query(
+    "UPDATE leaderboard_ingestion.repository_access SET state='unavailable',generation=generation+1 WHERE repository_id=2",
+  );
+  await assert.rejects(selectComments(request("v2-source-revoked")), /repository_unverified/);
+  assert.deepEqual(await allSaved(), rows);
+});
+
+test("an actual v1 to v2 continuation change supersedes the old plan while preserving all retained collection bytes", async () => {
+  const comments = githubCommentsContext([3, null, [{ repositoryId: 2, generation: "1" }]], true);
+  const previousRequest = {
+    key: hash("same approved content configuration"),
+    contextHash: hash(githubContentEditsContext(comments, true, false)),
+    cutoff,
+    sources: [{ repositoryId: 2, generation: "1" }],
+  };
+  const currentRequest = {
+    ...previousRequest,
+    contextHash: hash(githubContentEditsContext(comments, true, true)),
+  };
+  const repositories = [{ ...repository, installationId: 1, families: ["comments", "content_edits"] }];
+  const policy = { lookbackMs: 86400000, overlapMs: 1000, fullAuditsPerCycle: 2 };
+  const prepare = (tx, scan, { fresh }) =>
+    prepareReconciliationPlan(tx, {
+      scan,
+      repositories,
+      policy,
+      fresh,
+      startInTransaction: (session, selected) => collection.startInTransaction(session, selected),
+      readProgress: readReconciliationProgress,
+    });
+  const store = new ScanContinuationStore(db);
+  const previous = await store.claim(
+    previousRequest,
+    () => {},
+    () => cutoff,
+    () => [],
+    prepare,
+  );
+  assert.equal(previous.plan.length, 2);
+  const previousContent = previous.plan.find((entry) => entry.family === "content_edits");
+  assert.equal(
+    await collection.step(
+      previousContent.runId,
+      { readPage: async () => legacyPage("I_OLD_PLAN_11", "old-plan:page-2") },
+      1,
+    ),
+    "progress",
+  );
+  const previousRows = await allSaved();
+  const previousObservations = await retainedContent();
+  const admission = createGithubContentEditAdmission();
+  admission.setPlanned(previous, previous.plan, false);
+  assert.equal(admission.allows(previousContent), true);
+  assert.equal(admission.allowsComments(previousContent), false);
+
+  const nextCutoff = "2026-10-02T12:00:00.000Z";
+  const current = await store.claim(
+    currentRequest,
+    () => {},
+    () => nextCutoff,
+    () => [],
+    prepare,
+  );
+  assert.equal(current.key, previous.key);
+  assert.notEqual(current.token, previous.token);
+  assert.equal(current.cutoff, nextCutoff);
+  assert.notEqual(reconciliationContextDigest(current), reconciliationContextDigest(previous));
+  assert.equal(current.plan.length, 2);
+  assert.equal(await count(), 4);
+  for (const row of previousRows) assert.deepEqual(await saved(row.run_id), row);
+  assert.deepEqual(await retainedContent(), previousObservations);
+  const currentContent = current.plan.find((entry) => entry.family === "content_edits");
+  assert.notEqual(currentContent.runId, previousContent.runId);
+  for (const entry of current.plan) {
+    assert.equal(entry.until, nextCutoff);
+    assert.equal((await saved(entry.runId)).state, "pending");
+    assert.equal((await saved(entry.runId)).page_count, 0);
+  }
+  admission.setPlanned(current, current.plan, true);
+  assert.equal(admission.allows(currentContent), true);
+  assert.equal(admission.allowsComments(currentContent), true);
+  assert.equal(admission.allows(previousContent), false);
+  assert.equal(admission.allowsComments(previousContent), false);
+  assert.equal(admission.allowsComments(current.plan.find((entry) => entry.family === "comments")), false);
+  await assert.rejects(
+    store.freeze(previous, "2026-10-03T12:00:00.000Z", () => {}),
+    ScanSupersededError,
+  );
+  const beforeResume = await allSaved();
+  const resumed = await store.claim(
+    currentRequest,
+    () => {},
+    () => {
+      throw new Error("resume must use its saved v2 cutoff");
+    },
+    () => [],
+    prepare,
+  );
+  assert.deepEqual(resumed, current);
+  assert.deepEqual(await allSaved(), beforeResume);
+  assert.deepEqual(await retainedContent(), previousObservations);
+  const restartedAdmission = createGithubContentEditAdmission();
+  restartedAdmission.setPlanned(resumed, resumed.plan, true);
+  assert.equal(restartedAdmission.allowsComments(currentContent), true);
+  assert.throws(
+    () => restartedAdmission.setPlanned({ ...resumed, contextHash: previous.contextHash }, resumed.plan, true),
+    /invalid_content_edit/,
+  );
+  assert.equal(restartedAdmission.allows(currentContent), false);
+  assert.equal(restartedAdmission.allowsComments(currentContent), false);
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.scan_continuations")).rows[0].n, 1);
+});
