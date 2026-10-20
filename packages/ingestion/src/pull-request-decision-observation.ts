@@ -155,7 +155,7 @@ export function collectionPullRequestDecisionObservation(
   family: string,
   repositoryId: number,
 ): PullRequestDecisionObservation | undefined {
-  if (!value || typeof value !== "object") return undefined;
+  if (!value || (typeof value !== "object" && typeof value !== "function")) return undefined;
   // Legacy facts may inherit ordinary fields. Inspect a bounded prototype chain
   // without property reads or inherited "in" checks, rejecting proxies before
   // any reflection can invoke their traps, including revoked proxies.
@@ -167,7 +167,7 @@ export function collectionPullRequestDecisionObservation(
     current = Object.getPrototypeOf(current);
   }
   if (!hasDecisionHistory) return undefined;
-  if (![Object.prototype, null].includes(Object.getPrototypeOf(value))) return invalid();
+  if (typeof value !== "object" || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return invalid();
   const names = [
     "subjectId",
     "sourceRevision",

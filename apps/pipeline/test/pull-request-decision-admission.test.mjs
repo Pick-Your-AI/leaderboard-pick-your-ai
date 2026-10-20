@@ -4,6 +4,7 @@ import { capturePullRequestDecisionHistory, validatePullRequestDecisionHistory }
 import { compareSourceInstants } from "@pick-your-ai/contracts";
 import {
   assertPullRequestDecisionPersistence,
+  collectionPullRequestDecisionObservation,
   parsePullRequestDecisionObservation,
   pullRequestDecisionObservationVersion,
   pullRequestDecisionProducerBinding,
@@ -482,7 +483,7 @@ test(
     );
     const legacy = fact(observation);
     delete legacy.pullRequestDecisionHistory;
-    for (const position of ["outer", "prototype", "ancestor"]) {
+    for (const position of ["outer", "prototype", "ancestor", "callable"]) {
       for (const revoked of [false, true]) {
         const label = position + (revoked ? "-revoked" : "-trapping");
         await t.test(label, async () => {
@@ -491,8 +492,8 @@ test(
             hooks++;
             throw new Error("synthetic proxy hook must not run");
           };
-          const candidate = { ...legacy };
-          const pair = Proxy.revocable(position === "outer" ? candidate : {}, {
+          const candidate = position === "callable" ? Object.assign(() => {}, legacy) : { ...legacy };
+          const pair = Proxy.revocable(position === "outer" || position === "callable" ? candidate : {}, {
             get: trap,
             has: trap,
             ownKeys: trap,
@@ -501,7 +502,7 @@ test(
           });
           if (revoked) pair.revoke();
           let value = pair.proxy;
-          if (position !== "outer") {
+          if (position !== "outer" && position !== "callable") {
             Object.setPrototypeOf(candidate, position === "prototype" ? pair.proxy : Object.create(pair.proxy));
             value = candidate;
           }
@@ -519,8 +520,9 @@ test(
         });
       }
     }
-    for (const kind of ["plain", "accessor", "inherited"]) {
-      const value = { ...legacy, subjectId: legacy.subjectId + "_" + kind };
+    for (const kind of ["plain", "accessor", "inherited", "callable"]) {
+      const fields = { ...legacy, subjectId: legacy.subjectId + "_" + kind };
+      const value = kind === "callable" ? Object.assign(() => {}, fields) : fields;
       let reads = 0;
       if (kind === "accessor") {
         Object.defineProperty(value, "sourceRevision", {
@@ -545,5 +547,16 @@ test(
       assert.deepEqual(await counts(h.db, scan.runId), { facts: 1, items: 1, pages: 1 });
       assert.equal(reads, kind === "accessor" ? 2 : 0);
     }
+    // A callable cannot become a marked object by copying its own-field shape.
+    const marked = fact(observation);
+    assert.deepEqual(collectionPullRequestDecisionObservation(marked, "pull_requests", 2), observation);
+    const markedCallable = Object.assign(() => {}, marked);
+    delete markedCallable.name;
+    delete markedCallable.length;
+    Object.setPrototypeOf(markedCallable, Object.prototype);
+    assert.deepEqual(Reflect.ownKeys(markedCallable).sort(), Reflect.ownKeys(marked).sort());
+    assert.throws(() => collectionPullRequestDecisionObservation(markedCallable, "pull_requests", 2), {
+      message: "invalid_pull_request_decision_observation",
+    });
   },
 );
