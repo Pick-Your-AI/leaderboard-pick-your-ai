@@ -6,6 +6,7 @@ import { webhookDispatchVersion } from "../src/webhook-dispatch.mjs";
 import { components, publicScope } from "./harness.mjs";
 import { physicalSource } from "./fixtures/physical-context.mjs";
 import { operatorAllow, publishedOperatorReplay } from "./operator-harness.mjs";
+import { helpScenario, publicHelpFixture } from "../../../tests/fixtures/workstream-help.mjs";
 
 const digest = (value) => createHash("sha256").update(components.metrics.stableJSON(value)).digest("hex");
 
@@ -69,6 +70,15 @@ test("operator replay verifies captured physical and presentation fields and rej
         signature: components.metrics.stableJSON(policy),
         approvalReceipt: "synthetic-physical-policy",
       });
+      const help = helpScenario();
+      help.binding.workstreamHelp.records = [];
+      config.recognitionBindings = [help.binding];
+      const helpPolicy = help.policies[0].policy;
+      config.policies.push({
+        policy: helpPolicy,
+        signature: components.metrics.stableJSON(helpPolicy),
+        approvalReceipt: "synthetic-empty-help-policy",
+      });
     },
     enrichmentFactory(client, slug) {
       return async (input) => {
@@ -88,6 +98,7 @@ test("operator replay verifies captured physical and presentation fields and rej
   assert.equal(saved.document.physicalContexts.length, 1);
   assert.equal(saved.document.physicalContexts[0].state, "available");
   assert.equal(saved.document.physicalEvidence.length, 1);
+  assert.deepEqual(saved.document.reviewedWorkstreamHelp, []);
   assert.equal(
     saved.document.physicalContexts[0].samples[0].mergedEvidenceId,
     saved.document.physicalEvidence[0].contribution.contributionId,
@@ -114,7 +125,12 @@ test("operator replay verifies captured physical and presentation fields and rej
       saved.snapshot_id,
     ]);
   try {
-    for (const field of ["rankingPresentationPolicy", "physicalContexts", "physicalEvidence"]) {
+    for (const field of [
+      "rankingPresentationPolicy",
+      "physicalContexts",
+      "physicalEvidence",
+      "reviewedWorkstreamHelp",
+    ]) {
       const changed = structuredClone(saved.document);
       delete changed[field];
       assert.notEqual(digest(changed), saved.document_hash);
@@ -140,7 +156,7 @@ test("operator replay verifies captured physical and presentation fields and rej
   assert.deepEqual(h.githubReads, reads, "hash verification does not collect or replace retained source evidence");
 });
 
-test("legacy operator content keeps absent optional fields absent and does not accept injected captured bytes", async () => {
+async function verifyOperatorContent(capturedHelp) {
   // A fixed synthetic legacy content contract supplies the old ID independently
   // of the verifier. Ledger/authorization collaborators are bounded stubs here;
   // the preceding case exercises the actual persisted source and replay path.
@@ -154,6 +170,7 @@ test("legacy operator content keeps absent optional fields absent and does not a
     evidence: [],
     portfolioEvidence: [],
     pendingEvidence: [],
+    ...(capturedHelp === null ? {} : { reviewedWorkstreamHelp: capturedHelp }),
     ranking: [],
     diagnostics: [],
     methodology: [],
@@ -173,6 +190,7 @@ test("legacy operator content keeps absent optional fields absent and does not a
     evidence: [],
     portfolioEvidence: [],
     pendingEvidence: [],
+    ...(capturedHelp === null ? {} : { reviewedWorkstreamHelp: capturedHelp }),
     ranking: [],
     diagnostics: [],
     methodology: [],
@@ -288,11 +306,34 @@ test("legacy operator content keeps absent optional fields absent and does not a
     ["rankingPresentationPolicy", components.contracts.currentRankingPresentationPolicy],
     ["physicalContexts", []],
     ["physicalEvidence", []],
+    ["reviewedWorkstreamHelp", []],
   ]) {
-    document = { ...structuredClone(original), [field]: structuredClone(value) };
+    document = structuredClone(original);
+    if (Object.hasOwn(document, field)) delete document[field];
+    else document[field] = structuredClone(value);
     assert.notEqual(digest(document), digest(original));
     assert.equal(await verifyLegacy(), null, `${field}: adding bytes cannot preserve a legacy content ID`);
   }
+  if (capturedHelp !== null) {
+    document = {
+      ...structuredClone(original),
+      reviewedWorkstreamHelp: capturedHelp.length ? [] : publicHelpFixture(1).selected.reviewedWorkstreamHelp,
+    };
+    assert.notEqual(digest(document), digest(original));
+    assert.equal(await verifyLegacy(), null, "changing captured help cannot preserve its content ID");
+  }
   document = structuredClone(original);
   assert.equal((await verifyLegacy())(), true);
+}
+
+test("legacy operator content keeps absent optional fields absent and does not accept injected captured bytes", async () => {
+  await verifyOperatorContent(null);
+});
+
+test("operator content verifies captured empty help and rejects its removal or replacement", async () => {
+  await verifyOperatorContent([]);
+});
+
+test("operator content verifies captured reviewed help and rejects its removal or replacement", async () => {
+  await verifyOperatorContent(publicHelpFixture(1).selected.reviewedWorkstreamHelp);
 });
