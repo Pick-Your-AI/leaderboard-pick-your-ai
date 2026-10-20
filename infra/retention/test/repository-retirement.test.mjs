@@ -408,9 +408,7 @@ test("native receipts complete only the owned components and replay exactly afte
           if (sql.includes("SELECT * FROM leaderboard_ingestion.erase_collected_source_batch")) sourceReplay = true;
           if (
             sourceReplayed &&
-            sql.includes(
-              "FROM leaderboard_ingestion.collection_erasure_batches WHERE operation_id=$1 AND batch_id=$2",
-            )
+            sql.includes("FROM leaderboard_ingestion.collection_erasure_batches WHERE operation_id=$1 AND batch_id=$2")
           )
             progressRead = true;
           return result;
