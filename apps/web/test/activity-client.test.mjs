@@ -276,23 +276,49 @@ test("burst decoding rejects unknown versions and contradictory wrapper, member,
     { previewGroups: [groups[0], groups[0], ...groups.slice(2, 5)] },
   ])
     assert.throws(() => activityBursts({ ...compactBase, bursts: [{ ...burst, ...patch }], totalBursts: 1 }, selected));
-  for (const patch of [
-    { actorId: "bob" },
-    { actor: { ...group.actor, login: "different-person" } },
-    { activityState: "accepted" },
-    { groupId: groups[0].groupId },
-    { repositoryId: groups[0].repositoryId },
-    { latestOccurredAt: "2026-10-17T13:00:00.000Z", earliestOccurredAt: "2026-10-17T13:00:00.000Z" },
-    { categoryIds: ["documentation"] },
-    { artifactPreview: [{ ...groups[6].artifactPreview[0], publicUrl: "https://evil.invalid" }] },
+  const detailSelection = { ...selected, category: null, cursor: "continuation.signature" };
+  const detailBase = { ...compactBase, category: null, burst };
+  for (const index of [6, 0])
+    assert.deepEqual(
+      activityBurstDetail({ ...detailBase, groups: [groups[index]] }, detailSelection).groups,
+      [groups[index]],
+      `valid continuation group ${index}`,
+    );
+  for (const [label, patch, code = "invalid_activity_burst_response"] of [
+    ["different contributor", { actorId: "bob", actor: { ...group.actor, githubNodeId: "bob", login: "bob" } }],
+    ["changed actor profile", { actor: { ...group.actor, login: "different-person" } }],
+    ["different activity state", { activityState: "accepted" }],
+    ["preview group identity collision", { groupId: groups[0].groupId }],
+    ["preview repository collision", { repositoryId: groups[0].repositoryId }],
+    [
+      "member outside burst time range",
+      { latestOccurredAt: "2026-10-17T13:00:00.000Z", earliestOccurredAt: "2026-10-17T13:00:00.000Z" },
+    ],
+    ["category outside burst", { categoryIds: ["documentation"] }],
+    [
+      "upstream group URL rejection",
+      { artifactPreview: [{ ...groups[6].artifactPreview[0], publicUrl: "https://evil.invalid" }] },
+      "invalid_activity_response",
+    ],
   ])
-    assert.throws(() => activityBurstDetail({ ...compactBase, burst, groups: [{ ...groups[6], ...patch }] }, selected));
+    assert.throws(
+      () => activityBurstDetail({ ...detailBase, groups: [{ ...groups[6], ...patch }] }, detailSelection),
+      { code },
+      label,
+    );
   // Reusing a preview's durable identity with changed content must also fail.
-  for (const patch of [
-    { proofCount: 2 },
-    { artifactPreview: [{ ...groups[0].artifactPreview[0], artifactId: "other" }] },
+  for (const [label, patch] of [
+    ["changed preview proof count", { proofCount: 2 }],
+    [
+      "changed preview artifact identity",
+      { artifactPreview: [{ ...groups[0].artifactPreview[0], artifactId: "other" }] },
+    ],
   ])
-    assert.throws(() => activityBurstDetail({ ...compactBase, burst, groups: [{ ...groups[0], ...patch }] }, selected));
+    assert.throws(
+      () => activityBurstDetail({ ...detailBase, groups: [{ ...groups[0], ...patch }] }, detailSelection),
+      { code: "invalid_activity_burst_response" },
+      label,
+    );
 });
 
 test("complete burst pages reconcile summaries and never infer a shared hour for unknown source dates", () => {

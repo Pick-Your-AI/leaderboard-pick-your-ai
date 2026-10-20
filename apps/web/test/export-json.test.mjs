@@ -29,5 +29,7 @@ test("export JSON bounds nesting and decoded source length before native parsing
   const allowed = "[".repeat(25) + "0" + "]".repeat(25);
   assert.deepEqual(parseExportJSON(allowed), JSON.parse(allowed));
   assert.throws(() => parseExportJSON("[".repeat(26) + "0" + "]".repeat(26)), /invalid_export_json/);
-  assert.throws(() => parseExportJSON('"' + "x".repeat(2_000_000) + '"'), /invalid_export_json/);
+  const largest = "x".repeat(2 * 1024 * 1024 - 2);
+  assert.equal(parseExportJSON('"' + largest + '"'), largest);
+  assert.throws(() => parseExportJSON('"' + largest + 'x"'), /invalid_export_json/);
 });

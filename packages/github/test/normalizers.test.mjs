@@ -739,7 +739,6 @@ test("subjective maintenance, deployment, reliability and coordination stay rece
     "mentorship",
     "onboarding",
     "project_configuration",
-    "issue_ordering",
   ]) {
     for (const decision of ["accepted", "rejected"]) {
       const receipt = {

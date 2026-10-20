@@ -262,8 +262,10 @@ test("maintenance classification: a later malformed duplicate cannot disappear b
   assert.equal(calls, 1);
 });
 
-// Exact prior implementation, with only its export/name changed for the historical oracle.
-function previousClassificationAuthority(state, bindings = []) {
+// Historical authority stays exact by default for the stale-publication cases.
+// The explicit Project option composes its separately versioned authority into
+// current-format comparisons without changing the historical default.
+function previousClassificationAuthority(state, bindings = [], includeProjectAuthority = false) {
   const requests = Object.values(state.requests ?? {})
     .filter((r) => r.kind === "evidence")
     .sort((a, b) => a.id.localeCompare(b.id));
@@ -292,6 +294,14 @@ function previousClassificationAuthority(state, bindings = []) {
   if (bindings.some((binding) => binding.metricId === "data_quality")) authority.push("data-quality-recognition/v1");
   // Generic reproduction receipts had no scenario/environment/result boundary.
   if (bindings.some((binding) => binding.metricId === "reproductions")) authority.push("reproduction-recognition/v1");
+  // The reviewed Project boundary retires generic manual receipt authority.
+  // Automatic-only states retain the historical fingerprint exactly.
+  if (
+    includeProjectAuthority &&
+    requests.length &&
+    bindings.some((binding) => binding.metricId === "project_configuration")
+  )
+    authority.push("project-configuration-evidence/v1");
   // Earlier generic bug receipts admitted non-issue and explicitly synthetic sources.
   if (bindings.some((binding) => binding.metricId === "confirmed_bugs"))
     authority.push("confirmed-bug-source-admission/v1");
@@ -316,17 +326,20 @@ function previousClassificationAuthority(state, bindings = []) {
   return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
-test("maintenance classification: all98 bindings retain prior or independently retired authority", () => {
+test("maintenance classification: all98 fingerprints preserve historical defaults and compose reviewed Project authority", () => {
   const s = scenario(),
     empty = { requests: {}, profiles: {}, audit: [] };
   for (const metric of metricRegistryV1.metrics) {
     const binding = { ...s.binding, metricId: metric.id };
     delete binding.maintenanceClassification;
     for (const state of [empty, s.state]) {
-      const current = recognitionFingerprint(state, [binding]);
-      const prior = previousClassificationAuthority(state, [binding]);
-      if (metric.id === "release_stewardship") assert.notEqual(current, prior);
-      else assert.equal(current, prior, metric.id);
+      const actual = recognitionFingerprint(state, [binding]);
+      const historical = previousClassificationAuthority(state, [binding]);
+      const expected = previousClassificationAuthority(state, [binding], true);
+      if (["issue_ordering", "release_stewardship"].includes(metric.id)) assert.notEqual(actual, expected, metric.id);
+      else assert.equal(actual, expected, metric.id);
+      if (metric.id === "project_configuration" && state === s.state) assert.notEqual(expected, historical, metric.id);
+      else assert.equal(expected, historical, metric.id);
     }
   }
   for (const state of [empty, s.state]) {

@@ -1,7 +1,9 @@
+import { maxExportResponseBytes } from "./export-limits.ts";
+
 /** Parse downloaded export JSON without silently discarding duplicate members.
  * Bounds match the producer's maximum nesting; transport has its own byte cap. */
 export function parseExportJSON(raw: string): unknown {
-  if (raw.length > 2_000_000) throw new Error("invalid_export_json");
+  if (raw.length > maxExportResponseBytes) throw new Error("invalid_export_json");
   const stack: ({ keys: Set<string>; expectKey: boolean } | null)[] = [];
   for (let index = 0; index < raw.length; index++) {
     const character = raw[index];

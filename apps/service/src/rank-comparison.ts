@@ -1,7 +1,8 @@
-import { publicScopeFilterKey, sourceAdapterSchema } from "@pick-your-ai/contracts";
+import { publicScopeFilterKey, sourceAdapterSchema, type RankingPresentation } from "@pick-your-ai/contracts";
 import { compareRankMovement, resolveMetricWindow, stableJSON, type RankComparisonInput } from "@pick-your-ai/metrics";
 import { compareSourceInstants } from "./source-time.js";
 import type { PublicRead, PublicScope } from "./public-source.js";
+import { rankingPresentation } from "./ranking-presentation.js";
 
 /** Internal provider data. Never enter a public projection or export. */
 export interface RankSnapshotHistory {
@@ -11,6 +12,7 @@ export interface RankSnapshotHistory {
 }
 export type RankMovement = ReturnType<typeof compareRankMovement>[number];
 export interface PublicRankComparison {
+  rankingPresentation?: RankingPresentation;
   snapshotId: string | null;
   scope: PublicScope | null;
   generatedAt: string | null;
@@ -159,6 +161,16 @@ export function comparePublishedRanks(
   if (current.controls.version !== previous.controls.version) return unavailable("current_authority_changed");
   if (current.selected.snapshot.computationVersion !== previous.selected.snapshot.computationVersion)
     return unavailable("mixed_computation_versions");
+  const currentPresentation = rankingPresentation(current, metricId);
+  const previousPresentation = rankingPresentation(previous, metricId);
+  if (currentPresentation === null || previousPresentation === null)
+    return unavailable("ranking_presentation_policy_unknown");
+  if (
+    stableJSON(current.selected.rankingPresentationPolicy) !== stableJSON(previous.selected.rankingPresentationPolicy)
+  )
+    return unavailable("ranking_presentation_policy_changed");
+  if (currentPresentation.state !== "ranked" || previousPresentation.state !== "ranked")
+    return unavailable("ranking_presentation_cohort_unavailable");
   if (!currentHistory || !previousHistory) return unavailable("insufficient_evidence_history");
   try {
     if (publicScopeFilterKey(current.selected.scope) !== publicScopeFilterKey(previous.selected.scope))
@@ -171,6 +183,7 @@ export function comparePublishedRanks(
         snapshotId: previous.selected.snapshot.snapshotId,
         scope: previous.selected.scope,
         generatedAt: previous.selected.snapshot.generatedAt,
+        rankingPresentation: previousPresentation,
       },
       movement: compareRankMovement(
         {

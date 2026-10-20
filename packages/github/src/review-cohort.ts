@@ -1,5 +1,5 @@
-/** Persisted review evidence must have passed this source-identity validation generation. */
-export const reviewSourceNormalizationVersion = "review-source-identity/v1";
+/** Persisted review authority binds exact-source identity and scan-qualified first-submission sequences. */
+export const reviewSourceNormalizationVersion = "review-source-identity/v3";
 
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);

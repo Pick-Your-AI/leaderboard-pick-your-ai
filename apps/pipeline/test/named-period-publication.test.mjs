@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createHmac } from "node:crypto";
 import { createPipeline } from "../src/index.mjs";
-import { harness, components, ago, clock, boardUrl, fixtureId, publicScope } from "./harness.mjs";
+import {
+  harness,
+  components,
+  ago,
+  clock,
+  boardUrl,
+  fixtureId,
+  publicScope,
+  fiveAuthorIssuePayloads,
+} from "./harness.mjs";
 const second = (value) => value.replace(/\.\d{3}Z$/, ".000Z");
 const scopeAt = (end, period = "30d") => {
   const window = components.metrics.resolveMetricWindow(period, end);
@@ -19,7 +28,11 @@ test("named periods persist exact public scopes, partial history and precise obs
       config.scopes = [{ ...publicScope, period: "30d" }];
     },
     transformPayloads(payloads) {
-      return payloads.map((payload) => ({ ...payload, created_at: ago(4), updated_at: ago(0.1) }));
+      return fiveAuthorIssuePayloads(payloads).map((payload) => ({
+        ...payload,
+        created_at: ago(4),
+        updated_at: ago(0.1),
+      }));
     },
   });
   const firstEnd = second(ago(3)),

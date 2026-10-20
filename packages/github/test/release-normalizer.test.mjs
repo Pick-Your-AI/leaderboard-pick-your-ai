@@ -263,3 +263,18 @@ for (const [name, change] of [
     assert.throws(() => createGithubEvidenceNormalizer(s.options), /invalid_release_inclusion_targets/);
     assert.equal(s.state.calls.length, 0);
   });
+
+for (const [name, targets] of [
+  ["single sparse slot", () => new Array(1)],
+  ["leading sparse slot", (target) => Object.assign(new Array(2), { 1: target })],
+  ["trailing sparse slot", (target) => Object.assign(new Array(2), { 0: target })],
+  ["single undefined entry", () => [undefined]],
+  ["leading undefined entry", (target) => [undefined, target]],
+  ["trailing undefined entry", (target) => [target, undefined]],
+])
+  test(`release normalizer rejects ${name} before collection`, () => {
+    const s = fixture();
+    s.options.releaseInclusionTargets = targets(s.options.releaseInclusionTargets[0]);
+    assert.throws(() => createGithubEvidenceNormalizer(s.options), { message: "invalid_release_inclusion_targets" });
+    assert.equal(s.state.calls.length, 0);
+  });

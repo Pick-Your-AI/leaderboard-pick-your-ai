@@ -315,6 +315,7 @@ test("confirmed_bugs: configuration fences preserve automatic sources while manu
         "deployment_work",
         "incidents",
         "release_changes",
+        "issue_ordering",
         "release_stewardship",
       ].includes(metric.id)
     )

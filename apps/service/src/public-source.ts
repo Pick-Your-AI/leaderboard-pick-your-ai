@@ -1,5 +1,6 @@
 import type { RankSnapshotHistory } from "./rank-comparison.js";
 import type { ParticipationHistoryRead } from "./participation-history.js";
+import { projectPhysicalContext } from "./physical-context.js";
 import {
   canonicalPublicScope,
   publicScopeKey,
@@ -13,6 +14,9 @@ import {
   type ActorFilter,
   publicEvidenceMetadataSchema,
   type PublicEvidenceMetadata,
+  publicProjectContextSchema,
+  publicProjectContextMatches,
+  type PublicProjectContext,
   actorSchema,
   artifactSchema,
   publicArtifactIdSchema,
@@ -21,6 +25,13 @@ import {
   pendingCountSchema,
   snapshotSchema,
   sourceEventSchema,
+  rankingPresentationPolicySchema,
+  physicalSnapshotContextSchema,
+  physicalMetricIds,
+  physicalContextLimits,
+  type PhysicalSnapshotContext,
+  type PublicPhysicalContext,
+  type RankingPresentationPolicy,
   type Actor,
   type Artifact,
   type Contribution,
@@ -29,12 +40,13 @@ import {
   type PendingCount,
   type Snapshot,
 } from "@pick-your-ai/contracts";
-import { metricRegistryV1 } from "@pick-your-ai/metrics";
+import { metricRegistryV1, stableJSON } from "@pick-your-ai/metrics";
 import { compareSourceInstants } from "./source-time.js";
 
 export type { PublicScope } from "@pick-your-ai/contracts";
 export interface PublicEvidence {
   evidenceMetadata?: PublicEvidenceMetadata;
+  projectContext?: PublicProjectContext;
   artifact: Artifact;
   contribution: Contribution;
   occurredAt: string | null;
@@ -55,6 +67,7 @@ export interface PublicRow {
   result: MetricResult;
   evidenceIds: string[];
   pending?: PendingCount;
+  physicalContext?: PublicPhysicalContext;
 }
 export interface PublicDiagnostic {
   pending?: PendingCount;
@@ -77,8 +90,13 @@ export interface PublishedSnapshot {
   portfolioEvidence?: PortfolioEvidence[];
   /** Exact pending policy-unit receipts, separate from accepted and portfolio evidence. */
   pendingEvidence?: PortfolioEvidence[];
+  /** Provider-private original LOC receipts and merge provenance. Never serialize. */
+  physicalContexts?: PhysicalSnapshotContext[];
+  physicalEvidence?: PublicEvidence[];
   /** Approved per-metric direction; the API does not infer comparability or scoring. */
   ranking: { metricId: string; direction: "ascending" | "descending"; rank?: boolean }[];
+  /** Captured with this snapshot; absent legacy policy must never be inferred. */
+  rankingPresentationPolicy?: RankingPresentationPolicy;
   disabledMetrics?: { id: string; reason: string; policyVersion: string; policyLink: string | null }[];
   methodology?: { metricId: string; policyVersion: string; policySignature: string; policyLink: string | null }[];
   diagnostics?: PublicDiagnostic[];
@@ -275,6 +293,10 @@ export function projectRead(
     (selected.pendingEvidence !== undefined && !Array.isArray(selected.pendingEvidence)) ||
     selected.evidence.length + (selected.portfolioEvidence?.length ?? 0) + (selected.pendingEvidence?.length ?? 0) >
       20000 ||
+    (selected.physicalContexts !== undefined &&
+      (!Array.isArray(selected.physicalContexts) || selected.physicalContexts.length > 10000)) ||
+    (selected.physicalEvidence !== undefined &&
+      (!Array.isArray(selected.physicalEvidence) || selected.physicalEvidence.length > 10000)) ||
     !Array.isArray(selected.ranking) ||
     selected.ranking.length > 98
   )
@@ -294,6 +316,10 @@ export function projectRead(
       return reject();
     return { metricId: entry.metricId, direction: entry.direction, rank: entry.rank !== false };
   });
+  const rankingPresentationPolicy =
+    selected.rankingPresentationPolicy === undefined
+      ? undefined
+      : rankingPresentationPolicySchema.parse(selected.rankingPresentationPolicy);
   if (
     (selected.disabledMetrics !== undefined &&
       (!Array.isArray(selected.disabledMetrics) || selected.disabledMetrics.length > 98)) ||
@@ -335,6 +361,50 @@ export function projectRead(
     new Set(methodology.map((entry) => entry.metricId)).size !== methodology.length
   )
     return reject();
+  if (
+    (selected.physicalContexts !== undefined || selected.physicalEvidence !== undefined) &&
+    rankingPresentationPolicy === undefined
+  )
+    return reject();
+  const physicalCandidates = new Map<string, PhysicalSnapshotContext>();
+  const physicalReceipts = new Map<string, string>();
+  const physicalReferenceLimit = 40000;
+  let physicalReferences = 0;
+  let physicalCopies = 0;
+  for (const input of selected.physicalContexts ?? []) {
+    // Bound input work before the closed schema clones a candidate. One source
+    // receipt can legitimately appear in each of the four physical metrics.
+    if (input?.state === "available") {
+      if (!Array.isArray(input.samples) || input.samples.length > physicalContextLimits.units) return reject();
+      for (const item of input.samples) {
+        if (!Array.isArray(item?.receipt?.facts)) return reject();
+        physicalCopies += item.receipt.facts.length;
+        if (physicalCopies > physicalReferenceLimit * physicalMetricIds.length) return reject();
+      }
+    }
+    const candidate = physicalSnapshotContextSchema.parse(input);
+    const key = JSON.stringify([candidate.actorId, candidate.metricId]);
+    if (physicalCandidates.has(key)) return reject();
+    const samples = new Set<string>();
+    if (candidate.state === "available")
+      for (const item of candidate.samples) {
+        const receipt = item.receipt;
+        const source = JSON.stringify([receipt.repositoryId, receipt.canonicalIntegrationId, receipt.actorId]);
+        if (samples.has(source)) return reject();
+        samples.add(source);
+        const serialized = stableJSON(item);
+        const prior = physicalReceipts.get(source);
+        // A mismatched actor receives no deduplication credit. The later source
+        // projection still withholds that entire optional context as unknown.
+        if (receipt.actorId !== candidate.actorId) physicalReferences += receipt.facts.length;
+        else if (prior === undefined) {
+          physicalReferences += receipt.facts.length;
+          physicalReceipts.set(source, serialized);
+        } else if (prior !== serialized) return reject();
+        if (physicalReferences > physicalReferenceLimit) return reject();
+      }
+    physicalCandidates.set(key, candidate);
+  }
   const disabled = new Set(disabledMetrics.map((entry) => entry.id));
   if (new Set(ranking.map((entry) => entry.metricId)).size !== ranking.length) return reject();
   const snapshot = snapshotSchema.parse(selected.snapshot);
@@ -433,7 +503,7 @@ export function projectRead(
   >();
   const metadataByContribution = new Map<string, string>();
   const documentationClassificationByContribution = new Map<string, string>();
-  const projectEvidence = (entries: PublicEvidence[], acceptedReproductions = false) =>
+  const projectEvidence = (entries: PublicEvidence[], acceptedReproductions = false, privateMergeProvenance = false) =>
     entries
       .map((entry) => {
         const artifact = artifactSchema.parse(entry.artifact);
@@ -470,6 +540,9 @@ export function projectRead(
           if (previous !== undefined && previous !== current) return reject();
           documentationClassificationByContribution.set(parsed.contributionId, current);
         }
+        const publicMetricIds = parsed.metricIds.filter(
+          (metricId) => !disabled.has(metricId) && ranking.some((policy) => policy.metricId === metricId),
+        );
         const contribution = {
           ...parsed,
           ...(parsed.metricIds.some(
@@ -498,9 +571,9 @@ export function projectRead(
                 ],
               }
             : {}),
-          metricIds: parsed.metricIds.filter(
-            (metricId) => !disabled.has(metricId) && ranking.some((policy) => policy.metricId === metricId),
-          ),
+          // Private merge provenance passes the same current guards but never
+          // becomes metric evidence or confers release on the pr_merged metric.
+          metricIds: privateMergeProvenance ? [...parsed.metricIds] : publicMetricIds,
         };
         // One proof ID cannot change its fact, attribution or eligibility by collection.
         // Effective/source clocks and legacy reason labels are collection-specific;
@@ -509,7 +582,7 @@ export function projectRead(
           contribution.canonicalEventId,
           [...new Set(contribution.roles)].sort(),
           contribution.qualification,
-          [...new Set(contribution.metricIds)].sort(),
+          [...new Set(publicMetricIds)].sort(),
         ]);
         const previousIdentity = identityByContribution.get(contribution.contributionId);
         if (
@@ -533,6 +606,13 @@ export function projectRead(
         if (!date(entry.occurredAt) || (entry.sourceRevision !== null && !id(entry.sourceRevision))) return reject();
         const metadata =
           entry.evidenceMetadata === undefined ? undefined : publicEvidenceMetadataSchema.parse(entry.evidenceMetadata);
+        const projectContext =
+          entry.projectContext === undefined ? undefined : publicProjectContextSchema.parse(entry.projectContext);
+        if (
+          projectContext &&
+          !publicProjectContextMatches(projectContext, artifact, contribution, scope.context ?? "event")
+        )
+          return reject();
         if (documentationPurpose.length) {
           const repository = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/pull\/[1-9][0-9]*$/.exec(
             artifact.publicUrl ?? "",
@@ -567,6 +647,7 @@ export function projectRead(
         // so retain their readability without inventing missing classifications.
         const serialized = JSON.stringify({
           metadata: metadata ?? null,
+          projectContext: projectContext ?? null,
           classification: parsed.metricIds.includes("localization") ? classification : null,
           reproduction: parsed.metricIds.includes("reproductions") ? reproduction : null,
           maintenance: maintenance.length ? maintenance : null,
@@ -600,6 +681,7 @@ export function projectRead(
           return reject();
         return {
           ...(metadata === undefined ? {} : { evidenceMetadata: metadata }),
+          ...(projectContext === undefined ? {} : { projectContext }),
           artifact,
           contribution,
           occurredAt: entry.occurredAt,
@@ -693,6 +775,22 @@ export function projectRead(
       reasonCodes: ["public_pending_work", ...publicDocumentationReasons(entry.contribution)],
     },
   }));
+  const physicalInput = selected.physicalEvidence ?? [];
+  const physicalIds = physicalInput.map((entry) => {
+    const contribution = contributionSchema.parse(entry.contribution);
+    if (
+      contribution.metricIds.length !== 1 ||
+      contribution.metricIds[0] !== "pr_merged" ||
+      contribution.roles.length !== 1 ||
+      contribution.roles[0] !== "author"
+    )
+      return reject();
+    return contribution.contributionId;
+  });
+  if (new Set(physicalIds).size !== physicalInput.length) return reject();
+  const physicalDependencies = new Map(
+    projectEvidence(physicalInput, false, true).map((entry) => [entry.contribution.contributionId, entry]),
+  );
   const pendingEvidenceMap = new Map(pendingEvidence.map((entry) => [entry.contribution.contributionId, entry]));
   function pendingProjection(entry: PublicRow, result: MetricResult): PendingCount | undefined {
     if (entry.pending === undefined) return undefined; // Legacy is unknown, never inferred zero.
@@ -822,7 +920,25 @@ export function projectRead(
       scope: { ...scope },
       snapshot: { ...snapshot, coverage: snapshot.coverage.map(coverage), results: [] },
       actors,
-      rows: rows.map((row) => ({ ...row, result: { ...row.result, coverage: coverage(row.result.coverage) } })),
+      rows: rows.map((row) => {
+        const physicalContext =
+          rankingPresentationPolicy === undefined
+            ? undefined
+            : projectPhysicalContext({
+                candidate: physicalCandidates.get(JSON.stringify([row.actorId, row.result.metricId])),
+                row,
+                evidence: evidenceMap,
+                dependencies: physicalDependencies,
+                snapshot,
+                scope,
+                methodology,
+              });
+        return {
+          ...row,
+          result: { ...row.result, coverage: coverage(row.result.coverage) },
+          ...(physicalContext === undefined ? {} : { physicalContext }),
+        };
+      }),
       evidence,
       ...(selected.portfolioEvidence === undefined ? {} : { portfolioEvidence }),
       ...(selected.pendingEvidence === undefined
@@ -833,6 +949,7 @@ export function projectRead(
             ),
           }),
       ranking: ranking.filter((entry) => !disabled.has(entry.metricId)),
+      ...(rankingPresentationPolicy === undefined ? {} : { rankingPresentationPolicy }),
       disabledMetrics,
       methodology,
       diagnostics,

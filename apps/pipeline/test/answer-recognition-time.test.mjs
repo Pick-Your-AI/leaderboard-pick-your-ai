@@ -272,6 +272,7 @@ test("issue_answers: its configuration fence preserves automatic-source authorit
         "deployment_work",
         "incidents",
         "release_changes",
+        "issue_ordering",
         "release_stewardship",
       ].includes(metric.id)
     )
