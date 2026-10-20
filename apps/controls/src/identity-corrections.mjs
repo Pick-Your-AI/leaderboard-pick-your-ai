@@ -314,6 +314,8 @@ export function createVerifiedIdentityCorrectionConsumer({
       );
       let authority;
       let startedAt;
+      let finalRevision;
+      let expectedReceipt;
       const result = store.transaction(
         () => {
           startedAt = readClock();
@@ -398,6 +400,8 @@ export function createVerifiedIdentityCorrectionConsumer({
               },
               "Retained identity receipt changed",
             );
+            finalRevision = currentRevision;
+            expectedReceipt = structuredClone(receipt);
             return receipt;
           }
           requireThat(
@@ -437,6 +441,8 @@ export function createVerifiedIdentityCorrectionConsumer({
             .prepare("UPDATE identity_correction_revision SET revision=? WHERE id=1 AND revision=?")
             .run(receipt.afterRevision, currentRevision);
           requireThat(changed.changes === 1, 409, "Private attribution revision changed");
+          finalRevision = receipt.afterRevision;
+          expectedReceipt = structuredClone(receipt);
           return receipt;
         },
         {
@@ -446,6 +452,32 @@ export function createVerifiedIdentityCorrectionConsumer({
             const at = readClock();
             requireThat(compareSourceInstants(at, startedAt) >= 0, 409, "Identity application clock moved backwards");
             validateAuthority(current, decisionId, at);
+            requireThat(
+              database.prepare("SELECT revision FROM identity_correction_revision WHERE id=1").get()?.revision ===
+                finalRevision,
+              409,
+              "Private attribution revision changed",
+            );
+            const retained = database
+              .prepare(
+                "SELECT r.decision_document,r.authorization_document,r.document,o.attribution_revision,o.document AS overlay FROM identity_correction_receipts r JOIN identity_correction_overlays o ON o.decision_id=r.decision_id WHERE r.decision_id=?",
+              )
+              .get(decisionId);
+            requireThat(
+              retained?.attribution_revision === expectedReceipt.afterRevision,
+              409,
+              "Incomplete retained identity application",
+            );
+            same(
+              [
+                JSON.parse(retained.decision_document),
+                JSON.parse(retained.authorization_document),
+                JSON.parse(retained.document),
+                JSON.parse(retained.overlay),
+              ],
+              [current.decision, current.authorization, expectedReceipt, overlayFor(current.decision, expectedReceipt)],
+              "Retained identity application changed before commit",
+            );
           },
         },
       );
