@@ -447,6 +447,8 @@ async function replacementSetup(t, after = async () => {}) {
     source: h.options.sourceId,
     allowedRepositoryIds: [2],
     isSynthetic: true,
+    // Fixture authority; the enclosing runtime checks its live authorization.
+    assertAuthorized: () => assert.equal(h.options.dataMode, "synthetic"),
     pullRequestMergeTargetRepositoryIds: [2],
     now: p.now,
   });
