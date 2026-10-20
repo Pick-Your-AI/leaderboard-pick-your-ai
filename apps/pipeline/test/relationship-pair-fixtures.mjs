@@ -225,6 +225,9 @@ export async function retainLegacyPair(
     [row.fact_key, signature, JSON.stringify(document), oldHash, row.policy_signature],
   );
   const replaceBinding = (authorization) => {
+    // Historical inputs predate the independently bound current-generation
+    // pair capture; remove it consistently from every reconstructed input.
+    delete authorization.relationshipPairEvidence;
     if (bindingMode === "unbound") {
       delete authorization.identityEvidence;
       return;

@@ -5,6 +5,7 @@ import { lockIssueTransferSources } from "./issue-transfer-authority.mjs";
 const normalizationVersionFields = [
   "reviewSourceNormalizationVersion",
   "discussionSourceNormalizationVersion",
+  "discussionFeedbackNormalizationVersion",
   "defaultDeliveryNormalizationVersion",
   "relationshipPairNormalizationVersion",
 ];
@@ -155,7 +156,7 @@ export function createOperatorPublicationVerifier({
         if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > operatorPublicationProofBytes) return null;
         // These are the hash-verified frozen repository IDs and original graph
         // capture, not a dependency set reconstructed from today's config.
-        transferContent = normalization.issueTransferContent;
+        transferContent = { ...normalization.issueTransferContent, ...normalization.discussionFeedbackContent };
       }
       // Public documents omit the event cutoff and optional normalization
       // versions used to derive their content ID. Reconstruct every hashed field;

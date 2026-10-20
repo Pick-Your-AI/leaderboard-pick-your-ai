@@ -273,6 +273,17 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
       "Release inclusion requires its publication clock, qualified authors and versioned canonical units",
     );
   if (
+    policy.metricId === "helpful_feedback" &&
+    (policy.aggregation !== "count" ||
+      policy.dateBasis !== "acceptedAt" ||
+      policy.groupBy !== "canonical" ||
+      policy.rankedStates[0] !== "qualified" ||
+      policy.roles.length !== 1 ||
+      policy.roles[0] !== "author" ||
+      policy.groupingPolicyVersion !== "accepted-feedback-threads/v1")
+  )
+    throw new Error("Helpful feedback requires independent acceptance and versioned canonical author/thread units");
+  if (
     relationshipPairMetricIds.has(policy.metricId) &&
     (policy.dateBasis !== "occurredAt" ||
       policy.groupBy !== "canonical" ||

@@ -1,7 +1,9 @@
 import { captureRankEvidence, retainedRankHistory } from "./rank-history.mjs";
 import { createHash } from "node:crypto";
+import { parseDiscussionFeedbackCapture } from "@pick-your-ai/contracts";
 import { reversionAuthorityVersion } from "./reversion-effectiveness.mjs";
 import { captureIssueTransferAuthorization } from "./issue-transfer-authority.mjs";
+import { validateRelationshipPairCapture } from "./relationship-pair-authority.mjs";
 
 // Local fail-closed bounds, not a production retention or capacity commitment.
 // Records have the retained snapshot's lifecycle, never the optional preview TTL.
@@ -84,9 +86,22 @@ function identityAuthorization(authorization) {
     check(
       entry !== null &&
         typeof entry === "object" &&
-        Object.keys(entry).every((key) => ["factKey", "documentHash"].includes(key)),
+        Object.keys(entry).every((key) => ["factKey", "documentHash", "relationshipPairFactHashes"].includes(key)),
     );
-    return { factKey: hash(entry.factKey), documentHash: hash(entry.documentHash) };
+    const projection = entry.relationshipPairFactHashes;
+    check(
+      projection === undefined ||
+        (Array.isArray(projection) &&
+          projection.length > 0 &&
+          projection.length <= 10000 &&
+          same(projection, sorted(projection))),
+    );
+    if (projection !== undefined) projection.forEach(hash);
+    return {
+      factKey: hash(entry.factKey),
+      documentHash: hash(entry.documentHash),
+      ...(projection === undefined ? {} : { relationshipPairFactHashes: [...projection] }),
+    };
   });
   const hashes = new Set(normalizationHashes);
   check(
@@ -367,6 +382,16 @@ export function buildAggregateExplanation(capture, binding) {
       dataMode: authorization.dataMode,
       controlsConfigurationRevision: authorization.controlsConfigurationRevision,
       ...identityAuthorization(authorization),
+      ...(authorization.discussionFeedbackEvidence === undefined
+        ? {}
+        : {
+            discussionFeedbackEvidence: parseDiscussionFeedbackCapture(authorization.discussionFeedbackEvidence),
+          }),
+      ...(authorization.relationshipPairEvidence === undefined
+        ? {}
+        : {
+            relationshipPairEvidence: validateRelationshipPairCapture(authorization.relationshipPairEvidence),
+          }),
       ...reversionAuthorization(authorization),
       sources: authorization.sources.map((source) => ({
         repositoryId: token(source.repositoryId),
@@ -434,6 +459,14 @@ export class AggregateExplanationStore {
       );
       check(document.computationVersion === aggregateExplanationLimitsV1.computationVersion);
       reversionAuthorization(document.authorization);
+      if (document.authorization.discussionFeedbackEvidence !== undefined) {
+        const capture = parseDiscussionFeedbackCapture(document.authorization.discussionFeedbackEvidence);
+        check(
+          capture.every((entry) =>
+            document.authorization.sources.some((source) => source.repositoryId === String(entry.repositoryId)),
+          ),
+        );
+      }
       for (const metric of document.metrics) {
         for (const row of metric.rows)
           validateArithmetic(row, metric.aggregation, metric.minimumSamples, metric.ranked);

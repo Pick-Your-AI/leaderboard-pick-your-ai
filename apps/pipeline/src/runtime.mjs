@@ -1,4 +1,13 @@
-import { publicMaintenanceClassificationReasons, documentationPurposeVersion } from "@pick-your-ai/contracts";
+import {
+  publicMaintenanceClassificationReasons,
+  documentationPurposeVersion,
+  discussionFeedbackContentVersion,
+} from "@pick-your-ai/contracts";
+import {
+  createDiscussionFeedbackAuthority,
+  DiscussionFeedbackStore,
+  privateDiscussionFeedbackMetadata,
+} from "./discussion-feedback-store.mjs";
 import { validatePublicationPeriods, publicScopeFromTemplate } from "./publication-windows.mjs";
 import {
   resolveDiscoverablePublicationWindows,
@@ -37,11 +46,13 @@ import {
   readIssueTransferAuthority,
   issueTransferCorrectionExempt,
 } from "./issue-transfer-authority.mjs";
+import { conserveIssueCreations, projectIssueCreationCorrections } from "./issue-transfers.mjs";
 import {
-  selectIssueTransferSources,
-  conserveIssueCreations,
-  projectIssueCreationCorrections,
-} from "./issue-transfers.mjs";
+  readRelationshipPairAuthority,
+  readCapturedRelationshipPairAuthority,
+  relationshipPairCalculationDocument,
+  expandRelationshipPairSuppressions,
+} from "./relationship-pair-authority.mjs";
 import { ControlError, requireThat } from "../../controls/src/store.mjs";
 import { materializeEvidenceMetadata, selectEvidenceMetadata } from "./evidence-metadata.mjs";
 import { createPublicProjectContextProjector } from "./public-project-context.mjs";
@@ -226,7 +237,20 @@ const sourceSuppressionQuery = `SELECT subject_id
 const sourceSuppressions = async (tx, repositoryIds) =>
   (await tx.query(sourceSuppressionQuery, [repositoryIds])).rows.map((row) => row.subject_id);
 const issueTransferRemovals = (authority, corrections) => {
-  const direct = [...authority.removed, ...corrections.legacy.map((row) => row.artifact_id)];
+  const correctionArtifacts = corrections.legacy.map((row) => row.artifact_id);
+  const correctionSeeds = correctionArtifacts.length
+    ? [
+        ...correctionArtifacts,
+        ...expandIssueTransferSuppressions(authority.transfers, {
+          artifactIds: correctionArtifacts.filter(issueArtifactId),
+        }),
+      ]
+    : [];
+  const direct = [
+    ...authority.removed,
+    ...correctionSeeds,
+    ...expandRelationshipPairSuppressions(authority, correctionSeeds),
+  ];
   return [
     ...new Set([
       ...direct,
@@ -297,6 +321,23 @@ export async function createPipeline(options) {
       fail("synthetic_data_forbidden_in_public_runtime");
   };
   const config = copy(options.config ?? { version: "unconfigured", repositories: [], policies: [], scopes: [] });
+  const feedbackAuthority = createDiscussionFeedbackAuthority(
+    config,
+    dataMode,
+    options.discussionFeedbackAuthorityEpoch,
+  );
+  for (const binding of config.recognitionBindings ?? [])
+    if (
+      binding.metricId === "helpful_feedback" &&
+      !feedbackAuthority.repositoryIds.includes(Number(binding.repositoryId))
+    )
+      fail("helpful_feedback_source_not_enrolled");
+  const feedbackAuthorityHash = () => (feedbackAuthority.enabled ? digest(feedbackAuthority.capture()) : null);
+  const feedbackInScope = (scope) =>
+    repositoriesFor(scope).some((repo) => feedbackAuthority.repositoryIds.includes(repo.id));
+  const feedbackStore = new DiscussionFeedbackStore(db, feedbackAuthority, () => {
+    restrictConfiguration(controlsStore.read());
+  });
   const reconciliationPolicy = validateReconciliationPolicy(config.reconciliation);
   const projectWorkstreamMappings = canonicalProjectWorkstreamMappings(
     config,
@@ -411,7 +452,11 @@ export async function createPipeline(options) {
     (version) =>
       [normalizationSignature, ...previousNormalizationSignatures].map((signature) => digest([version, signature])),
   );
-  const discussionNormalizationSignature = digest([discussionSourceNormalizationVersion, normalizationSignature]);
+  const discussionNormalizationSignature = digest([
+    ...(feedbackAuthority.enabled ? [discussionFeedbackContentVersion] : []),
+    discussionSourceNormalizationVersion,
+    normalizationSignature,
+  ]);
   const defaultDeliverySignature = (signature) => digest([defaultDeliveryNormalizationVersion, signature]);
   const relationshipPairSignature = (signature) => digest([relationshipPairNormalizationVersion, signature]);
   const frozenNormalizationSignatures = [
@@ -466,6 +511,37 @@ export async function createPipeline(options) {
   const identityNormalizationSignatures = [
     ...new Set([...frozenNormalizationSignatures, ...relationshipPairNormalizationSignatures]),
   ];
+  const currentPairGenerationsFor = (family) => {
+    const base =
+      family === "reviews"
+        ? reviewNormalizationSignature
+        : family === "discussions"
+          ? discussionNormalizationSignature
+          : ["relationships", "project_history", "issue_field_history"].includes(family)
+            ? typedHistoryNormalizationSignature
+            : normalizationSignature;
+    return [relationshipPairSignature(defaultDeliverySignature(base)), relationshipPairSignature(base)];
+  };
+  const currentPairSignatures = [
+    ...new Set(["reviews", "discussions", "relationships", "issues"].flatMap(currentPairGenerationsFor)),
+  ];
+  const pairAuthorityOptions = {
+    repositories: config.repositories,
+    dataMode,
+    generationsFor: currentPairGenerationsFor,
+    signatures: currentPairSignatures,
+  };
+  async function readSourceAuthority(tx, request) {
+    const transfer = await readIssueTransferAuthority(tx, request);
+    return readRelationshipPairAuthority(tx, { ...pairAuthorityOptions, ...request, transfer });
+  }
+  const capturedPairAuthority = (tx, authorization, transfer, repositoryIds) =>
+    readCapturedRelationshipPairAuthority(tx, authorization.relationshipPairEvidence, {
+      ...pairAuthorityOptions,
+      transfer,
+      sources: authorization.sources,
+      repositoryIds,
+    });
   const verifyConfig = options.verifyConfiguration ?? (async () => false);
   const discoveryAuthorityBinding = Object.freeze({
     configurationHash: policyDigest(c.metrics.stableJSON(config)),
@@ -547,7 +623,15 @@ export async function createPipeline(options) {
               typeof entry === "object" &&
               typeof entry.factKey === "string" &&
               /^[a-f0-9]{64}$/.test(entry.factKey) &&
-              hashes.has(entry.documentHash),
+              hashes.has(entry.documentHash) &&
+              (entry.relationshipPairFactHashes === undefined ||
+                (Array.isArray(entry.relationshipPairFactHashes) &&
+                  entry.relationshipPairFactHashes.length > 0 &&
+                  entry.relationshipPairFactHashes.length <= 10000 &&
+                  entry.relationshipPairFactHashes.every(
+                    (hash) => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash),
+                  ) &&
+                  new Set(entry.relationshipPairFactHashes).size === entry.relationshipPairFactHashes.length)),
           ) &&
           new Set(normalizationSources.map((entry) => entry.factKey)).size === normalizationSources.length &&
           new Set(normalizationSources.map((entry) => entry.documentHash)).size === hashes.size),
@@ -595,7 +679,43 @@ export async function createPipeline(options) {
       409,
       "Frozen identity evidence integrity failure",
     );
-    return rows;
+    const projections = new Map((normalizationSources ?? []).map((entry) => [entry.factKey, entry]));
+    const capturedProjections = new Map(
+      (authorization.relationshipPairEvidence?.bindings ?? []).map((entry) => [
+        JSON.stringify([entry.factKey, entry.documentHash, entry.policySignature]),
+        new Set(entry.factHashes),
+      ]),
+    );
+    const projectedSources = new Set();
+    const retained = rows.flatMap((row) => {
+      const selected = projections.get(row.fact_key)?.relationshipPairFactHashes;
+      if (selected === undefined) return [row];
+      const captured = capturedProjections.get(JSON.stringify([row.fact_key, row.document_hash, row.policy_signature]));
+      // Historical wrappers may retain identical bytes. Only the independently
+      // verified current capture can authorize a dependency's actor projection.
+      if (captured === undefined) return [];
+      requireThat(
+        selected.every((hash) => captured.has(hash)),
+        409,
+        "Frozen relationship pair projection unavailable",
+      );
+      const key = JSON.stringify([row.fact_key, row.document_hash]);
+      if (projectedSources.has(key)) return [];
+      const projected = { ...row, relationshipPairFactHashes: selected };
+      relationshipPairCalculationDocument(projected);
+      projectedSources.add(key);
+      return [projected];
+    });
+    requireThat(
+      (normalizationSources ?? []).every(
+        (entry) =>
+          entry.relationshipPairFactHashes === undefined ||
+          projectedSources.has(JSON.stringify([entry.factKey, entry.documentHash])),
+      ),
+      409,
+      "Frozen relationship pair projection unavailable",
+    );
+    return retained;
   }
   const reviewEvidenceCurrent = (row) =>
     row.family !== "reviews" ||
@@ -604,7 +724,9 @@ export async function createPipeline(options) {
   const discussionEvidenceCurrent = (row) =>
     row.family !== "discussions" ||
     (digest(row.document) === row.document_hash &&
-      row.document.discussionSourceNormalizationVersion === discussionSourceNormalizationVersion);
+      row.document.discussionSourceNormalizationVersion === discussionSourceNormalizationVersion &&
+      (row.document.discussionFeedbackSources === undefined ||
+        row.document.discussionFeedbackNormalizationVersion === discussionFeedbackContentVersion));
   const defaultDeliveryEvidenceCurrent = (row) =>
     !hasDefaultDeliveryClaims(row.document) ||
     (digest(row.document) === row.document_hash &&
@@ -660,7 +782,13 @@ export async function createPipeline(options) {
       fail("invalid_publication_proof_budget");
     const authorization = explanation.authorization;
     const selectedIds = repositoriesFor(scope).map((repo) => String(repo.id));
-    const transferAuthority = await readIssueTransferAuthority(tx, {
+    await feedbackStore.assertCapture(tx, selectedIds.map(Number), authorization.discussionFeedbackEvidence);
+    await feedbackStore.originals(
+      tx,
+      controlsStore.read(),
+      recognitionBindings.filter((binding) => selectedIds.includes(binding.repositoryId)),
+    );
+    const transferAuthority = await readSourceAuthority(tx, {
       repositories: config.repositories,
       repositoryIds: selectedIds,
       dataMode,
@@ -677,6 +805,12 @@ export async function createPipeline(options) {
       explanation.references.some((entry) => isRelationshipPairMetric(entry.metricId)) ||
       hasRelationshipPairMarker(publication) ||
       hasRelationshipPairMarker(controlsStore.read().pipelinePublications?.[publication.snapshotId]);
+    if (relationshipPair && authorization.relationshipPairEvidence === undefined)
+      return { obsolete: "relationship_pair" };
+    if (authorization.relationshipPairEvidence !== undefined) {
+      const pairAuthority = await capturedPairAuthority(tx, authorization, transferAuthority, selectedIds);
+      if (!pairAuthority.available || !pairAuthority.sourcesCurrent) return { obsolete: "relationship_pair" };
+    }
     const needsReview = await legacyInputHasFamily(tx, authorization, "reviews", explanation.cutoff);
     const needsDiscussion = await legacyInputHasFamily(tx, authorization, "discussions", explanation.cutoff);
     const kind = relationshipPair
@@ -779,6 +913,10 @@ export async function createPipeline(options) {
           canonical(authorization.identityEvidence)) ||
       canonical(retained.document.identityAuthorization?.issueTransferEvidence) !==
         canonical(authorization.issueTransferEvidence) ||
+      canonical(retained.document.identityAuthorization?.discussionFeedbackEvidence) !==
+        canonical(authorization.discussionFeedbackEvidence) ||
+      canonical(retained.document.identityAuthorization?.relationshipPairEvidence) !==
+        canonical(authorization.relationshipPairEvidence) ||
       (authorization.issueTransferEvidence !== undefined &&
         (canonical([...retained.document.frozen.repositoryIds].sort()) !==
           canonical(authorization.sources.map((source) => source.repositoryId).sort()) ||
@@ -789,6 +927,9 @@ export async function createPipeline(options) {
       review,
       discussion,
       defaultDelivery,
+      discussionFeedbackContent: authorization.discussionFeedbackEvidence?.length
+        ? { discussionFeedbackEvidenceHash: digest(authorization.discussionFeedbackEvidence) }
+        : {},
       relationshipPair,
       ...(authorization.issueTransferEvidence === undefined
         ? {}
@@ -797,6 +938,13 @@ export async function createPipeline(options) {
             issueTransferContent: {
               repositoryIds: retained.document.frozen.repositoryIds.map(Number),
               issueTransferEvidenceHash: digest(retained.document.identityAuthorization.issueTransferEvidence),
+              ...(authorization.relationshipPairEvidence === undefined
+                ? {}
+                : {
+                    relationshipPairEvidenceHash: digest(
+                      retained.document.identityAuthorization.relationshipPairEvidence,
+                    ),
+                  }),
             },
           }),
     };
@@ -804,6 +952,7 @@ export async function createPipeline(options) {
   // Source read locks span the final reviewer reauthentication and synchronous
   // private result transaction. No source/network permission is granted here.
   async function withAuthorizedComparisonInputs(authorizations, work, transaction) {
+    const comparisonFeedbackAuthority = feedbackAuthority.capture();
     requireThat(
       authorizations.every(
         (authorization) => authorization.configurationHash === digest(config) && authorization.dataMode === dataMode,
@@ -822,8 +971,14 @@ export async function createPipeline(options) {
         const saved = authorization.issueTransferEvidence;
         if (saved !== undefined) validateIssueTransferCapture(saved);
         const selected = saved?.selectedRepositoryIds ?? authorization.sources.map((source) => source.repositoryId);
+        await feedbackStore.assertCapture(tx, selected.map(Number), authorization.discussionFeedbackEvidence);
+        await feedbackStore.originals(
+          tx,
+          controlsStore.read(),
+          recognitionBindings.filter((binding) => selected.includes(binding.repositoryId)),
+        );
         selected.forEach((id) => selectedIds.add(id));
-        const current = await readIssueTransferAuthority(tx, {
+        const current = await readSourceAuthority(tx, {
           repositories: config.repositories,
           repositoryIds: selected,
           artifactIds: saved?.artifactIds ?? [],
@@ -837,6 +992,15 @@ export async function createPipeline(options) {
             "Frozen issue transfer normalization obsolete",
           );
         requireThat(current.selectedPublic, 409, "Frozen input source authorization changed");
+        if (authorization.relationshipPairEvidence !== undefined) {
+          const pairAuthority = await capturedPairAuthority(tx, authorization, current, selected);
+          requireThat(
+            pairAuthority.available && pairAuthority.sourcesCurrent,
+            409,
+            "Frozen relationship pair source authorization changed",
+          );
+          pairAuthority.requiredIds.forEach((id) => selectedIds.add(id));
+        }
         transferAuthorities.push(current);
       }
       requireThat(
@@ -880,6 +1044,12 @@ export async function createPipeline(options) {
           409,
           "Frozen relationship pair normalization obsolete",
         );
+        requireThat(
+          !rows.some((row) => hasRelationshipPairClaims(row.document) || hasRelationshipPairMarker(row.document)) ||
+            authorization.relationshipPairEvidence !== undefined,
+          409,
+          "Frozen relationship pair source binding unavailable",
+        );
         const normalizationSources = binding.normalizationSources;
         // Hash-only legacy captures did not bind source ordering. They retain
         // their identical-label rule rather than gaining unproven rename history.
@@ -893,7 +1063,7 @@ export async function createPipeline(options) {
             "Frozen identity evidence integrity failure",
           );
           assertDataMode(row.document);
-          for (const actor of row.document.actors) {
+          for (const actor of relationshipPairCalculationDocument(row).actors) {
             requireThat(
               retainSourceActor(identity, actor, sourceBinding(row), canonical, c.contracts),
               409,
@@ -916,9 +1086,24 @@ export async function createPipeline(options) {
           ),
           utc(now()),
         );
-      for (const correction of corrections.legacy)
-        if (authorizations.some((authorization) => !issueTransferCorrectionExempt(authorization, correction)))
-          removed.push(correction.artifact_id);
+      const correctionArtifacts = corrections.legacy
+        .filter((correction) =>
+          authorizations.some((authorization) => !issueTransferCorrectionExempt(authorization, correction)),
+        )
+        .map((correction) => correction.artifact_id);
+      const correctionSeeds = correctionArtifacts.length
+        ? [
+            ...correctionArtifacts,
+            ...expandIssueTransferSuppressions(
+              transferAuthorities.flatMap((authority) => authority.transfers),
+              { artifactIds: correctionArtifacts.filter(issueArtifactId) },
+            ),
+          ]
+        : [];
+      removed.push(
+        ...correctionSeeds,
+        ...transferAuthorities.flatMap((authority) => expandRelationshipPairSuppressions(authority, correctionSeeds)),
+      );
       removed.push(
         ...expandIssueTransferSuppressions(
           transferAuthorities.flatMap((authority) => authority.transfers),
@@ -957,12 +1142,22 @@ export async function createPipeline(options) {
             // The host must atomically read its authoritative roster/configuration
             // cache. Two independently awaited checks cannot establish this fence.
             if (typeof options.policyComparisonAuthorityCurrent !== "function") return false;
+            try {
+              feedbackAuthority.assert(comparisonFeedbackAuthority);
+            } catch {
+              return false;
+            }
             const current = options.policyComparisonAuthorityCurrent({
               configurationHash: digest(config),
               actorId: session.actorId,
               roleVersion: session.roleVersion,
             });
             if (current && typeof current.then === "function") void Promise.resolve(current).catch(() => undefined);
+            try {
+              feedbackAuthority.assert(comparisonFeedbackAuthority);
+            } catch {
+              return false;
+            }
             return current === true;
           },
         },
@@ -982,6 +1177,9 @@ export async function createPipeline(options) {
         onUnavailable: (repo, reason) => denyRepository(repo, reason, utc(now())),
         includePullRequestReviewComments: ({ runId }) => expandedGithubCommentsRun(runId),
         includeContentEditMetadata: (request) => contentEditAdmission.allows(request),
+        ...(feedbackAuthority.enabled
+          ? { discussionFeedback: { authority: feedbackAuthority, store: feedbackStore } }
+          : {}),
         async useRestSnapshotRevisions({ repositoryId, family }) {
           if (reconciliationPolicy) return true;
           // Keep immutable observation identities after an approved policy change
@@ -1104,12 +1302,14 @@ export async function createPipeline(options) {
   const recognitionBindings = copy(config.recognitionBindings ?? []);
   let runRecognitionFingerprint = null;
   let runConfigurationRevision = null;
+  let runFeedbackAuthority = null;
   const assertRunConfiguration = () => {
     const state = controlsStore.read();
     const overlay = restrictConfiguration(state);
     if (recognitionBindings.length && recognitionFingerprint(state, recognitionBindings) !== runRecognitionFingerprint)
       fail("recognition_changed_during_run");
     if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
+    if (feedbackAuthority.enabled) feedbackAuthority.assert(runFeedbackAuthority);
   };
   const scanContext = (mode, sources, revision, fingerprint) => ({
     key: digest(["bounded-scan/v1", config, dataMode, mode]),
@@ -1120,6 +1320,7 @@ export async function createPipeline(options) {
             revision,
             recognitionBindings.length ? fingerprint : null,
             sources,
+            ...(feedbackAuthority.enabled ? [discussionFeedbackContentVersion, feedbackAuthority.capture()] : []),
             // Selected release proofs use the PR delivery generation. Retire an older
             // frozen scan before collecting a newly required normalization generation.
             ...(dataMode === "public" && (config.releaseInclusionTargets?.length || selectedDocumentationPurpose)
@@ -1193,6 +1394,7 @@ export async function createPipeline(options) {
           allowedRepositoryIds: config.repositories.map((repo) => repo.id),
           isSynthetic: dataMode === "synthetic",
           assertAuthorized: () => assertRunConfiguration(),
+          verifyDiscussionFeedbackSource: (input) => feedbackStore.verifyInput(input),
           documentationPolicies: config.documentationPolicies ?? [],
           researchPolicies: config.researchPolicies ?? [],
           releaseInclusionTargets: config.releaseInclusionTargets ?? [],
@@ -1239,6 +1441,7 @@ export async function createPipeline(options) {
     return pending;
   };
   async function approved(transaction = db) {
+    const capturedFeedbackAuthority = feedbackAuthority.capture();
     authorized = Boolean(await verifyConfig(copy(config)));
     if (!authorized) return false;
     assertDataMode(config);
@@ -1327,6 +1530,7 @@ export async function createPipeline(options) {
       if (error?.message === "duplicate_public_scope") fail("duplicate_public_scope_configuration");
       throw error;
     }
+    feedbackAuthority.assert(capturedFeedbackAuthority);
     return true;
   }
   const configuredScope = (scope) =>
@@ -1556,11 +1760,14 @@ export async function createPipeline(options) {
     if (new Set(latestProjectRuns.map((run) => String(run.repository_id))).size !== latestProjectRuns.length)
       fail("ambiguous_current_project_run");
     const selectedProjectRuns = latestProjectRuns.map((run) => run.run_id);
+    const selectedFeedbackRuns = await db.transaction((tx) => feedbackStore.currentScanIds(tx, repositoryIds, cutoff));
+    assertRunConfiguration();
     const sourceRows = (
       await db.query(
         `SELECT fact.* FROM leaderboard_ingestion.source_facts AS fact
       JOIN leaderboard_ingestion.repository_access AS access USING (repository_id)
       WHERE fact.repository_id = ANY($1::bigint[]) AND fact.observed_at <= $2 AND access.state='public'
+      AND (fact.family<>'discussions' OR fact.repository_id<>ALL($4::bigint[]) OR fact.first_run_id=ANY($5::text[]))
       AND (
         (fact.family='project_current' AND fact.document ? 'projectSubjectId'
           AND EXISTS (SELECT 1 FROM leaderboard_ingestion.collection_items AS selected
@@ -1577,7 +1784,7 @@ export async function createPipeline(options) {
       AND NOT EXISTS (SELECT 1 FROM leaderboard_ingestion.object_suppressions AS removed
         WHERE removed.repository_id=fact.repository_id AND removed.subject_id=fact.subject_id)
       ORDER BY fact.fact_key LIMIT 10001`,
-        [repositoryIds, cutoff, selectedProjectRuns],
+        [repositoryIds, cutoff, selectedProjectRuns, feedbackAuthority.repositoryIds, selectedFeedbackRuns],
       )
     ).rows;
     if (sourceRows.length > 10000) fail("frozen_dataset_budget_exceeded");
@@ -1651,6 +1858,15 @@ export async function createPipeline(options) {
       )
         fail("discussion_normalizer_version_unverified");
       const repository = config.repositories.find((repo) => String(repo.id) === String(row.repository_id));
+      if (row.document.discussionFeedback !== undefined) {
+        if (
+          (options.normalizer || options.githubEnrich) &&
+          options.discussionFeedbackNormalizationVersion !== discussionFeedbackContentVersion
+        )
+          fail("discussion_feedback_normalizer_version_unverified");
+        await db.transaction((tx) => feedbackStore.verifyRow(tx, row, { current: true }));
+        assertRunConfiguration();
+      }
       const releaseTargets =
         dataMode === "public" && row.family === "pull_requests"
           ? (config.releaseInclusionTargets ?? []).filter(
@@ -1991,6 +2207,7 @@ export async function createPipeline(options) {
         ...retainPhysicalContext(output, row, repository, c.contracts, dataMode),
         ...normalizedProjectContext(output, row, repository, projectWorkstreamMappings),
         ...privateIssueTransferMetadata(output, row, repository, config.repositories, cached?.document),
+        ...privateDiscussionFeedbackMetadata(output, row),
         reasons: Array.isArray(output.reasons)
           ? output.reasons.map((reason) =>
               typeof reason === "string" && /^[a-z0-9_:-]{1,100}$/.test(reason) ? reason : "normalization_unavailable",
@@ -2058,6 +2275,11 @@ export async function createPipeline(options) {
     confirmation.scopeKey === scopeKey(scope) &&
     confirmation.snapshotId === snapshotId &&
     confirmation.revision === revision &&
+    (feedbackInScope(scope)
+      ? confirmation.discussionFeedbackNormalizationVersion === discussionFeedbackContentVersion &&
+        confirmation.discussionFeedbackAuthorityHash === feedbackAuthorityHash()
+      : confirmation.discussionFeedbackNormalizationVersion === undefined &&
+        confirmation.discussionFeedbackAuthorityHash === undefined) &&
     (confirmation.reviewSourceNormalizationVersion === undefined ||
       confirmation.reviewSourceNormalizationVersion === reviewSourceNormalizationVersion) &&
     (confirmation.discussionSourceNormalizationVersion === undefined ||
@@ -2070,6 +2292,7 @@ export async function createPipeline(options) {
     /^[a-f0-9]{64}$/.test(confirmation.aggregateExplanationHash);
   function confirmPublication(scope, publication, comparisonInput, publicPeriods = []) {
     controlsStore.transaction((state) => {
+      if (feedbackAuthority.enabled) feedbackAuthority.assert(runFeedbackAuthority);
       const overlay = restrictConfiguration(state);
       if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
       if (
@@ -2093,6 +2316,12 @@ export async function createPipeline(options) {
       if (comparisonInput) publication.comparisonInput = policyComparisons.capture(state, comparisonInput);
       state.pipelinePublications ||= {};
       const confirmation = {
+        ...(feedbackInScope(scope)
+          ? {
+              discussionFeedbackNormalizationVersion: discussionFeedbackContentVersion,
+              discussionFeedbackAuthorityHash: feedbackAuthorityHash(),
+            }
+          : {}),
         ...(publication.relationshipPairNormalizationVersion === undefined
           ? {}
           : { relationshipPairNormalizationVersion: publication.relationshipPairNormalizationVersion }),
@@ -2230,6 +2459,7 @@ export async function createPipeline(options) {
           for (const field of [
             "reviewSourceNormalizationVersion",
             "discussionSourceNormalizationVersion",
+            "discussionFeedbackNormalizationVersion",
             "defaultDeliveryNormalizationVersion",
             "relationshipPairNormalizationVersion",
           ])
@@ -2277,23 +2507,32 @@ export async function createPipeline(options) {
         entry.document.facts.filter((fact) => fact.metricId === "issues_opened").map((fact) => fact.artifactId),
       );
     const transferAuthority = await db.transaction((tx) =>
-      readIssueTransferAuthority(tx, {
+      readSourceAuthority(tx, {
         repositories: config.repositories,
         repositoryIds: repos.map((repo) => repo.id),
         artifactIds: selectedArtifactIds,
         cutoff: observationCutoff,
         dataMode,
+        normalized: normalizedAll,
       }),
     );
     if (!transferAuthority.selectedPublic || transferAuthority.access.length !== transferAuthority.repositoryIds.length)
       fail("source_unavailable_before_normalization");
-    const normalized = selectIssueTransferSources(
-      normalizedAll,
-      transferAuthority.transfers,
-      repos.map((repo) => repo.id),
-    ).normalized;
+    const normalized = transferAuthority.normalized;
+    const displayActorIds = new Set(
+      normalized
+        .filter((entry) => entry.relationshipPairFactHashes === undefined)
+        .flatMap((entry) => entry.document.actors.map((actor) => actor.id)),
+    );
     const hasReviewSources = normalized.some((entry) => entry.family === "reviews");
     const hasDiscussionSources = normalized.some((entry) => entry.family === "discussions");
+    const feedbackCapture = await db.transaction((tx) =>
+      feedbackStore.capture(
+        tx,
+        repos.map((repo) => repo.id),
+      ),
+    );
+    assertRunConfiguration();
     const hasDefaultDeliverySources = normalized.some(
       (entry) => entry.document.defaultDeliveryNormalizationVersion === defaultDeliveryNormalizationVersion,
     );
@@ -2301,23 +2540,34 @@ export async function createPipeline(options) {
       (entry) => entry.document.relationshipPairNormalizationVersion === relationshipPairNormalizationVersion,
     );
     let outputs = normalized.map((entry) => {
-      const document = { ...entry.document, selectedCurrentState: entry.selectedCurrentState };
+      const document = {
+        ...copy(relationshipPairCalculationDocument(entry)),
+        selectedCurrentState: entry.selectedCurrentState,
+      };
       if (entry.family !== "reviews" || entry.reviewSequenceObserved) return document;
       const withheld = new Set(
-        entry.document.facts.filter((fact) => fact.metricId === "first_reviews").map((fact) => fact.id),
+        document.facts.filter((fact) => fact.metricId === "first_reviews").map((fact) => fact.id),
       );
       if (!withheld.size) return document;
       return {
         ...document,
-        facts: entry.document.facts.filter((fact) => !withheld.has(fact.id)),
-        evidence: entry.document.evidence.filter((entry) => !withheld.has(entry.contribution.contributionId)),
-        reasons: [...entry.document.reasons, "first_review_sequence_observation_unversioned"],
+        facts: document.facts.filter((fact) => !withheld.has(fact.id)),
+        evidence: document.evidence.filter((entry) => !withheld.has(entry.contribution.contributionId)),
+        reasons: [...document.reasons, "first_review_sequence_observation_unversioned"],
       };
     });
     const actorSources = new Map(outputs.map((output, index) => [output, normalized[index].source]));
     // Only persisted provider normalizations can restore identity; recognition overlays are transient.
     const normalizationSources = normalized
-      .map((entry) => ({ factKey: entry.source.factKey, documentHash: digest(entry.document) }))
+      .map((entry) => ({
+        factKey: entry.source.factKey,
+        documentHash: digest(entry.document),
+        ...(entry.relationshipPairFactHashes === undefined
+          ? {}
+          : {
+              relationshipPairFactHashes: [...entry.relationshipPairFactHashes].sort(),
+            }),
+      }))
       .sort((left, right) => left.factKey.localeCompare(right.factKey));
     const normalizationHashes = [...new Set(normalizationSources.map((entry) => entry.documentHash))].sort();
     const physicalSources = config.policies.some((item) => c.contracts.physicalMetricIds.includes(item.policy.metricId))
@@ -2364,6 +2614,21 @@ export async function createPipeline(options) {
         reasons: [],
         issueTransfers: transferAuthority.transfers,
         issueCreationScopes: transferAuthority.creationScopes,
+        discussionFeedbackSources: outputs.flatMap((output) =>
+          (output.discussionFeedbackSources ?? []).map((source) => ({
+            ...source,
+            selectedCurrentState: output.selectedCurrentState === true,
+          })),
+        ),
+        discussionFeedbackRepositoryIds: feedbackCapture.map((entry) => entry.repositoryId),
+        discussionFeedbackOriginals: await db.transaction((tx) =>
+          feedbackStore.originals(
+            tx,
+            controlsStore.read(),
+            recognitionBindings.filter((binding) => repos.some((repo) => String(repo.id) === binding.repositoryId)),
+            observationCutoff,
+          ),
+        ),
       };
       combined.facts = [
         ...new Map(
@@ -2671,14 +2936,25 @@ export async function createPipeline(options) {
         Object.assign(entry, projectContextFor(entry, fact));
       }
     }
+    const publicActorIds = new Set([
+      ...displayActorIds,
+      ...rows.map((row) => row.actorId),
+      ...[...publicEvidence, ...portfolioEvidence, ...pendingEvidence].map((entry) => entry.contribution.actorId),
+    ]);
     const content = {
+      ...(feedbackCapture.length
+        ? {
+            discussionFeedbackNormalizationVersion: discussionFeedbackContentVersion,
+            discussionFeedbackEvidenceHash: digest(feedbackCapture),
+          }
+        : {}),
       ...(hasRelationshipPairSources ? { relationshipPairNormalizationVersion } : {}),
       ...(hasDiscussionSources ? { discussionSourceNormalizationVersion } : {}),
       ...(hasDefaultDeliverySources ? { defaultDeliveryNormalizationVersion } : {}),
       ...(hasReviewSources ? { reviewSourceNormalizationVersion } : {}),
       approvedPublic: true,
       scope: copy(scope),
-      actors: actorContracts([...actors.values()]),
+      actors: actorContracts([...actors.values()].filter((actor) => publicActorIds.has(actor.id))),
       rows,
       evidence: publicEvidence,
       portfolioEvidence,
@@ -2704,6 +2980,11 @@ export async function createPipeline(options) {
       configVersion: config.version,
       repositoryIds: transferAuthority.repositoryIds.map(Number),
       issueTransferEvidenceHash: digest(transferAuthority.capture),
+      ...(transferAuthority.relationshipPairEvidence === undefined
+        ? {}
+        : {
+            relationshipPairEvidenceHash: digest(transferAuthority.relationshipPairEvidence),
+          }),
       ...reversionBinding,
     };
     const snapshotId = digest(content);
@@ -2726,6 +3007,12 @@ export async function createPipeline(options) {
           normalizationSources,
         },
         issueTransferEvidence: transferAuthority.capture,
+        ...(feedbackCapture.length ? { discussionFeedbackEvidence: feedbackCapture } : {}),
+        ...(transferAuthority.relationshipPairEvidence === undefined
+          ? {}
+          : {
+              relationshipPairEvidence: transferAuthority.relationshipPairEvidence,
+            }),
         issueTransferCorrections,
         sources: transferAuthority.access.map((row) => ({
           repositoryId: String(row.repository_id),
@@ -2792,6 +3079,11 @@ export async function createPipeline(options) {
     try {
       const publication = await db.transaction(async (tx) => {
         await lockIssueTransferSources(tx, config.repositories);
+        await feedbackStore.assertCapture(
+          tx,
+          repos.map((repo) => repo.id),
+          feedbackCapture.length ? feedbackCapture : undefined,
+        );
         const scanHeads = scan ? await scanContinuations.lockForPublication(tx, scan, assertRunConfiguration) : null;
         if (dispatch) await outbox.assertLease(tx, dispatch.lease);
         const bindPublication = async (publication) => {
@@ -2815,16 +3107,17 @@ export async function createPipeline(options) {
           return publication;
         };
         await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`pipeline:${scopeKey(scope)}`]);
-        const retainedAuthority = await readIssueTransferAuthority(tx, {
+        const retainedAuthority = await readSourceAuthority(tx, {
           repositories: config.repositories,
           repositoryIds: repos.map((repo) => repo.id),
           artifactIds: selectedArtifactIds,
           cutoff: observationCutoff,
           dataMode,
+          normalized: normalizedAll,
         });
         if (retainedAuthority.fingerprint !== transferAuthority.fingerprint)
           fail("issue_transfer_authority_changed_before_publication");
-        const currentTransferAuthority = await readIssueTransferAuthority(tx, {
+        const currentTransferAuthority = await readSourceAuthority(tx, {
           repositories: config.repositories,
           repositoryIds: repos.map((repo) => repo.id),
           artifactIds: selectedArtifactIds,
@@ -2988,6 +3281,7 @@ export async function createPipeline(options) {
       // the same synchronous SQLite boundary used by configuration activation.
       if (hasReviewSources) publication.reviewSourceNormalizationVersion = reviewSourceNormalizationVersion;
       if (hasDiscussionSources) publication.discussionSourceNormalizationVersion = discussionSourceNormalizationVersion;
+      if (feedbackCapture.length) publication.discussionFeedbackNormalizationVersion = discussionFeedbackContentVersion;
       if (hasDefaultDeliverySources)
         publication.defaultDeliveryNormalizationVersion = defaultDeliveryNormalizationVersion;
       if (hasRelationshipPairSources)
@@ -3041,7 +3335,7 @@ export async function createPipeline(options) {
         }
         // Even a legitimate empty menu still requires current repository and
         // installation authority; no history scan or GET-side repair occurs.
-        const transferAuthority = await readIssueTransferAuthority(tx, {
+        const transferAuthority = await readSourceAuthority(tx, {
           repositories: config.repositories,
           repositoryIds,
           dataMode,
@@ -3055,6 +3349,7 @@ export async function createPipeline(options) {
           access: accessIdentity(access),
           removed: [...removed].sort(),
           corrections: corrections.fingerprint,
+          discussionFeedback: await feedbackStore.capture(tx, repositoryIds),
         };
         if (!(await approved(tx)) || signal.aborted) return null;
         finalRead = () => {
@@ -3127,7 +3422,7 @@ export async function createPipeline(options) {
       if (epoch === null) return null;
       const admitted = await db.transaction(async (tx) => {
         if (signal.aborted || discoveryEpoch() !== epoch) return null;
-        const transferAuthority = await readIssueTransferAuthority(tx, {
+        const transferAuthority = await readSourceAuthority(tx, {
           repositories: config.repositories,
           repositoryIds,
           dataMode,
@@ -3202,6 +3497,7 @@ export async function createPipeline(options) {
             currentCorrections,
           ),
           corrections: currentCorrections.fingerprint,
+          discussionFeedback: await feedbackStore.capture(tx, repositoryIds),
         };
         if (canonical(currentAuthority) !== canonical(capturedAuthority)) return null;
         const current = finalRead();
@@ -3222,7 +3518,7 @@ export async function createPipeline(options) {
         if (!current) return null;
         const prior = await source.read(previous.scope, previous.snapshotId, signal, tx);
         const repositoryIds = repositoriesFor(scope).map((repo) => repo.id);
-        const transferAuthority = await readIssueTransferAuthority(tx, {
+        const transferAuthority = await readSourceAuthority(tx, {
           repositories: config.repositories,
           repositoryIds,
           dataMode,
@@ -3342,7 +3638,7 @@ export async function createPipeline(options) {
             selected.head_document.dataMode !== dataMode
           )
             return null;
-          const transferAuthority = await readIssueTransferAuthority(tx, {
+          const transferAuthority = await readSourceAuthority(tx, {
             repositories: config.repositories,
             repositoryIds: repositoriesFor(scope).map((repo) => repo.id),
             dataMode,
@@ -3540,10 +3836,12 @@ export async function createPipeline(options) {
     const runState = controlsStore.read();
     runConfigurationRevision = restrictConfiguration(runState).revision;
     runRecognitionFingerprint = recognitionFingerprint(runState, recognitionBindings);
+    runFeedbackAuthority = feedbackAuthority.capture();
     if (dispatch && runConfigurationRevision !== dispatch.lease.operation.configurationRevision)
       fail("dispatch_configuration_changed");
     if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 10000) fail("invalid_pipeline_page_budget");
     if (!["backfill", "reconcile", "audit"].includes(mode)) fail("invalid_scan_scope");
+    if (feedbackAuthority.enabled) await feedbackStore.assertStorage();
     let scan = null;
     if (implicitCutoff && !dispatch) {
       // Verify all configured sources before choosing a durable scan context.
@@ -3602,6 +3900,9 @@ export async function createPipeline(options) {
               cutoff,
               mode,
               dataMode,
+              ...(family === "discussions" && feedbackAuthority.repositoryIds.includes(repo.id)
+                ? [discussionFeedbackContentVersion, feedbackAuthority.current(repo.id).authorityHash]
+                : []),
               ...(scan ? [scan.token] : []),
               ...(dispatch ? [dispatch.lease.operation.operationKey, dispatch.lease.collectionRevision] : []),
             ]),
@@ -4064,7 +4365,7 @@ export async function createPipeline(options) {
         );
         const fact = views[0]?.fact;
         if (!fact) fail("correction_evidence_mismatch");
-        const authority = await readIssueTransferAuthority(tx, {
+        const authority = await readSourceAuthority(tx, {
           repositories: config.repositories,
           repositoryIds: [fact.repoId],
           artifactIds: [fact.artifactId],
@@ -4164,7 +4465,7 @@ export async function createPipeline(options) {
           ),
         suppressedArtifacts: async (tx, ids) =>
           (
-            await readIssueTransferAuthority(tx, {
+            await readSourceAuthority(tx, {
               repositories: config.repositories,
               repositoryIds: ids,
               dataMode,

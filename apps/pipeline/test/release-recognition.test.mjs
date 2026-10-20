@@ -751,6 +751,12 @@ test("release inclusion: affected release destinations retire preceding authorit
   const empty = { requests: {}, profiles: {}, audit: [] };
   for (const metric of metricRegistryV1.metrics) {
     const bindings = [{ ...s.binding, metricId: metric.id }];
+    // Legacy generic feedback selections lack the required native-thread contract.
+    if (metric.id === "helpful_feedback") {
+      for (const state of [s.state, empty])
+        assert.throws(() => recognitionFingerprint(state, bindings), /invalid_discussion_feedback_contract/);
+      continue;
+    }
     // The literal historical function above remains unchanged. Current manual
     // claims also require the independently accepted intake authority marker.
     assert.notEqual(recognitionFingerprint(s.state, bindings), previousAuthority(s.state, bindings));

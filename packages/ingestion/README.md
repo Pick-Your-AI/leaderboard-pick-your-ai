@@ -58,12 +58,15 @@ version. Existing expiry authorization, batch and cutoff checks remain required.
 
 ## Run validation
 
-Use Node 24, from this directory:
+Use Node 24, from the repository root. Ingestion shares the versioned source
+contracts package, so install with the root workspace lock and build that
+dependency before compiling ingestion:
 
 ```sh
 npm ci --ignore-scripts
-npm run typecheck
-npm test
+npm run build --workspace @pick-your-ai/contracts
+npm run typecheck --workspace @pick-your-ai/ingestion
+npm test --workspace @pick-your-ai/ingestion
 ```
 
 Default tests use PGlite's embedded PostgreSQL engine and explicitly skip multi-connection tests. CI repeats the suite against a fresh PostgreSQL 17 service, including concurrent duplicate inserts and `SKIP LOCKED` workers. For the same integration suite locally, supply `INGESTION_TEST_DATABASE_URL` pointing to a disposable database named `leaderboard_ingestion_test` or `leaderboard_ingestion_<suffix>_test` (lowercase alphanumeric suffix segments). Tests refuse an existing ingestion schema and truncate only that dedicated test schema between cases. They leave it present for inspection; use a fresh database for another run. Never point this setting at a shared or production database.
