@@ -300,12 +300,17 @@ export async function createPipeline(options) {
       fail("synthetic_data_forbidden_in_public_runtime");
   };
   const config = copy(options.config ?? { version: "unconfigured", repositories: [], policies: [], scopes: [] });
+  // Discovery only: validate scopes at the approved run/read boundary below.
+  // Invalid scope configuration must not change the existing construction lifecycle.
   const mergeTargetRepositoryIds = [
     ...new Set(
-      (config.scopes ?? [])
-        .map(publicScopeFromTemplate)
-        .filter((scope) => scope.branch !== undefined)
-        .map((scope) => Number(scope.repository)),
+      config.repositories
+        .filter(
+          (repo) =>
+            Array.isArray(config.scopes) &&
+            config.scopes.some((scope) => scope?.branch !== undefined && scope.repository === String(repo.id)),
+        )
+        .map((repo) => repo.id),
     ),
   ].sort((a, b) => a - b);
   const policiesForScope = (scope) =>

@@ -103,7 +103,10 @@ function provider(known) {
   });
   return { client, payloads, state, now: () => state.clock };
 }
-async function setup(t, { known = true, faultAfterFreeze = false, memoryDatabase = false } = {}) {
+async function setup(
+  t,
+  { known = true, faultAfterFreeze = false, memoryDatabase = false, configuredScopes = [plain, scope] } = {},
+) {
   const p = provider(known);
   const h = await harness(t, {
     memoryDatabase,
@@ -113,7 +116,7 @@ async function setup(t, { known = true, faultAfterFreeze = false, memoryDatabase
     probeRepository: async () => ({ repositoryId: 2, installationId: 1, visibility: "public", checkedAt: p.now() }),
     configure(config) {
       config.repositories[0].families = ["pull_requests"];
-      config.scopes = [plain, scope];
+      config.scopes = configuredScopes;
       config.policies = ["pr_opened", "pr_merged"].map((metricId) => {
         const value = policy(metricId);
         return {
@@ -393,4 +396,30 @@ test("a corrected merge stays excluded across a fresh proof generation and autho
   assert.equal(Object.hasOwn(originalCorrection.document.fact, "mergeTarget"), false);
   assert.deepEqual(await runtime.applyCorrection(decision), receipt);
   assert.deepEqual(await correctionRow(), originalCorrection);
+});
+
+test("invalid merge-target scopes reject at the approved run boundary before provider access", async (t) => {
+  for (const [name, invalidScope] of [
+    ["unknown public role", { ...scope, roles: ["unknown"] }],
+    ["operator is not a public role", { ...scope, roles: ["operator"] }],
+    [
+      "legacy scope version cannot carry merge-target roles",
+      { ...scope, schemaVersion: "public-scope/v2", context: "current", projects: [], roles: ["reporter"] },
+    ],
+  ])
+    await t.test(name, async (subtest) => {
+      const { h, p, runtime } = await setup(subtest, {
+        memoryDatabase: true,
+        configuredScopes: [invalidScope],
+      });
+      assert.deepEqual(p.state.calls, [], "construction does not read the provider");
+      await assert.rejects(runtime.runOnce({ cutoff: iso(Date.now() - 1000) }), /invalid_public_scope/);
+      assert.deepEqual(p.state.calls, [], "invalid approved scope cannot start provider collection");
+      await assert.rejects(readScope(runtime), /invalid_public_scope/);
+      assert.deepEqual(p.state.calls, [], "invalid scope cannot reach provider access through a read");
+      for (const table of ["leaderboard_ingestion.collection_runs", "leaderboard_pipeline.heads"]) {
+        const rows = (await h.db.query(`SELECT count(*) AS count FROM ${table}`)).rows;
+        assert.equal(Number(rows[0].count), 0, "invalid scope cannot allocate " + table);
+      }
+    });
 });
