@@ -2236,7 +2236,7 @@ test(
       expectedVersion: 1,
       factId,
       operatorId: "201",
-      approvalReceipt: "synthetic-pair-triage-correction",
+      approvalReceipt: "synthetic-correction-approval",
     };
     const receipt = await runtime.applyCorrection(decision);
     assert.equal(receipt.status, "applied");
