@@ -82,6 +82,7 @@ import { capturePhysicalSources, selectPhysicalContexts } from "./physical-selec
 import {
   defaultDeliveryNormalizationVersion,
   fieldChangeNormalizationVersion,
+  triageMetadataNormalizationVersion,
   discussionSourceNormalizationVersion,
   githubSnapshotRevision,
   reviewSourceNormalizationVersion,
@@ -147,6 +148,22 @@ const fieldChangeMetrics = new Set([
 ]);
 const hasFieldChangeClaims = (document) =>
   Array.isArray(document?.facts) && document.facts.some((fact) => fieldChangeMetrics.has(fact?.metricId));
+// A trusted enrichment can supply triage metadata from any collected family.
+// Keep affected facts distinct from an explicitly corrected empty result.
+const triageMetadataMetrics = new Set([
+  "labels_applied",
+  "items_triaged",
+  "assignments_coordinated",
+  "milestones_curated",
+  "label_taxonomy",
+  "milestone_definitions",
+  "public_moderation",
+]);
+const hasTriageMetadataClaims = (document) =>
+  Array.isArray(document?.facts) && document.facts.some((fact) => triageMetadataMetrics.has(fact?.metricId));
+const hasTriageMetadataOutput = (document) =>
+  hasTriageMetadataClaims(document) ||
+  (Array.isArray(document?.reasons) && document.reasons.includes("no_op_metadata_change"));
 // Private preview records retain labels only. Provider bindings stay in the
 // restricted normalization store and are restored transiently before engine use.
 const previewActor = ({ id, login, kind, publicState, executionMode }) => ({
@@ -477,13 +494,21 @@ export async function createPipeline(options) {
   // Preserve every preceding document hash. The outer wrapper includes the
   // complete family, policy, and optional default-delivery generation.
   const fieldChangeSignature = (signature) => digest([fieldChangeNormalizationVersion, signature]);
+  const triageMetadataSignature = (signature) => digest([triageMetadataNormalizationVersion, signature]);
+  const currentFamilyNormalizationSignatures = [
+    normalizationSignature,
+    typedHistoryNormalizationSignature,
+    reviewNormalizationSignature,
+    discussionNormalizationSignature,
+  ];
   const frozenNormalizationSignatures = [
-    ...[
-      normalizationSignature,
-      typedHistoryNormalizationSignature,
-      reviewNormalizationSignature,
-      discussionNormalizationSignature,
-    ].flatMap((signature) => [
+    ...currentFamilyNormalizationSignatures.flatMap((signature) => [
+      triageMetadataSignature(signature),
+      triageMetadataSignature(defaultDeliverySignature(signature)),
+      triageMetadataSignature(fieldChangeSignature(signature)),
+      triageMetadataSignature(fieldChangeSignature(defaultDeliverySignature(signature))),
+    ]),
+    ...currentFamilyNormalizationSignatures.flatMap((signature) => [
       fieldChangeSignature(signature),
       fieldChangeSignature(defaultDeliverySignature(signature)),
     ]),
@@ -686,6 +711,7 @@ export async function createPipeline(options) {
         digest,
         defaultDeliverySignature,
         { version: fieldChangeNormalizationVersion, signature: fieldChangeSignature },
+        { version: triageMetadataNormalizationVersion, signature: triageMetadataSignature },
       );
       await readMergeTargetNormalization(row.document, row, repo, mergeAuthorization?.cutoff ?? null);
     }
@@ -749,6 +775,20 @@ export async function createPipeline(options) {
         : options.fieldChangeNormalizationVersion) !== fieldChangeNormalizationVersion
     )
       fail("field_change_normalizer_version_unverified");
+  };
+  const triageMetadataEvidenceCurrent = (row) =>
+    !hasTriageMetadataClaims(row.document) ||
+    (digest(row.document) === row.document_hash &&
+      row.document.triageMetadataNormalizationVersion === triageMetadataNormalizationVersion);
+  const assertTriageMetadataNormalizer = () => {
+    // Enrichment still executes the loaded comparator. Bind a replacement's
+    // live declaration to the callback selected once at construction.
+    if (
+      (providedNormalizer === undefined || providedNormalizer === null
+        ? c.github?.triageMetadataNormalizationVersion
+        : options.triageMetadataNormalizationVersion) !== triageMetadataNormalizationVersion
+    )
+      fail("triage_metadata_normalizer_version_unverified");
   };
   const assertDiscussionFeedbackNormalizer = () => {
     // Retain the callbacks actually selected at construction, while reading
@@ -816,17 +856,20 @@ export async function createPipeline(options) {
     // references. Its actual delivery claims also cover enriched non-PR sources.
     const defaultDelivery = explanation.references.some((entry) => defaultDeliveryMetrics.has(entry.metricId));
     const fieldChange = explanation.references.some((entry) => fieldChangeMetrics.has(entry.metricId));
+    const triageMetadata = explanation.references.some((entry) => triageMetadataMetrics.has(entry.metricId));
     const needsReview = await legacyInputHasFamily(tx, authorization, "reviews", explanation.cutoff);
     const needsDiscussion = await legacyInputHasFamily(tx, authorization, "discussions", explanation.cutoff);
-    const kind = fieldChange
-      ? "field_change"
-      : defaultDelivery
-        ? "default_delivery"
-        : needsReview
-          ? "review"
-          : needsDiscussion
-            ? "discussion"
-            : "review";
+    const kind = triageMetadata
+      ? "triage_metadata"
+      : fieldChange
+        ? "field_change"
+        : defaultDelivery
+          ? "default_delivery"
+          : needsReview
+            ? "review"
+            : needsDiscussion
+              ? "discussion"
+              : "review";
     if (
       authorization.issueTransferEvidence === undefined &&
       canonical(authorization.sources.map((entry) => entry.repositoryId).sort()) !==
@@ -843,9 +886,10 @@ export async function createPipeline(options) {
       !needsDiscussion &&
       !defaultDelivery &&
       !fieldChange &&
+      !triageMetadata &&
       authorization.issueTransferEvidence === undefined
     )
-      return { review: false, discussion: false, defaultDelivery: false, fieldChange: false };
+      return { review: false, discussion: false, defaultDelivery: false, fieldChange: false, triageMetadata: false };
     // An empty transfer capture adds no family normalization requirement to an
     // ordinary historical publication. Its exact frozen transfer content still
     // binds the snapshot below. Newly discovered proof or dependencies retain
@@ -856,6 +900,7 @@ export async function createPipeline(options) {
       !needsDiscussion &&
       !defaultDelivery &&
       !fieldChange &&
+      !triageMetadata &&
       authorization.issueTransferEvidence?.bindings.length === 0 &&
       transferAuthority.rows.length === 0 &&
       canonical([...transferAuthority.repositoryIds].sort()) === canonical([...selectedIds].sort());
@@ -873,6 +918,11 @@ export async function createPipeline(options) {
       (!rows.some((row) => hasFieldChangeClaims(row.document)) || !rows.every(fieldChangeEvidenceCurrent))
     )
       return { obsolete: "field_change" };
+    if (
+      triageMetadata &&
+      (!rows.some((row) => hasTriageMetadataClaims(row.document)) || !rows.every(triageMetadataEvidenceCurrent))
+    )
+      return { obsolete: "triage_metadata" };
     const review = rows.some((row) => row.family === "reviews");
     const discussion = rows.some((row) => row.family === "discussions");
     if (
@@ -881,9 +931,10 @@ export async function createPipeline(options) {
       !discussion &&
       !defaultDelivery &&
       !fieldChange &&
+      !triageMetadata &&
       authorization.issueTransferEvidence === undefined
     )
-      return { review: false, discussion: false, defaultDelivery: false, fieldChange: false };
+      return { review: false, discussion: false, defaultDelivery: false, fieldChange: false, triageMetadata: false };
     const retained = (
       await tx.query(
         `SELECT CASE WHEN $2::bigint IS NULL OR octet_length(document::text)<=$2 THEN document END AS document,
@@ -931,6 +982,7 @@ export async function createPipeline(options) {
       discussion,
       defaultDelivery,
       fieldChange,
+      triageMetadata,
       discussionFeedbackContent: authorization.discussionFeedbackEvidence?.length
         ? { discussionFeedbackEvidenceHash: digest(authorization.discussionFeedbackEvidence) }
         : {},
@@ -1028,6 +1080,7 @@ export async function createPipeline(options) {
         requireThat(rows.every(discussionEvidenceCurrent), 409, "Frozen Discussion normalization obsolete");
         requireThat(rows.every(defaultDeliveryEvidenceCurrent), 409, "Frozen default delivery normalization obsolete");
         requireThat(rows.every(fieldChangeEvidenceCurrent), 409, "Frozen field change normalization obsolete");
+        requireThat(rows.every(triageMetadataEvidenceCurrent), 409, "Frozen triage metadata normalization obsolete");
         if (authorization.mergeTargetEvidence !== undefined)
           restoredMergeTargets.set(
             digest(authorization),
@@ -1824,6 +1877,20 @@ export async function createPipeline(options) {
         ? mergeTargetGenerationSignature(normalizationSignature, mergeTargetPass.generation, digest)
         : sourceFamilySignature;
       const familyDeliverySignature = defaultDeliverySignature(familySignature);
+      const fieldFamilySignature = fieldChangeSignature(familySignature);
+      const fieldDeliverySignature = fieldChangeSignature(familyDeliverySignature);
+      const currentFieldSignatures = new Set([
+        fieldFamilySignature,
+        fieldDeliverySignature,
+        triageMetadataSignature(fieldFamilySignature),
+        triageMetadataSignature(fieldDeliverySignature),
+      ]);
+      const currentTriageSignatures = new Set([
+        triageMetadataSignature(fieldDeliverySignature),
+        triageMetadataSignature(fieldFamilySignature),
+        triageMetadataSignature(familyDeliverySignature),
+        triageMetadataSignature(familySignature),
+      ]);
       const previousBaseSignatures = [
         ...new Set([
           ...(typedHistory ? [normalizationSignature, ...previousTypedHistoryNormalizationSignatures] : []),
@@ -1866,8 +1933,9 @@ export async function createPipeline(options) {
           [
             row.fact_key,
             [
-              fieldChangeSignature(familyDeliverySignature),
-              fieldChangeSignature(familySignature),
+              ...currentTriageSignatures,
+              fieldDeliverySignature,
+              fieldFamilySignature,
               familyDeliverySignature,
               familySignature,
               ...precedingGenerations.flatMap((generation) => [generation.deliverySignature, generation.baseSignature]),
@@ -1882,17 +1950,34 @@ export async function createPipeline(options) {
       let fieldChange =
         ["project_history", "issue_field_history"].includes(row.family) ||
         candidates.some(
-          (entry) =>
-            entry.policy_signature === fieldChangeSignature(familySignature) ||
-            entry.policy_signature === fieldChangeSignature(familyDeliverySignature) ||
-            hasFieldChangeClaims(entry.document),
+          (entry) => currentFieldSignatures.has(entry.policy_signature) || hasFieldChangeClaims(entry.document),
         );
-      const baseSignature = fieldChange ? fieldChangeSignature(familySignature) : familySignature;
-      const deliverySignature = fieldChange ? fieldChangeSignature(familyDeliverySignature) : familyDeliverySignature;
-      const previousGenerations = fieldChange
-        ? [{ baseSignature: familySignature, deliverySignature: familyDeliverySignature }, ...precedingGenerations]
-        : precedingGenerations;
+      let triageMetadata = candidates.some(
+        (entry) => currentTriageSignatures.has(entry.policy_signature) || hasTriageMetadataOutput(entry.document),
+      );
+      const unwrappedBaseSignature = fieldChange ? fieldFamilySignature : familySignature;
+      const unwrappedDeliverySignature = fieldChange ? fieldDeliverySignature : familyDeliverySignature;
+      const baseSignature = triageMetadata ? triageMetadataSignature(unwrappedBaseSignature) : unwrappedBaseSignature;
+      const deliverySignature = triageMetadata
+        ? triageMetadataSignature(unwrappedDeliverySignature)
+        : unwrappedDeliverySignature;
+      const previousGenerations = [
+        ...(triageMetadata
+          ? [{ baseSignature: unwrappedBaseSignature, deliverySignature: unwrappedDeliverySignature }]
+          : []),
+        ...(fieldChange ? [{ baseSignature: familySignature, deliverySignature: familyDeliverySignature }] : []),
+        ...(triageMetadata && fieldChange
+          ? [
+              {
+                baseSignature: triageMetadataSignature(familySignature),
+                deliverySignature: triageMetadataSignature(familyDeliverySignature),
+              },
+            ]
+          : []),
+        ...precedingGenerations,
+      ];
       if (fieldChange) assertFieldChangeNormalizer();
+      if (triageMetadata) assertTriageMetadataNormalizer();
       const deliveryCache = candidates.find((entry) => entry.policy_signature === deliverySignature);
       const cached = deliveryCache ?? candidates.find((entry) => entry.policy_signature === baseSignature);
       const previousCaches = previousGenerations.map((generation) => {
@@ -1905,8 +1990,9 @@ export async function createPipeline(options) {
       // Validate each selected predecessor even when another generation already
       // supplies delivery classification or a current cache can otherwise be used.
       // Typed histories and reviews retain plain and delivery documents independently.
-      const retainedPredecessors =
-        fieldChange || typedHistory || row.family === "reviews"
+      const retainedPredecessors = triageMetadata
+        ? candidates.filter((entry) => entry !== cached)
+        : fieldChange || typedHistory || row.family === "reviews"
           ? candidates.filter((entry) =>
               previousGenerations.some(
                 (generation) =>
@@ -1954,6 +2040,8 @@ export async function createPipeline(options) {
           (!mergeTargetSource ||
             cached.document.pullRequestMergeTargetNormalization?.generation === mergeTargetPass.generation) &&
           (!fieldChange || cached.document.fieldChangeNormalizationVersion === fieldChangeNormalizationVersion) &&
+          (!triageMetadata ||
+            cached.document.triageMetadataNormalizationVersion === triageMetadataNormalizationVersion) &&
           // Native field visibility can change without changing an event or its
           // revision. Revalidate every retained transition before publication.
           row.family !== "issue_field_history" &&
@@ -1974,6 +2062,10 @@ export async function createPipeline(options) {
             document: cached.document,
             document_hash: cached.document_hash,
           }) &&
+          triageMetadataEvidenceCurrent({
+            document: cached.document,
+            document_hash: cached.document_hash,
+          }) &&
           hasDispatchEvidence(cached.document, dispatch, row)
         ) {
           if (mergeTargetSource) {
@@ -1984,6 +2076,7 @@ export async function createPipeline(options) {
               digest,
               defaultDeliverySignature,
               { version: fieldChangeNormalizationVersion, signature: fieldChangeSignature },
+              { version: triageMetadataNormalizationVersion, signature: triageMetadataSignature },
             );
             await readMergeTargetNormalization(
               cached.document,
@@ -2021,6 +2114,7 @@ export async function createPipeline(options) {
             if (mergeTargetSource) assertMergeTargetNormalizer();
             if (row.family === "reviews") assertReviewNormalizer();
             if (row.family === "discussions") assertDiscussionNormalizer();
+            if (triageMetadata) assertTriageMetadataNormalizer();
             const current = (
               await tx.query(
                 "SELECT document_hash FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=$2 FOR UPDATE",
@@ -2031,15 +2125,18 @@ export async function createPipeline(options) {
               fail("normalization_changed_before_dependency_capture");
             if (row.family === "reviews") assertReviewNormalizer();
             if (row.family === "discussions") assertDiscussionNormalizer();
+            if (triageMetadata) assertTriageMetadataNormalizer();
             await retainSourceArtifacts(tx, row.fact_key, cached.document);
             await retainIssueTransferIndex(tx, row, cached.policy_signature, cached.document);
             if (mergeTargetSource) assertMergeTargetNormalizer();
             if (row.family === "reviews") assertReviewNormalizer();
             if (row.family === "discussions") assertDiscussionNormalizer();
+            if (triageMetadata) assertTriageMetadataNormalizer();
           });
           if (mergeTargetSource) assertMergeTargetNormalizer();
           if (row.family === "reviews") assertReviewNormalizer();
           if (row.family === "discussions") assertDiscussionNormalizer();
+          if (triageMetadata) assertTriageMetadataNormalizer();
           if (fieldChange) assertFieldChangeNormalizer();
           if (discussionFeedback) assertDiscussionFeedbackNormalizer();
           outputs.push({
@@ -2063,6 +2160,7 @@ export async function createPipeline(options) {
         assertRunConfiguration();
         if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
+        if (triageMetadata) assertTriageMetadataNormalizer();
         output = await normalizer({
           repository: copy(repository),
           family: row.family,
@@ -2077,6 +2175,7 @@ export async function createPipeline(options) {
         assertRunConfiguration();
         if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
+        if (triageMetadata) assertTriageMetadataNormalizer();
         if (discussionFeedback) assertDiscussionFeedbackNormalizer();
         monitorSuccess(monitorSource(repository.id), "normalization", normalizationStarted);
       } catch (error) {
@@ -2170,8 +2269,11 @@ export async function createPipeline(options) {
       // while normalization was pending cannot certify the returned document.
       fieldChange ||= hasFieldChangeClaims(output);
       if (fieldChange) assertFieldChangeNormalizer();
+      triageMetadata ||= hasTriageMetadataOutput(output);
+      if (triageMetadata) assertTriageMetadataNormalizer();
       signature = defaultDelivery ? familyDeliverySignature : familySignature;
       if (fieldChange) signature = fieldChangeSignature(signature);
+      if (triageMetadata) signature = triageMetadataSignature(signature);
       const suppressed = Array.isArray(output.suppressArtifactIds) ? output.suppressArtifactIds : [];
       for (const artifactId of suppressed) {
         if (typeof artifactId !== "string" || !/^[A-Za-z0-9_=.:-]{1,200}$/.test(artifactId))
@@ -2183,6 +2285,7 @@ export async function createPipeline(options) {
           assertRunConfiguration();
           if (row.family === "reviews") assertReviewNormalizer();
           if (row.family === "discussions") assertDiscussionNormalizer();
+          if (triageMetadata) assertTriageMetadataNormalizer();
           await tx.query(
             "INSERT INTO leaderboard_ingestion.object_suppressions(repository_id,subject_id,reason) VALUES($1,$2,'unavailable') ON CONFLICT DO NOTHING",
             [repository.id, artifactId],
@@ -2244,6 +2347,7 @@ export async function createPipeline(options) {
             }
           : {}),
         ...(fieldChange ? { fieldChangeNormalizationVersion } : {}),
+        ...(triageMetadata ? { triageMetadataNormalizationVersion } : {}),
         ...(defaultDelivery ? { defaultDeliveryNormalizationVersion } : {}),
         ...(row.family === "reviews" ? { reviewSourceNormalizationVersion } : {}),
         ...(row.family === "discussions" ? { discussionSourceNormalizationVersion } : {}),
@@ -2274,6 +2378,7 @@ export async function createPipeline(options) {
         if (mergeTargetSource) assertMergeTargetNormalizer();
         if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
+        if (triageMetadata) assertTriageMetadataNormalizer();
         if (fieldChange) assertFieldChangeNormalizer();
         if (discussionFeedback) assertDiscussionFeedbackNormalizer();
         await tx.query(
@@ -2298,15 +2403,18 @@ export async function createPipeline(options) {
         if (current?.document_hash !== digest(document)) fail("normalization_changed_before_dependency_capture");
         if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
+        if (triageMetadata) assertTriageMetadataNormalizer();
         await retainSourceArtifacts(tx, row.fact_key, document);
         await retainIssueTransferIndex(tx, row, signature, document);
         if (mergeTargetSource) assertMergeTargetNormalizer();
         if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
+        if (triageMetadata) assertTriageMetadataNormalizer();
       });
       if (mergeTargetSource) assertMergeTargetNormalizer();
       if (row.family === "reviews") assertReviewNormalizer();
       if (row.family === "discussions") assertDiscussionNormalizer();
+      if (triageMetadata) assertTriageMetadataNormalizer();
       if (fieldChange) assertFieldChangeNormalizer();
       if (discussionFeedback) assertDiscussionFeedbackNormalizer();
       outputs.push({
@@ -2364,6 +2472,8 @@ export async function createPipeline(options) {
       confirmation.defaultDeliveryNormalizationVersion === defaultDeliveryNormalizationVersion) &&
     (confirmation.fieldChangeNormalizationVersion === undefined ||
       confirmation.fieldChangeNormalizationVersion === fieldChangeNormalizationVersion) &&
+    (confirmation.triageMetadataNormalizationVersion === undefined ||
+      confirmation.triageMetadataNormalizationVersion === triageMetadataNormalizationVersion) &&
     typeof confirmation.aggregateExplanationHash === "string" &&
     /^[a-f0-9]{64}$/.test(confirmation.aggregateExplanationHash);
   function confirmPublication(scope, publication, comparisonInput, publicPeriods = []) {
@@ -2379,6 +2489,18 @@ export async function createPipeline(options) {
         )
       )
         assertFieldChangeNormalizer();
+      // Existing confirmed static receipts remain readable. New confirmation
+      // checks the selected provider inside the actual Controls transaction.
+      if (
+        publication.triageMetadataNormalizationVersion !== undefined &&
+        !confirmationMatches(
+          state.pipelinePublications?.[publication.snapshotId],
+          scope,
+          publication.snapshotId,
+          publication.revision,
+        )
+      )
+        assertTriageMetadataNormalizer();
       if (
         publication.discussionSourceNormalizationVersion !== undefined &&
         !confirmationMatches(
@@ -2424,6 +2546,9 @@ export async function createPipeline(options) {
       if (comparisonInput) publication.comparisonInput = policyComparisons.capture(state, comparisonInput);
       state.pipelinePublications ||= {};
       const confirmation = {
+        ...(publication.triageMetadataNormalizationVersion === undefined
+          ? {}
+          : { triageMetadataNormalizationVersion: publication.triageMetadataNormalizationVersion }),
         ...(publication.fieldChangeNormalizationVersion === undefined
           ? {}
           : { fieldChangeNormalizationVersion: publication.fieldChangeNormalizationVersion }),
@@ -2578,6 +2703,7 @@ export async function createPipeline(options) {
             "discussionFeedbackNormalizationVersion",
             "defaultDeliveryNormalizationVersion",
             "fieldChangeNormalizationVersion",
+            "triageMetadataNormalizationVersion",
           ])
             if (priorConfirmation[field] !== undefined) priorPublication[field] = priorConfirmation[field];
           if (normalizationBinding.review)
@@ -2588,6 +2714,8 @@ export async function createPipeline(options) {
             priorPublication.defaultDeliveryNormalizationVersion = defaultDeliveryNormalizationVersion;
           if (normalizationBinding.fieldChange)
             priorPublication.fieldChangeNormalizationVersion = fieldChangeNormalizationVersion;
+          if (normalizationBinding.triageMetadata)
+            priorPublication.triageMetadataNormalizationVersion = triageMetadataNormalizationVersion;
           confirmPublication(scope, priorPublication, undefined, publicPeriods);
           return priorPublication;
         }
@@ -2643,11 +2771,15 @@ export async function createPipeline(options) {
     const hasFieldChangeSources = normalized.some(
       (entry) => entry.document.fieldChangeNormalizationVersion === fieldChangeNormalizationVersion,
     );
+    const hasTriageMetadataSources = normalized.some(
+      (entry) => entry.document.triageMetadataNormalizationVersion === triageMetadataNormalizationVersion,
+    );
     const hasReviewSources = normalized.some((entry) => entry.family === "reviews");
     const hasDiscussionSources = normalized.some((entry) => entry.family === "discussions");
     const ready = () => {
       assertRunConfiguration();
       if (hasDiscussionSources) assertDiscussionNormalizer();
+      if (hasTriageMetadataSources) assertTriageMetadataNormalizer();
     };
     ready();
     const feedbackCapture = await db.transaction((tx) =>
@@ -3052,6 +3184,7 @@ export async function createPipeline(options) {
     }
     const content = {
       ...(hasFieldChangeSources ? { fieldChangeNormalizationVersion } : {}),
+      ...(hasTriageMetadataSources ? { triageMetadataNormalizationVersion } : {}),
       ...(feedbackCapture.length
         ? {
             discussionFeedbackNormalizationVersion: discussionFeedbackContentVersion,
@@ -3382,6 +3515,10 @@ export async function createPipeline(options) {
       });
       // PostgreSQL can commit while controls change. Confirm publication only in
       // the same synchronous SQLite boundary used by configuration activation.
+      if (hasTriageMetadataSources) {
+        assertTriageMetadataNormalizer();
+        publication.triageMetadataNormalizationVersion = triageMetadataNormalizationVersion;
+      }
       if (hasFieldChangeSources) {
         assertFieldChangeNormalizer();
         publication.fieldChangeNormalizationVersion = fieldChangeNormalizationVersion;
@@ -4498,6 +4635,7 @@ export async function createPipeline(options) {
               digest,
               defaultDeliverySignature,
               { version: fieldChangeNormalizationVersion, signature: fieldChangeSignature },
+              { version: triageMetadataNormalizationVersion, signature: triageMetadataSignature },
             );
             const repo = config.repositories.find((entry) => entry.id === Number(row.repository_id));
             if (!repo || !mergeTargetRepositoryIds.includes(repo.id)) fail("merge_target_source_scope_mismatch");

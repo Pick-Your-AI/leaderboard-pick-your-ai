@@ -71,7 +71,16 @@ Delivered LOC facts require a verified default-branch integration whose diff pin
 
 Issue creation, closure stewardship and implementing outcomes stay separate. A closer does not become the implementer; an assignee or bulk planning batch does not prove accepted findings, bug confirmation, completion, reproduction, mentoring or unblocking. Comments are pending answer evidence until independently accepted.
 
-Exact label/assignment/milestone/type events preserve sender, action, target identity and event time. Label removals are triage observations, not label additions. Every target-dependent transition, including removal and issue-type changes, requires its own stable target identity. An absent target or a display name alone emits an unknown fact without a raw-state value; another metadata field or current item snapshot cannot fill the gap. Label definition changes and milestone definition changes are separate from item membership; renames retain definition identity. Metadata no-ops are excluded when before/after evidence proves equality. Public pin/unpin/lock/unlock are descriptive facets only; there is no private moderation or sanctions intake.
+Exact label/assignment/milestone/type events preserve sender, action, target identity and event time. Label removals are triage observations, not label additions. Every target-dependent transition, including removal and issue-type changes, requires its own stable target identity. An absent target or a display name alone emits an unknown fact without a raw-state value; another metadata field or current item snapshot cannot fill the gap. Label definition changes and milestone definition changes are separate from item membership; renames retain definition identity. Metadata no-ops are excluded when the existing JSON serialization projection proves equal before/after values. Object member order is irrelevant recursively; array order, member presence and scalar types remain significant. Public pin/unpin/lock/unlock are descriptive facets only; there is no private moderation or sanctions intake.
+
+Triage metadata uses the exported `triageMetadataNormalizationVersion`, currently
+`triage-metadata-json-values/v1`. A custom normalizer that emits triage facts or a
+`no_op_metadata_change` result must declare that generation in its runtime
+options. Enrichment uses the loaded built-in comparator and version. The
+[source cases](../packages/github/test/triage-metadata-json-values.test.mjs) cover
+JSON value equality and serialization behavior; the
+[pipeline cases](../apps/pipeline/test/triage-metadata-generation.test.mjs) cover
+cache generations and publication boundaries using synthetic sources.
 
 Native REST `issue_type_added` and `issue_type_removed` events map to the existing `issue_typed` and `issue_untyped` raw actions. The source observation retains the native name; the raw grouping and public evidence use the canonical action. The collection revision fingerprint binds the event's own type target before hydration can emit a fact. Missing targets remain unknown, and all pre-existing non-type event fingerprints are unchanged. Other type transitions remain unsupported until their complete source-specific evidence is handled. The [original Android/Apple planning-batch audit](triage-fairness-audit.md) records the observed gap, corrected replay and limits for every LB-08 category.
 

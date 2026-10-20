@@ -8,6 +8,7 @@ const normalizationVersionFields = [
   "discussionFeedbackNormalizationVersion",
   "defaultDeliveryNormalizationVersion",
   "fieldChangeNormalizationVersion",
+  "triageMetadataNormalizationVersion",
 ];
 
 const unavailable = () => {
