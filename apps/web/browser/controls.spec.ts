@@ -48,6 +48,43 @@ async function controls(
   return writes;
 }
 
+for (const width of [320, 360, 768, 1024, 1280]) {
+  for (const colorScheme of ["light", "dark"] as const) {
+    for (const path of ["/account", "/admin"] as const) {
+      test(`protected ${path} WCAG 2.2 and reflow at ${width}px in ${colorScheme}`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.emulateMedia({ colorScheme });
+        const writes = await controls(page, path === "/admin" ? ["reviewer"] : []);
+        await page.goto(path);
+        if (path === "/account") {
+          await expect(page.getByLabel("Bio (up to 500 characters)")).toHaveValue("Saved bio");
+          await expect(page.getByRole("button", { name: "Save profile", exact: true })).toBeVisible();
+        } else {
+          await expect(page.getByText("Evidence for independent review", { exact: true })).toBeVisible();
+          await expect(page.getByRole("button", { name: "Record review decision", exact: true })).toBeVisible();
+        }
+        await expect(
+          page.getByRole("heading", { name: "Editorial dimension consent and review", exact: true }),
+        ).toBeVisible();
+        await expect(page.getByText("Checking current dimension declarations…", { exact: true })).toHaveCount(0);
+        await expect(page.getByRole("alert")).toHaveCount(0);
+        await expect(page.locator("html")).toHaveCSS("color-scheme", colorScheme);
+
+        const reflow = await page.evaluate(() => ({
+          viewportWidth: window.innerWidth,
+          contentWidth: document.documentElement.scrollWidth,
+        }));
+        expect.soft(reflow.contentWidth).toBeLessThanOrEqual(reflow.viewportWidth + 1);
+        const scan = await new AxeBuilder({ page })
+          .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"])
+          .analyze();
+        expect(scan.violations).toEqual([]);
+        expect(writes).toHaveLength(0);
+      });
+    }
+  }
+}
+
 for (const { description, actorId, path } of [
   { description: "numeric", actorId: 1, path: "/account" },
   { description: "singleton array", actorId: ["1"], path: "/admin" },
