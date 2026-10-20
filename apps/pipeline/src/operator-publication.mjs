@@ -196,7 +196,12 @@ export function createOperatorPublicationVerifier({
       // These fields are part of the content ID only when the original
       // publication captured them. Preserve legacy absence; never substitute
       // a current presentation policy or synthesize a missing physical receipt.
-      for (const field of ["rankingPresentationPolicy", "physicalContexts", "physicalEvidence"])
+      for (const field of [
+        "rankingPresentationPolicy",
+        "physicalContexts",
+        "physicalEvidence",
+        "reviewedWorkstreamHelp",
+      ])
         if (Object.hasOwn(document, field)) content[field] = document[field];
       if (digest(content) !== expected.snapshotId) return null;
       // Identical content may reuse the first immutable arithmetic explanation
