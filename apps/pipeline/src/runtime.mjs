@@ -1639,6 +1639,15 @@ export async function createPipeline(options) {
   async function verifyRepository(repo) {
     assertRunConfiguration();
     if (!collectionSource?.readPage || !normalizer || !probeSource) fail("source_provider_unconfigured");
+    const beforeProbe = (
+      await db.query("SELECT state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=$1", [
+        repo.id,
+      ])
+    ).rows[0];
+    // A lifecycle change during this probe must not authorize its older public result.
+    const expectedGeneration = beforeProbe ? String(beforeProbe.generation) : null;
+    const wasPublic = beforeProbe?.state === "public";
+    assertRunConfiguration();
     let checkedAt = utc(now());
     let probe;
     try {
@@ -1671,20 +1680,15 @@ export async function createPipeline(options) {
       await denyRepository(repo, "visibility_or_scope_not_public", checkedAt);
       fail("public_source_not_verified");
     }
-    const current = (
-      await db.query("SELECT state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=$1", [
-        repo.id,
-      ])
-    ).rows[0];
-    if (current?.state === "public") {
+    if (wasPublic) {
       const saved = await db.query(
         "UPDATE leaderboard_ingestion.repository_access SET checked_at=clock_timestamp() WHERE repository_id=$1 AND generation=$2 AND state='public' RETURNING repository_id",
-        [repo.id, current.generation],
+        [repo.id, expectedGeneration],
       );
       if (!saved.rows.length) fail("repository_access_changed");
       return;
     }
-    if (!(await collection.verifyPublic(repo.id, repo.installationId, current ? String(current.generation) : null)))
+    if (!(await collection.verifyPublic(repo.id, repo.installationId, expectedGeneration)))
       fail("repository_revoked_or_changed");
   }
   const hasDispatchEvidence = (document, dispatch, row) =>
