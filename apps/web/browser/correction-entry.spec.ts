@@ -111,11 +111,9 @@ async function fixture(page: Page, directory: string, failure: (typeof failures)
 const accountLink = (page: Page) =>
   page.getByRole("link", { name: "Open configured account authentication", exact: true });
 
-for (const failure of failures)
-  test("configured correction login remains reachable when public metrics are " + failure.name, async ({
-    page,
-    configuredApp,
-  }) => {
+for (const failure of failures) {
+  const title = "configured correction login remains reachable when public metrics are " + failure.name;
+  test(title, async ({ page, configuredApp }) => {
     const api = await fixture(page, configuredApp, failure);
     try {
       await page.goto("/corrections?ui=api");
@@ -137,11 +135,10 @@ for (const failure of failures)
       await api.close();
     }
   });
+}
 
-test("correction login does not clear an invalid public selection or start a public read", async ({
-  page,
-  configuredApp,
-}) => {
+const selectionTitle = "correction login does not clear an invalid public selection or start a public read";
+test(selectionTitle, async ({ page, configuredApp }) => {
   const api = await fixture(page, configuredApp);
   try {
     await page.goto("/corrections?ui=api&actors=invalid");
@@ -163,12 +160,10 @@ for (const configuration of [
   },
   { name: "absent", value: "", message: "No protected contributor-controls endpoint is configured." },
 ]) {
+  const title = "public metrics failure preserves the configuration diagnostic and no account link";
   test.describe(configuration.name + " correction account configuration", () => {
     test.use({ controlsBase: configuration.value });
-    test("public metrics failure preserves the configuration diagnostic and no account link", async ({
-      page,
-      configuredApp,
-    }) => {
+    test(title, async ({ page, configuredApp }) => {
       const api = await fixture(page, configuredApp);
       try {
         await page.goto("/corrections?ui=api");
