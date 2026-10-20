@@ -1617,13 +1617,13 @@ test("a failed API application remains an error until explicit recovery and neve
     await second.requested;
     view.api.fail();
     second.release();
-    await expect(page.getByRole("alert")).toContainText("public_read_unavailable");
+    await expect(page.getByRole("alert")).toContainText("public_projection_unavailable");
     await expect(view.provenance).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toHaveCount(0);
     expect(await view.summaries()).toEqual([]);
     expect(view.boardReads("api-1")).toBe(oldReads);
     await page.clock.runFor(1000);
-    await expect(page.getByRole("alert")).toContainText("public_read_unavailable");
+    await expect(page.getByRole("alert")).toContainText("public_projection_unavailable");
     expect(view.boardReads("api-1")).toBe(oldReads);
     view.api.recover();
     view.api.next(3);

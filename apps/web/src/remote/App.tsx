@@ -92,6 +92,7 @@ import {
 } from "./client.ts";
 
 type Data =
+  | { kind: "overview" }
   | { kind: "catalog" }
   | { kind: "programs"; directory: ProgramDirectory; program: ProgramRecord | null }
   | { kind: "method"; metricId: string }
@@ -699,7 +700,9 @@ export function RemoteApp() {
     active.current = controller;
     verifiedRead.current = null;
     setOverviewActivity({ status: "loading" });
-    if (document.visibilityState !== "visible") return () => controller.abort();
+    // A hidden overview may load registry navigation, never a source snapshot or contributor data.
+    const hiddenOverview = document.visibilityState !== "visible" && url.pathname === "/" && applying.current === null;
+    if (document.visibilityState !== "visible" && !hiddenOverview) return () => controller.abort();
     if (parsed.error) {
       cancelApplication(false);
       setChecking(false);
@@ -714,6 +717,7 @@ export function RemoteApp() {
     const qs = parameters(exact);
     const boardQuery = parameters(exact, { board: true, cursor: selected.cursor });
     const load = async (): Promise<Data> => {
+      if (hiddenOverview) return { kind: "overview" };
       const path = url.pathname;
       const programId = programRoute(path);
       if (programId !== false) {
@@ -805,7 +809,7 @@ export function RemoteApp() {
           controller.signal.aborted ||
           generation !== readGeneration.current ||
           urlRef.current !== url ||
-          document.visibilityState !== "visible"
+          (document.visibilityState !== "visible" && data.kind !== "overview")
         )
           return;
         if (batch && applying.current !== batch) return;
@@ -897,6 +901,7 @@ export function RemoteApp() {
   }, [state, focusInside]);
   const data = state.status === "ready" ? state.data : null;
   const meta = data && "value" in data ? data.value : null;
+  const staticOverview = data?.kind === "health" || data?.kind === "overview";
   const previousSnapshot = lastVerified.current?.location === url ? lastVerified.current : null;
   const pending = meta && !selected.snapshot && meta.head.snapshotId !== meta.snapshotId ? meta.head.snapshotId : null;
   // Retain the actual focused control and its section independently. Moving
@@ -1287,11 +1292,11 @@ export function RemoteApp() {
             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusInside(false);
           }}
         >
-          {data?.kind === "health" && url.pathname === "/" && state.status === "ready" && (
+          {staticOverview && url.pathname === "/" && state.status === "ready" && (
             <>
               <OverviewNavigation registry={state.registry} selected={pinned} />
               <FirstContributionsEntry selected={pinned} />
-              <OverviewAcceptedWork state={overviewActivity} selected={pinned} />
+              {data?.kind === "health" && <OverviewAcceptedWork state={overviewActivity} selected={pinned} />}
             </>
           )}
           {data?.kind === "catalog" && state.status === "ready" && (

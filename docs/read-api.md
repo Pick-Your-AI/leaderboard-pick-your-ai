@@ -366,7 +366,9 @@ new batch can start. Cancellation does not replay the old target, and failure
 cleanup does not silently fetch an older snapshot to replace the error. Visible
 loading text remains, but an identified Apply batch does not also announce that
 loading text through a second live region. Initial loading and genuine error
-alerts keep their existing behavior.
+alerts keep their existing behavior. An initially hidden overview can load the
+public metric catalog for navigation; snapshot and contributor activity reads wait
+until the page becomes visible.
 
 The paced-update browser cases use controlled time and synthetic provider inputs
 through the real service handler. They cover delayed reads, advancing heads,

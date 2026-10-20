@@ -3,11 +3,11 @@
 This is a partial implementation of [LB-19.01 / issue #72](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/72).
 The new suite feeds synthetic GitHub source payloads through the actual normalizer
 and metric engine. It adds explicit actor, clock, source-proof and grouping
-checks for 18 metric IDs. The inventory separately maps 63 other IDs to existing
-meaningful source cases, with exact test names and their limits. Seventeen IDs
+checks for 18 metric IDs. The inventory separately maps 64 other IDs to existing
+meaningful source cases, with exact test names and their limits. Sixteen IDs
 remain explicitly deferred in the inventory. The accepted eleven-reference update,
-two pair mappings and two accepted-source mappings below do not certify all 98
-public definitions.
+two pair mappings, two accepted-source mappings and the bounded Project item-day
+mapping below do not certify all 98 public definitions.
 
 The [machine-readable inventory](../packages/metrics/test/fixtures/metric-source-semantics.json)
 accounts for every registry ID exactly once. A metric with new cases has an
@@ -70,13 +70,14 @@ the corresponding metric rather than marking its entire public definition done.
 
 ## Remaining acceptance and ownership
 
-The inventory now has 18 direct-suite entries, 63 existing-source mappings and
-17 explicit remaining dispositions. The references include specialized domain
+The inventory now has 18 direct-suite entries, 64 existing-source mappings and
+16 explicit remaining dispositions. The references include specialized domain
 receipt admission, localization, bug/answer recognition, typed history,
-participation history, physical diff eligibility, maintenance, automation and
-editorial consent. Each maps a literal positive and exclusion test; parameterized
-domain cases also name their metric input. These are bounded source-review
-references, not 63 new executions or a claim that every remaining facet is done.
+participation history, physical diff eligibility, maintenance, automation,
+editorial consent and observed Project item days. Each maps a literal positive
+and exclusion test; parameterized domain cases also name their metric input.
+These are bounded source-review references, not 64 new executions or a claim
+that every remaining facet is done.
 The original 18/47/33 inventory and its semantic/cache executions remain attributed
 to the earlier source. The separately reviewed repository-net helper adds one
 reference backed by its own 20 synthetic source cases, producing the historical
@@ -146,11 +147,16 @@ as evidence for unknown in-scope active-week exclusion. Its calendar denominator
 is context, not a certified fully covered participation share or month projection.
 
 The remaining dispositions retain six derivation/admission prerequisites and
-eleven IDs needing additional semantic cases. The accepted eleven-reference review
-left 21 entries; this composition maps two pairs plus direct changes and helpful
-feedback, leaving 17. Project field/update cases already establish bounded raw
-transitions, but do not establish complete item/day or substantive-update semantics;
-those entries remain deferred.
+ten IDs needing additional semantic cases. The accepted eleven-reference review
+left 21 entries; the prior composition mapped two pairs plus direct changes and
+helpful feedback, leaving 17. The [Project field item-day cases](../packages/metrics/test/project-field-days.test.js)
+now add one bounded mapping for explicitly enriched synthetic item transitions
+under `project-field-day/v1`, leaving 16. The [grouping guide](project-field-day-grouping.md)
+preserves the limits: no native `projects_v2_item` collection, installed grants,
+complete history, live sender identity, manual-effort classification, independent
+correction authorization or public activation is established. `project_updates`
+remains deferred because scalar field transitions do not prove substantive
+published Project progress-update artifacts.
 The optional retained-line and commit-attributed
 lenses are not silently assigned to the adjacent physical-context PRs. A raw
 relationship cannot establish preserved duplicate evidence; a generic accepted
