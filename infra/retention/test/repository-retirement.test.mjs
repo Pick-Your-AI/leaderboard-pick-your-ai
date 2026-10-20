@@ -319,8 +319,14 @@ test("the complete separately scoped authorization is checked again before a fen
     ),
     /retirement_not_authorized/,
   );
-  await assert.rejects(h.collection.readProgress(h.request, async () => false), /retirement_not_authorized/);
-  await assert.rejects(h.derived.readProgress(h.request, async () => false), /retirement_not_authorized/);
+  await assert.rejects(
+    h.collection.readProgress(h.request, async () => false),
+    /retirement_not_authorized/,
+  );
+  await assert.rejects(
+    h.derived.readProgress(h.request, async () => false),
+    /retirement_not_authorized/,
+  );
   for (const change of [
     { policyVersion: "synthetic-other-policy" },
     { authorizationReceipt: "synthetic-other-approval" },
