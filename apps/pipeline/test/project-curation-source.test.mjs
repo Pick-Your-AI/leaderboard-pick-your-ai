@@ -774,7 +774,10 @@ test("curation metadata excludes content from every durable checkpoint even when
   assert.equal(inventoryPages, 6, "both metadata inventories refresh after durable reopen");
   assert.equal(restRequests, 0);
   assert.ok(writes.some((write) => write.key.startsWith("scan:")));
-  assert.equal(writes.some((write) => write.key.startsWith("http:")), false);
+  assert.equal(
+    writes.some((write) => write.key.startsWith("http:")),
+    false,
+  );
   const latest = new Map(writes.map((write) => [JSON.stringify([write.repositoryId, write.key]), write]));
   for (const write of latest.values()) {
     const actual = write.repositoryId === null ? reopened : reopened.forRepository(write.repositoryId);
