@@ -161,7 +161,24 @@ export function createGithubCollectionSource({
     if (!scope || scope.slug !== repository.slug || scope.installationId !== repository.installationId)
       throw new Error("repository_not_authorized");
     const client = readClient.forRepository(scope.id);
-    const value = await client.rest(sourceId, `/repos/${scope.slug}`, assertAuthorized);
+    let value;
+    if (scope.families.includes("project_curation_history")) {
+      const [owner, name] = scope.slug.split("/");
+      // REST probes can persist their full ETag response before a caller projects
+      // it. Curation needs only the repository identity and current visibility.
+      const data = await client.graphql(
+        sourceId,
+        "query ProjectCurationRepository($owner:String!, $name:String!) {" +
+          " repository(owner:$owner, name:$name) { databaseId nameWithOwner isPrivate } }",
+        { owner, name },
+        assertAuthorized,
+      );
+      value = {
+        id: data?.repository?.databaseId,
+        full_name: data?.repository?.nameWithOwner,
+        private: data?.repository?.isPrivate,
+      };
+    } else value = await client.rest(sourceId, `/repos/${scope.slug}`, assertAuthorized);
     if (
       value?.id !== repository.id ||
       typeof value.private !== "boolean" ||
@@ -487,26 +504,83 @@ export function createGithubCollectionSource({
           if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
         }
       } else if (request.family === "project_curation_history") {
-        const subjects = await scan("project-curation:issue-and-pr-subjects:v1", routes.issues, (items) =>
-          items.map((subject) => {
-            if (
-              subject === null ||
-              typeof subject !== "object" ||
-              Array.isArray(subject) ||
-              (subject.pull_request !== undefined &&
-                (subject.pull_request === null ||
-                  typeof subject.pull_request !== "object" ||
-                  Array.isArray(subject.pull_request)))
-            )
-              throw new Error("project_curation_subject_identity_unverified");
-            return {
-              node_id: subject.node_id,
-              number: subject.number,
-              html_url: subject.html_url,
-              pull_request: subject.pull_request !== undefined,
-            };
-          }),
-        );
+        const [owner, name] = repository.slug.split("/");
+        const subjects = [];
+        // Select metadata at the transport boundary. A REST inventory would
+        // cache complete issue bodies before scanRest applies its selector.
+        for (const [field, kind, states] of [
+          ["issues", "issue", "OPEN,CLOSED"],
+          ["pullRequests", "pull_request", "OPEN,CLOSED,MERGED"],
+        ]) {
+          const inventory = await client.scanGraphql({
+            source: sourceId,
+            key: `pipeline:${repository.id}:${request.runId}:project-curation:${kind}-subjects-metadata-v1`,
+            query:
+              "query ProjectCurationInventory($owner:String!, $name:String!, $first:Int!, $after:String) {" +
+              " repository(owner:$owner, name:$name) { databaseId isPrivate " +
+              field +
+              "(first:$first, after:$after, states:[" +
+              states +
+              "], orderBy:{field:CREATED_AT,direction:ASC}) {" +
+              " nodes { id number url } pageInfo { hasNextPage endCursor } } } }",
+            variables: { owner, name },
+            first: 100,
+            maxPages,
+            refresh: true,
+            assertAuthorized,
+            select(data) {
+              assertAuthorized();
+              const nativeRepository = data?.repository;
+              if (
+                nativeRepository === null ||
+                typeof nativeRepository !== "object" ||
+                Array.isArray(nativeRepository) ||
+                nativeRepository.databaseId !== repository.id ||
+                nativeRepository.isPrivate !== false
+              )
+                throw new Error("project_curation_scope_unverified");
+              const connection = nativeRepository[field];
+              if (
+                connection === null ||
+                typeof connection !== "object" ||
+                Array.isArray(connection) ||
+                !Array.isArray(connection.nodes) ||
+                connection.nodes.length > 100
+              )
+                throw new Error("project_curation_subject_identity_unverified");
+              return {
+                nodes: connection.nodes.map((subject) => {
+                  if (
+                    subject === null ||
+                    typeof subject !== "object" ||
+                    Array.isArray(subject) ||
+                    typeof subject.id !== "string" ||
+                    !/^[A-Za-z0-9_=.:-]{1,128}$/.test(subject.id) ||
+                    !Number.isSafeInteger(subject.number) ||
+                    subject.number < 1 ||
+                    subject.url !==
+                      "https://github.com/" +
+                        repository.slug +
+                        "/" +
+                        (kind === "pull_request" ? "pull/" : "issues/") +
+                        subject.number
+                  )
+                    throw new Error("project_curation_subject_identity_unverified");
+                  return {
+                    node_id: subject.id,
+                    number: subject.number,
+                    html_url: subject.url,
+                    pull_request: kind === "pull_request",
+                  };
+                }),
+                pageInfo: connection.pageInfo,
+              };
+            },
+          });
+          if (!Array.isArray(inventory) || subjects.length + inventory.length > 10000)
+            throw new Error("source_dataset_budget_exceeded");
+          subjects.push(...inventory);
+        }
         if (subjects.length > 10000) throw new Error("source_dataset_budget_exceeded");
         const seenNumbers = new Set();
         const seenSubjects = new Set();

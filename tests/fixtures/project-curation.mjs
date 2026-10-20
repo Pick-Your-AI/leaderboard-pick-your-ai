@@ -77,6 +77,21 @@ export function projectCurationFixture({ slug = "synthetic-org/synthetic-repo", 
       },
     };
   }
+  function inventory(query) {
+    const field = query.includes("pullRequests(") ? "pullRequests" : "issues";
+    return {
+      repository: {
+        databaseId: state.repositoryId,
+        isPrivate: !state.repositoryPublic,
+        [field]: {
+          nodes: state.subjects
+            .filter((subject) => (subject.pull_request !== undefined) === (field === "pullRequests"))
+            .map((subject) => ({ id: subject.node_id, number: subject.number, url: subject.html_url })),
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    };
+  }
   const client = syntheticRepositoryClient(repository.id, {
     async rest(source, path, authorize) {
       authorize?.();
@@ -93,6 +108,11 @@ export function projectCurationFixture({ slug = "synthetic-org/synthetic-repo", 
     },
     async scanGraphql(options) {
       options.assertAuthorized?.();
+      if (options.query.includes("ProjectCurationInventory")) {
+        state.reads.push({ kind: "inventory", key: options.key, query: options.query, refresh: options.refresh });
+        assert.equal(options.refresh, true);
+        return options.select(inventory(options.query)).nodes;
+      }
       state.reads.push({ kind: "timeline", key: options.key, query: options.query, refresh: options.refresh });
       assert.match(options.query, /ADDED_TO_PROJECT_V2_EVENT,REMOVED_FROM_PROJECT_V2_EVENT/);
       assert.equal(options.refresh, true);
@@ -108,12 +128,20 @@ export function projectCurationFixture({ slug = "synthetic-org/synthetic-repo", 
       if (variables.id) {
         result = { node: { id: variables.id, public: state.projectPublic } };
         await state.afterProject?.();
+      } else if (query.includes("ProjectCurationRepository")) {
+        result = {
+          repository: {
+            databaseId: state.repositoryId,
+            nameWithOwner: slug,
+            isPrivate: !state.repositoryPublic,
+          },
+        };
       } else result = data(variables.number, query);
       authorize?.();
       return result;
     },
   });
-  return { repository, state, client, data };
+  return { repository, state, client, data, inventory };
 }
 
 export function curationReaderOptions(fixture, number = 1) {

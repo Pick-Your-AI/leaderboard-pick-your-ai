@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   createGithubCollectionSource,
   githubRecentSourceFamilies,
@@ -167,7 +170,7 @@ test("curation collector retains minimized native bindings and unknown total his
   assert.ok(
     fixture.state.reads
       .filter((read) => read.kind === "inventory")
-      .every((read) => read.key.endsWith(":project-curation:issue-and-pr-subjects:v1")),
+      .every((read) => /:project-curation:(?:issue|pull_request)-subjects-metadata-v1$/.test(read.key)),
   );
 });
 
@@ -501,15 +504,16 @@ test("real scan checkpoints refresh the curation subject inventory before every 
     maxRetries: 0,
     fetch: async (url, init) => {
       const respond = (body) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
-      if (init.method !== "POST") {
-        const path = new URL(url).pathname;
-        if (path === "/repos/" + fixture.repository.slug)
-          return respond({ id: 2, private: false, full_name: fixture.repository.slug });
-        assert.equal(path, "/repos/" + fixture.repository.slug + "/issues");
-        inventoryReads++;
-        return respond(fixture.state.subjects);
-      }
+      assert.equal(init.method, "POST", "curation acquires only selected GraphQL metadata");
       const { query, variables } = JSON.parse(init.body);
+      if (query.includes("ProjectCurationRepository"))
+        return respond({
+          data: { repository: { databaseId: 2, isPrivate: false, nameWithOwner: fixture.repository.slug } },
+        });
+      if (query.includes("ProjectCurationInventory")) {
+        inventoryReads++;
+        return respond({ data: fixture.inventory(query) });
+      }
       return respond({
         data: variables.id ? { node: { id: variables.id, public: true } } : fixture.data(variables.number, query),
       });
@@ -517,11 +521,11 @@ test("real scan checkpoints refresh the curation subject inventory before every 
   });
   const reader = source({ ...fixture, client });
   const first = await reader.readPage({ ...request, limit: 1 });
-  assert.equal(inventoryReads, 1);
+  assert.equal(inventoryReads, 2);
   const cursor = first.nextCursor;
   fixture.state.subjects.reverse();
   const stable = await reader.readPage({ ...request, limit: 1, cursor });
-  assert.equal(inventoryReads, 2, "the actual scan client must not reuse the complete subject checkpoint");
+  assert.equal(inventoryReads, 4, "the actual scan client must refresh both complete subject checkpoints");
   assert.equal(stable.facts[0].subjectId, "PVE_SYNTHETIC_PR_REMOVE");
 
   const retainedSubjects = structuredClone(fixture.state.subjects);
@@ -532,14 +536,14 @@ test("real scan checkpoints refresh the curation subject inventory before every 
   });
   fixture.state.events.set(3, [curationEvent("PVE_NEW_SUBJECT")]);
   await assert.rejects(reader.readPage({ ...request, limit: 1, cursor }), /source_project_curation_cursor_changed/);
-  assert.equal(inventoryReads, 3);
+  assert.equal(inventoryReads, 6);
   fixture.state.subjects = retainedSubjects.filter((subject) => subject.number !== 1);
   await assert.rejects(reader.readPage({ ...request, limit: 1, cursor }), /source_project_curation_cursor_changed/);
-  assert.equal(inventoryReads, 4);
+  assert.equal(inventoryReads, 8);
   fixture.state.subjects = retainedSubjects;
   fixture.state.events.delete(3);
   assert.deepEqual(await reader.readPage({ ...request, limit: 1, cursor }), stable);
-  assert.equal(inventoryReads, 5);
+  assert.equal(inventoryReads, 10);
 });
 
 test("curation frozen previews and authorized corrections survive database reopen", async (t) => {
@@ -661,3 +665,217 @@ test("curation frozen previews and authorized corrections survive database reope
     saved,
   );
 });
+
+test("curation metadata excludes content from every durable checkpoint even when responses carry ETags", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "leaderboard-curation-metadata-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const sentinel = "SYNTHETIC_UNSELECTED_CURATION_CONTENT";
+  const fixture = projectCurationFixture();
+  fixture.state.subjects.push({
+    node_id: "I_SYNTHETIC_SECOND_CURATION",
+    number: 3,
+    html_url: "https://github.com/" + fixture.repository.slug + "/issues/3",
+  });
+  fixture.state.events.set(3, [curationEvent("PVE_SYNTHETIC_SECOND_ADD")]);
+  const writes = [];
+  function checkedStore(actual, repositoryId = null) {
+    return {
+      load: (key) => actual.load(key),
+      async save(key, value) {
+        const serialized = JSON.stringify(value);
+        assert.equal(serialized.includes(sentinel), false, "unselected content must not reach any checkpoint write");
+        writes.push({ repositoryId, key, value: JSON.parse(serialized) });
+        await actual.save(key, value);
+      },
+      ...(repositoryId === null
+        ? { forRepository: (id) => checkedStore(actual.forRepository(id), id) }
+        : {
+            repositoryId,
+            assertActive: () => actual.assertActive(),
+            retire: (binding) => actual.retire(binding),
+          }),
+    };
+  }
+  let restRequests = 0;
+  let inventoryPages = 0;
+  const makeClient = (checkpoints) =>
+    new components.github.GithubReadClient({
+      apiOrigin: "https://api.synthetic.invalid",
+      token: async () => "synthetic-curation-metadata-token",
+      checkpoints,
+      maxRetries: 0,
+      fetch: async (url, init) => {
+        const respond = (body) =>
+          new Response(JSON.stringify(body), {
+            headers: { "content-type": "application/json", etag: '"synthetic-curation-metadata"' },
+          });
+        // This branch deliberately models the old ETag-bearing REST path.
+        // A regression reaches the durable-write assertion before scan selection.
+        if (init.method !== "POST") {
+          restRequests++;
+          const path = new URL(url).pathname;
+          if (path === "/repos/" + fixture.repository.slug)
+            return respond({ id: 2, private: false, full_name: fixture.repository.slug, description: sentinel });
+          assert.equal(path, "/repos/" + fixture.repository.slug + "/issues");
+          return respond(fixture.state.subjects.map((subject) => ({ ...subject, title: sentinel, body: sentinel })));
+        }
+        const { query, variables } = JSON.parse(init.body);
+        assert.doesNotMatch(query, /\b(?:body|title|description|fieldValues)\b/);
+        if (query.includes("ProjectCurationRepository"))
+          return respond({
+            data: {
+              repository: {
+                databaseId: 2,
+                isPrivate: false,
+                nameWithOwner: fixture.repository.slug,
+                description: sentinel,
+              },
+            },
+          });
+        if (query.includes("ProjectCurationInventory")) {
+          inventoryPages++;
+          const data = fixture.inventory(query);
+          const field = query.includes("pullRequests(") ? "pullRequests" : "issues";
+          const connection = data.repository[field];
+          if (field === "issues") {
+            connection.nodes = connection.nodes.slice(variables.after ? 1 : 0, variables.after ? 2 : 1);
+            connection.pageInfo = {
+              hasNextPage: !variables.after,
+              endCursor: variables.after ? null : "synthetic-next-issue",
+            };
+          }
+          for (const subject of connection.nodes) Object.assign(subject, { title: sentinel, body: sentinel });
+          return respond({ data });
+        }
+        if (variables.id) return respond({ data: { node: { id: variables.id, public: true, unselected: sentinel } } });
+        const data = fixture.data(variables.number, query);
+        const subject = data.repository[query.includes("pullRequest(number:") ? "pullRequest" : "issue"];
+        subject.body = sentinel;
+        for (const event of subject.timelineItems.nodes) event.unselected = sentinel;
+        return respond({ data });
+      },
+    });
+  const checkpoints = new components.github.FileCheckpointStore(directory);
+  const first = await source({ ...fixture, client: makeClient(checkedStore(checkpoints)) }).readPage({
+    ...request,
+    limit: 2,
+  });
+  assert.equal(first.facts.length, 2);
+  assert.match(first.nextCursor, /^[a-f0-9]{64}:2$/);
+  assert.equal(inventoryPages, 3, "issue and PR inventories retain independent native pagination");
+  const reopened = new components.github.FileCheckpointStore(directory);
+  const next = await source({ ...fixture, client: makeClient(checkedStore(reopened)) }).readPage({
+    ...request,
+    limit: 2,
+    cursor: first.nextCursor,
+  });
+  assert.equal(next.facts.length, 1);
+  assert.equal(next.nextCursor, null);
+  assert.equal(inventoryPages, 6, "both metadata inventories refresh after durable reopen");
+  assert.equal(restRequests, 0);
+  assert.ok(writes.some((write) => write.key.startsWith("scan:")));
+  assert.equal(
+    writes.some((write) => write.key.startsWith("http:")),
+    false,
+  );
+  const latest = new Map(writes.map((write) => [JSON.stringify([write.repositoryId, write.key]), write]));
+  for (const write of latest.values()) {
+    const actual = write.repositoryId === null ? reopened : reopened.forRepository(write.repositoryId);
+    const saved = await actual.load(write.key);
+    assert.deepEqual(saved, write.value, "the real file-backed store retains the projected checkpoint");
+    assert.equal(JSON.stringify(saved).includes(sentinel), false);
+  }
+});
+
+for (const field of ["id", "number", "url"]) {
+  test(`curation rejects malformed ${field} before durable storage without an ETag`, async (t) => {
+    const directory = await mkdtemp(join(tmpdir(), "leaderboard-curation-identity-"));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const sentinel = "SYNTHETIC_UNUSED_IDENTITY_TEXT";
+    const fixture = projectCurationFixture();
+    const writes = [];
+    let malformed = false;
+    function checkedStore(actual, repositoryId = null) {
+      return {
+        load: (key) => actual.load(key),
+        async save(key, value) {
+          const saved = structuredClone(value);
+          await actual.save(key, value);
+          writes.push({ repositoryId, key, value: saved });
+        },
+        ...(repositoryId === null
+          ? { forRepository: (id) => checkedStore(actual.forRepository(id), id) }
+          : {
+              repositoryId,
+              assertActive: () => actual.assertActive(),
+              retire: (binding) => actual.retire(binding),
+            }),
+      };
+    }
+    const makeClient = (checkpoints) =>
+      new components.github.GithubReadClient({
+        apiOrigin: "https://api.synthetic.invalid",
+        token: async () => "synthetic-curation-identity-token",
+        checkpoints,
+        maxRetries: 0,
+        fetch: async (url, init) => {
+          // No ETag: this isolates selection-before-scan-persistence from HTTP caching.
+          const respond = (body) =>
+            new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+          if (init.method !== "POST") {
+            const path = new URL(url).pathname;
+            if (path === "/repos/" + fixture.repository.slug)
+              return respond({ id: 2, private: false, full_name: fixture.repository.slug });
+            assert.equal(path, "/repos/" + fixture.repository.slug + "/issues");
+            const subjects = structuredClone(fixture.state.subjects);
+            if (malformed)
+              subjects[0][{ id: "node_id", number: "number", url: "html_url" }[field]] = { note: sentinel };
+            return respond(subjects);
+          }
+          const { query, variables } = JSON.parse(init.body);
+          if (query.includes("ProjectCurationRepository"))
+            return respond({
+              data: { repository: { databaseId: 2, isPrivate: false, nameWithOwner: fixture.repository.slug } },
+            });
+          if (query.includes("ProjectCurationInventory")) {
+            const data = fixture.inventory(query);
+            if (malformed && data.repository.issues) data.repository.issues.nodes[0][field] = { note: sentinel };
+            return respond({ data });
+          }
+          return respond({
+            data: variables.id ? { node: { id: variables.id, public: true } } : fixture.data(variables.number, query),
+          });
+        },
+      });
+    const checkpoints = new components.github.FileCheckpointStore(directory);
+    const reader = source({ ...fixture, client: makeClient(checkedStore(checkpoints)) });
+    const healthy = await reader.readPage(request);
+    assert.equal(healthy.facts.length, 2, "the actual reader and durable store first accept valid identities");
+    assert.ok(writes.length > 0);
+    const savedWrites = writes.length;
+    const latest = new Map(writes.map((write) => [JSON.stringify([write.repositoryId, write.key]), write]));
+    malformed = true;
+    await assert.rejects(reader.readPage(request), /project_curation_subject_identity_unverified/);
+    assert.equal(writes.length, savedWrites, "an invalid first inventory page must not write its selected values");
+
+    const reopened = new components.github.FileCheckpointStore(directory);
+    for (const write of latest.values()) {
+      const actual = write.repositoryId === null ? reopened : reopened.forRepository(write.repositoryId);
+      assert.deepEqual(await actual.load(write.key), write.value, "the prior valid durable checkpoint stays exact");
+    }
+    const inspect = async (path) => {
+      for (const entry of await readdir(path, { withFileTypes: true })) {
+        const child = join(path, entry.name);
+        if (entry.isDirectory()) await inspect(child);
+        else {
+          assert.equal(entry.isFile(), true);
+          assert.equal((await readFile(child, "utf8")).includes(sentinel), false);
+        }
+      }
+    };
+    await inspect(directory);
+    malformed = false;
+    const recovered = await source({ ...fixture, client: makeClient(checkedStore(reopened)) }).readPage(request);
+    assert.deepEqual(recovered, healthy, "valid metadata remains usable after the rejected page and durable reopen");
+  });
+}
