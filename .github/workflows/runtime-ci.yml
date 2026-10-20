@@ -60,6 +60,10 @@ jobs:
       - run: npm test
         env:
           PIPELINE_SCOPE_STORAGE_TEST_DATABASE_URL: postgres://leaderboard:leaderboard@127.0.0.1:5432/leaderboard_test
+      - name: Verify file-backed pipeline storage survives reopen
+        run: >-
+          env -u PIPELINE_SCOPE_STORAGE_TEST_DATABASE_URL
+          node --test --test-isolation=none apps/pipeline/test/scope-storage.test.mjs
       - name: Verify pipeline retirement with independent PostgreSQL connections
         run: |
           test -n "$PIPELINE_RETIREMENT_TEST_DATABASE_URL"

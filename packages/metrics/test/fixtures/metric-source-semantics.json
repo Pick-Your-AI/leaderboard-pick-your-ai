@@ -286,37 +286,13 @@
   ],
   "deferred": [
     {
-      "id": "transfer-owner-382",
-      "metric_ids": ["issue_transfers"],
-      "reason": "COV15 transfer alias conservation and privacy remain the canonical #382 source lane."
-    },
-    {
-      "id": "release-operations-owners",
-      "metric_ids": ["release_changes", "release_stewardship", "deployment_work", "incidents"],
-      "reason": "The selected #375/#367 release and operations source remains with its canonical owners; no duplicate source implementation or execution is claimed."
-    },
-    {
-      "id": "project-owner-406",
-      "metric_ids": ["project_configuration"],
-      "reason": "Typed Project configuration and its host authority remain the canonical #406 lane."
-    },
-    {
-      "id": "ordering-owner-412",
-      "metric_ids": ["issue_ordering"],
-      "reason": "Canonical #412 supplies typed ordering plans and exact host authority. Its current source and receiving execution remain separate from this continuation."
-    },
-    {
       "id": "source-implementation-prerequisites",
       "metric_ids": [
         "cross_workstream_reviews",
         "evidence_reviews",
         "project_items_curated",
         "helpful_feedback",
-        "governance",
         "outreach",
-        "repositories",
-        "workstreams",
-        "collaborations",
         "commit_attributed_lines",
         "retained_lines"
       ],
@@ -700,6 +676,86 @@
       "positive_test": "partitioned participation keeps actor ordering, historic scope and sorted active weeks",
       "negative_test": "partitioned participation keeps actor ordering, historic scope and sorted active weeks",
       "limitation": "Eligible events in distinct UTC weeks produce distinct active weeks; repeated events within one week count once. The case also keeps selected active weeks separate from earlier organization history. It does not establish unknown in-scope state exclusion or month projection, and the five-week calendar context is not certification of a fully covered participation share. No actual participant classification."
+    },
+    {
+      "metric_id": "issue_transfers",
+      "path": "packages/github/test/issue-transfer-provenance.test.mjs",
+      "positive_test": "typed transfer binds both approved endpoints to the exact retained observation",
+      "negative_test": "inadmissible transfer ${name} supplies no typed equivalence",
+      "limitation": "Synthetic enriched source admission binds the exact transition, actor and both approved endpoints. Inadmissible endpoints yield no transfer fact. The retained fact is raw, with acceptedAt and acceptanceReceipt null; this pair does not establish native historical destination discovery, whole COV15 behavior, aggregate/public row values, qualified merit or public activation."
+    },
+    {
+      "metric_id": "release_changes",
+      "path": "apps/pipeline/test/release-recognition.test.mjs",
+      "positive_test": "release inclusion: accepted author, publication clock and immutable commit link preserve the original merge",
+      "negative_test": "release inclusion: a review before publication fails in both adapter and direct paths",
+      "limitation": "Synthetic independent review and typed release inclusion bind accepted PR author, immutable release commit and publication clock; actual aggregate value is one in the publication window. A review predating publication is rejected in both adapter and direct paths. Live release coverage, real source-use permission and public activation remain separate."
+    },
+    {
+      "metric_id": "release_stewardship",
+      "path": "apps/pipeline/test/release-stewardship-recognition.test.mjs",
+      "positive_test": "release stewardship pipeline: publication policy admits one current reviewed publisher and preserves both clocks",
+      "negative_test": "release stewardship pipeline: current consent, source-use review, withdrawal and suppression withhold callbacks",
+      "limitation": "Synthetic reviewed publisher participation counts once at publication, separately from acceptance time. Missing/stale intake, pending/declined consent, withdrawal and suppression withhold the callback. Named release contributors/checklist receipts, live source authority and public activation remain separate."
+    },
+    {
+      "metric_id": "deployment_work",
+      "path": "apps/pipeline/test/operations-recognition.test.mjs",
+      "positive_test": "operations ${metric}: exact reviewed authored work qualifies and preserves original source and private boundaries",
+      "negative_test": "operations deployment_work: ${name} fails qualification",
+      "case_parameter": "deployment_work",
+      "limitation": "Synthetic reviewed authored deployment improvement binds author, exact public record/deployment identifiers and acceptance clock. Execution-only runs, unknown source use, absent/repeated deployment objects and private free-text environment names used as identifiers fail before callback. The same-file clock case asserts aggregate value one and publicEnabled false; this does not establish deployment execution merit or real permission/public activation."
+    },
+    {
+      "metric_id": "incidents",
+      "path": "apps/pipeline/test/operations-recognition.test.mjs",
+      "positive_test": "operations ${metric}: exact reviewed authored work qualifies and preserves original source and private boundaries",
+      "negative_test": "operations incidents: ${name} cannot become reliability merit",
+      "case_parameter": "incidents",
+      "limitation": "Synthetic approved postmortem/remediation contribution binds exact author, public record and acceptance clock. Incident counts, personally owned uptime, unapproved narrative and a string replacing the approval Boolean are rejected. Same-file cases assert value one and refuse ranking: narrative spotlight only, with real review/source authority/public activation separate."
+    },
+    {
+      "metric_id": "project_configuration",
+      "path": "apps/pipeline/test/project-configuration-recognition.test.mjs",
+      "positive_test": "project configuration: all facets in one change set still contribute one unit",
+      "negative_test": "project configuration: generic receipts cannot establish typed before/after proof",
+      "limitation": "Synthetic typed before/after configuration and contributor-role evidence admits one change set across multiple facets; generic receipts cannot supply that proof. Additional same-file cases bind consented roles, separate automated effects and assert stored public row.result.value equals one before withdrawal. Current Project creator/updatedAt do not prove later authorship; live API permission and public activation remain separate."
+    },
+    {
+      "metric_id": "issue_ordering",
+      "path": "apps/pipeline/test/ordering-recognition.test.mjs",
+      "positive_test": "private audited current ordering receipt yields one canonical accepted-at unit",
+      "negative_test": "legacy generic and mismatched role/source-use records stay withheld in both public claims and metric authority",
+      "limitation": "Synthetic audited typed before/after ordering and contributor/source-use bindings admit one accepted-at unit. Legacy or mismatched role/detail/source revision/digest grants no public claim or recognized fact. Same-file publication asserts row.result.value one and current withdrawal/reopen rejection; this is reviewed-plan coverage, not observed drag history, actual permission or public activation."
+    },
+    {
+      "metric_id": "governance",
+      "path": "apps/pipeline/test/operations-recognition.test.mjs",
+      "positive_test": "operations ${metric}: exact reviewed authored work qualifies and preserves original source and private boundaries",
+      "negative_test": "operations governance: ${name} is not accepted governance work",
+      "case_parameter": "governance",
+      "limitation": "Synthetic independently reviewed authored governance work binds an accepted decision/version and immutable public record. Permission administration alone, an unaccepted proposal and an undeclared access roster fail before receipt application. Same-file cases distinguish decision versions and assert aggregate value one at the acceptance clock with publicEnabled false; real policy adoption, source rights and public activation remain separate."
+    },
+    {
+      "metric_id": "repositories",
+      "path": "packages/metrics/test/breadth-source.test.js",
+      "positive_test": "repositories: accepted source activities count distinct stable repositories and retain all proofs",
+      "negative_test": "raw activity, an assignee and approval words never supply accepted breadth",
+      "limitation": "Actual normalizer and independent synthetic receipt paths feed accepted source activity into the breadth aggregator: three accepted activities across two stable repositories produce value two with all evidence IDs retained. Raw observations, an assignee and payload approval words cannot supply accepted breadth. Supplied policy, lineage and incomplete coverage remain explicit; no live source grant or public activation is established."
+    },
+    {
+      "metric_id": "workstreams",
+      "path": "packages/metrics/test/breadth-source.test.js",
+      "positive_test": "workstreams: overlapping Project lenses count each verified event-time workstream once",
+      "negative_test": "raw activity, an assignee and approval words never supply accepted breadth",
+      "limitation": "Actual normalized and synthetically accepted activity with explicitly supplied event-time mapping counts two workstreams once across overlapping Project lenses. Raw activity supplies none; unknown/partial mapping remains separately unknown or partial and current membership cannot replace history. The tests preserve publicEnabled false and do not establish real Project access, mapping completeness or public activation."
+    },
+    {
+      "metric_id": "collaborations",
+      "path": "packages/metrics/test/collaborations-source.test.js",
+      "positive_test": "accepted source authors, verified coauthors and reviewers produce distinct evidenced peers",
+      "negative_test": "ordinary source observations and actual unreviewed PR/review facts cannot create accepted peers",
+      "limitation": "Actual normalized PR/review facts with independently accepted synthetic receipts produce two evidenced peers with exact roles, source artifact and pair-formation times. Replacing them with actual unreviewed facts yields unknown/no peers; additional cases reject either side's missing acceptance or self review. Incomplete coverage, null rank and publicEnabled false remain explicit; no real consent, complete peer history or public activation is established."
     }
   ]
 }

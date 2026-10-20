@@ -292,6 +292,19 @@ export function createVerifiedIdentityCorrectionConsumer({
     }
     return parse(authoritySchema, result);
   }
+  function readClock() {
+    const result = now();
+    if (types.isPromise(result)) {
+      // Observe native rejections before rejecting the synchronous clock value.
+      void Promise.prototype.then.call(
+        result,
+        () => undefined,
+        () => undefined,
+      );
+      throw new ControlError(409, "Invalid identity application clock");
+    }
+    return parse(instant, result, "Invalid identity application clock");
+  }
   return Object.freeze({
     apply(decisionId) {
       requireThat(
@@ -303,7 +316,7 @@ export function createVerifiedIdentityCorrectionConsumer({
       let startedAt;
       const result = store.transaction(
         () => {
-          startedAt = parse(instant, now(), "Invalid identity application clock");
+          startedAt = readClock();
           authority = read(decisionId);
           validateAuthority(authority, decisionId, startedAt);
           const { decision, authorization } = authority;
@@ -430,7 +443,7 @@ export function createVerifiedIdentityCorrectionConsumer({
           beforeCommit() {
             const current = read(decisionId);
             same(current, authority, "Protected identity authority changed during application");
-            const at = parse(instant, now(), "Invalid identity application clock");
+            const at = readClock();
             requireThat(compareSourceInstants(at, startedAt) >= 0, 409, "Identity application clock moved backwards");
             validateAuthority(current, decisionId, at);
           },
