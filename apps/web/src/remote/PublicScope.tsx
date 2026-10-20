@@ -54,7 +54,9 @@ export function PublicScopeProvenance({ scope, compact = false }: { scope: Publi
   const roles = scope.roles?.length
     ? `${scope.roles.map((role) => roleLabels[role]).join(", ")} (any selected)`
     : "all";
-  const description = `Membership: ${membership}. GitHub Projects: ${projects}. Contribution roles: ${roles}.`;
+  const description =
+    `Membership: ${membership}. GitHub Projects: ${projects}. Contribution roles: ${roles}.` +
+    (scope.branch === undefined ? "" : ` Merge target at merge: ${scope.branch}.`);
   const provenance = (
     <p className="public-scope-provenance" aria-label="Membership and contribution scope">
       {description}
@@ -66,7 +68,8 @@ export function PublicScopeProvenance({ scope, compact = false }: { scope: Publi
         <summary>
           Membership: {membership}. GitHub Projects:{" "}
           {scope.projects?.length ? `${scope.projects.length} selected` : "all in this materialized scope"}.{" "}
-          Contribution roles: {scope.roles?.length ? `${scope.roles.length} selected` : "all"}. Show full scope.
+          Contribution roles: {scope.roles?.length ? `${scope.roles.length} selected` : "all"}.
+          {scope.branch === undefined ? "" : " Merge target selected."} Show full scope.
         </summary>
         {provenance}
       </details>
