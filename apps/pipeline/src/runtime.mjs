@@ -641,6 +641,16 @@ export async function createPipeline(options) {
     row.family !== "reviews" ||
     (digest(row.document) === row.document_hash &&
       row.document.reviewSourceNormalizationVersion === reviewSourceNormalizationVersion);
+  const assertReviewNormalizer = () => {
+    // Bind compatibility to the callbacks actually retained at construction.
+    // Their host declaration remains live across normalization and publication.
+    if (
+      ((providedNormalizer !== undefined && providedNormalizer !== null) || providedEnrichment
+        ? options.reviewSourceNormalizationVersion
+        : c.github?.reviewSourceNormalizationVersion) !== reviewSourceNormalizationVersion
+    )
+      fail("review_normalizer_version_unverified");
+  };
   const discussionEvidenceCurrent = (row) =>
     row.family !== "discussions" ||
     (digest(row.document) === row.document_hash &&
@@ -1717,13 +1727,7 @@ export async function createPipeline(options) {
         baseSignature: signature,
         deliverySignature: defaultDeliverySignature(signature),
       }));
-      if (
-        row.family === "reviews" &&
-        (options.normalizer || options.githubEnrich
-          ? options.reviewSourceNormalizationVersion
-          : c.github.reviewSourceNormalizationVersion) !== reviewSourceNormalizationVersion
-      )
-        fail("review_normalizer_version_unverified");
+      if (row.family === "reviews") assertReviewNormalizer();
       if (row.family === "discussions") assertDiscussionNormalizer();
       const repository = config.repositories.find((repo) => String(repo.id) === String(row.repository_id));
       const discussionFeedback = row.document.discussionFeedback !== undefined;
@@ -1757,6 +1761,7 @@ export async function createPipeline(options) {
           ],
         )
       ).rows;
+      if (row.family === "reviews") assertReviewNormalizer();
       if (row.family === "discussions") assertDiscussionNormalizer();
       if (discussionFeedback) assertDiscussionFeedbackNormalizer();
       let fieldChange =
@@ -1879,6 +1884,7 @@ export async function createPipeline(options) {
           retainPhysicalContext(cached.document, row, repository, c.contracts, dataMode);
           await db.transaction(async (tx) => {
             await lockIssueTransferSources(tx, config.repositories, "update");
+            if (row.family === "reviews") assertReviewNormalizer();
             if (row.family === "discussions") assertDiscussionNormalizer();
             const current = (
               await tx.query(
@@ -1888,11 +1894,14 @@ export async function createPipeline(options) {
             ).rows[0];
             if (current?.document_hash !== cached.document_hash)
               fail("normalization_changed_before_dependency_capture");
+            if (row.family === "reviews") assertReviewNormalizer();
             if (row.family === "discussions") assertDiscussionNormalizer();
             await retainSourceArtifacts(tx, row.fact_key, cached.document);
             await retainIssueTransferIndex(tx, row, cached.policy_signature, cached.document);
+            if (row.family === "reviews") assertReviewNormalizer();
             if (row.family === "discussions") assertDiscussionNormalizer();
           });
+          if (row.family === "reviews") assertReviewNormalizer();
           if (row.family === "discussions") assertDiscussionNormalizer();
           if (fieldChange) assertFieldChangeNormalizer();
           if (discussionFeedback) assertDiscussionFeedbackNormalizer();
@@ -1914,6 +1923,7 @@ export async function createPipeline(options) {
       let output;
       try {
         assertRunConfiguration();
+        if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
         output = await normalizer({
           repository: copy(repository),
@@ -1926,6 +1936,7 @@ export async function createPipeline(options) {
           policyVersion: config.version,
         });
         assertRunConfiguration();
+        if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
         if (discussionFeedback) assertDiscussionFeedbackNormalizer();
         monitorSuccess(monitorSource(repository.id), "normalization", normalizationStarted);
@@ -2031,6 +2042,7 @@ export async function createPipeline(options) {
           // source gate through their final current-privacy projection.
           await lockIssueTransferSources(tx, config.repositories, "update");
           assertRunConfiguration();
+          if (row.family === "reviews") assertReviewNormalizer();
           if (row.family === "discussions") assertDiscussionNormalizer();
           await tx.query(
             "INSERT INTO leaderboard_ingestion.object_suppressions(repository_id,subject_id,reason) VALUES($1,$2,'unavailable') ON CONFLICT DO NOTHING",
@@ -2101,6 +2113,7 @@ export async function createPipeline(options) {
       };
       await db.transaction(async (tx) => {
         await lockIssueTransferSources(tx, config.repositories, "update");
+        if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
         if (fieldChange) assertFieldChangeNormalizer();
         if (discussionFeedback) assertDiscussionFeedbackNormalizer();
@@ -2118,11 +2131,14 @@ export async function createPipeline(options) {
           )
         ).rows[0];
         if (current?.document_hash !== digest(document)) fail("normalization_changed_before_dependency_capture");
+        if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
         await retainSourceArtifacts(tx, row.fact_key, document);
         await retainIssueTransferIndex(tx, row, signature, document);
+        if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
       });
+      if (row.family === "reviews") assertReviewNormalizer();
       if (row.family === "discussions") assertDiscussionNormalizer();
       if (fieldChange) assertFieldChangeNormalizer();
       if (discussionFeedback) assertDiscussionFeedbackNormalizer();
@@ -2197,6 +2213,16 @@ export async function createPipeline(options) {
         assertDiscussionNormalizer();
       if (feedbackAuthority.enabled) feedbackAuthority.assert(runFeedbackAuthority);
       if (feedbackInScope(scope)) assertDiscussionFeedbackNormalizer();
+      if (
+        publication.reviewSourceNormalizationVersion !== undefined &&
+        !confirmationMatches(
+          state.pipelinePublications?.[publication.snapshotId],
+          scope,
+          publication.snapshotId,
+          publication.revision,
+        )
+      )
+        assertReviewNormalizer();
       const overlay = restrictConfiguration(state);
       if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
       if (
@@ -2443,6 +2469,7 @@ export async function createPipeline(options) {
       ),
     );
     ready();
+    if (hasReviewSources) assertReviewNormalizer();
     const hasDefaultDeliverySources = normalized.some(
       (entry) => entry.document.defaultDeliveryNormalizationVersion === defaultDeliveryNormalizationVersion,
     );
@@ -2960,6 +2987,7 @@ export async function createPipeline(options) {
     try {
       const publication = await db.transaction(async (tx) => {
         await lockIssueTransferSources(tx, config.repositories);
+        if (hasReviewSources) assertReviewNormalizer();
         ready();
         await feedbackStore.assertCapture(
           tx,
@@ -2985,6 +3013,7 @@ export async function createPipeline(options) {
             if (saved?.snapshot_id !== publication.snapshotId) fail("dispatch_publication_conflict");
             await outbox.assertLease(tx, dispatch.lease);
           }
+          if (hasReviewSources) assertReviewNormalizer();
           ready();
           return publication;
         };
@@ -3047,6 +3076,7 @@ export async function createPipeline(options) {
           )
         ).rows[0];
         ready();
+        if (hasReviewSources) assertReviewNormalizer();
         if (scan) scanContinuations.assertHead(scanHeads, scopeKey(scope), current?.snapshot_id ?? null);
         if (priorPublication) {
           const saved = (
@@ -3164,7 +3194,10 @@ export async function createPipeline(options) {
         assertFieldChangeNormalizer();
         publication.fieldChangeNormalizationVersion = fieldChangeNormalizationVersion;
       }
-      if (hasReviewSources) publication.reviewSourceNormalizationVersion = reviewSourceNormalizationVersion;
+      if (hasReviewSources) {
+        assertReviewNormalizer();
+        publication.reviewSourceNormalizationVersion = reviewSourceNormalizationVersion;
+      }
       if (hasDiscussionSources) {
         assertDiscussionNormalizer();
         publication.discussionSourceNormalizationVersion = discussionSourceNormalizationVersion;
