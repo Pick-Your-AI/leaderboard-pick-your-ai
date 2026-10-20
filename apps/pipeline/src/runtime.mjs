@@ -973,6 +973,7 @@ export async function createPipeline(options) {
         onUnavailable: (repo, reason) => denyRepository(repo, reason, utc(now())),
         includePullRequestReviewComments: ({ runId }) => expandedGithubCommentsRun(runId),
         includeContentEditMetadata: (request) => contentEditAdmission.allows(request),
+        includeCommentEditMetadata: (request) => contentEditAdmission.allowsComments(request),
         ...(feedbackAuthority.enabled
           ? { discussionFeedback: { authority: feedbackAuthority, store: feedbackStore } }
           : {}),
@@ -1126,6 +1127,7 @@ export async function createPipeline(options) {
           defaultCommentsInventory,
         ),
         defaultContentEditInventory,
+        true,
       ),
     ),
   });
@@ -3609,7 +3611,7 @@ export async function createPipeline(options) {
           : null,
       );
       cutoff = scan.cutoff;
-      if (defaultContentEditInventory && scan.plan) contentEditAdmission.setPlanned(scan, scan.plan);
+      if (defaultContentEditInventory && scan.plan) contentEditAdmission.setPlanned(scan, scan.plan, true);
     }
     const publicationWindows = resolveDiscoverablePublicationWindows(
       config.scopes,
@@ -3647,7 +3649,7 @@ export async function createPipeline(options) {
         // otherwise atomically materialize and pin the expanded inventory ID.
         const selectedRequest =
           !scan?.plan && defaultContentEditInventory && request.family === "content_edits"
-            ? await startGithubContentEditRun(db, collection, request, assertRunConfiguration)
+            ? await startGithubContentEditRun(db, collection, request, assertRunConfiguration, true)
             : !scan?.plan && defaultCommentsInventory && request.family === "comments"
               ? await startGithubCommentsRun(db, collection, request, assertRunConfiguration)
               : request;

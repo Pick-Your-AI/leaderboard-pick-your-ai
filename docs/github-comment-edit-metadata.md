@@ -1,6 +1,6 @@
 # GitHub comment and review edit metadata
 
-This reader provides bounded edit-history metadata for an already-bound public GitHub comment or submitted review. It contributes to [inventory and backfill issue #59](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/59). It does not enumerate comments or enable a production source. The existing [Issue and PullRequest content-edit inventory](github-content-edit-metadata.md), its collection format and saved runs remain unchanged.
+This reader provides bounded edit-history metadata for an already-bound public GitHub comment or submitted review. It contributes to [inventory and backfill issue #59](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/59). The separate [comment and review inventory](github-comment-edit-inventory.md) supplies those targets to explicitly admitted default-source audits and backfills. The existing [Issue and PullRequest metadata format](github-content-edit-metadata.md) and retained parent-only runs keep their original semantics.
 
 ## Supported native targets
 
@@ -54,15 +54,15 @@ These bounds concern the available native connection. GitHub's retained history 
 
 `verifyGithubCommentEditRevision` validates the complete revision shape and recomputes the semantic digest. It does not authenticate provider data, prove access, or establish that an arbitrary scan suffix names an authorized collection. Other revision families and additional fields are rejected.
 
-The new prefix lies within the existing collection boundary's reserved `gh-content-edit-*` namespace. The current Issue/PullRequest collection parser does not accept this new format, so a caller cannot silently persist it through the legacy fallback. This change adds no source selection, admission policy, inventory traversal, collection DTO, normalization or public contribution. Existing `gh-content-edit-v1`, REST comment revisions and saved source contexts keep their existing behavior.
+The new prefix lies within the collection boundary's reserved `gh-content-edit-*` namespace. The explicit comment metadata parser accepts this version only with a bound saved repository, exact target ID and URL, neutral fact fields and verified semantic revision. Unsupported versions or missing DTOs cannot fall through to legacy persistence. The existing `gh-content-edit-v1` and REST comment revisions retain their separate contracts.
 
-A later integration must enumerate authorized published targets, preserve their exact native relationships, introduce an explicit versioned collection/admission contract, retain neutral private metadata, and account for saved-run and checkpoint compatibility. A valid edit timestamp or editor ID must not become contribution evidence merely because this reader returned it.
+The [inventory integration](github-comment-edit-inventory.md) defines the versioned admission, collection, hydration and saved-run rules. A valid edit timestamp or editor ID remains private metadata and does not become contribution evidence merely because this reader returned it.
 
 ## Verification and remaining acceptance
 
 The [focused reader tests](../packages/github/test/comment-edit-history.test.mjs) use the real `GithubReadClient` and `FileCheckpointStore` with [synthetic native responses](../tests/fixtures/comment-edit-metadata.mjs). They cover all four target kinds, submitted-state admission, exact native bindings, unknown and empty histories, interrupted paging and reopen, completed-cache validation, input capture, current authorization loss, repository retirement, bounds, malformed metadata and revision isolation. The existing Issue/PullRequest reader and normalizer suites protect the shared parser extraction.
 
-Synthetic tests do not establish a GitHub App installation's actual GraphQL capabilities, complete historical coverage, production inventory/hydration, or full #59 acceptance. Those requirements remain separately tracked.
+Synthetic tests establish bounded implementation behavior, including the separately tested inventory and hydration integration. They do not establish a GitHub App installation's actual GraphQL capabilities, a live deployment, complete historical coverage or full #59 acceptance. Those requirements remain separately tracked.
 
 Primary references:
 

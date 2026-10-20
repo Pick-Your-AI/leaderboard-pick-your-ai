@@ -74,6 +74,13 @@ import {
   verifyGithubContentEditRevision,
   type ContentEditMetadata,
 } from "./content-edit-history.js";
+import {
+  githubCommentEditAuthorization,
+  parseGithubCommentEditMetadata,
+  readGithubCommentEditMetadata,
+  verifyGithubCommentEditRevision,
+  type GithubCommentEditMetadata,
+} from "./comment-edit-history.js";
 import { readPublicProjectSnapshot, projectSnapshotRevision } from "./project-snapshots.js";
 import {
   readPublicSubjectProjectSnapshot,
@@ -1940,7 +1947,7 @@ export interface CollectionNormalizerInput {
     historySubjectId?: string;
     issueFieldId?: string;
     projectSubjectId?: string;
-    contentEditMetadata?: ContentEditMetadata;
+    contentEditMetadata?: ContentEditMetadata | GithubCommentEditMetadata;
     discussionFeedback?: DiscussionFeedbackObservation;
     sourceRevision: string;
     sourceUrl: string;
@@ -2170,6 +2177,39 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
         input.fact.state !== "present"
       )
         return none("content_edit_collected_binding_unverified");
+      if (input.fact.contentEditMetadata?.version === "github-comment-edit-metadata/v1") {
+        let metadata: GithubCommentEditMetadata;
+        try {
+          metadata = parseGithubCommentEditMetadata(input.fact.contentEditMetadata);
+        } catch {
+          return none("content_edit_collected_binding_unverified");
+        }
+        // Capture every caller-owned binding before the first asynchronous read.
+        const repository = { id: input.repository.id, slug: input.repository.slug };
+        const revision = input.fact.sourceRevision,
+          scanId = input.factKey;
+        if (
+          metadata.repository.id !== repository.id ||
+          metadata.repository.slug !== repository.slug ||
+          metadata.target.id !== input.fact.subjectId ||
+          metadata.target.url !== input.fact.sourceUrl
+        )
+          return none("content_edit_collected_binding_unverified");
+        if (!verifyGithubCommentEditRevision(metadata, revision)) return none("content_edit_revision_unverified");
+        const assertAuthorized = githubCommentEditAuthorization(options.assertAuthorized);
+        assertAuthorized();
+        const hydrated = await readGithubCommentEditMetadata({
+          client: options.client,
+          source: options.source,
+          repository,
+          target: metadata.target,
+          scanId,
+          assertAuthorized,
+        });
+        assertAuthorized();
+        if (!verifyGithubCommentEditRevision(hydrated, revision)) return none("content_edit_revision_unverified");
+        return none("content_edit_metadata_only");
+      }
       let metadata: ContentEditMetadata;
       try {
         metadata = parseGithubContentEditMetadata(input.fact.contentEditMetadata);

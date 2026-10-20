@@ -6,14 +6,24 @@ import { components } from "./harness.mjs";
 import { createPipeline } from "../src/runtime.mjs";
 import { parseReconciliationRunId, reconciliationContextDigest } from "../src/reconciliation-plan.mjs";
 import { syntheticCheckpointStore } from "../../../packages/github/test/synthetic-client.mjs";
-import { repository, parent, edit, model, responseFor } from "../../../tests/fixtures/content-edit-metadata.mjs";
+import { repository, parent, edit, model } from "../../../tests/fixtures/content-edit-metadata.mjs";
+import { commentInventoryModel, commentInventoryResponse } from "../../../tests/fixtures/comment-edit-inventory.mjs";
+import { createGithubCollectionSource } from "../src/github-source.mjs";
 
 const hash = (value) => createHash("sha256").update(components.metrics.stableJSON(value)).digest("hex");
 const iso = (value) => new Date(value).toISOString();
 const json = (value) => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
 const policy = { lookbackMs: 86400000, overlapMs: 1000, fullAuditsPerCycle: 2 };
 
-function transport({ state = model(), beforeResponse } = {}) {
+function transport({ state = model(), commentState, beforeResponse } = {}) {
+  const inventory = commentState ?? {
+    parents: state,
+    entries: new Map(),
+    comments: new Map(),
+    reviews: new Map(),
+    threads: new Map(),
+    threadComments: new Map(),
+  };
   const cutoff = new Date(Date.now() - 1000).toISOString();
   const created = new Date(Date.parse(cutoff) - 86400000).toISOString();
   const actor = { id: 101, node_id: "U_SYNTHETIC_A", login: "synthetic-alice", type: "User" };
@@ -56,7 +66,7 @@ function transport({ state = model(), beforeResponse } = {}) {
         return json({ id: repository.id, private: false, full_name: repository.slug });
       if (path === "/graphql") {
         assert.doesNotMatch(call.body.query, /\b(?:body|bodyHTML|bodyText|diff|title|login|email)\b/);
-        return json(responseFor(state, call.body));
+        return json(commentInventoryResponse(inventory, call.body));
       }
       const values = new Map([
         [`/repos/${repository.slug}/issues/comments`, [conversation]],
@@ -108,9 +118,16 @@ async function assertNoPublicCreditOrSuppression(h, runtime = h.runtime) {
     assert.equal(source.occurredAt, null);
     assert.equal(source.evidence, "current_state");
     assert.equal(source.state, "present");
-    assert.equal(source.subjectId, source.contentEditMetadata.parent.id);
-    assert.equal(source.sourceUrl, source.contentEditMetadata.parent.url);
-    assert.match(source.sourceRevision, /^gh-content-edit-v1:[a-f0-9]{64}\.[a-f0-9]{32}$/);
+    const comment = source.contentEditMetadata.version === "github-comment-edit-metadata/v1";
+    const target = comment ? source.contentEditMetadata.target : source.contentEditMetadata.parent;
+    assert.equal(source.subjectId, target.id);
+    assert.equal(source.sourceUrl, target.url);
+    assert.match(
+      source.sourceRevision,
+      comment
+        ? /^gh-content-edit-comment-v1:[a-f0-9]{64}\.[a-f0-9]{32}$/
+        : /^gh-content-edit-v1:[a-f0-9]{64}\.[a-f0-9]{32}$/,
+    );
     assert.ok(normalized, "each selected content observation has a retained normalization");
     for (const field of ["actors", "facts", "evidence", "assistance", "participation", "suppressArtifactIds"])
       assert.deepEqual(normalized[field], [], field);
@@ -145,7 +162,7 @@ test(
     assert.equal(first.state, "published");
     assert.match(first.progress.find((row) => row.family === "comments").runId, /^gc2:[a-f0-9]{64}$/);
     const content = first.progress.find((row) => row.family === "content_edits");
-    assert.match(content.runId, /^gce1:[a-f0-9]{64}$/);
+    assert.match(content.runId, /^gce2:[a-f0-9]{64}$/);
     const saved = (await runs(h)).find((row) => row.run_id === content.runId);
     assert.equal(saved.item_count, 3);
     assert.equal(saved.expected_count, null);
@@ -237,7 +254,7 @@ test(
     const sources = [{ repositoryId: repository.id, generation: "1" }];
     const oldContext = [0, null, sources, "github-comments-inventory/v2"];
     const key = hash(["bounded-scan/v1", h.config, "synthetic", "reconcile"]);
-    const contextHash = hash([...oldContext, "github-content-edits/metadata-v1"]);
+    const contextHash = hash([...oldContext, "github-content-edits/metadata-v2"]);
     assert.equal(saved[0].configuration_key, key);
     assert.equal(saved[0].context_hash, contextHash);
     const expected = reconciliationContextDigest({ key, contextHash });
@@ -348,7 +365,7 @@ for (const retainedState of ["complete", "pending", "failed"])
       assert.equal(result.state, retainedState === "complete" ? "published" : "collecting");
       assert.equal(result.progress[0].runId, runId);
       const after = await runs(h);
-      assert.equal(after.length, 1, "no fresh gce1 run bypasses a retained old operation");
+      assert.equal(after.length, 1, "no fresh versioned run bypasses a retained old operation");
       assert.deepEqual(planTuple(after[0]), planTuple(before));
       for (const field of ["cursor", "page_count", "item_count", "expected_count"])
         assert.equal(after[0][field], before[field], field);
@@ -482,5 +499,178 @@ test(
     assert.equal(inventoryCalls(s).length, 0);
     assert.equal(await count(h, "leaderboard_ingestion.source_facts"), 0);
     assert.equal(await count(h, "leaderboard_ingestion.object_suppressions"), 0);
+  },
+);
+
+test(
+  "the default v2 audit collects and hydrates all four published comment families without contribution credit",
+  { timeout: 30000 },
+  async (t) => {
+    const commentState = commentInventoryModel();
+    const s = transport({ state: commentState.parents, commentState });
+    const h = await operatorHarness(t, { githubClient: s.client, configure: configure() });
+    const result = await h.runtime.runOnce({ mode: "audit", cutoff: s.cutoff });
+    assert.equal(result.state, "published");
+    assert.match(result.progress[0].runId, /^gce2:[a-f0-9]{64}$/);
+    const rows = await contentRows(h);
+    assert.equal(rows.length, 11);
+    const comments = rows.filter((row) => row.source.contentEditMetadata.version === "github-comment-edit-metadata/v1");
+    assert.equal(comments.length, 9);
+    assert.deepEqual([...new Set(comments.map((row) => row.source.contentEditMetadata.target.kind))].sort(), [
+      "issue_comment",
+      "pull_request_conversation_comment",
+      "pull_request_review",
+      "pull_request_review_comment",
+    ]);
+    assert.ok(comments.every((row) => row.source.contentEditMetadata.repository.id === repository.id));
+    assert.doesNotMatch(
+      JSON.stringify(rows),
+      /synthetic-never-retain|COMMENT_SYNTHETIC_pull_request_review_comment_404/,
+    );
+    const saved = (await runs(h))[0];
+    assert.equal(saved.item_count, 11);
+    assert.equal(saved.expected_count, null);
+    const historyReads = graphCalls(s).filter((call) => call.body.query.includes("query GithubCommentEditMetadata"));
+    assert.equal(historyReads.length, 18, "each of nine collected targets has a separately bound hydration read");
+    await assertNoPublicCreditOrSuppression(h);
+    const retained = await h.db.query(
+      "SELECT fact_key,document FROM leaderboard_ingestion.source_facts ORDER BY fact_key",
+    );
+    const reads = inventoryCalls(s).length;
+    await h.runtime.stop();
+    await h.reopenDatabase();
+    const reopened = await createPipeline(h.options);
+    t.after(() => reopened.stop());
+    const again = await reopened.runOnce({ mode: "audit", cutoff: s.cutoff });
+    assert.equal(again.state, "published");
+    assert.deepEqual(again.progress, result.progress);
+    assert.equal(inventoryCalls(s).length, reads);
+    assert.deepEqual(
+      (await h.db.query("SELECT fact_key,document FROM leaderboard_ingestion.source_facts ORDER BY fact_key")).rows,
+      retained.rows,
+    );
+    await assertNoPublicCreditOrSuppression(h, reopened);
+  },
+);
+
+for (const retainedState of ["complete", "pending", "failed"])
+  test(
+    `a retained ${retainedState} gce1 parent run keeps its exact namespace and never enumerates comment targets`,
+    { timeout: 30000 },
+    async (t) => {
+      const commentState = commentInventoryModel();
+      const s = transport({ state: commentState.parents, commentState });
+      const h = await operatorHarness(t, { githubClient: s.client, configure: configure() });
+      const runId = "gce1:" + hash([h.config.version, repository.id, "content_edits", s.cutoff, "audit", "synthetic"]);
+      const request = {
+        runId,
+        repositoryId: repository.id,
+        family: "content_edits",
+        mode: "audit",
+        since: null,
+        until: s.cutoff,
+      };
+      await h.runtime.collection.start(request);
+      const source = createGithubCollectionSource({
+        client: s.client,
+        sourceId: h.options.sourceId,
+        repositories: h.config.repositories,
+        isSynthetic: true,
+        includeContentEditMetadata: () => true,
+      });
+      const oldPage = await source.readPage({ ...request, cursor: null, limit: 100 });
+      const first =
+        retainedState === "complete" ? oldPage : { ...oldPage, facts: oldPage.facts.slice(0, 1), nextCursor: "1" };
+      assert.equal(
+        await h.runtime.collection.step(runId, { readPage: async () => first }),
+        retainedState === "complete" ? "complete" : "progress",
+      );
+      if (retainedState === "failed")
+        assert.equal(
+          await h.runtime.collection.step(runId, {
+            readPage() {
+              throw new Error("synthetic retained v1 failure");
+            },
+          }),
+          "failed",
+        );
+      const before = (await runs(h))[0];
+      const retainedFacts = (
+        await h.db.query("SELECT fact_key,document FROM leaderboard_ingestion.source_facts ORDER BY fact_key")
+      ).rows;
+      await h.runtime.stop();
+      await h.reopenDatabase();
+      const reopened = await createPipeline(h.options);
+      t.after(() => reopened.stop());
+      const result = await reopened.runOnce({ mode: "audit", cutoff: s.cutoff });
+      assert.equal(result.state, "published");
+      assert.equal(result.progress[0].runId, runId);
+      const after = await runs(h);
+      assert.equal(after.length, 1);
+      assert.deepEqual(planTuple(after[0]), planTuple(before));
+      assert.equal(after[0].item_count, 2);
+      assert.equal(after[0].expected_count, null);
+      for (const retained of retainedFacts) {
+        const actual = (
+          await h.db.query("SELECT fact_key,document FROM leaderboard_ingestion.source_facts WHERE fact_key=$1", [
+            retained.fact_key,
+          ])
+        ).rows[0];
+        assert.deepEqual(actual, retained);
+      }
+      assert.equal(graphCalls(s).filter((call) => call.body.query.includes("query GithubCommentEdit")).length, 0);
+      assert.equal((await contentRows(h)).length, 2);
+      await assertNoPublicCreditOrSuppression(h, reopened);
+    },
+  );
+
+test(
+  "an interrupted v2 nested inventory commits no partial fact page and resumes the same actual scheduled plan",
+  { timeout: 30000 },
+  async (t) => {
+    const commentState = commentInventoryModel();
+    let failed = false;
+    const s = transport({
+      state: commentState.parents,
+      commentState,
+      beforeResponse(call) {
+        if (
+          !failed &&
+          call.path === "/graphql" &&
+          call.body.query.includes("query GithubCommentEditInventory") &&
+          call.body.variables.id === "THREAD_SYNTHETIC_2"
+        ) {
+          failed = true;
+          return json({ errors: [{ message: "synthetic interrupted child inventory" }] });
+        }
+      },
+    });
+    const h = await operatorHarness(t, { githubClient: s.client, configure: configure(["content_edits"], true) });
+    const first = await h.runtime.runOnce();
+    assert.equal(failed, true);
+    assert.equal(first.state, "collecting");
+    const before = (await runs(h))[0];
+    assert.equal(before.item_count, 0);
+    assert.equal(before.page_count, 0);
+    assert.equal(await count(h, "leaderboard_ingestion.source_facts"), 0);
+    assert.equal(await count(h, "leaderboard_pipeline.snapshots"), 0);
+    const scan = (await h.db.query("SELECT * FROM leaderboard_pipeline.scan_continuations")).rows[0];
+    const parsed = parseReconciliationRunId(before.run_id);
+    assert.equal(parsed.token, scan.cycle_token);
+    await h.runtime.stop();
+    await h.reopenDatabase();
+    const reopened = await createPipeline(h.options);
+    t.after(() => reopened.stop());
+    const result = await reopened.runOnce();
+    assert.equal(result.state, "published");
+    const after = (await runs(h))[0];
+    assert.deepEqual(planTuple(after), planTuple(before));
+    assert.equal(after.item_count, 11);
+    assert.equal(after.expected_count, null);
+    const health = await reopened.operations.readHealth(repository.id, operatorAllow);
+    const coverage = health.collector.families.find((value) => value.family === "content_edits");
+    assert.equal(coverage.expectedItems, null);
+    assert.equal(coverage.reconciledThrough, null);
+    await assertNoPublicCreditOrSuppression(h, reopened);
   },
 );

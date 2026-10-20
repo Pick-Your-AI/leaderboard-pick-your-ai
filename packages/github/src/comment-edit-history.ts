@@ -93,7 +93,7 @@ const timestamp = (value: unknown): string => {
   return date.toISOString();
 };
 
-function repository(value: unknown): Repository {
+export function parseGithubCommentEditRepository(value: unknown): Repository {
   const entry = keys(value, ["id", "slug"]);
   if (
     typeof entry.slug !== "string" ||
@@ -105,7 +105,7 @@ function repository(value: unknown): Repository {
   return { id: integer(entry.id, 1, Number.MAX_SAFE_INTEGER), slug: entry.slug };
 }
 
-function nativeRepository(value: unknown, expected: Repository): Repository {
+export function parseNativeGithubCommentEditRepository(value: unknown, expected: Repository): Repository {
   if (
     !object(value) ||
     value.databaseId !== expected.id ||
@@ -116,7 +116,7 @@ function nativeRepository(value: unknown, expected: Repository): Repository {
   return { ...expected };
 }
 
-function target(value: unknown, repo: Repository): GithubCommentEditTarget {
+export function parseGithubCommentEditTarget(value: unknown, repo: Repository): GithubCommentEditTarget {
   const entry = keys(value, ["kind", "id", "url", "parent"]);
   if (
     ![
@@ -143,7 +143,10 @@ function target(value: unknown, repo: Repository): GithubCommentEditTarget {
   return { kind, id: identifier(entry.id), url: entry.url, parent };
 }
 
-function publication(value: unknown, kind: GithubCommentEditKind): GithubCommentEditPublication {
+export function parseGithubCommentEditPublication(
+  value: unknown,
+  kind: GithubCommentEditKind,
+): GithubCommentEditPublication {
   const entry = keys(value, ["publishedAt", "reviewState", "submittedAt"]);
   const publishedAt = timestamp(entry.publishedAt);
   if (kind === "pull_request_review") {
@@ -156,13 +159,13 @@ function publication(value: unknown, kind: GithubCommentEditKind): GithubComment
 }
 
 function base(entry: Record<string, unknown>): Base {
-  const repo = repository(entry.repository);
-  const selected = target(entry.target, repo);
+  const repo = parseGithubCommentEditRepository(entry.repository);
+  const selected = parseGithubCommentEditTarget(entry.target, repo);
   if (typeof entry.includesCreatedEdit !== "boolean") return fail("history_unverified");
   return {
     repository: repo,
     target: selected,
-    publication: publication(entry.publication, selected.kind),
+    publication: parseGithubCommentEditPublication(entry.publication, selected.kind),
     includesCreatedEdit: entry.includesCreatedEdit,
   };
 }
@@ -230,7 +233,11 @@ function page(
   return { version: pageVersion, ...selected, history: { ...validated, retainedTotalCount: count }, pageInfo: info };
 }
 
-function nativeTarget(value: unknown, expected: GithubCommentEditTarget, repo: Repository): GithubCommentEditTarget {
+export function parseNativeGithubCommentEditTarget(
+  value: unknown,
+  expected: GithubCommentEditTarget,
+  repo: Repository,
+): GithubCommentEditTarget {
   const type =
     expected.kind === "pull_request_review"
       ? "PullRequestReview"
@@ -238,13 +245,13 @@ function nativeTarget(value: unknown, expected: GithubCommentEditTarget, repo: R
         ? "PullRequestReviewComment"
         : "IssueComment";
   if (!object(value) || value.__typename !== type) return fail("target_unverified");
-  nativeRepository(value.repository, repo);
+  parseNativeGithubCommentEditRepository(value.repository, repo);
   if (expected.kind === "issue_comment" && value.pullRequest !== null) return fail("target_unverified");
   const parent = value[expected.kind === "issue_comment" ? "issue" : "pullRequest"];
   if (!object(parent) || parent.__typename !== (expected.parent.kind === "issue" ? "Issue" : "PullRequest"))
     return fail("target_unverified");
-  nativeRepository(parent.repository, repo);
-  const selected = target(
+  parseNativeGithubCommentEditRepository(parent.repository, repo);
+  const selected = parseGithubCommentEditTarget(
     {
       kind: expected.kind,
       id: value.id,
@@ -257,20 +264,10 @@ function nativeTarget(value: unknown, expected: GithubCommentEditTarget, repo: R
   return selected;
 }
 
-/** Read a supplied native target, not an inventory. No default source is enabled here. */
-export async function readGithubCommentEditMetadata(
-  options: GithubCommentEditReadOptions,
-): Promise<GithubCommentEditMetadata> {
-  const repo = repository(options.repository);
-  const selected = target(options.target, repo);
-  const source = identifier(options.source),
-    scanId = identifier(options.scanId);
-  const first = integer(options.first ?? 100, 1, 100);
-  const maxPages = integer(options.maxPages ?? 100, 1, 10_000);
-  const maxEdits = integer(options.maxEdits ?? 100, 0, 100);
-  const guard = options.assertAuthorized;
+/** A shared current fence for the bound reader and its separately versioned inventory. */
+export function githubCommentEditAuthorization(guard: unknown): () => void {
   if (typeof guard !== "function") return fail("authorization_required");
-  const authorize = () => {
+  return () => {
     let result: unknown;
     try {
       result = guard();
@@ -294,6 +291,20 @@ export async function readGithubCommentEditMetadata(
       fail("authorization_must_be_synchronous");
     }
   };
+}
+
+/** Read a supplied native target, not an inventory. No default source is enabled here. */
+export async function readGithubCommentEditMetadata(
+  options: GithubCommentEditReadOptions,
+): Promise<GithubCommentEditMetadata> {
+  const repo = parseGithubCommentEditRepository(options.repository);
+  const selected = parseGithubCommentEditTarget(options.target, repo);
+  const source = identifier(options.source),
+    scanId = identifier(options.scanId);
+  const first = integer(options.first ?? 100, 1, 100);
+  const maxPages = integer(options.maxPages ?? 100, 1, 10_000);
+  const maxEdits = integer(options.maxEdits ?? 100, 0, 100);
+  const authorize = githubCommentEditAuthorization(options.assertAuthorized);
   authorize();
   const client = options.client.forRepository(repo.id);
   const type =
@@ -335,7 +346,7 @@ export async function readGithubCommentEditMetadata(
       select(data) {
         authorize();
         const node = object(data) ? data.node : null;
-        const actualTarget = nativeTarget(node, selected, repo);
+        const actualTarget = parseNativeGithubCommentEditTarget(node, selected, repo);
         const native = node as Record<string, unknown>;
         const connection = native.userContentEdits;
         if (connection !== null && (!object(connection) || !Array.isArray(connection.nodes)))
