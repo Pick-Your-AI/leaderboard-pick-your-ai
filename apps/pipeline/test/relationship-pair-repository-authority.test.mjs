@@ -2549,7 +2549,11 @@ test(
           assert.ok(inspected);
           assert.equal(inspected.document_hash, row.document_hash, "the retained good hash remains unchanged");
           assert.deepEqual(inspected.document.syntheticHistoryShape, invalidDocument.syntheticHistoryShape);
-          assert.deepEqual(await semanticNormalizationRows(h), original, "the failed transaction restores exact caches");
+          assert.deepEqual(
+            await semanticNormalizationRows(h),
+            original,
+            "the failed transaction restores exact caches",
+          );
           assert.deepEqual(await frozenInput(h, selected.snapshotId), input);
           assert.deepEqual(h.controlsStore.read(), controls);
           assert.deepEqual(h.calls, calls, "protected authority reads never recollect or rehydrate");
