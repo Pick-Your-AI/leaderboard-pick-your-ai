@@ -1,4 +1,5 @@
 import { contributionRoleSchema, type Contribution } from "./v1/schemas.js";
+import { isPullRequestMergeTargetBranch } from "./pull-request-merge-target.js";
 
 export type PublicContributionRole = Exclude<Contribution["roles"][number], "unknown">;
 export const publicContributionRoles = Object.freeze(
@@ -12,14 +13,17 @@ export interface PublicScope {
   workstream: string | null;
   start: string | null;
   end: string | null;
-  schemaVersion?: "public-scope/v2" | "public-scope/v3";
+  schemaVersion?: "public-scope/v2" | "public-scope/v3" | "public-scope/v4";
   context?: "event" | "current";
   projects?: string[];
   roles?: PublicContributionRole[];
+  /** Exact native target name at merge, never the current PR base branch. */
+  branch?: string;
 }
 
 export const publicScopeSchemaVersion = "public-scope/v2" as const;
 export const publicRoleScopeSchemaVersion = "public-scope/v3" as const;
+export const publicMergeTargetScopeSchemaVersion = "public-scope/v4" as const;
 export const publicScopeProjectLimit = 100;
 export const publicScopeRoleLimit = publicContributionRoles.length;
 const keys = new Set([
@@ -32,6 +36,7 @@ const keys = new Set([
   "context",
   "projects",
   "roles",
+  "branch",
 ]);
 const identifier = (value: unknown): value is string =>
   typeof value === "string" && /^[A-Za-z0-9_.:-]{1,200}$/.test(value);
@@ -62,7 +67,9 @@ export function canonicalPublicScope(input: unknown): PublicScope {
     (value.context !== undefined && value.context !== "event" && value.context !== "current") ||
     (value.schemaVersion !== undefined &&
       value.schemaVersion !== publicScopeSchemaVersion &&
-      value.schemaVersion !== publicRoleScopeSchemaVersion) ||
+      value.schemaVersion !== publicRoleScopeSchemaVersion &&
+      value.schemaVersion !== publicMergeTargetScopeSchemaVersion) ||
+    (value.branch !== undefined && (!isPullRequestMergeTargetBranch(value.branch) || value.repository === null)) ||
     (value.roles !== undefined &&
       (!Array.isArray(value.roles) ||
         value.roles.length > publicScopeRoleLimit ||
@@ -77,14 +84,23 @@ export function canonicalPublicScope(input: unknown): PublicScope {
   const roles = [...new Set((value.roles ?? []) as PublicContributionRole[])].sort();
   const context = value.context ?? "event";
   const membership = context === "current" || projects.length > 0;
-  const version = roles.length ? publicRoleScopeSchemaVersion : membership ? publicScopeSchemaVersion : undefined;
+  const version =
+    value.branch !== undefined
+      ? publicMergeTargetScopeSchemaVersion
+      : roles.length
+        ? publicRoleScopeSchemaVersion
+        : membership
+          ? publicScopeSchemaVersion
+          : undefined;
   if (
     value.schemaVersion !== undefined &&
     (value.schemaVersion !== version ||
       value.context === undefined ||
       value.projects === undefined ||
       (value.schemaVersion === publicScopeSchemaVersion && "roles" in value) ||
-      (value.schemaVersion === publicRoleScopeSchemaVersion && value.roles === undefined))
+      ((value.schemaVersion === publicRoleScopeSchemaVersion ||
+        value.schemaVersion === publicMergeTargetScopeSchemaVersion) &&
+        value.roles === undefined))
   )
     return invalid();
   return {
@@ -94,7 +110,8 @@ export function canonicalPublicScope(input: unknown): PublicScope {
     start: value.start as string | null,
     end: value.end as string | null,
     ...(version ? { schemaVersion: version, context, projects } : {}),
-    ...(roles.length ? { roles } : {}),
+    ...(roles.length || version === publicMergeTargetScopeSchemaVersion ? { roles } : {}),
+    ...(value.branch === undefined ? {} : { branch: value.branch as string }),
   };
 }
 
@@ -106,6 +123,8 @@ export function publicScopeKey(input: PublicScope): string {
     key.push([publicScopeSchemaVersion, scope.context, scope.projects]);
   if (scope.schemaVersion === publicRoleScopeSchemaVersion)
     key.push([publicRoleScopeSchemaVersion, scope.context, scope.projects, scope.roles]);
+  if (scope.schemaVersion === publicMergeTargetScopeSchemaVersion)
+    key.push([publicMergeTargetScopeSchemaVersion, scope.context, scope.projects, scope.roles, scope.branch]);
   return JSON.stringify(key);
 }
 
@@ -125,5 +144,6 @@ export function publicScopeParameters(input: PublicScope): Record<string, string
     if (scope.projects!.length) params.project = scope.projects!.join(",");
   }
   if (scope.roles?.length) params.role = scope.roles.join(",");
+  if (scope.branch !== undefined) params.branch = scope.branch;
   return params;
 }
