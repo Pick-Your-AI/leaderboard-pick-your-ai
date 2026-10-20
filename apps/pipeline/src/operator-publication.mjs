@@ -144,7 +144,10 @@ export function createOperatorPublicationVerifier({
       bytes += Buffer.byteLength(JSON.stringify(proof));
       if (bytes > operatorPublicationProofBytes) return null;
       let transferContent = {};
-      if (proof.document.authorization.issueTransferEvidence !== undefined) {
+      if (
+        proof.document.authorization.issueTransferEvidence !== undefined ||
+        proof.document.authorization.pullRequestDecisionEvidence !== undefined
+      ) {
         if (typeof publicationNormalizationBinding !== "function") return null;
         const normalization = await publicationNormalizationBinding(
           tx,

@@ -21,6 +21,14 @@ import {
   publicationMonitorIdentity,
 } from "./scope-storage.mjs";
 import { retainedRankHistory } from "./rank-history.mjs";
+import {
+  decisionHistoryRepositories,
+  pullRequestDecisionGenerationVersion,
+  parseDecisionGenerationCapture,
+  readDecisionGenerations,
+  readDecisionFrozenInput,
+  migrateDecisionHistoryRuns,
+} from "./pull-request-decision-history.mjs";
 import { readImportedHistory } from "./reconciliation-history.mjs";
 import {
   copyParticipationHistoryJSON,
@@ -316,6 +324,7 @@ async function retainSourceArtifacts(tx, factKey, document) {
 export async function migratePipeline(db) {
   await migrateScopeStorage(db);
   await migrateIssueTransferMetadata(db);
+  await migrateDecisionHistoryRuns(db);
   // Keep the continuation schema outside the retained v2 migration fingerprint.
   // Serialize first-time creation independently after that migration commits.
   await db.transaction(async (tx) => {
@@ -364,6 +373,19 @@ export async function createPipeline(options) {
       fail("synthetic_data_forbidden_in_public_runtime");
   };
   const config = copy(options.config ?? { version: "unconfigured", repositories: [], policies: [], scopes: [] });
+  const decisionRepositoryIds = decisionHistoryRepositories(
+    options.pullRequestDecisionRepositoryIds,
+    config.repositories,
+  );
+  const decisionSourceId = options.sourceId;
+  const decisionClock = options.decisionHistoryNow ?? (() => new Date().toISOString());
+  const selectedGithubClient = options.githubClient;
+  const selectedCustomSource = options.source;
+  if (
+    decisionRepositoryIds.length &&
+    (selectedCustomSource != null || !selectedGithubClient || typeof decisionClock !== "function")
+  )
+    fail("decision_history_builtin_source_required");
   const feedbackAuthority = createDiscussionFeedbackAuthority(
     config,
     dataMode,
@@ -790,7 +812,7 @@ export async function createPipeline(options) {
       "Frozen identity source binding unavailable",
     );
     const normalizationQuery = `SELECT n.document,n.document_hash,n.policy_signature,f.fact_key,f.observed_at,f.first_run_id,f.family,
-          f.repository_id,f.document AS source_document FROM leaderboard_pipeline.normalizations AS n
+          f.repository_id,f.document - 'pullRequestDecisionHistory' AS source_document FROM leaderboard_pipeline.normalizations AS n
        JOIN leaderboard_ingestion.source_facts AS f ON f.fact_key=n.fact_key
        WHERE n.document_hash=ANY($1::text[]) AND (n.policy_signature=ANY($2::text[])
          OR (n.document->'pullRequestMergeTargetNormalization'->>'schemaVersion'=$6
@@ -1047,6 +1069,82 @@ export async function createPipeline(options) {
   // The caller holds the existing repository access locks. Source facts can
   // only be erased after retirement, which is incompatible with those locks
   // and a public source. Unrelated retained views keep their frozen-read rules.
+  async function readDecisionPublicationReceipt(tx, operationKey, captureEnabled) {
+    const row = (
+      await tx.query(
+        `SELECT CASE WHEN NOT $2::boolean OR octet_length(document::text)<=8000000 THEN document END AS document,
+          document_hash,octet_length(document::text) AS document_bytes
+        FROM leaderboard_pipeline.receipts WHERE operation_hash=${pipelineKeySQL("$1")} AND operation_key=$1
+          AND kind='snapshot_published'`,
+        [operationKey, captureEnabled],
+      )
+    ).rows[0];
+    if (captureEnabled && row) {
+      if (
+        !Number.isSafeInteger(Number(row.document_bytes)) ||
+        Number(row.document_bytes) < 0 ||
+        Number(row.document_bytes) > 8_000_000 ||
+        row.document === null
+      )
+        fail("decision_history_frozen_input_budget_exceeded");
+      row.document = copyParticipationHistoryJSON(row.document);
+    }
+    return row;
+  }
+
+  // A private capture is optional for legacy publications. When present, use
+  // only the construction-selected builtin and its INSERT-bound selected runs.
+  function decisionReadFence(capture) {
+    if (
+      collectionSource !== defaultSource ||
+      defaultSource === null ||
+      capture.source !== decisionSourceId ||
+      capture.runs.some((run) => !decisionRepositoryIds.includes(run.repositoryId))
+    )
+      fail("decision_history_builtin_source_required");
+    const state = controlsStore.read();
+    const revision = restrictConfiguration(state).revision;
+    const recognition = recognitionBindings.length ? recognitionFingerprint(state, recognitionBindings) : null;
+    const feedback = feedbackAuthority.capture();
+    return () => {
+      const current = controlsStore.read();
+      if (
+        restrictConfiguration(current).revision !== revision ||
+        (recognitionBindings.length && recognitionFingerprint(current, recognitionBindings) !== recognition)
+      )
+        fail("decision_history_authorization_changed");
+      feedbackAuthority.assert(feedback);
+    };
+  }
+
+  async function retainedDecisionEvidence(tx, authorization, cutoff = null) {
+    if (authorization.pullRequestDecisionEvidence === undefined) return null;
+    const capture = parseDecisionGenerationCapture(authorization.pullRequestDecisionEvidence);
+    if (
+      (cutoff !== null && capture.observationCutoff !== cutoff) ||
+      capture.runs.some(
+        (run) =>
+          !authorization.sources.some(
+            (source) => source.repositoryId === String(run.repositoryId) && source.generation === run.accessGeneration,
+          ),
+      )
+    )
+      fail("decision_history_capture_binding_changed");
+    const assertCurrent = decisionReadFence(capture);
+    const restored = await readDecisionGenerations(tx, {
+      selectedRuns: capture.runs.map((run) => ({ repositoryId: run.repositoryId, runId: run.runId })),
+      repositories: config.repositories,
+      source: decisionSourceId,
+      asOf: capture.asOf,
+      observationCutoff: capture.observationCutoff,
+      dataMode,
+      assertAuthorized: assertCurrent,
+      expected: capture,
+    });
+    assertCurrent();
+    return { ...restored, assertCurrent };
+  }
+
   async function publicationNormalizationBinding(
     tx,
     scope,
@@ -1057,6 +1155,8 @@ export async function createPipeline(options) {
     if (maxFrozenBytes !== null && (!Number.isSafeInteger(maxFrozenBytes) || maxFrozenBytes < 0))
       fail("invalid_publication_proof_budget");
     const authorization = explanation.authorization;
+    const decision = await retainedDecisionEvidence(tx, authorization, explanation.cutoff);
+    if (decision !== null) maxFrozenBytes = maxFrozenBytes === null ? 8_000_000 : Math.min(maxFrozenBytes, 8_000_000);
     const needsMergeTarget = scope.branch !== undefined;
     if (
       canonical(captureMergeTargetAuthorization(authorization)) !==
@@ -1135,6 +1235,7 @@ export async function createPipeline(options) {
       !relationshipPair &&
       !fieldChange &&
       !triageMetadata &&
+      decision === null &&
       authorization.issueTransferEvidence === undefined
     )
       return {
@@ -1157,6 +1258,7 @@ export async function createPipeline(options) {
       !relationshipPair &&
       !fieldChange &&
       !triageMetadata &&
+      decision === null &&
       authorization.issueTransferEvidence?.bindings.length === 0 &&
       transferAuthority.rows.length === 0 &&
       canonical([...transferAuthority.repositoryIds].sort()) === canonical([...selectedIds].sort());
@@ -1200,6 +1302,7 @@ export async function createPipeline(options) {
       !relationshipPair &&
       !fieldChange &&
       !triageMetadata &&
+      decision === null &&
       authorization.issueTransferEvidence === undefined
     )
       return {
@@ -1226,7 +1329,8 @@ export async function createPipeline(options) {
         Number(retained.document_bytes) > maxFrozenBytes)
     )
       fail("operator_publication_proof_budget_exceeded");
-    if (historyBudget && retained) retained.document = copyParticipationHistoryJSON(retained.document);
+    if ((historyBudget || decision !== null) && retained)
+      retained.document = copyParticipationHistoryJSON(retained.document);
     if (
       !retained ||
       digest(retained.document) !== retained.document_hash ||
@@ -1246,6 +1350,8 @@ export async function createPipeline(options) {
         canonical(authorization.discussionFeedbackEvidence) ||
       canonical(retained.document.identityAuthorization?.relationshipPairEvidence) !==
         canonical(authorization.relationshipPairEvidence) ||
+      canonical(retained.document.identityAuthorization?.pullRequestDecisionEvidence) !==
+        canonical(authorization.pullRequestDecisionEvidence) ||
       canonical(captureMergeTargetAuthorization(retained.document.identityAuthorization ?? {})) !==
         canonical(mergeTargetAuthorization(scope, explanation.cutoff)) ||
       (needsMergeTarget && retained.document.engineScope?.branch !== scope.branch) ||
@@ -1255,6 +1361,7 @@ export async function createPipeline(options) {
           canonical([...retained.document.engineScope.repos].sort()) !== canonical([...selectedIds].sort())))
     )
       fail(`public_${kind}_frozen_input_integrity_error`);
+    decision?.assertCurrent();
     return {
       review,
       discussion,
@@ -1287,6 +1394,7 @@ export async function createPipeline(options) {
   // private result transaction. No source/network permission is granted here.
   async function withAuthorizedComparisonInputs(authorizations, work, transaction, historyBudget = false) {
     const comparisonFeedbackAuthority = feedbackAuthority.capture();
+    const decisionFences = [];
     requireThat(
       authorizations.every(
         (authorization) => authorization.configurationHash === digest(config) && authorization.dataMode === dataMode,
@@ -1354,6 +1462,8 @@ export async function createPipeline(options) {
       const restoredActors = new Map();
       const restoredMergeTargets = new Map();
       for (const authorization of authorizations) {
+        const decision = await retainedDecisionEvidence(tx, authorization);
+        if (decision !== null) decisionFences.push(decision.assertCurrent);
         const binding = authorization.identityEvidence;
         const rows = await readNormalizationEvidence(tx, authorization, historyBudget);
         if (rows === null) {
@@ -1458,6 +1568,13 @@ export async function createPipeline(options) {
         {
           refreshApproval: () => approved(tx),
           restoreInput(input, authorization) {
+            if (
+              authorization.pullRequestDecisionEvidence !== undefined &&
+              parseDecisionGenerationCapture(authorization.pullRequestDecisionEvidence).observationCutoff !==
+                input.cutoff
+            )
+              fail("decision_history_capture_binding_changed");
+            decisionFences.forEach((assertCurrent) => assertCurrent());
             if (authorization.identityEvidence === undefined) return input;
             if (authorization.mergeTargetEvidence !== undefined) {
               const captures = restoredMergeTargets.get(digest(authorization));
@@ -1492,6 +1609,7 @@ export async function createPipeline(options) {
             if (typeof options.policyComparisonAuthorityCurrent !== "function") return false;
             try {
               feedbackAuthority.assert(comparisonFeedbackAuthority);
+              decisionFences.forEach((assertCurrent) => assertCurrent());
             } catch {
               return false;
             }
@@ -1503,6 +1621,7 @@ export async function createPipeline(options) {
             if (current && typeof current.then === "function") void Promise.resolve(current).catch(() => undefined);
             try {
               feedbackAuthority.assert(comparisonFeedbackAuthority);
+              decisionFences.forEach((assertCurrent) => assertCurrent());
             } catch {
               return false;
             }
@@ -1512,13 +1631,17 @@ export async function createPipeline(options) {
         tx,
       );
     };
-    return transaction ? read(transaction) : db.transaction(read);
+    const result = await (transaction ? read(transaction) : db.transaction(read));
+    decisionFences.forEach((assertCurrent) => assertCurrent());
+    return result;
   }
   const contentEditAdmission = createGithubContentEditAdmission();
-  const defaultSource = options.githubClient
+  const defaultSource = selectedGithubClient
     ? createGithubCollectionSource({
-        client: options.githubClient,
-        sourceId: options.sourceId,
+        client: selectedGithubClient,
+        sourceId: decisionSourceId,
+        pullRequestDecisionRepositoryIds: decisionRepositoryIds,
+        decisionHistoryNow: decisionClock,
         repositories: config.repositories,
         isSynthetic: dataMode === "synthetic",
         assertAuthorized: () => assertRunConfiguration(),
@@ -1544,7 +1667,8 @@ export async function createPipeline(options) {
         },
       })
     : null;
-  const collectionSource = options.source ?? defaultSource;
+  const collectionSource = selectedCustomSource ?? defaultSource;
+  const readCollectionPage = collectionSource?.readPage;
   const defaultCommentsInventory =
     defaultSource !== null &&
     collectionSource === defaultSource &&
@@ -1554,7 +1678,6 @@ export async function createPipeline(options) {
     collectionSource === defaultSource &&
     config.repositories.some((repository) => repository.families.includes("content_edits"));
   const probeSource = options.probeRepository ?? defaultSource?.probeRepository;
-  const collection = new c.ingestion.CollectionStore(db);
   const scanContinuations = new ScanContinuationStore(db);
   const guardedSource = {
     assertAuthorized() {
@@ -1564,12 +1687,21 @@ export async function createPipeline(options) {
       // The controls overlay can change while an earlier probe/page is pending.
       // Recheck before collection and reject results that lost authorization.
       assertRunConfiguration();
-      const page = await collectionSource.readPage(request);
+      const page = decisionRepositoryIds.length
+        ? await readCollectionPage.call(collectionSource, request)
+        : await collectionSource.readPage(request);
       assertRunConfiguration();
       assertDataMode(page);
       return page;
     },
   };
+  if (decisionRepositoryIds.length) Object.freeze(guardedSource);
+  const collection = new c.ingestion.CollectionStore(
+    db,
+    decisionRepositoryIds.length
+      ? { sourceId: decisionSourceId, dataMode, repositoryIds: decisionRepositoryIds, source: guardedSource }
+      : undefined,
+  );
   const configurationOverlay = (state) =>
     options.configurationOverlay?.(state) ??
     c.controls.configurationOverlay?.(state) ?? {
@@ -1673,6 +1805,9 @@ export async function createPipeline(options) {
             revision,
             recognitionBindings.length ? fingerprint : null,
             sources,
+            ...(decisionRepositoryIds.length
+              ? [pullRequestDecisionGenerationVersion, decisionSourceId, decisionRepositoryIds]
+              : []),
             ...(feedbackAuthority.enabled ? [discussionFeedbackContentVersion, feedbackAuthority.capture()] : []),
             // Selected release proofs use the PR delivery generation. Retire an older
             // frozen scan before collecting a newly required normalization generation.
@@ -2081,7 +2216,14 @@ export async function createPipeline(options) {
             entry.artifact.publicUrl === dispatch.lease.observation.sourceUrl,
         ),
     );
-  async function normalizeStored(repositoryIds, cutoff, dispatch, releasePass = null, mergeTargetPass = null) {
+  async function normalizeStored(
+    repositoryIds,
+    cutoff,
+    dispatch,
+    releasePass = null,
+    mergeTargetPass = null,
+    decisionRuns = [],
+  ) {
     // A first-review sequence depends on the whole cohort, not just the review's
     // mutable fields. Only a source observation bound to the latest completed
     // review scan may supply that sequence to this publication. Retained caches
@@ -2134,20 +2276,31 @@ export async function createPipeline(options) {
     if (new Set(latestProjectRuns.map((run) => String(run.repository_id))).size !== latestProjectRuns.length)
       fail("ambiguous_current_project_run");
     const selectedProjectRuns = latestProjectRuns.map((run) => run.run_id);
+    const selectedDecisionRuns = decisionRuns.filter((run) => repositoryIds.includes(run.repositoryId));
+    const selectedDecisionRepositories = selectedDecisionRuns.map((run) => run.repositoryId);
     const selectedFeedbackRuns = await db.transaction((tx) => feedbackStore.currentScanIds(tx, repositoryIds, cutoff));
     assertRunConfiguration();
     const sourceRows = (
       await db.query(
-        `SELECT fact.* FROM leaderboard_ingestion.source_facts AS fact
+        `SELECT fact.* FROM (
+        SELECT fact_key,repository_id,family,subject_id,source_revision,
+          document - 'pullRequestDecisionHistory' AS document,first_run_id,observed_at
+        FROM leaderboard_ingestion.source_facts
+      ) AS fact
       JOIN leaderboard_ingestion.repository_access AS access USING (repository_id)
       WHERE fact.repository_id = ANY($1::bigint[]) AND fact.observed_at <= $2 AND access.state='public'
       AND (fact.family<>'discussions' OR fact.repository_id<>ALL($4::bigint[]) OR fact.first_run_id=ANY($5::text[]))
+      AND (fact.family<>'pull_requests' OR fact.repository_id<>ALL($6::bigint[])
+        OR EXISTS (SELECT 1 FROM leaderboard_ingestion.collection_items AS selected
+          WHERE selected.fact_key=fact.fact_key AND selected.run_id=ANY($7::text[])))
       AND (
         (fact.family='project_current' AND fact.document ? 'projectSubjectId'
           AND EXISTS (SELECT 1 FROM leaderboard_ingestion.collection_items AS selected
             WHERE selected.fact_key=fact.fact_key AND selected.run_id=ANY($3::text[])))
         OR (NOT (fact.family='project_current' AND fact.document ? 'projectSubjectId')
-        AND (fact.document->>'evidence' <> 'current_state' OR NOT EXISTS (
+        AND (fact.document->>'evidence' <> 'current_state'
+        OR (fact.family='pull_requests' AND fact.repository_id=ANY($6::bigint[]))
+        OR NOT EXISTS (
         SELECT 1 FROM leaderboard_ingestion.source_facts AS newer
         WHERE newer.repository_id=fact.repository_id AND newer.family=fact.family AND newer.subject_id=fact.subject_id
         AND newer.document->>'evidence'='current_state' AND newer.observed_at <= $2 AND newer.observed_at > fact.observed_at
@@ -2158,7 +2311,15 @@ export async function createPipeline(options) {
       AND NOT EXISTS (SELECT 1 FROM leaderboard_ingestion.object_suppressions AS removed
         WHERE removed.repository_id=fact.repository_id AND removed.subject_id=fact.subject_id)
       ORDER BY fact.fact_key LIMIT 10001`,
-        [repositoryIds, cutoff, selectedProjectRuns, feedbackAuthority.repositoryIds, selectedFeedbackRuns],
+        [
+          repositoryIds,
+          cutoff,
+          selectedProjectRuns,
+          feedbackAuthority.repositoryIds,
+          selectedFeedbackRuns,
+          selectedDecisionRepositories,
+          selectedDecisionRuns.map((run) => run.runId),
+        ],
       )
     ).rows;
     if (sourceRows.length > 10000) fail("frozen_dataset_budget_exceeded");
@@ -2878,12 +3039,18 @@ export async function createPipeline(options) {
     dispatch,
     scan = null,
     mergeTargetGeneration = null,
+    decisionCapture = null,
   ) {
     assertRunConfiguration();
     scope = c.contracts.canonicalPublicScope(scope);
     if (!configuredScope(scope)) fail("scope_not_approved");
     const selectedPolicies = policiesForScope(scope);
     const repos = repositoriesFor(scope);
+    const scopedDecisionRuns =
+      decisionCapture?.runs.filter((run) => repos.some((repo) => repo.id === run.repositoryId)) ?? [];
+    const scopedDecisionCapture = scopedDecisionRuns.length
+      ? parseDecisionGenerationCapture({ ...decisionCapture, runs: scopedDecisionRuns })
+      : null;
     const generations = (
       await db.query(
         "SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) ORDER BY repository_id",
@@ -2903,6 +3070,7 @@ export async function createPipeline(options) {
     )
       fail("dispatch_source_generation_changed");
     let priorPublication = null;
+    let priorDecisionBound = false;
     let replayedBackfillRevision;
     if (dispatch) {
       // A committed operation can be acknowledged after another publisher advances
@@ -3005,11 +3173,8 @@ export async function createPipeline(options) {
         // An unconfirmed SQL commit has no private preview capture. Recompute
         // its exact frozen input before atomically confirming both; do not
         // manufacture a marker or move the SQL head to a historical operation.
-        const retained = (
-          await db.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
-            prior.snapshot_id,
-          ])
-        ).rows[0];
+        const retained = await readDecisionFrozenInput(db, prior.snapshot_id, scopedDecisionCapture !== null);
+        priorDecisionBound = retained?.decision_bound === true;
         if (
           !retained ||
           digest(retained.document) !== retained.document_hash ||
@@ -3029,6 +3194,7 @@ export async function createPipeline(options) {
       dispatch,
       null,
       mergeTargetGeneration === null ? null : { generation: mergeTargetGeneration, collect: false },
+      decisionCapture?.runs ?? [],
     );
     const selectedArtifactIds = normalizedAll
       .filter((entry) => repos.some((repo) => String(repo.id) === entry.repositoryId))
@@ -3558,6 +3724,7 @@ export async function createPipeline(options) {
         },
         ...mergeTargetAuthorization(scope, observationCutoff),
         issueTransferEvidence: transferAuthority.capture,
+        ...(scopedDecisionCapture === null ? {} : { pullRequestDecisionEvidence: scopedDecisionCapture }),
         ...(feedbackCapture.length ? { discussionFeedbackEvidence: feedbackCapture } : {}),
         ...(transferAuthority.relationshipPairEvidence === undefined
           ? {}
@@ -3574,11 +3741,8 @@ export async function createPipeline(options) {
     });
     let retainedComparisonInput;
     const restorePublicationInput = async (tx, publication) => {
-      const retained = (
-        await tx.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
-          publication.snapshotId,
-        ])
-      ).rows[0];
+      const retained = await readDecisionFrozenInput(tx, publication.snapshotId, scopedDecisionCapture !== null);
+      const decisionBound = retained?.decision_bound === true;
       const document = retained?.document;
       if (
         !document ||
@@ -3610,12 +3774,11 @@ export async function createPipeline(options) {
         },
         tx,
       );
-      const saved = (
-        await tx.query(
-          `SELECT document,document_hash FROM leaderboard_pipeline.receipts WHERE operation_hash=${pipelineKeySQL("$1")} AND operation_key=$1 AND kind='snapshot_published'`,
-          [`publish:${scopeKey(scope)}:${publication.snapshotId}`],
-        )
-      ).rows[0];
+      const saved = await readDecisionPublicationReceipt(
+        tx,
+        `publish:${scopeKey(scope)}:${publication.snapshotId}`,
+        decisionBound,
+      );
       if (
         !saved ||
         digest(saved.document) !== saved.document_hash ||
@@ -3637,6 +3800,18 @@ export async function createPipeline(options) {
           repos.map((repo) => repo.id),
           feedbackCapture.length ? feedbackCapture : undefined,
         );
+        if (scopedDecisionCapture !== null)
+          await retainedDecisionEvidence(
+            tx,
+            {
+              pullRequestDecisionEvidence: scopedDecisionCapture,
+              sources: transferAuthority.access.map((row) => ({
+                repositoryId: String(row.repository_id),
+                generation: String(row.generation),
+              })),
+            },
+            observationCutoff,
+          );
         const scanHeads = scan ? await scanContinuations.lockForPublication(tx, scan, assertRunConfiguration) : null;
         if (dispatch) await outbox.assertLease(tx, dispatch.lease);
         const bindPublication = async (publication) => {
@@ -3723,12 +3898,11 @@ export async function createPipeline(options) {
         if (hasReviewSources) assertReviewNormalizer();
         if (scan) scanContinuations.assertHead(scanHeads, scopeKey(scope), current?.snapshot_id ?? null);
         if (priorPublication) {
-          const saved = (
-            await tx.query(
-              `SELECT document,document_hash FROM leaderboard_pipeline.receipts WHERE operation_hash=${pipelineKeySQL("$1")} AND operation_key=$1 AND kind='snapshot_published'`,
-              [`publish:${scopeKey(scope)}:${snapshotId}`],
-            )
-          ).rows[0];
+          const saved = await readDecisionPublicationReceipt(
+            tx,
+            `publish:${scopeKey(scope)}:${snapshotId}`,
+            priorDecisionBound || scopedDecisionCapture !== null,
+          );
           if (
             !saved ||
             digest(saved.document) !== saved.document_hash ||
@@ -3740,12 +3914,19 @@ export async function createPipeline(options) {
         if (current?.snapshot_id === snapshotId) {
           const publication = { snapshotId, revision: Number(current.revision), changed: false };
           const confirmation = controlsStore.read().pipelinePublications?.[snapshotId];
-          if (confirmationMatches(confirmation, scope, snapshotId, publication.revision))
-            aggregateExplanations.verify(snapshotId, {
+          if (confirmationMatches(confirmation, scope, snapshotId, publication.revision)) {
+            const original = aggregateExplanations.verify(snapshotId, {
               ...explanationBinding(scope, publication),
               digest: confirmation.aggregateExplanationHash,
             });
-          else {
+            if (
+              scopedDecisionCapture !== null ||
+              original.document.authorization.pullRequestDecisionEvidence !== undefined
+            )
+              // Identical public content keeps its first private generation,
+              // including legacy absence. Never backfill it with a later scan.
+              retainedComparisonInput = await restorePublicationInput(tx, publication);
+          } else {
             // An unconfirmed retry may observe the same public content at a
             // later clock. Its committed receipt owns the original private
             // input; re-admit it without rewriting either SQL record.
@@ -3909,6 +4090,7 @@ export async function createPipeline(options) {
         "sources",
         "issueTransferEvidence",
         "relationshipPairEvidence",
+      "pullRequestDecisionEvidence",
         "discussionFeedbackEvidence",
         "reversionAuthority",
         "reversionRecordsHash",
@@ -4875,7 +5057,10 @@ export async function createPipeline(options) {
               cutoff,
               mode,
               dataMode,
-              ...(family === "discussions" && feedbackAuthority.repositoryIds.includes(repo.id)
+              ...(family === "pull_requests" && decisionRepositoryIds.includes(repo.id)
+                 ? [pullRequestDecisionGenerationVersion, decisionSourceId]
+                 : []),
+               ...(family === "discussions" && feedbackAuthority.repositoryIds.includes(repo.id)
                 ? [discussionFeedbackContentVersion, feedbackAuthority.current(repo.id).authorityHash]
                 : []),
               ...(scan ? [scan.token] : []),
@@ -4919,6 +5104,9 @@ export async function createPipeline(options) {
         if (status !== "complete") return { state: "collecting", progress, publications: [] };
       }
     }
+    const decisionRuns = progress
+      .filter((entry) => entry.family === "pull_requests" && decisionRepositoryIds.includes(entry.repositoryId))
+      .map(({ repositoryId, runId }) => ({ repositoryId, runId }));
     // New release proof is a separate observation from the immutable PR row.
     // Complete only explicitly selected public lookups before freezing the cycle;
     // a frozen retry reuses its exact compatible cache and never recollects it.
@@ -4948,16 +5136,35 @@ export async function createPipeline(options) {
         mergeTargetGeneration === null
           ? null
           : { generation: mergeTargetGeneration, collect: !scan?.observationCutoff },
+        decisionRuns,
       );
     }
     if (mergeTargetGeneration !== null)
-      await normalizeStored(mergeTargetRepositoryIds, scan?.observationCutoff ?? utc(now()), null, null, {
-        generation: mergeTargetGeneration,
-        collect: !scan?.observationCutoff,
-        only: true,
-      });
+      await normalizeStored(
+        mergeTargetRepositoryIds,
+        scan?.observationCutoff ?? utc(now()),
+        null,
+        null,
+        { generation: mergeTargetGeneration, collect: !scan?.observationCutoff, only: true },
+        decisionRuns,
+      );
     const publications = [];
-    let observationCutoff = utc(now());
+    let observationCutoff = scan?.observationCutoff ?? utc(now());
+    const captureDecisionRuns = (selectedCutoff) =>
+      db.transaction((tx) =>
+        readDecisionGenerations(tx, {
+          selectedRuns: decisionRuns,
+          repositories: config.repositories,
+          source: decisionSourceId,
+          asOf: cutoff,
+          observationCutoff: selectedCutoff,
+          dataMode,
+          assertAuthorized: assertRunConfiguration,
+        }),
+      );
+    // A sub-millisecond database O must not be rounded down or committed behind
+    // a new frozen F. A too-early host clock fails before creating that freeze.
+    let decisionCapture = decisionRuns.length ? (await captureDecisionRuns(observationCutoff)).capture : null;
     try {
       if (scan) {
         scan = await scanContinuations.freeze(scan, observationCutoff, assertRunConfiguration);
@@ -4999,8 +5206,13 @@ export async function createPipeline(options) {
         dispatch.generations = frozen.generations;
       }
       if (observationCutoff < cutoff) fail("observation_clock_precedes_event_cutoff");
+      if (decisionCapture !== null && decisionCapture.observationCutoff !== observationCutoff)
+        decisionCapture = (await captureDecisionRuns(observationCutoff)).capture;
+      assertRunConfiguration();
       for (const selected of publicationWindows)
-        publications.push(await publish(selected, cutoff, observationCutoff, dispatch, scan, mergeTargetGeneration));
+        publications.push(
+          await publish(selected, cutoff, observationCutoff, dispatch, scan, mergeTargetGeneration, decisionCapture),
+        );
       // SQL publication and synchronous private confirmation must both succeed.
       // A failed/partial batch keeps its original event and observation cutoffs.
       if (scan) await scanContinuations.retire(scan, assertRunConfiguration);
@@ -5105,11 +5317,7 @@ export async function createPipeline(options) {
       const normalizationBinding = await publicationNormalizationBinding(tx, selectedScope, publication, explanation);
       if (normalizationBinding.obsolete) fail(`dispatch_${normalizationBinding.obsolete}_normalization_obsolete`);
       if (mergeTargetRepositoryIds.length) {
-        const retained = (
-          await tx.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
-            publication.snapshotId,
-          ])
-        ).rows[0];
+        const retained = await readDecisionFrozenInput(tx, publication.snapshotId);
         const document = retained?.document;
         const engineScope = {
           ...selected.window,
@@ -5156,13 +5364,11 @@ export async function createPipeline(options) {
           },
           tx,
         );
-        const published = (
-          await tx.query(
-            `SELECT document,document_hash FROM leaderboard_pipeline.receipts
-             WHERE operation_hash=${pipelineKeySQL("$1")} AND operation_key=$1 AND kind='snapshot_published'`,
-            [`publish:${publication.scopeKey}:${publication.snapshotId}`],
-          )
-        ).rows[0];
+        const published = await readDecisionPublicationReceipt(
+          tx,
+          `publish:${publication.scopeKey}:${publication.snapshotId}`,
+          explanation.authorization.pullRequestDecisionEvidence !== undefined,
+        );
         if (
           !published ||
           digest(published.document) !== published.document_hash ||
@@ -5390,11 +5596,7 @@ export async function createPipeline(options) {
         !(await options.authorizePolicyPreview?.({ snapshotId, policy: copy(policy), operatorId }))
       )
         fail("policy_preview_not_authorized");
-      const saved = (
-        await db.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
-          snapshotId,
-        ])
-      ).rows[0];
+      const saved = await readDecisionFrozenInput(db, snapshotId);
       if (!saved || digest(saved.document) !== saved.document_hash) fail("frozen_input_unavailable");
       const guard = await policyInputGuard(snapshotId, saved.document);
       const previous = saved.document.policies.find((p) => p.policy.metricId === policy.metricId)?.policy;
@@ -5432,11 +5634,7 @@ export async function createPipeline(options) {
         )
       ).rows[0];
       if (!saved || digest(saved.document) !== saved.document_hash) fail("policy_comparison_unavailable");
-      const input = (
-        await db.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
-          saved.document.snapshotId,
-        ])
-      ).rows[0];
+      const input = await readDecisionFrozenInput(db, saved.document.snapshotId);
       if (
         !input ||
         digest(input.document) !== input.document_hash ||
@@ -5499,7 +5697,7 @@ export async function createPipeline(options) {
         await lockIssueTransferSources(tx, config.repositories, "update", [], "share");
         const candidates = (
           await tx.query(
-            `SELECT n.document,n.document_hash,n.policy_signature,f.repository_id,f.family,f.observed_at,f.document AS source_document FROM leaderboard_pipeline.normalizations n
+            `SELECT n.document,n.document_hash,n.policy_signature,f.repository_id,f.family,f.observed_at,f.document - 'pullRequestDecisionHistory' AS source_document FROM leaderboard_pipeline.normalizations n
           JOIN leaderboard_ingestion.source_facts f USING(fact_key) WHERE f.repository_id=ANY($1::bigint[]) AND
             (n.policy_signature=ANY($2::text[]) OR
              (n.document->'pullRequestMergeTargetNormalization'->>'schemaVersion'=$4 AND

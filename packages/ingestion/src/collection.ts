@@ -7,6 +7,12 @@ import {
 } from "./content-edit-metadata.js";
 import { collectionDiscussionFeedback } from "./discussion-feedback.js";
 import type { DiscussionFeedbackObservation } from "@pick-your-ai/contracts";
+import {
+  collectionPullRequestDecisionObservation,
+  assertPullRequestDecisionPersistence,
+  pullRequestDecisionProducerBinding,
+  type PullRequestDecisionObservation,
+} from "./pull-request-decision-observation.js";
 
 export const sourceFamilies = [
   "issues",
@@ -44,6 +50,8 @@ export interface SourceFact {
   contentEditMetadata?: ContentEditMetadata | CommentEditMetadata;
   /** Private content fingerprints and complete-observation generation; never raw text. */
   discussionFeedback?: DiscussionFeedbackObservation;
+  /** Private native decision observation; never a public contribution or current-state transition. */
+  pullRequestDecisionHistory?: PullRequestDecisionObservation;
   sourceRevision: string;
   sourceUrl: string;
   /** Snapshot state never establishes a transition's actor or occurrence time. */
@@ -99,6 +107,7 @@ function validateScanRequest(request: ScanRequest): void {
 function normalizeFact(value: SourceFact, family: SourceFamily, repositoryId: number): SourceFact {
   const contentEditMetadata = collectionContentEditMetadata(value, family, repositoryId);
   const discussionFeedback = collectionDiscussionFeedback(value, family);
+  const pullRequestDecisionHistory = collectionPullRequestDecisionObservation(value, family, repositoryId);
   id(value.subjectId);
   if (value.historySubjectId !== undefined) id(value.historySubjectId);
   if (value.issueFieldId !== undefined) {
@@ -148,6 +157,7 @@ function normalizeFact(value: SourceFact, family: SourceFamily, repositoryId: nu
     state: value.state,
     ...(contentEditMetadata !== undefined ? { contentEditMetadata } : {}),
     ...(discussionFeedback !== undefined ? { discussionFeedback } : {}),
+    ...(pullRequestDecisionHistory !== undefined ? { pullRequestDecisionHistory } : {}),
   };
   if (discussionFeedback === undefined && normalized.sourceRevision.startsWith("gdf"))
     throw new Error("invalid_discussion_feedback_source_fact");
@@ -178,8 +188,75 @@ export async function assertRepositoryAvailable(
   if (denied.rows.length) throw new Error("repository_unavailable");
 }
 
+/** Trusted construction only; this binding is never accepted from a scan or page. */
+export interface DecisionHistoryCollectionProducer {
+  sourceId: string;
+  dataMode: "public" | "synthetic";
+  repositoryIds: readonly number[];
+  source: ReadOnlySource;
+}
+
 export class CollectionStore {
-  constructor(readonly db: SqlDatabase) {}
+  readonly #decisionProducer: string | null;
+  readonly #decisionRepositories: readonly number[];
+  readonly #decisionSource: ReadOnlySource | null;
+  readonly #decisionReadPage: ReadOnlySource["readPage"] | null;
+  readonly #decisionAuthorize: (() => void) | null;
+  readonly #decisionAuthorizationMethod: ReadOnlySource["assertAuthorized"] | null;
+
+  constructor(readonly db: SqlDatabase, decisionProducer?: DecisionHistoryCollectionProducer) {
+    this.#decisionProducer =
+      decisionProducer === undefined
+        ? null
+        : pullRequestDecisionProducerBinding(decisionProducer.sourceId, decisionProducer.dataMode);
+    const repositories = decisionProducer === undefined ? [] : [...decisionProducer.repositoryIds];
+    if (
+      repositories.length > 1000 ||
+      repositories.some((value) => !Number.isSafeInteger(value) || value < 1) ||
+      new Set(repositories).size !== repositories.length ||
+      (decisionProducer !== undefined &&
+        (!repositories.length ||
+          typeof decisionProducer.source?.readPage !== "function" ||
+          typeof decisionProducer.source.assertAuthorized !== "function"))
+    )
+      throw new TypeError("invalid_pull_request_decision_producer");
+    this.#decisionRepositories = Object.freeze(repositories);
+    this.#decisionSource = decisionProducer?.source ?? null;
+    this.#decisionReadPage = this.#decisionSource?.readPage ?? null;
+    const authorize = this.#decisionSource?.assertAuthorized ?? null;
+    this.#decisionAuthorizationMethod = authorize;
+    this.#decisionAuthorize = authorize
+      ? () => {
+          const result: unknown = authorize.call(this.#decisionSource);
+          if (result !== undefined) {
+            void Promise.resolve(result).catch(() => undefined);
+            throw new Error("pull_request_decision_authorization_invalid");
+          }
+        }
+      : null;
+  }
+
+  #producerFor(request: { repositoryId: number; family: string }): string | null {
+    return request.family === "pull_requests" && this.#decisionRepositories.includes(request.repositoryId)
+      ? this.#decisionProducer
+      : null;
+  }
+
+  #assertProducer(row: Record<string, unknown>, source?: ReadOnlySource): string | null {
+    const expected = this.#producerFor({ repositoryId: Number(row.repository_id), family: String(row.family) });
+    if ((row.decision_producer ?? null) !== expected)
+      throw new Error("pull_request_decision_producer_binding_changed");
+    if (expected !== null) {
+      if (
+        (source !== undefined && source !== this.#decisionSource) ||
+        this.#decisionSource?.readPage !== this.#decisionReadPage ||
+        this.#decisionSource?.assertAuthorized !== this.#decisionAuthorizationMethod
+      )
+        throw new Error("pull_request_decision_producer_changed");
+      this.#decisionAuthorize!();
+    }
+    return expected;
+  }
 
   /** Host supplies a fresh read-only visibility probe. A stale probe cannot undo a revocation. */
   async verifyPublic(
@@ -280,10 +357,16 @@ export class CollectionStore {
       [request.repositoryId],
     );
     if (!access.rows[0]) throw new Error("repository_unverified");
+    const producer = this.#producerFor(request);
+    if (producer !== null) this.#decisionAuthorize!();
     await tx.query(
-      `INSERT INTO leaderboard_ingestion.collection_runs
-        (run_id, repository_id, family, mode, since_at, until_at, access_generation) VALUES ($1,$2,$3,$4,$5,$6,$7)
-        ON CONFLICT (run_id) DO NOTHING`,
+      producer === null
+        ? `INSERT INTO leaderboard_ingestion.collection_runs
+          (run_id, repository_id, family, mode, since_at, until_at, access_generation) VALUES ($1,$2,$3,$4,$5,$6,$7)
+          ON CONFLICT (run_id) DO NOTHING`
+        : `INSERT INTO leaderboard_ingestion.collection_runs
+          (run_id, repository_id, family, mode, since_at, until_at, access_generation,decision_producer)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (run_id) DO NOTHING`,
       [
         request.runId,
         request.repositoryId,
@@ -292,11 +375,13 @@ export class CollectionStore {
         request.since,
         request.until,
         access.rows[0].generation,
+        ...(producer === null ? [] : [producer]),
       ],
     );
     const prior = (
       await tx.query("SELECT * FROM leaderboard_ingestion.collection_runs WHERE run_id = $1", [request.runId])
     ).rows[0]!;
+    this.#assertProducer(prior);
     if (
       String(prior.repository_id) !== String(request.repositoryId) ||
       prior.family !== request.family ||
@@ -318,7 +403,12 @@ export class CollectionStore {
     const run = (await this.db.query("SELECT * FROM leaderboard_ingestion.collection_runs WHERE run_id = $1", [runId]))
       .rows[0];
     if (!run) throw new Error("unknown_scan");
+    const decisionProducer = this.#assertProducer(run, source);
     if (run.state === "complete") return "complete";
+    const assertSourceAuthorized = () => {
+      if (decisionProducer !== null) this.#assertProducer(run, source);
+      else source.assertAuthorized?.();
+    };
     const request: ScanRequest = {
       runId,
       repositoryId: Number(run.repository_id),
@@ -331,7 +421,13 @@ export class CollectionStore {
     try {
       if (Number(run.page_count) >= 10_000) throw new Error("scan_page_budget_exceeded");
       await assertRepositoryAvailable(this.db, request.repositoryId);
-      const page = await source.readPage({ ...request, cursor: run.cursor as string | null, limit });
+      if (decisionProducer !== null) assertSourceAuthorized();
+      const pageRequest = { ...request, cursor: run.cursor as string | null, limit };
+      const page =
+        decisionProducer === null
+          ? await source.readPage(pageRequest)
+          : await this.#decisionReadPage!.call(source, pageRequest);
+      if (decisionProducer !== null) assertSourceAuthorized();
       failureCode = "source_schema_drift";
       if (
         page.repositoryId !== request.repositoryId ||
@@ -347,7 +443,17 @@ export class CollectionStore {
         throw new Error("nonadvancing_source_page");
       if (expectedCount !== null && (!Number.isSafeInteger(expectedCount) || expectedCount < 0))
         throw new Error("invalid_source_count");
-      const facts = page.facts.map((fact) => normalizeFact(fact, request.family, request.repositoryId));
+      let decisionBytes = 0;
+      const facts = page.facts.map((fact) => {
+        const normalized = normalizeFact(fact, request.family, request.repositoryId);
+        if ((normalized.pullRequestDecisionHistory !== undefined) !== (decisionProducer !== null))
+          throw new Error("pull_request_decision_producer_binding_changed");
+        if (normalized.pullRequestDecisionHistory !== undefined) {
+          decisionBytes += Buffer.byteLength(JSON.stringify(normalized));
+          if (decisionBytes > 8_000_000) throw new Error("pull_request_decision_page_budget_exceeded");
+        }
+        return normalized;
+      });
       if (expectedCount !== null && facts.some((fact) => fact.contentEditMetadata !== undefined))
         throw new Error("content_edit_history_count_unknown");
       if (
@@ -376,7 +482,7 @@ export class CollectionStore {
       if (request.family !== "project_current" && facts.some((fact) => fact.projectSubjectId !== undefined))
         throw new Error("invalid_current_project_subject");
       failureCode = "source_commit_failed";
-      return await this.db.transaction(async (tx) => {
+      const status = await this.db.transaction(async (tx): Promise<"complete" | "progress" | "superseded"> => {
         // Public readers share this repository gate while reading current controls.
         // Suppression writes must exclude them; ordinary collection remains concurrent.
         const gateLock = facts.some((fact) => fact.state === "deleted" || fact.state === "unavailable")
@@ -393,7 +499,8 @@ export class CollectionStore {
         const current = (
           await tx.query("SELECT * FROM leaderboard_ingestion.collection_runs WHERE run_id = $1 FOR UPDATE", [runId])
         ).rows[0]!;
-        source.assertAuthorized?.();
+        assertSourceAuthorized();
+        this.#assertProducer(current, source);
         if (current.page_count !== run.page_count || current.state === "complete") return "superseded";
         if (current.expected_count !== null && current.expected_count !== expectedCount)
           throw new Error("source_count_changed");
@@ -411,10 +518,31 @@ export class CollectionStore {
           const inserted = await tx.query(
             `INSERT INTO leaderboard_ingestion.source_facts
             (fact_key, repository_id, family, subject_id, source_revision, document, first_run_id) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)
-            ON CONFLICT (fact_key) DO NOTHING RETURNING fact_key`,
+            ON CONFLICT (fact_key) DO NOTHING RETURNING fact_key,first_run_id,
+              to_char(observed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS decision_observed_at`,
             [key, request.repositoryId, request.family, fact.subjectId, fact.sourceRevision, document, runId],
           );
           changed += inserted.rows.length;
+          if (fact.pullRequestDecisionHistory !== undefined) {
+            const saved =
+              inserted.rows[0] ??
+              (
+                await tx.query(
+                  `SELECT first_run_id,
+                    to_char(observed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS decision_observed_at
+                  FROM leaderboard_ingestion.source_facts WHERE fact_key=$1`,
+                  [key],
+                )
+              ).rows[0];
+            if (!saved) throw new Error("pull_request_decision_source_unavailable");
+            assertPullRequestDecisionPersistence(
+              fact.pullRequestDecisionHistory,
+              request,
+              saved.decision_observed_at as string,
+              String(saved.first_run_id),
+            );
+            assertSourceAuthorized();
+          }
           if (fact.state === "deleted" || fact.state === "unavailable")
             await tx.query(
               `INSERT INTO leaderboard_ingestion.object_suppressions
@@ -426,6 +554,25 @@ export class CollectionStore {
             runId,
             key,
           ]);
+        }
+        if (decisionBytes) {
+          const footprint = (
+            await tx.query(
+              `SELECT COALESCE(sum(octet_length(f.document::text)),0) AS bytes
+              FROM leaderboard_ingestion.collection_items AS item
+              JOIN leaderboard_ingestion.source_facts AS f USING(fact_key)
+              WHERE item.run_id=$1`,
+              [runId],
+            )
+          ).rows[0];
+          if (
+            !footprint ||
+            !Number.isSafeInteger(Number(footprint.bytes)) ||
+            Number(footprint.bytes) < 0 ||
+            Number(footprint.bytes) > 8_000_000
+          )
+            throw new Error("pull_request_decision_run_budget_exceeded");
+          assertSourceAuthorized();
         }
         await tx.query(
           `INSERT INTO leaderboard_ingestion.collection_pages (run_id,page_number,item_count,changed_count,cursor_hash) VALUES ($1,$2,$3,$4,$5)`,
@@ -443,9 +590,11 @@ export class CollectionStore {
           last_success_at = clock_timestamp(), attempted_at = clock_timestamp() WHERE run_id = $1`,
           [runId, nextCursor, count, expectedCount, nextCursor === null ? "complete" : "pending"],
         );
-        source.assertAuthorized?.();
+        assertSourceAuthorized();
         return nextCursor === null ? "complete" : "progress";
       });
+      if (decisionProducer !== null) assertSourceAuthorized();
+      return status;
     } catch {
       // Never retain adapter exceptions, URLs with credentials, or source payloads.
       await this.db.query(
