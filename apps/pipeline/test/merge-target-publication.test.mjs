@@ -5,6 +5,8 @@ import test from "node:test";
 import { components, harness, publicScope } from "./harness.mjs";
 import { createPipeline } from "../src/runtime.mjs";
 import { syntheticCheckpointStore } from "../../../packages/github/test/synthetic-client.mjs";
+import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
+import { mergeTargetGenerationSignature } from "../src/pull-request-merge-target.mjs";
 
 const slug = "synthetic-org/synthetic-repo",
   target = "release/previous-target";
@@ -649,4 +651,226 @@ test("adding an unused replacement option does not reclassify the captured built
   assert.equal(unused, 0);
   assert.equal(p.state.graphql, 5);
   assert.equal((await readScope(runtime)).selected.rows.length, 5);
+});
+
+async function fieldMergeSetup(t) {
+  const { h, p } = await setup(t, { memoryDatabase: true, configuredScopes: [scope] });
+  await h.runtime.stop();
+  const state = { calls: 0, afterFreeze: true, frozen: false };
+  const normalizerOptions = {
+    client: p.client,
+    source: h.options.sourceId,
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+    assertAuthorized: () => assert.equal(h.options.dataMode, "synthetic"),
+    now: p.now,
+  };
+  const native = components.github.createGithubEvidenceNormalizer({
+    ...normalizerOptions,
+    pullRequestMergeTargetRepositoryIds: [2],
+  });
+  const enriched = components.github.createGithubEvidenceNormalizer({
+    ...normalizerOptions,
+    enrich: async (input) => {
+      const pull = p.payloads.find((entry) => entry.node_id === input.fact.subjectId);
+      assert.ok(pull);
+      return {
+        repository: { id: 2, slug, visibility: "public" },
+        proof: {
+          verified: true,
+          source: "github_rest",
+          revision: input.fact.sourceRevision,
+          eventId: `synthetic-field-${pull.number}`,
+          isSynthetic: true,
+        },
+        family: "field_change",
+        action: "issue_field_changed",
+        occurredAt: pull.merged_at,
+        observedAt: input.observedAt,
+        payload: { issue: pull, sender: pull.user, change: { before: { priority: 1 }, after: { priority: 2 } } },
+      };
+    },
+  });
+  h.options.normalizer = async (input) => {
+    state.calls++;
+    const merge = await native(input);
+    const field = await enriched(input);
+    assert.equal(field.facts.length, 1);
+    assert.equal(field.facts[0].metricId, "issue_field_updates");
+    // Real native and enrichment normalizers supply both sets of facts. This
+    // fixture never supplies a merge projection or a cache version marker.
+    return {
+      ...merge,
+      facts: [...merge.facts, ...field.facts],
+      actors: [...new Map([...merge.actors, ...field.actors].map((actor) => [actor.id, actor])).values()],
+      evidence: [...merge.evidence, ...field.evidence],
+    };
+  };
+  h.options.defaultDeliveryNormalizationVersion = components.github.defaultDeliveryNormalizationVersion;
+  h.options.pullRequestMergeTargetNormalizationVersion = components.github.pullRequestMergeTargetNormalizationVersion;
+  h.options.fieldChangeNormalizationVersion = components.github.fieldChangeNormalizationVersion;
+  const query = async (run, sql, params) => {
+    if (sql.includes("UPDATE leaderboard_pipeline.scan_continuations SET observation_cutoff")) state.frozen = true;
+    if (
+      state.afterFreeze &&
+      state.frozen &&
+      sql.startsWith("SELECT repository_id,state,generation FROM leaderboard_ingestion.repository_access")
+    ) {
+      state.afterFreeze = false;
+      throw new Error("synthetic_stop_after_combined_merge_field_freeze");
+    }
+    return run(sql, params);
+  };
+  const db = {
+    query: (sql, params) => query(h.db.query.bind(h.db), sql, params),
+    transaction: (work) =>
+      h.db.transaction((tx) => work({ query: (sql, params) => query(tx.query.bind(tx), sql, params) })),
+  };
+  const runtime = await createPipeline({ ...h.options, db });
+  t.after(() => runtime.stop());
+  return { h, p, runtime, state };
+}
+
+test("field-enriched native merge generations retain current, frozen and correction authority", async (t) => {
+  const { h, p, runtime, state } = await fieldMergeSetup(t);
+  const cutoff = iso(Date.now() - 1000);
+  await assert.rejects(runtime.runOnce({ cutoff }), /synthetic_stop_after_combined_merge_field_freeze/);
+  assert.equal(state.frozen, true);
+  assert.equal(state.calls, 5);
+  assert.equal(p.state.graphql, 5);
+  const frozen = await caches(h.db);
+  assert.equal(frozen.length, 5);
+  const fieldVersion = components.github.fieldChangeNormalizationVersion;
+  for (const row of frozen) {
+    const marker = row.document.pullRequestMergeTargetNormalization;
+    const merge = mergeTargetGenerationSignature(marker.baseSignature, marker.generation, comparisonHash);
+    const inner =
+      row.document.defaultDeliveryNormalizationVersion === undefined
+        ? merge
+        : comparisonHash([components.github.defaultDeliveryNormalizationVersion, merge]);
+    assert.equal(row.document.fieldChangeNormalizationVersion, fieldVersion);
+    assert.equal(row.policy_signature, comparisonHash([fieldVersion, inner]));
+    assert.ok(row.document.facts.some((fact) => fact.metricId === "issue_field_updates"));
+    const native = row.document.pullRequestMergeTargets[0];
+    assert.equal(native.status, "known");
+    assert.deepEqual(await components.contracts.verifyGithubPullRequestMergeTargetCapture(native), native);
+    assert.equal(
+      row.document.facts.find((fact) => fact.metricId === "pr_merged").mergeTarget.proofHash,
+      native.proofHash,
+    );
+  }
+
+  p.state.forbid = true;
+  const resumed = await runtime.runOnce({ cutoff });
+  assert.equal(resumed.state, "published");
+  assert.equal(state.calls, 5);
+  assert.equal(p.state.graphql, 5);
+  assert.deepEqual(await caches(h.db), frozen);
+  const selected = await readScope(runtime);
+  assert.equal(selected.selected.rows.length, 5);
+  assert.equal(
+    (await runtime.source.read(scope, selected.selected.snapshot.snapshotId, new AbortController().signal)).selected
+      .rows.length,
+    5,
+  );
+  const board = await runtime.app.inject(`/api/v1/boards?${query()}`);
+  assert.equal(board.statusCode, 200, board.body);
+  assert.equal(board.json().rows.length, 5);
+  assert.doesNotMatch(board.body, /fieldChangeNormalizationVersion|pullRequestMergeTargets|proofHash/);
+  const originalFactId = board.json().rows.find((row) => row.actorId === "101").evidenceIds[0];
+  const requestId = "11111111-1111-4111-8111-000000004593";
+  h.controlsStore.transaction((value) => {
+    value.requests[requestId] = {
+      id: requestId,
+      kind: "correction",
+      owner: "101",
+      locator: p.payloads[0].html_url,
+      status: "pending",
+      version: 1,
+      createdAt: Date.parse(p.state.clock),
+      updatedAt: Date.parse(p.state.clock),
+      history: [],
+    };
+  });
+  const decision = {
+    requestId,
+    expectedVersion: 1,
+    factId: originalFactId,
+    operatorId: "201",
+    approvalReceipt: "synthetic-correction-approval",
+  };
+  const receipt = await runtime.applyCorrection(decision);
+  assert.equal(receipt.status, "applied");
+  const correction = (
+    await h.db.query("SELECT * FROM leaderboard_pipeline.corrections WHERE request_id=$1", [requestId])
+  ).rows[0];
+  assert.equal(correction.document.fact.state, "excluded");
+  assert.equal(Object.hasOwn(correction.document.fact, "mergeTarget"), false);
+
+  p.state.forbid = false;
+  p.state.clock = iso(Date.parse(p.state.clock) + 5000);
+  const fresh = await runtime.runOnce({ cutoff: iso(Date.parse(cutoff) + 2000) });
+  assert.equal(fresh.state, "published");
+  assert.equal(state.calls, 10);
+  assert.equal(p.state.graphql, 10);
+  const generations = await caches(h.db);
+  assert.equal(generations.length, 10);
+  for (const old of frozen)
+    assert.deepEqual(
+      generations.find((row) => row.fact_key === old.fact_key && row.policy_signature === old.policy_signature),
+      old,
+    );
+  p.state.forbid = true;
+  const expectedActors = ["102", "103", "104", "105"];
+  const currentBoard = await runtime.app.inject(`/api/v1/boards?${query()}`);
+  assert.equal(currentBoard.statusCode, 200, currentBoard.body);
+  assert.ok(currentBoard.json().rows.every((row) => row.actorId !== "101"));
+  const head = h.controlsStore.read().pipelineHeads[components.contracts.publicScopeKey(scope)];
+  assert.ok(head);
+  const publication = fresh.publications.find((entry) => entry.snapshotId === head.snapshotId);
+  assert.ok(publication);
+  assert.equal(publication.comparisonInput.state, "retained");
+  const comparisons = runtime.policyComparisons.comparisons;
+  const record = comparisons.input(publication.comparisonInput.inputId);
+  assert.deepEqual(
+    record.input.facts.find((fact) => fact.id === originalFactId && fact.state === "excluded"),
+    correction.document.fact,
+  );
+  const result = await runtime.policyComparisons.withAuthorizedInputs(
+    [record.authorization],
+    async (removed, authority) =>
+      h.controlsStore.transaction((value) => {
+        const compared = comparisons.compare(
+          record,
+          { ...policy("pr_merged"), version: "synthetic-field-merge-comparison-v1" },
+          authority.restoreInput,
+        );
+        for (const aggregate of [compared.document.before, compared.document.after])
+          assert.deepEqual(aggregate.rows.map((row) => row.actorId).sort(), expectedActors);
+        const forged = structuredClone(record.input);
+        const positive = forged.facts.find((fact) => fact.actorId === "102" && fact.metricId === "pr_merged");
+        const previous = frozen
+          .flatMap((row) => row.document.facts)
+          .find((fact) => fact.actorId === "102" && fact.metricId === "pr_merged");
+        assert.ok(positive?.mergeTarget);
+        assert.ok(previous?.mergeTarget);
+        assert.notEqual(positive.mergeTarget.proofHash, previous.mergeTarget.proofHash);
+        positive.mergeTarget.proofHash = previous.mergeTarget.proofHash;
+        assert.throws(
+          () => authority.restoreInput(forged, record.authorization),
+          /merge_target_normalization_binding_unavailable/,
+        );
+        return comparisons.redact(compared, record, value, removed);
+      }),
+  );
+  assert.equal(result.status, "candidate_preview");
+  for (const aggregate of [result.before, result.after])
+    assert.deepEqual(aggregate.rows.map((row) => row.actorId).sort(), expectedActors);
+  assert.deepEqual(await runtime.applyCorrection(decision), receipt);
+  assert.deepEqual(
+    (await h.db.query("SELECT * FROM leaderboard_pipeline.corrections WHERE request_id=$1", [requestId])).rows[0],
+    correction,
+  );
+  assert.equal(state.calls, 10);
+  assert.equal(p.state.graphql, 10);
 });

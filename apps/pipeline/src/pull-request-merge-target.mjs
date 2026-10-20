@@ -20,7 +20,14 @@ export function mergeTargetGenerationSignature(baseSignature, generation, digest
   return digest([mergeTargetNormalizationVersion, baseSignature, generation]);
 }
 
-export function validateMergeTargetGeneration(document, signature, baseSignature, digest, deliverySignature) {
+export function validateMergeTargetGeneration(
+  document,
+  signature,
+  baseSignature,
+  digest,
+  deliverySignature,
+  fieldChange = null,
+) {
   const marker = document.pullRequestMergeTargetNormalization;
   if (
     !marker ||
@@ -29,8 +36,21 @@ export function validateMergeTargetGeneration(document, signature, baseSignature
     marker.baseSignature !== baseSignature
   )
     fail();
-  const expected = mergeTargetGenerationSignature(baseSignature, marker.generation, digest);
-  if (signature !== expected && signature !== deliverySignature(expected)) fail();
+  let expected = mergeTargetGenerationSignature(baseSignature, marker.generation, digest);
+  let expectedDelivery = deliverySignature(expected);
+  if (document.fieldChangeNormalizationVersion !== undefined) {
+    if (
+      !fieldChange ||
+      document.fieldChangeNormalizationVersion !== fieldChange.version ||
+      typeof fieldChange.signature !== "function"
+    )
+      fail();
+    // Field semantics wrap the complete merge-target/default-delivery generation.
+    // A marker requires that exact outer wrapper; arbitrary unwrapping is forbidden.
+    expected = fieldChange.signature(expected);
+    expectedDelivery = fieldChange.signature(expectedDelivery);
+  }
+  if (signature !== expected && signature !== expectedDelivery) fail();
   return marker;
 }
 
