@@ -647,6 +647,16 @@ export async function createPipeline(options) {
       row.document.discussionSourceNormalizationVersion === discussionSourceNormalizationVersion &&
       (row.document.discussionFeedbackSources === undefined ||
         row.document.discussionFeedbackNormalizationVersion === discussionFeedbackContentVersion));
+  const assertDiscussionNormalizer = () => {
+    // Compatibility belongs to the callbacks selected at construction, while
+    // their declaration must remain current through new publication admission.
+    if (
+      ((providedNormalizer !== undefined && providedNormalizer !== null) || providedEnrichment
+        ? options.discussionSourceNormalizationVersion
+        : c.github?.discussionSourceNormalizationVersion) !== discussionSourceNormalizationVersion
+    )
+      fail("discussion_normalizer_version_unverified");
+  };
   const defaultDeliveryEvidenceCurrent = (row) =>
     !hasDefaultDeliveryClaims(row.document) ||
     (digest(row.document) === row.document_hash &&
@@ -1714,13 +1724,7 @@ export async function createPipeline(options) {
           : c.github.reviewSourceNormalizationVersion) !== reviewSourceNormalizationVersion
       )
         fail("review_normalizer_version_unverified");
-      if (
-        row.family === "discussions" &&
-        (options.normalizer || options.githubEnrich
-          ? options.discussionSourceNormalizationVersion
-          : c.github.discussionSourceNormalizationVersion) !== discussionSourceNormalizationVersion
-      )
-        fail("discussion_normalizer_version_unverified");
+      if (row.family === "discussions") assertDiscussionNormalizer();
       const repository = config.repositories.find((repo) => String(repo.id) === String(row.repository_id));
       const discussionFeedback = row.document.discussionFeedback !== undefined;
       if (discussionFeedback) {
@@ -1753,6 +1757,7 @@ export async function createPipeline(options) {
           ],
         )
       ).rows;
+      if (row.family === "discussions") assertDiscussionNormalizer();
       if (discussionFeedback) assertDiscussionFeedbackNormalizer();
       let fieldChange =
         ["project_history", "issue_field_history"].includes(row.family) ||
@@ -1874,6 +1879,7 @@ export async function createPipeline(options) {
           retainPhysicalContext(cached.document, row, repository, c.contracts, dataMode);
           await db.transaction(async (tx) => {
             await lockIssueTransferSources(tx, config.repositories, "update");
+            if (row.family === "discussions") assertDiscussionNormalizer();
             const current = (
               await tx.query(
                 "SELECT document_hash FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=$2 FOR UPDATE",
@@ -1882,9 +1888,12 @@ export async function createPipeline(options) {
             ).rows[0];
             if (current?.document_hash !== cached.document_hash)
               fail("normalization_changed_before_dependency_capture");
+            if (row.family === "discussions") assertDiscussionNormalizer();
             await retainSourceArtifacts(tx, row.fact_key, cached.document);
             await retainIssueTransferIndex(tx, row, cached.policy_signature, cached.document);
+            if (row.family === "discussions") assertDiscussionNormalizer();
           });
+          if (row.family === "discussions") assertDiscussionNormalizer();
           if (fieldChange) assertFieldChangeNormalizer();
           if (discussionFeedback) assertDiscussionFeedbackNormalizer();
           outputs.push({
@@ -1905,6 +1914,7 @@ export async function createPipeline(options) {
       let output;
       try {
         assertRunConfiguration();
+        if (row.family === "discussions") assertDiscussionNormalizer();
         output = await normalizer({
           repository: copy(repository),
           family: row.family,
@@ -1916,6 +1926,7 @@ export async function createPipeline(options) {
           policyVersion: config.version,
         });
         assertRunConfiguration();
+        if (row.family === "discussions") assertDiscussionNormalizer();
         if (discussionFeedback) assertDiscussionFeedbackNormalizer();
         monitorSuccess(monitorSource(repository.id), "normalization", normalizationStarted);
       } catch (error) {
@@ -2020,6 +2031,7 @@ export async function createPipeline(options) {
           // source gate through their final current-privacy projection.
           await lockIssueTransferSources(tx, config.repositories, "update");
           assertRunConfiguration();
+          if (row.family === "discussions") assertDiscussionNormalizer();
           await tx.query(
             "INSERT INTO leaderboard_ingestion.object_suppressions(repository_id,subject_id,reason) VALUES($1,$2,'unavailable') ON CONFLICT DO NOTHING",
             [repository.id, artifactId],
@@ -2089,6 +2101,7 @@ export async function createPipeline(options) {
       };
       await db.transaction(async (tx) => {
         await lockIssueTransferSources(tx, config.repositories, "update");
+        if (row.family === "discussions") assertDiscussionNormalizer();
         if (fieldChange) assertFieldChangeNormalizer();
         if (discussionFeedback) assertDiscussionFeedbackNormalizer();
         await tx.query(
@@ -2105,9 +2118,12 @@ export async function createPipeline(options) {
           )
         ).rows[0];
         if (current?.document_hash !== digest(document)) fail("normalization_changed_before_dependency_capture");
+        if (row.family === "discussions") assertDiscussionNormalizer();
         await retainSourceArtifacts(tx, row.fact_key, document);
         await retainIssueTransferIndex(tx, row, signature, document);
+        if (row.family === "discussions") assertDiscussionNormalizer();
       });
+      if (row.family === "discussions") assertDiscussionNormalizer();
       if (fieldChange) assertFieldChangeNormalizer();
       if (discussionFeedback) assertDiscussionFeedbackNormalizer();
       outputs.push({
@@ -2169,6 +2185,16 @@ export async function createPipeline(options) {
     /^[a-f0-9]{64}$/.test(confirmation.aggregateExplanationHash);
   function confirmPublication(scope, publication, comparisonInput, publicPeriods = []) {
     controlsStore.transaction((state) => {
+      if (
+        publication.discussionSourceNormalizationVersion !== undefined &&
+        !confirmationMatches(
+          state.pipelinePublications?.[publication.snapshotId],
+          scope,
+          publication.snapshotId,
+          publication.revision,
+        )
+      )
+        assertDiscussionNormalizer();
       if (feedbackAuthority.enabled) feedbackAuthority.assert(runFeedbackAuthority);
       if (feedbackInScope(scope)) assertDiscussionFeedbackNormalizer();
       const overlay = restrictConfiguration(state);
@@ -2405,13 +2431,18 @@ export async function createPipeline(options) {
     );
     const hasReviewSources = normalized.some((entry) => entry.family === "reviews");
     const hasDiscussionSources = normalized.some((entry) => entry.family === "discussions");
+    const ready = () => {
+      assertRunConfiguration();
+      if (hasDiscussionSources) assertDiscussionNormalizer();
+    };
+    ready();
     const feedbackCapture = await db.transaction((tx) =>
       feedbackStore.capture(
         tx,
         repos.map((repo) => repo.id),
       ),
     );
-    assertRunConfiguration();
+    ready();
     const hasDefaultDeliverySources = normalized.some(
       (entry) => entry.document.defaultDeliveryNormalizationVersion === defaultDeliveryNormalizationVersion,
     );
@@ -2929,6 +2960,7 @@ export async function createPipeline(options) {
     try {
       const publication = await db.transaction(async (tx) => {
         await lockIssueTransferSources(tx, config.repositories);
+        ready();
         await feedbackStore.assertCapture(
           tx,
           repos.map((repo) => repo.id),
@@ -2952,8 +2984,8 @@ export async function createPipeline(options) {
             ).rows[0];
             if (saved?.snapshot_id !== publication.snapshotId) fail("dispatch_publication_conflict");
             await outbox.assertLease(tx, dispatch.lease);
-            assertRunConfiguration();
           }
+          ready();
           return publication;
         };
         await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`pipeline:${scopeKey(scope)}`]);
@@ -3014,7 +3046,7 @@ export async function createPipeline(options) {
             [scopeKey(scope)],
           )
         ).rows[0];
-        assertRunConfiguration();
+        ready();
         if (scan) scanContinuations.assertHead(scanHeads, scopeKey(scope), current?.snapshot_id ?? null);
         if (priorPublication) {
           const saved = (
@@ -3123,7 +3155,7 @@ export async function createPipeline(options) {
           comparisonInputHash: digest(comparisonInputFor({ snapshotId, revision })),
           controlsRevision: state.revision,
         });
-        assertRunConfiguration();
+        ready();
         return bindPublication({ snapshotId, revision, changed: true, receiptId });
       });
       // PostgreSQL can commit while controls change. Confirm publication only in
@@ -3133,7 +3165,10 @@ export async function createPipeline(options) {
         publication.fieldChangeNormalizationVersion = fieldChangeNormalizationVersion;
       }
       if (hasReviewSources) publication.reviewSourceNormalizationVersion = reviewSourceNormalizationVersion;
-      if (hasDiscussionSources) publication.discussionSourceNormalizationVersion = discussionSourceNormalizationVersion;
+      if (hasDiscussionSources) {
+        assertDiscussionNormalizer();
+        publication.discussionSourceNormalizationVersion = discussionSourceNormalizationVersion;
+      }
       if (feedbackCapture.length) publication.discussionFeedbackNormalizationVersion = discussionFeedbackContentVersion;
       if (hasDefaultDeliverySources)
         publication.defaultDeliveryNormalizationVersion = defaultDeliveryNormalizationVersion;
