@@ -4,6 +4,7 @@ import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { request, ReadFailure, uiHref, type Selection } from "./client.ts";
 import { EditorialRotation } from "./OverviewDiscovery.tsx";
 import { EditorialDimensions } from "./EditorialDimensions.tsx";
+import { WorkstreamHelp } from "./WorkstreamHelp.tsx";
 import {
   achievements,
   cardHref,
@@ -254,6 +255,7 @@ export function ContributorRecognition({
         ))}
       </ul>
       <AchievementResults key={key} base={base} selected={selected} snapshotId={snapshotId} actorId={actorId} />
+      <WorkstreamHelp key={"help:" + key} base={base} selected={selected} snapshotId={snapshotId} actorId={actorId} />
     </section>
   );
 }

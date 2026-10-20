@@ -1,3 +1,10 @@
+import {
+  validateWorkstreamHelpBindings,
+  qualifyWorkstreamHelp,
+  verifyWorkstreamHelpConsistency,
+  bindWorkstreamHelp,
+  materializedWorkstreamHelp,
+} from "./workstream-help.mjs";
 import { createHash } from "node:crypto";
 import {
   compareSourceInstants,
@@ -5,6 +12,7 @@ import {
   maintenanceClassificationVersion,
   documentationPurposeVersion,
   acceptedFeedbackThreadsVersion,
+  workstreamHelpVersion,
 } from "@pick-your-ai/contracts";
 import {
   validateAutomationSource,
@@ -36,6 +44,7 @@ import {
 
 // Private controls only. Never accept a public claim projection as authentication.
 export function recognitionFingerprint(state, bindings = []) {
+  const helpBindings = validateWorkstreamHelpBindings(bindings);
   // An unsupported opt-in cannot keep an old saved hash current without rematerialization.
   for (const binding of bindings) {
     validateMaintenanceClassificationBinding(binding);
@@ -61,6 +70,7 @@ export function recognitionFingerprint(state, bindings = []) {
   // Version the target/clock authority and include exact current bindings. An old
   // unbound locale publication cannot remain authorized after this correction.
   const authority = ["localization-review-target/v1", requests, suppressed, audit, bindings];
+  if (helpBindings.size) authority.push(workstreamHelpVersion);
   // Retire old authority for participant-bearing or malformed consent records.
   // An explicit empty collaborator set keeps its unchanged prior semantics.
   if (requests.some((request) => !hasRequiredParticipantConsent(request) || Object.keys(request.collaborators).length))
@@ -140,13 +150,15 @@ export function materializeRecognition(
   cutoff,
   publicReasons = () => [],
 ) {
-  if (bindings.some((binding) => ["issue_ordering", "helpful_feedback"].includes(binding.metricId))) {
+  let helpBindings = validateWorkstreamHelpBindings(bindings);
+  if (helpBindings.size || bindings.some((binding) => ["issue_ordering", "helpful_feedback"].includes(binding.metricId))) {
     // Freeze the invocation before any host receipt callback can change a later
     // source, claim, scope enrollment or policy used by this same evaluation.
     input = structuredClone(input);
     state = structuredClone(state);
     bindings = structuredClone(bindings);
     policies = structuredClone(policies);
+    if (helpBindings.size) helpBindings = validateWorkstreamHelpBindings(bindings);
   }
   for (const binding of bindings) validateDocumentationPurposeBinding(binding);
   for (const binding of bindings) validateHelpfulFeedbackBinding(binding);
@@ -157,6 +169,8 @@ export function materializeRecognition(
     applyReceipt(current, structuredClone(receipt), structuredClone(reviewers));
   const recognitionReasons = (contribution) => structuredClone(publicReasons(structuredClone(contribution)));
   let output = structuredClone(input);
+  const workstreamHelpJobs = [];
+  const workstreamHelpUnits = new Map();
   const domainUnits = new Set();
   const projectChangesets = new Map();
   const projectArtifacts = new Map();
@@ -455,6 +469,12 @@ export function materializeRecognition(
       domain,
     });
     if (documentationPurpose) domain.publicReasonCodes.push("documentation_purpose:release_notes");
+    const workstreamHelp = qualifyWorkstreamHelp({
+      input, state, request, decision, binding, candidate: candidates[0], acceptedAt, cutoff,
+      configured: helpBindings.get(binding),
+    });
+    verifyWorkstreamHelpConsistency(workstreamHelp, workstreamHelpUnits);
+    if (workstreamHelp) workstreamHelpJobs.push({ help: workstreamHelp, metricId: binding.metricId });
     if (domain?.reviewedArtifact) {
       const { url, hash } = domain.reviewedArtifact;
       const previous = reviewedOperationArtifacts.get(url);
@@ -534,6 +554,10 @@ export function materializeRecognition(
         domainReasons.set(evidence.contribution.contributionId, domain.publicReasonCodes);
       }
     }
+    if (workstreamHelp && workstreamHelp.sourceAcceptance.decisionId === decision.id)
+      bindWorkstreamHelp(
+        workstreamHelp, output.facts.slice(previousFacts), output.evidence.slice(previousEvidence),
+      );
   }
   for (const { feedback, decision, binding, request, target, acceptedAt } of feedbackJobs) {
     output = invokeReceipt(
@@ -581,5 +605,13 @@ export function materializeRecognition(
       ...(domainReasons.get(entry.contribution.contributionId) ?? ["independent_recognition_receipt"]),
       ...recognitionReasons(entry.contribution),
     ];
+  if (helpBindings.size) {
+    const help = materializedWorkstreamHelp(
+      workstreamHelpJobs, output.facts.slice(input.facts.length), output.evidence.slice(input.evidence.length),
+    );
+    output.reviewedWorkstreamHelp = help.records;
+    // Private, invocation-local dependencies; the runtime never publishes these identifiers.
+    output.workstreamHelpSourceDecisions = help.sourceDecisions;
+  }
   return output;
 }
