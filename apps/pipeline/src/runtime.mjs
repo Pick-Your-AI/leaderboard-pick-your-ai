@@ -501,6 +501,10 @@ export async function createPipeline(options) {
   // Wrap the complete source generation; unrelated families keep their keys.
   const typedHistorySignature = (signature) => digest(["typed-history-actor-classification/v1", signature]);
   const typedHistoryNormalizationSignature = typedHistorySignature(normalizationSignature);
+  const projectCurationNormalizationSignature = digest([
+    "project-curation-history/v1",
+    typedHistoryNormalizationSignature,
+  ]);
   // Retain both actual preceding typed-history formats: the original Project
   // wrapper and the complete release/purpose wrapper before transfer admission.
   const previousTypedHistoryNormalizationSignatures = [
@@ -547,6 +551,8 @@ export async function createPipeline(options) {
       ),
     );
   const frozenNormalizationSignatures = [
+    defaultDeliverySignature(projectCurationNormalizationSignature),
+    projectCurationNormalizationSignature,
     defaultDeliverySignature(typedHistoryNormalizationSignature),
     typedHistoryNormalizationSignature,
     ...previousTypedHistoryNormalizationSignatures.flatMap((signature) => [
@@ -599,6 +605,7 @@ export async function createPipeline(options) {
     ...[
       normalizationSignature,
       typedHistoryNormalizationSignature,
+      projectCurationNormalizationSignature,
       reviewNormalizationSignature,
       discussionNormalizationSignature,
     ].flatMap((signature) => [
@@ -647,9 +654,11 @@ export async function createPipeline(options) {
         ? reviewNormalizationSignature
         : family === "discussions"
           ? discussionNormalizationSignature
-          : ["relationships", "project_history", "issue_field_history"].includes(family)
-            ? typedHistoryNormalizationSignature
-            : normalizationSignature;
+          : family === "project_curation_history"
+            ? projectCurationNormalizationSignature
+            : ["relationships", "project_history", "issue_field_history"].includes(family)
+              ? typedHistoryNormalizationSignature
+              : normalizationSignature;
     const marker = document?.pullRequestMergeTargetNormalization;
     if (marker !== undefined) {
       if (
@@ -2201,15 +2210,22 @@ export async function createPipeline(options) {
         if (!mergeTargetPass) fail("merge_target_normalizer_version_unverified");
         assertMergeTargetNormalizer();
       }
-      const typedHistory = ["relationships", "project_history", "issue_field_history"].includes(row.family);
+      const typedHistory = [
+        "relationships",
+        "project_history",
+        "issue_field_history",
+        "project_curation_history",
+      ].includes(row.family);
       const sourceFamilySignature =
         row.family === "reviews"
           ? reviewNormalizationSignature
           : row.family === "discussions"
             ? discussionNormalizationSignature
-            : typedHistory
-              ? typedHistoryNormalizationSignature
-              : normalizationSignature;
+            : row.family === "project_curation_history"
+              ? projectCurationNormalizationSignature
+              : typedHistory
+                ? typedHistoryNormalizationSignature
+                : normalizationSignature;
       const familySignature = mergeTargetSource
         ? mergeTargetGenerationSignature(normalizationSignature, mergeTargetPass.generation, digest)
         : sourceFamilySignature;
@@ -2381,6 +2397,9 @@ export async function createPipeline(options) {
           // Native field visibility can change without changing an event or its
           // revision. Revalidate every retained transition before publication.
           row.family !== "issue_field_history" &&
+          // Curation visibility and native-event availability are live admission,
+          // even when a prior immutable document has the same source revision.
+          row.family !== "project_curation_history" &&
           cached.policy_signature === signature &&
           (!defaultDelivery ||
             cached.document.defaultDeliveryNormalizationVersion === defaultDeliveryNormalizationVersion) &&
@@ -2657,6 +2676,9 @@ export async function createPipeline(options) {
         ...(row.family === "reviews" ? { reviewSourceNormalizationVersion } : {}),
         ...(row.family === "discussions" ? { discussionSourceNormalizationVersion } : {}),
         ...(row.family === "project_history" ? { projectHistoryNormalizationVersion: "collected-subject/v2" } : {}),
+        ...(row.family === "project_curation_history"
+          ? { projectCurationNormalizationVersion: "project-curation-history/v1" }
+          : {}),
         ...(row.family === "project_current" && row.document.projectSubjectId !== undefined
           ? { projectContextNormalizationVersion: "subject-membership/v2" }
           : {}),
