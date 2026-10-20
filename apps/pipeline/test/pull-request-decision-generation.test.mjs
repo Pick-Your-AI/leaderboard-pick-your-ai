@@ -622,9 +622,8 @@ test(
     assert.equal(p.state.lists, 2);
     assert.equal(p.state.graphql, 0, "native history begins only after complete REST inventory");
     assert.equal(p.state.normalized, 0);
-    const runs = (
-      await h.db.query("SELECT state,item_count,expected_count FROM leaderboard_ingestion.collection_runs")
-    ).rows;
+    const runs = (await h.db.query("SELECT state,item_count,expected_count FROM leaderboard_ingestion.collection_runs"))
+      .rows;
     assert.equal(runs.length, 1);
     assert.equal(runs[0].state, "failed");
     assert.equal(runs[0].item_count, 0);
