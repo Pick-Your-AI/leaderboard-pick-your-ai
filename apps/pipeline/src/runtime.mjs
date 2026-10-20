@@ -71,6 +71,15 @@ import {
 } from "./content-edit-inventory.mjs";
 import { normalizationDocumentVersion, privateAttribution } from "./private-attribution.mjs";
 import { retainPhysicalContext } from "./physical-context.mjs";
+import {
+  mergeTargetNormalizationVersion,
+  mergeTargetGenerationSignature,
+  validateMergeTargetGeneration,
+  readMergeTargetNormalization,
+  assertMergeTargetFacts,
+  captureMergeTargetAuthorization,
+  mergeTargetAuthorization,
+} from "./pull-request-merge-target.mjs";
 import { capturePhysicalSources, selectPhysicalContexts } from "./physical-selection.mjs";
 import {
   defaultDeliveryNormalizationVersion,
@@ -349,6 +358,23 @@ export async function createPipeline(options) {
   const feedbackStore = new DiscussionFeedbackStore(db, feedbackAuthority, () => {
     restrictConfiguration(controlsStore.read());
   });
+  // Discovery only: validate scopes at the approved run/read boundary below.
+  // Invalid scope configuration must not change the existing construction lifecycle.
+  const mergeTargetRepositoryIds = [
+    ...new Set(
+      config.repositories
+        .filter(
+          (repo) =>
+            Array.isArray(config.scopes) &&
+            config.scopes.some((scope) => scope?.branch !== undefined && scope.repository === String(repo.id)),
+        )
+        .map((repo) => repo.id),
+    ),
+  ].sort((a, b) => a - b);
+  const policiesForScope = (scope) =>
+    scope.branch === undefined
+      ? config.policies
+      : config.policies.filter((item) => c.contracts.supportsPullRequestMergeTarget(item.policy.metricId));
   const reconciliationPolicy = validateReconciliationPolicy(config.reconciliation);
   const projectWorkstreamMappings = canonicalProjectWorkstreamMappings(
     config,
@@ -541,8 +567,33 @@ export async function createPipeline(options) {
   const identityNormalizationSignatures = [
     ...new Set([...frozenNormalizationSignatures, ...relationshipPairNormalizationSignatures]),
   ];
-  const currentPairGenerationsFor = (family) => {
-    const base =
+  const mergeTargetBaseSignatures = [...new Set([normalizationSignature, ...previousNormalizationSignatures])];
+  const mergeTargetWrappers = () => [
+    { version: fieldChangeNormalizationVersion, signature: fieldChangeSignature },
+    { version: relationshipPairNormalizationVersion, signature: relationshipPairSignature },
+  ];
+  async function validateMergeTargetRow(row, cutoff = null, current = true) {
+    const marker = row.document.pullRequestMergeTargetNormalization;
+    const repository = config.repositories.find((entry) => entry.id === Number(row.repository_id));
+    if (
+      row.family !== "pull_requests" ||
+      !repository ||
+      !mergeTargetRepositoryIds.includes(repository.id) ||
+      !(current ? [normalizationSignature] : mergeTargetBaseSignatures).includes(marker?.baseSignature)
+    )
+      fail("merge_target_source_scope_mismatch");
+    validateMergeTargetGeneration(
+      row.document,
+      row.policy_signature,
+      marker.baseSignature,
+      digest,
+      defaultDeliverySignature,
+      ...mergeTargetWrappers(),
+    );
+    await readMergeTargetNormalization(row.document, row, repository, cutoff);
+  }
+  const currentPairGenerationsFor = (family, document = null) => {
+    let base =
       family === "reviews"
         ? reviewNormalizationSignature
         : family === "discussions"
@@ -550,18 +601,36 @@ export async function createPipeline(options) {
           : ["relationships", "project_history", "issue_field_history"].includes(family)
             ? typedHistoryNormalizationSignature
             : normalizationSignature;
+    const marker = document?.pullRequestMergeTargetNormalization;
+    if (marker !== undefined) {
+      if (
+        family !== "pull_requests" ||
+        marker?.schemaVersion !== mergeTargetNormalizationVersion ||
+        marker.baseSignature !== normalizationSignature
+      )
+        return [];
+      base = mergeTargetGenerationSignature(base, marker.generation, digest);
+    }
     return normalizationGenerations(base)
       .filter((generation) => generation.relationshipPair)
       .map((generation) => generation.signature);
   };
   const currentPairSignatures = [
-    ...new Set(["reviews", "discussions", "relationships", "issues"].flatMap(currentPairGenerationsFor)),
+    ...new Set(
+      ["reviews", "discussions", "relationships", "issues"].flatMap((family) => currentPairGenerationsFor(family)),
+    ),
   ];
   const pairAuthorityOptions = {
     repositories: config.repositories,
     dataMode,
     generationsFor: currentPairGenerationsFor,
     signatures: currentPairSignatures,
+    mergeTarget: {
+      repositoryIds: mergeTargetRepositoryIds,
+      version: mergeTargetNormalizationVersion,
+      baseSignature: normalizationSignature,
+      validate: validateMergeTargetRow,
+    },
   };
   async function readSourceAuthority(tx, request) {
     const transfer = await readIssueTransferAuthority(tx, request);
@@ -672,9 +741,12 @@ export async function createPipeline(options) {
     );
     const rows = (
       await tx.query(
-        `SELECT n.document,n.document_hash,n.policy_signature,f.fact_key,f.observed_at,f.first_run_id,f.family FROM leaderboard_pipeline.normalizations AS n
+        `SELECT n.document,n.document_hash,n.policy_signature,f.fact_key,f.observed_at,f.first_run_id,f.family,
+          f.repository_id,f.document AS source_document FROM leaderboard_pipeline.normalizations AS n
        JOIN leaderboard_ingestion.source_facts AS f ON f.fact_key=n.fact_key
-       WHERE n.document_hash=ANY($1::text[]) AND n.policy_signature=ANY($2::text[])
+       WHERE n.document_hash=ANY($1::text[]) AND (n.policy_signature=ANY($2::text[])
+         OR (n.document->'pullRequestMergeTargetNormalization'->>'schemaVersion'=$6
+           AND n.document->'pullRequestMergeTargetNormalization'->>'baseSignature'=$7))
          AND f.repository_id=ANY($3::bigint[])
          AND ($4::jsonb IS NULL OR EXISTS (
            SELECT 1 FROM jsonb_to_recordset($4::jsonb) AS bound(fact_key text,document_hash text)
@@ -695,6 +767,8 @@ export async function createPipeline(options) {
                 })),
               ),
           10000 * identityNormalizationSignatures.length + 1,
+          mergeTargetNormalizationVersion,
+          normalizationSignature,
         ],
       )
     ).rows;
@@ -747,6 +821,19 @@ export async function createPipeline(options) {
       409,
       "Frozen relationship pair projection unavailable",
     );
+    const mergeAuthorization = captureMergeTargetAuthorization(authorization).mergeTargetEvidence;
+    for (const row of retained) {
+      if (row.document.pullRequestMergeTargetNormalization === undefined) {
+        if (
+          mergeAuthorization &&
+          row.family === "pull_requests" &&
+          String(row.repository_id) === mergeAuthorization.repositoryId
+        )
+          fail("merge_target_frozen_normalization_unavailable");
+        continue;
+      }
+      await validateMergeTargetRow(row, mergeAuthorization?.cutoff ?? null);
+    }
     return retained;
   }
   const reviewEvidenceCurrent = (row) =>
@@ -786,13 +873,17 @@ export async function createPipeline(options) {
   const relationshipPairComponentsCurrent = () =>
     c.contracts?.relationshipPairNormalizationVersion === relationshipPairNormalizationVersion &&
     c.metrics?.relationshipPairNormalizationVersion === relationshipPairNormalizationVersion;
+  const relationshipPairGenerationCurrent = (row) =>
+    relationshipPairNormalizationSignatures.has(row.policy_signature) ||
+    (row.document.pullRequestMergeTargetNormalization !== undefined &&
+      currentPairGenerationsFor(row.family, row.document).includes(row.policy_signature));
   const relationshipPairEvidenceCurrent = (row) =>
     (!hasRelationshipPairClaims(row.document) &&
       !hasRelationshipPairMarker(row.document) &&
-      !relationshipPairNormalizationSignatures.has(row.policy_signature)) ||
+      !relationshipPairGenerationCurrent(row)) ||
     (relationshipPairComponentsCurrent() &&
       digest(row.document) === row.document_hash &&
-      relationshipPairNormalizationSignatures.has(row.policy_signature) &&
+      relationshipPairGenerationCurrent(row) &&
       row.document.relationshipPairNormalizationVersion === relationshipPairNormalizationVersion);
   const assertRelationshipPairNormalizer = () => {
     if (!relationshipPairComponentsCurrent()) fail("relationship_pair_engine_version_unverified");
@@ -802,6 +893,17 @@ export async function createPipeline(options) {
         : options.relationshipPairNormalizationVersion) !== relationshipPairNormalizationVersion
     )
       fail("relationship_pair_normalizer_version_unverified");
+  };
+  const assertMergeTargetNormalizer = () => {
+    // Compatibility follows the callback actually selected at construction.
+    // Its declaration remains live across awaits and the visibility commit.
+    if (
+      mergeTargetRepositoryIds.length &&
+      (providedNormalizer === undefined || providedNormalizer === null
+        ? c.github?.pullRequestMergeTargetNormalizationVersion
+        : options.pullRequestMergeTargetNormalizationVersion) !== mergeTargetNormalizationVersion
+    )
+      fail("merge_target_normalizer_version_unverified");
   };
   const fieldChangeEvidenceCurrent = (row) =>
     !hasFieldChangeClaims(row.document) ||
@@ -856,6 +958,12 @@ export async function createPipeline(options) {
     if (maxFrozenBytes !== null && (!Number.isSafeInteger(maxFrozenBytes) || maxFrozenBytes < 0))
       fail("invalid_publication_proof_budget");
     const authorization = explanation.authorization;
+    const needsMergeTarget = scope.branch !== undefined;
+    if (
+      canonical(captureMergeTargetAuthorization(authorization)) !==
+      canonical(mergeTargetAuthorization(scope, explanation.cutoff))
+    )
+      fail("public_merge_target_authority_mismatch");
     const selectedIds = repositoriesFor(scope).map((repo) => String(repo.id));
     await feedbackStore.assertCapture(tx, selectedIds.map(Number), authorization.discussionFeedbackEvidence);
     await feedbackStore.originals(
@@ -911,6 +1019,7 @@ export async function createPipeline(options) {
     )
       fail(`public_${kind}_source_scope_mismatch`);
     if (
+      !needsMergeTarget &&
       !needsReview &&
       !needsDiscussion &&
       !defaultDelivery &&
@@ -924,6 +1033,7 @@ export async function createPipeline(options) {
     // binds the snapshot below. Newly discovered proof or dependencies retain
     // the full evidence path, as do all review/Discussion/delivery inputs.
     const ordinaryEmptyTransfer =
+      !needsMergeTarget &&
       !needsReview &&
       !needsDiscussion &&
       !defaultDelivery &&
@@ -947,7 +1057,7 @@ export async function createPipeline(options) {
         (row) =>
           hasRelationshipPairClaims(row.document) ||
           hasRelationshipPairMarker(row.document) ||
-          relationshipPairNormalizationSignatures.has(row.policy_signature),
+          relationshipPairGenerationCurrent(row),
       ) ||
         !rows.every(relationshipPairEvidenceCurrent))
     )
@@ -960,6 +1070,7 @@ export async function createPipeline(options) {
     const review = rows.some((row) => row.family === "reviews");
     const discussion = rows.some((row) => row.family === "discussions");
     if (
+      !needsMergeTarget &&
       !review &&
       !discussion &&
       !defaultDelivery &&
@@ -1003,6 +1114,9 @@ export async function createPipeline(options) {
         canonical(authorization.discussionFeedbackEvidence) ||
       canonical(retained.document.identityAuthorization?.relationshipPairEvidence) !==
         canonical(authorization.relationshipPairEvidence) ||
+      canonical(captureMergeTargetAuthorization(retained.document.identityAuthorization ?? {})) !==
+        canonical(mergeTargetAuthorization(scope, explanation.cutoff)) ||
+      (needsMergeTarget && retained.document.engineScope?.branch !== scope.branch) ||
       (authorization.issueTransferEvidence !== undefined &&
         (canonical([...retained.document.frozen.repositoryIds].sort()) !==
           canonical(authorization.sources.map((source) => source.repositoryId).sort()) ||
@@ -1104,6 +1218,7 @@ export async function createPipeline(options) {
         "Frozen input source authorization changed",
       );
       const restoredActors = new Map();
+      const restoredMergeTargets = new Map();
       for (const authorization of authorizations) {
         const binding = authorization.identityEvidence;
         const rows = await readNormalizationEvidence(tx, authorization);
@@ -1138,6 +1253,11 @@ export async function createPipeline(options) {
           "Frozen relationship pair source binding unavailable",
         );
         requireThat(rows.every(fieldChangeEvidenceCurrent), 409, "Frozen field change normalization obsolete");
+        if (authorization.mergeTargetEvidence !== undefined)
+          restoredMergeTargets.set(
+            digest(authorization),
+            rows.flatMap((row) => row.document.pullRequestMergeTargets ?? []),
+          );
         const normalizationSources = binding.normalizationSources;
         // Hash-only legacy captures did not bind source ordering. They retain
         // their identical-label rule rather than gaining unproven rename history.
@@ -1204,6 +1324,11 @@ export async function createPipeline(options) {
           refreshApproval: () => approved(tx),
           restoreInput(input, authorization) {
             if (authorization.identityEvidence === undefined) return input;
+            if (authorization.mergeTargetEvidence !== undefined) {
+              const captures = restoredMergeTargets.get(digest(authorization));
+              requireThat(captures, 409, "Frozen merge-target authority unavailable");
+              assertMergeTargetFacts(input.facts, captures, { complete: false });
+            }
             const actors = restoredActors.get(digest(authorization));
             requireThat(actors, 409, "Frozen identity evidence unavailable");
             return {
@@ -1392,13 +1517,17 @@ export async function createPipeline(options) {
   let runRecognitionFingerprint = null;
   let runConfigurationRevision = null;
   let runFeedbackAuthority = null;
-  const assertRunConfiguration = () => {
+  const assertConfigurationCurrent = () => {
     const state = controlsStore.read();
     const overlay = restrictConfiguration(state);
     if (recognitionBindings.length && recognitionFingerprint(state, recognitionBindings) !== runRecognitionFingerprint)
       fail("recognition_changed_during_run");
     if (overlay.revision !== runConfigurationRevision) fail("active_configuration_changed");
     if (feedbackAuthority.enabled) feedbackAuthority.assert(runFeedbackAuthority);
+  };
+  const assertRunConfiguration = () => {
+    assertConfigurationCurrent();
+    assertMergeTargetNormalizer();
   };
   const scanContext = (mode, sources, revision, fingerprint) => ({
     key: digest(["bounded-scan/v1", config, dataMode, mode]),
@@ -1497,6 +1626,7 @@ export async function createPipeline(options) {
           documentationPolicies: config.documentationPolicies ?? [],
           researchPolicies: config.researchPolicies ?? [],
           releaseInclusionTargets: config.releaseInclusionTargets ?? [],
+          ...(mergeTargetRepositoryIds.length ? { pullRequestMergeTargetRepositoryIds: mergeTargetRepositoryIds } : {}),
           now: () => utc(now()),
           projectWorkstreamMappings,
           ...(providedEnrichment ? { enrich: providedEnrichment } : {}),
@@ -1613,6 +1743,12 @@ export async function createPipeline(options) {
         fail("invalid_public_scope");
       if (scope.repository !== null && !config.repositories.some((repo) => String(repo.id) === scope.repository))
         fail("unapproved_scope_repository");
+      if (
+        scope.branch !== undefined &&
+        (!policiesForScope(scope).length ||
+          !config.repositories.find((repo) => String(repo.id) === scope.repository)?.families.includes("pull_requests"))
+      )
+        fail("merge_target_scope_requires_merged_metric_and_pull_requests");
       if (scope.workstream !== null) required(scope.workstream, "invalid_workstream_scope");
       if ((scope.start === null) !== (scope.end === null)) fail("incomplete_public_window");
       if (scope.start !== null && utc(scope.start) >= utc(scope.end)) fail("invalid_public_window");
@@ -1746,6 +1882,15 @@ export async function createPipeline(options) {
   async function verifyRepository(repo) {
     assertRunConfiguration();
     if (!collectionSource?.readPage || !normalizer || !probeSource) fail("source_provider_unconfigured");
+    const beforeProbe = (
+      await db.query("SELECT state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=$1", [
+        repo.id,
+      ])
+    ).rows[0];
+    // A lifecycle change during this probe must not authorize its older public result.
+    const expectedGeneration = beforeProbe ? String(beforeProbe.generation) : null;
+    const wasPublic = beforeProbe?.state === "public";
+    assertRunConfiguration();
     let checkedAt = utc(now());
     let probe;
     try {
@@ -1778,20 +1923,15 @@ export async function createPipeline(options) {
       await denyRepository(repo, "visibility_or_scope_not_public", checkedAt);
       fail("public_source_not_verified");
     }
-    const current = (
-      await db.query("SELECT state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=$1", [
-        repo.id,
-      ])
-    ).rows[0];
-    if (current?.state === "public") {
+    if (wasPublic) {
       const saved = await db.query(
         "UPDATE leaderboard_ingestion.repository_access SET checked_at=clock_timestamp() WHERE repository_id=$1 AND generation=$2 AND state='public' RETURNING repository_id",
-        [repo.id, current.generation],
+        [repo.id, expectedGeneration],
       );
       if (!saved.rows.length) fail("repository_access_changed");
       return;
     }
-    if (!(await collection.verifyPublic(repo.id, repo.installationId, current ? String(current.generation) : null)))
+    if (!(await collection.verifyPublic(repo.id, repo.installationId, expectedGeneration)))
       fail("repository_revoked_or_changed");
   }
   const hasDispatchEvidence = (document, dispatch, row) =>
@@ -1806,7 +1946,7 @@ export async function createPipeline(options) {
             entry.artifact.publicUrl === dispatch.lease.observation.sourceUrl,
         ),
     );
-  async function normalizeStored(repositoryIds, cutoff, dispatch, releasePass = null) {
+  async function normalizeStored(repositoryIds, cutoff, dispatch, releasePass = null, mergeTargetPass = null) {
     // A first-review sequence depends on the whole cohort, not just the review's
     // mutable fields. Only a source observation bound to the latest completed
     // review scan may supply that sequence to this publication. Retained caches
@@ -1909,10 +2049,18 @@ export async function createPipeline(options) {
     // Trusted native readers may share one fresh issue-membership scan within
     // this invocation. The opaque token never survives into another batch.
     const issueFieldHistoryBatch = Object.freeze({});
+    let mergeTargetHistoryCount = 0;
     const outputs = [];
     for (const row of sourceRows) {
+      const mergeTargetSource =
+        row.family === "pull_requests" && mergeTargetRepositoryIds.includes(Number(row.repository_id));
+      if (mergeTargetPass?.only && !mergeTargetSource) continue;
+      if (mergeTargetSource) {
+        if (!mergeTargetPass) fail("merge_target_normalizer_version_unverified");
+        assertMergeTargetNormalizer();
+      }
       const typedHistory = ["relationships", "project_history", "issue_field_history"].includes(row.family);
-      const familySignature =
+      const sourceFamilySignature =
         row.family === "reviews"
           ? reviewNormalizationSignature
           : row.family === "discussions"
@@ -1920,9 +2068,13 @@ export async function createPipeline(options) {
             : typedHistory
               ? typedHistoryNormalizationSignature
               : normalizationSignature;
+      const familySignature = mergeTargetSource
+        ? mergeTargetGenerationSignature(normalizationSignature, mergeTargetPass.generation, digest)
+        : sourceFamilySignature;
       const currentGenerations = normalizationGenerations(familySignature);
       const previousBaseSignatures = [
         ...new Set([
+          ...(mergeTargetSource ? [sourceFamilySignature] : []),
           ...(typedHistory ? [normalizationSignature, ...previousTypedHistoryNormalizationSignatures] : []),
           ...(row.family === "reviews" ? previousReviewNormalizationSignatures : []),
           ...previousNormalizationSignatures.map((signature) =>
@@ -1954,24 +2106,61 @@ export async function createPipeline(options) {
             )
           : [];
       if (releasePass && !releaseTargets.length) continue;
-      const candidates = (
+      const knownSignatures = new Set(generations.map((generation) => generation.signature));
+      const storedCandidates = (
         await db.query(
-          "SELECT policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=ANY($2::text[])",
-          [row.fact_key, [...new Set(generations.map((generation) => generation.signature))]],
+          `SELECT policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations
+           WHERE fact_key=$1 AND (policy_signature=ANY($2::text[]) OR $3::boolean)
+           ORDER BY policy_signature LIMIT 20001`,
+          [row.fact_key, [...knownSignatures], mergeTargetSource],
         )
       ).rows;
+      if (mergeTargetSource) assertMergeTargetNormalizer();
       if (row.family === "reviews") assertReviewNormalizer();
       if (row.family === "discussions") assertDiscussionNormalizer();
       if (discussionFeedback) assertDiscussionFeedbackNormalizer();
-      // Every queried generation can supply a classification hint, even when
-      // its corrected facts became empty. Validate all predecessors first.
-      for (const candidate of candidates) {
+      // Inspect enrolled PR history independently of mutable marker contents.
+      // Only an admitted generation can supply a classification hint.
+      if (storedCandidates.length > 20000) fail("merge_target_history_budget_exceeded");
+      if (mergeTargetSource) {
+        mergeTargetHistoryCount += storedCandidates.length;
+        if (mergeTargetHistoryCount > 20000) fail("merge_target_history_budget_exceeded");
+      }
+      for (const candidate of storedCandidates) {
         if (digest(candidate.document) !== candidate.document_hash) fail("normalization_integrity_error");
         if (candidate.document.isSynthetic !== (dataMode === "synthetic")) fail("normalization_data_mode_mismatch");
         assertDataMode(candidate.document);
       }
+      const candidates = [];
+      const retainedMergeTargetGenerations = [];
+      for (const candidate of storedCandidates) {
+        const marker = candidate.document.pullRequestMergeTargetNormalization;
+        if (
+          marker !== undefined ||
+          (mergeTargetSource && currentGenerations.some((entry) => entry.signature === candidate.policy_signature))
+        ) {
+          if (
+            !knownSignatures.has(candidate.policy_signature) &&
+            !mergeTargetBaseSignatures.includes(marker?.baseSignature)
+          )
+            continue;
+          await validateMergeTargetRow({ ...row, ...candidate, source_document: row.document }, null, false);
+          assertRunConfiguration();
+          const priorBase = mergeTargetGenerationSignature(marker.baseSignature, marker.generation, digest);
+          const generation = normalizationGenerations(priorBase).find(
+            (entry) => entry.signature === candidate.policy_signature,
+          );
+          if (!generation) fail("merge_target_normalization_binding_unavailable");
+          retainedMergeTargetGenerations.push(generation);
+        } else if (!knownSignatures.has(candidate.policy_signature)) continue;
+        candidates.push(candidate);
+      }
       const generationSignatures = (field) =>
-        new Set(generations.filter((generation) => generation[field]).map((generation) => generation.signature));
+        new Set(
+          [...generations, ...retainedMergeTargetGenerations]
+            .filter((generation) => generation[field])
+            .map((generation) => generation.signature),
+        );
       const deliveryGenerations = generationSignatures("defaultDelivery");
       const fieldGenerations = generationSignatures("fieldChange");
       const pairGenerations = generationSignatures("relationshipPair");
@@ -2002,6 +2191,7 @@ export async function createPipeline(options) {
             generation.relationshipPair === relationshipPair,
         ).signature;
       const assertRowNormalizer = () => {
+        if (mergeTargetSource) assertMergeTargetNormalizer();
         if (row.family === "reviews") assertReviewNormalizer();
         if (row.family === "discussions") assertDiscussionNormalizer();
         if (discussionFeedback) assertDiscussionFeedbackNormalizer();
@@ -2035,6 +2225,8 @@ export async function createPipeline(options) {
         if (
           currentHistoryNormalizer &&
           currentProjectNormalizer &&
+          (!mergeTargetSource ||
+            cached.document.pullRequestMergeTargetNormalization?.generation === mergeTargetPass.generation) &&
           (!fieldChange || cached.document.fieldChangeNormalizationVersion === fieldChangeNormalizationVersion) &&
           // Native field visibility can change without changing an event or its
           // revision. Revalidate every retained transition before publication.
@@ -2060,6 +2252,13 @@ export async function createPipeline(options) {
           }) &&
           hasDispatchEvidence(cached.document, dispatch, row)
         ) {
+          if (mergeTargetSource) {
+            await validateMergeTargetRow(
+              { ...row, ...cached, source_document: row.document },
+              mergeTargetPass.collect ? null : cutoff,
+            );
+            assertMergeTargetNormalizer();
+          }
           if (releaseTargets.length && !releasePass?.collect) {
             const records = cached.document.releaseInclusions;
             if (
@@ -2115,6 +2314,7 @@ export async function createPipeline(options) {
       // A frozen publication may only consume proof collected before its cutoff.
       // Missing compatible caches require a fresh cycle, never a backdated lookup.
       if (releaseTargets.length && !releasePass?.collect) fail("release_inclusion_frozen_normalization_unavailable");
+      if (mergeTargetSource && !mergeTargetPass.collect) fail("merge_target_frozen_normalization_unavailable");
       const normalizationStarted = performance.now();
       let output;
       try {
@@ -2130,6 +2330,7 @@ export async function createPipeline(options) {
           observedAt: new Date(row.observed_at).toISOString(),
           policyVersion: config.version,
         });
+        if (mergeTargetSource) output = copy(output);
         assertRunConfiguration();
         assertRowNormalizer();
         monitorSuccess(monitorSource(repository.id), "normalization", normalizationStarted);
@@ -2245,6 +2446,15 @@ export async function createPipeline(options) {
       // Persist authoritative exclusions even when this dispatch cannot yet
       // prove the target creation. Failure must not leave older evidence visible.
       if (!hasDispatchEvidence(output, dispatch, row)) fail("dispatch_enrichment_unavailable");
+      const pullRequestMergeTargets = mergeTargetSource
+        ? await readMergeTargetNormalization(output, row, repository)
+        : undefined;
+      if (
+        !mergeTargetSource &&
+        (output.pullRequestMergeTargets !== undefined || output.facts.some((fact) => fact.mergeTarget !== undefined))
+      )
+        fail("unconfigured_merge_target_proof");
+      assertRunConfiguration();
       // Keep collector products private and bound to this source repository.
       // The normalizer's public evidence is validated separately above; copying
       // this explicit, minimized field never expands that public boundary.
@@ -2278,6 +2488,16 @@ export async function createPipeline(options) {
       }
       const document = {
         ...(relationshipPair ? { relationshipPairNormalizationVersion } : {}),
+        ...(mergeTargetSource
+          ? {
+              pullRequestMergeTargetNormalization: {
+                schemaVersion: mergeTargetNormalizationVersion,
+                baseSignature: normalizationSignature,
+                generation: mergeTargetPass.generation,
+              },
+              pullRequestMergeTargets,
+            }
+          : {}),
         ...(fieldChange ? { fieldChangeNormalizationVersion } : {}),
         ...(defaultDelivery ? { defaultDeliveryNormalizationVersion } : {}),
         ...(row.family === "reviews" ? { reviewSourceNormalizationVersion } : {}),
@@ -2312,7 +2532,13 @@ export async function createPipeline(options) {
         VALUES ($1,$2,$3::jsonb,$4) ON CONFLICT (fact_key,policy_signature) DO UPDATE
         SET document=EXCLUDED.document,document_hash=EXCLUDED.document_hash
         WHERE normalizations.document_hash=$5`,
-          [row.fact_key, signature, JSON.stringify(document), digest(document), cached?.document_hash ?? null],
+          [
+            row.fact_key,
+            signature,
+            JSON.stringify(document),
+            digest(document),
+            mergeTargetSource ? null : (cached?.document_hash ?? null),
+          ],
         );
         const current = (
           await tx.query(
@@ -2419,6 +2645,7 @@ export async function createPipeline(options) {
           publication.revision,
         )
       ) {
+        assertMergeTargetNormalizer();
         if (publication.defaultDeliveryNormalizationVersion !== undefined) assertDefaultDeliveryNormalizer();
         if (publication.fieldChangeNormalizationVersion !== undefined) assertFieldChangeNormalizer();
         if (publication.relationshipPairNormalizationVersion !== undefined) assertRelationshipPairNormalizer();
@@ -2491,10 +2718,18 @@ export async function createPipeline(options) {
       windowIndex().record(state, scope, publicPeriods, confirmation);
     });
   }
-  async function publish({ scope, window, publicPeriods = [] }, cutoff, observationCutoff, dispatch, scan = null) {
+  async function publish(
+    { scope, window, publicPeriods = [] },
+    cutoff,
+    observationCutoff,
+    dispatch,
+    scan = null,
+    mergeTargetGeneration = null,
+  ) {
     assertRunConfiguration();
     scope = c.contracts.canonicalPublicScope(scope);
     if (!configuredScope(scope)) fail("scope_not_approved");
+    const selectedPolicies = policiesForScope(scope);
     const repos = repositoriesFor(scope);
     const generations = (
       await db.query(
@@ -2636,6 +2871,8 @@ export async function createPipeline(options) {
       config.repositories.map((repo) => repo.id),
       observationCutoff,
       dispatch,
+      null,
+      mergeTargetGeneration === null ? null : { generation: mergeTargetGeneration, collect: false },
     );
     const selectedArtifactIds = normalizedAll
       .filter((entry) => repos.some((repo) => String(repo.id) === entry.repositoryId))
@@ -2718,7 +2955,9 @@ export async function createPipeline(options) {
       }))
       .sort((left, right) => left.factKey.localeCompare(right.factKey));
     const normalizationHashes = [...new Set(normalizationSources.map((entry) => entry.documentHash))].sort();
-    const physicalSources = config.policies.some((item) => c.contracts.physicalMetricIds.includes(item.policy.metricId))
+    const physicalSources = selectedPolicies.some((item) =>
+      c.contracts.physicalMetricIds.includes(item.policy.metricId),
+    )
       ? capturePhysicalSources(normalized, normalizationSources, digest, dataMode)
       : [];
     const suppressedArtifactIds = new Set([
@@ -2749,7 +2988,7 @@ export async function createPipeline(options) {
         context: scope.context ?? "event",
       },
     ).outputs;
-    if (recognitionBindings.length) {
+    if (recognitionBindings.length && scope.branch === undefined) {
       const combined = {
         facts: outputs.flatMap((o) => o.facts),
         actors: [...actors.values()],
@@ -2787,7 +3026,7 @@ export async function createPipeline(options) {
         combined,
         controlsStore.read(),
         recognitionBindings,
-        config.policies,
+        selectedPolicies,
         c.github.applyRecognitionReceipt,
         observationCutoff,
         c.contracts.publicDocumentationReasons,
@@ -2834,7 +3073,7 @@ export async function createPipeline(options) {
     const reversion = materializeReversionEffectiveness(
       {
         facts,
-        policies: config.policies,
+        policies: selectedPolicies,
         evidence: [...evidence.values()],
       },
       correctionState.decisions,
@@ -2873,6 +3112,7 @@ export async function createPipeline(options) {
       roles: scope.roles ?? [],
       actors: "all",
       context: scope.context ?? "event",
+      ...(scope.branch === undefined ? {} : { branch: scope.branch }),
     };
     const projectContextFor = createPublicProjectContextProjector(normalized, engineScope.context, observationCutoff);
     const state = controlsStore.read();
@@ -2885,7 +3125,7 @@ export async function createPipeline(options) {
         )
       : null;
     const coverage = repos.flatMap((repo) =>
-      [...new Set(config.policies.flatMap((item) => item.policy.sources))].map((source) => {
+      [...new Set(selectedPolicies.flatMap((item) => item.policy.sources))].map((source) => {
         const progress = reconciliation?.progress.filter((row) => row.repositoryId === repo.id);
         const github = source.startsWith("github_");
         const lastSuccessfulSync = reconciliation
@@ -2944,7 +3184,7 @@ export async function createPipeline(options) {
       facts: [...facts, ...corrections],
       coverage,
     };
-    for (const item of config.policies.filter((item) => item.policy.metricId === "pr_accepted_rate")) {
+    for (const item of selectedPolicies.filter((item) => item.policy.metricId === "pr_accepted_rate")) {
       const units = new Set();
       for (const fact of frozen.facts.filter(
         (fact) => fact.metricId === item.policy.metricId && item.policy.rankedStates.includes(fact.state),
@@ -2954,11 +3194,11 @@ export async function createPipeline(options) {
         units.add(unit);
       }
     }
-    const aggregates = config.policies.map((item) => c.metrics.aggregateMetric(frozen, item.policy, engineScope));
+    const aggregates = selectedPolicies.map((item) => c.metrics.aggregateMetric(frozen, item.policy, engineScope));
     const physical = selectPhysicalContexts({
       sources: physicalSources,
       aggregates,
-      policies: config.policies,
+      policies: selectedPolicies,
       contracts: c.contracts,
       serialize: c.metrics.stableJSON,
       policyDigest,
@@ -2967,7 +3207,7 @@ export async function createPipeline(options) {
     const pendingFor = (aggregate, row) => ({
       schemaVersion: "leaderboard-pending/v1",
       state: aggregate.coverage === "complete" ? "measured" : row.pending > 0 ? "partial" : "unknown",
-      valueClass: config.policies.find((item) => item.policy.metricId === aggregate.metricId).policy.rankedStates[0],
+      valueClass: selectedPolicies.find((item) => item.policy.metricId === aggregate.metricId).policy.rankedStates[0],
       count: row.pending > 0 || aggregate.coverage === "complete" ? row.pending : null,
       evidenceIds: row.pendingEvidence.map((fact) => fact.id),
     });
@@ -3030,7 +3270,7 @@ export async function createPipeline(options) {
     );
     // Descriptive public work is not conditional on earning a ranked outcome.
     // Selection reuses existing corrections, source/role/context checks and receipt validation.
-    const portfolioFacts = config.policies.flatMap((item) =>
+    const portfolioFacts = selectedPolicies.flatMap((item) =>
       c.metrics.selectPortfolioFacts(frozen, item.policy, engineScope),
     );
     const portfolioEvidence = portfolioFacts.flatMap((fact) => {
@@ -3079,7 +3319,7 @@ export async function createPipeline(options) {
         facts.find((fact) => fact.id === entry.contribution.contributionId);
       if (fact) {
         entry.occurredAt =
-          fact[config.policies.find((item) => item.policy.metricId === fact.metricId).policy.dateBasis];
+          fact[selectedPolicies.find((item) => item.policy.metricId === fact.metricId).policy.dateBasis];
         Object.assign(entry, materializeEvidenceMetadata(entry, fact));
         Object.assign(entry, projectContextFor(entry, fact));
       }
@@ -3109,14 +3349,14 @@ export async function createPipeline(options) {
       portfolioEvidence,
       pendingEvidence,
       ...physical,
-      ranking: config.policies.map((item) => ({
+      ranking: selectedPolicies.map((item) => ({
         metricId: item.policy.metricId,
         direction: "descending",
         rank: item.policy.rank,
       })),
       rankingPresentationPolicy: copy(c.contracts.currentRankingPresentationPolicy),
       diagnostics,
-      methodology: config.policies.map((item) => ({
+      methodology: selectedPolicies.map((item) => ({
         metricId: item.policy.metricId,
         policyVersion: item.policy.version,
         policySignature: policyDigest(item.signature),
@@ -3141,7 +3381,7 @@ export async function createPipeline(options) {
     const comparisonInputFor = (publication) => ({
       input: { ...frozen, actors: frozen.actors.map(previewActor) },
       scope: engineScope,
-      policies: config.policies.map((item) => item.policy),
+      policies: selectedPolicies.map((item) => item.policy),
       aggregates,
       snapshot: { snapshotId: publication.snapshotId, revision: publication.revision },
       authorization: {
@@ -3155,6 +3395,7 @@ export async function createPipeline(options) {
           // hash-only historical captures can otherwise be ambiguous across families.
           normalizationSources,
         },
+        ...mergeTargetAuthorization(scope, observationCutoff),
         issueTransferEvidence: transferAuthority.capture,
         ...(feedbackCapture.length ? { discussionFeedbackEvidence: feedbackCapture } : {}),
         ...(transferAuthority.relationshipPairEvidence === undefined
@@ -3183,7 +3424,7 @@ export async function createPipeline(options) {
         digest(document) !== retained.document_hash ||
         canonical(document.scope) !== canonical(scope) ||
         canonical(document.engineScope) !== canonical(engineScope) ||
-        canonical(document.policies) !== canonical(JSON.parse(JSON.stringify(config.policies))) ||
+        canonical(document.policies) !== canonical(JSON.parse(JSON.stringify(selectedPolicies))) ||
         document.identityAuthorization?.configurationHash !== digest(config) ||
         document.identityAuthorization?.dataMode !== dataMode
       )
@@ -3411,7 +3652,7 @@ export async function createPipeline(options) {
             identityAuthorization: comparisonInputFor({ snapshotId, revision }).authorization,
             engineScope,
             scope,
-            policies: config.policies,
+            policies: selectedPolicies,
           }),
         );
         await tx.query(
@@ -3422,7 +3663,7 @@ export async function createPipeline(options) {
           snapshotId,
           revision,
           configuration: config.version,
-          policySignatures: config.policies.map((item) => item.signature),
+          policySignatures: selectedPolicies.map((item) => item.signature),
           datasetId: frozen.datasetId,
           comparisonInputHash: digest(comparisonInputFor({ snapshotId, revision })),
           controlsRevision: state.revision,
@@ -4111,14 +4352,40 @@ export async function createPipeline(options) {
     // New release proof is a separate observation from the immutable PR row.
     // Complete only explicitly selected public lookups before freezing the cycle;
     // a frozen retry reuses its exact compatible cache and never recollects it.
+    const mergeTargetGeneration = mergeTargetRepositoryIds.length
+      ? digest([
+          mergeTargetNormalizationVersion,
+          cutoff,
+          mode,
+          scan?.token ?? null,
+          progress
+            .filter((entry) => entry.family === "pull_requests")
+            .map((entry) => entry.runId)
+            .sort(),
+        ])
+      : null;
     if (dataMode === "public" && config.releaseInclusionTargets?.length) {
       const releaseRepositoryIds = config.repositories
         .filter((repo) => config.releaseInclusionTargets.some((target) => target.repositoryId === repo.id))
         .map((repo) => repo.id);
-      await normalizeStored(releaseRepositoryIds, scan?.observationCutoff ?? utc(now()), null, {
-        collect: !scan?.observationCutoff,
-      });
+      await normalizeStored(
+        releaseRepositoryIds,
+        scan?.observationCutoff ?? utc(now()),
+        null,
+        {
+          collect: !scan?.observationCutoff,
+        },
+        mergeTargetGeneration === null
+          ? null
+          : { generation: mergeTargetGeneration, collect: !scan?.observationCutoff },
+      );
     }
+    if (mergeTargetGeneration !== null)
+      await normalizeStored(mergeTargetRepositoryIds, scan?.observationCutoff ?? utc(now()), null, null, {
+        generation: mergeTargetGeneration,
+        collect: !scan?.observationCutoff,
+        only: true,
+      });
     const publications = [];
     let observationCutoff = utc(now());
     try {
@@ -4163,7 +4430,7 @@ export async function createPipeline(options) {
       }
       if (observationCutoff < cutoff) fail("observation_clock_precedes_event_cutoff");
       for (const selected of publicationWindows)
-        publications.push(await publish(selected, cutoff, observationCutoff, dispatch, scan));
+        publications.push(await publish(selected, cutoff, observationCutoff, dispatch, scan, mergeTargetGeneration));
       // SQL publication and synchronous private confirmation must both succeed.
       // A failed/partial batch keeps its original event and observation cutoffs.
       if (scan) await scanContinuations.retire(scan, assertRunConfiguration);
@@ -4178,6 +4445,224 @@ export async function createPipeline(options) {
   function runOnce(options) {
     return serialize(() => runOnceInternal(options));
   }
+  async function verifyDispatchPublications(tx, lease, publications) {
+    if (!(await approved(tx))) fail("dispatch_collection_incomplete");
+    assertConfigurationCurrent();
+    await outbox.assertLease(tx, lease);
+    const saved = (
+      await tx.query(
+        "SELECT operation,observation_cutoff,source_generations FROM leaderboard_ingestion.outbox WHERE event_key=$1",
+        [lease.eventKey],
+      )
+    ).rows[0];
+    if (!saved || canonical(saved.operation) !== canonical(lease.operation)) fail("dispatch_configuration_changed");
+    const access = (
+      await tx.query(
+        `SELECT repository_id,installation_id,generation FROM leaderboard_ingestion.repository_access
+         WHERE repository_id=ANY($1::bigint[]) AND state='public' ORDER BY repository_id FOR SHARE`,
+        [config.repositories.map((repo) => repo.id)],
+      )
+    ).rows;
+    if (
+      access.length !== config.repositories.length ||
+      !Array.isArray(saved.source_generations) ||
+      saved.source_generations.length !== access.length ||
+      new Set(saved.source_generations.map((entry) => entry.repositoryId)).size !== access.length ||
+      access.some(
+        (row) =>
+          String(row.installation_id) !==
+            String(config.repositories.find((repo) => repo.id === Number(row.repository_id))?.installationId) ||
+          !saved.source_generations.some(
+            (prior) => prior.repositoryId === Number(row.repository_id) && prior.generation === String(row.generation),
+          ),
+      )
+    )
+      fail("dispatch_source_generation_changed");
+    const windows = resolveDiscoverablePublicationWindows(
+      config.scopes,
+      lease.operation.cutoff,
+      c.metrics.resolveMetricWindow,
+    );
+    if (
+      !windows.length ||
+      publications.length !== windows.length ||
+      new Set(publications.map((entry) => entry.scopeKey)).size !== windows.length
+    )
+      fail("dispatch_publication_unconfirmed");
+    for (const publication of publications) {
+      const selected = windows.find(({ scope }) => scopeKey(scope) === publication.scopeKey);
+      const selectedScope = selected?.scope;
+      const receipt = (
+        await tx.query(
+          `SELECT saved.snapshot_id,saved.revision,saved.config_version,saved.scope_key,
+            saved.document,saved.document_hash
+           FROM leaderboard_pipeline.dispatch_publications AS operation
+           JOIN leaderboard_pipeline.snapshots AS saved USING(snapshot_id)
+           WHERE operation.operation_key=$1 AND operation.scope_hash=${pipelineKeySQL("$2")}
+             AND operation.scope_key=$2 AND operation.snapshot_id=$3`,
+          [lease.operation.operationKey, publication.scopeKey, publication.snapshotId],
+        )
+      ).rows[0];
+      const confirmation = controlsStore.read().pipelinePublications?.[publication.snapshotId];
+      if (
+        !receipt ||
+        !selectedScope ||
+        !confirmationMatches(confirmation, selectedScope, publication.snapshotId, publication.revision) ||
+        confirmation?.controlsConfigurationRevision !== runConfigurationRevision
+      )
+        fail("dispatch_publication_unconfirmed");
+      if (
+        digest(receipt.document) !== receipt.document_hash ||
+        receipt.document.snapshot?.snapshotId !== publication.snapshotId ||
+        receipt.document.snapshot?.revision !== publication.revision ||
+        Number(receipt.revision) !== publication.revision ||
+        receipt.config_version !== config.version ||
+        receipt.document.dataMode !== dataMode ||
+        receipt.scope_key !== publication.scopeKey ||
+        scopeKey(receipt.document.scope) !== publication.scopeKey
+      )
+        fail("dispatch_snapshot_integrity_error");
+      if (recognitionBindings.length && confirmation.recognitionFingerprint !== runRecognitionFingerprint)
+        fail("dispatch_recognition_changed");
+      if (!confirmation.aggregateExplanationHash) fail("aggregate_explanation_required");
+      const explanation = aggregateExplanations.verify(publication.snapshotId, {
+        scopeKey: publication.scopeKey,
+        revision: publication.revision,
+        computationVersion,
+        configurationHash: digest(config),
+        digest: confirmation.aggregateExplanationHash,
+      }).document;
+      const normalizationBinding = await publicationNormalizationBinding(tx, selectedScope, publication, explanation);
+      if (normalizationBinding.obsolete) fail(`dispatch_${normalizationBinding.obsolete}_normalization_obsolete`);
+      if (mergeTargetRepositoryIds.length) {
+        const retained = (
+          await tx.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
+            publication.snapshotId,
+          ])
+        ).rows[0];
+        const document = retained?.document;
+        const engineScope = {
+          ...selected.window,
+          repos: repositoriesFor(selectedScope).map((repo) => String(repo.id)),
+          projects: selectedScope.projects ?? [],
+          workstreams: selectedScope.workstream === null ? [] : [selectedScope.workstream],
+          roles: selectedScope.roles ?? [],
+          actors: "all",
+          context: selectedScope.context ?? "event",
+          ...(selectedScope.branch === undefined ? {} : { branch: selectedScope.branch }),
+        };
+        // An identical already-confirmed snapshot may predate this operation's
+        // observation freeze. Its original cutoff remains authoritative.
+        if (
+          saved.observation_cutoff === null ||
+          saved.observation_cutoff === undefined ||
+          !document ||
+          digest(document) !== retained.document_hash ||
+          utc(document.frozen?.cutoff) !== explanation.cutoff ||
+          explanation.cutoff < lease.operation.cutoff ||
+          explanation.cutoff > utc(new Date(saved.observation_cutoff).toISOString()) ||
+          canonical(document.scope) !== canonical(selectedScope) ||
+          canonical(document.engineScope) !== canonical(engineScope) ||
+          canonical(document.policies) !== canonical(JSON.parse(JSON.stringify(policiesForScope(selectedScope))))
+        )
+          fail("dispatch_frozen_input_unavailable");
+        const original = await withAuthorizedComparisonInputs(
+          [document.identityAuthorization],
+          (removed, guard) => {
+            const suppressed = new Set(removed);
+            if (document.frozen.facts.some((fact) => suppressed.has(fact.artifactId)))
+              fail("retained_publication_source_unavailable");
+            const restored = guard.restoreInput(document.frozen, document.identityAuthorization);
+            return {
+              input: document.frozen,
+              scope: document.engineScope,
+              policies: document.policies.map((item) => item.policy),
+              aggregates: document.policies.map((item) =>
+                c.metrics.aggregateMetric(restored, item.policy, document.engineScope),
+              ),
+              snapshot: { snapshotId: publication.snapshotId, revision: publication.revision },
+              authorization: document.identityAuthorization,
+            };
+          },
+          tx,
+        );
+        const published = (
+          await tx.query(
+            `SELECT document,document_hash FROM leaderboard_pipeline.receipts
+             WHERE operation_hash=${pipelineKeySQL("$1")} AND operation_key=$1 AND kind='snapshot_published'`,
+            [`publish:${publication.scopeKey}:${publication.snapshotId}`],
+          )
+        ).rows[0];
+        if (
+          !published ||
+          digest(published.document) !== published.document_hash ||
+          published.document.snapshotId !== publication.snapshotId ||
+          published.document.revision !== publication.revision ||
+          published.document.configuration !== config.version ||
+          published.document.datasetId !== document.frozen.datasetId ||
+          published.document.comparisonInputHash !== digest(original) ||
+          canonical(published.document.policySignatures) !==
+            canonical(policiesForScope(selectedScope).map((item) => item.signature))
+        )
+          fail("dispatch_snapshot_integrity_error");
+      }
+    }
+    if (!(await approved(tx))) fail("dispatch_collection_incomplete");
+    await outbox.assertLease(tx, lease);
+    assertConfigurationCurrent();
+  }
+  async function readConfirmedDispatchPublications(lease) {
+    const runState = controlsStore.read();
+    runConfigurationRevision = restrictConfiguration(runState).revision;
+    runRecognitionFingerprint = recognitionFingerprint(runState, recognitionBindings);
+    runFeedbackAuthority = feedbackAuthority.capture();
+    if (runConfigurationRevision !== lease.operation.configurationRevision) fail("dispatch_configuration_changed");
+    const windows = resolveDiscoverablePublicationWindows(
+      config.scopes,
+      lease.operation.cutoff,
+      c.metrics.resolveMetricWindow,
+    );
+    return db.transaction(async (tx) => {
+      await lockIssueTransferSources(tx, config.repositories);
+      await outbox.assertLease(tx, lease);
+      assertConfigurationCurrent();
+      const rows = (
+        await tx.query(
+          `SELECT scope_key,snapshot_id FROM leaderboard_pipeline.dispatch_publications
+           WHERE operation_key=$1 ORDER BY scope_key LIMIT $2`,
+          [lease.operation.operationKey, windows.length + 1],
+        )
+      ).rows;
+      if (rows.length > windows.length) fail("dispatch_publication_unconfirmed");
+      if (rows.length !== windows.length) return null;
+      const byScope = new Map(rows.map((row) => [row.scope_key, row]));
+      if (byScope.size !== windows.length || windows.some(({ scope }) => !byScope.has(scopeKey(scope))))
+        fail("dispatch_publication_unconfirmed");
+      const state = controlsStore.read();
+      const publications = [];
+      for (const { scope } of windows) {
+        const row = byScope.get(scopeKey(scope));
+        const confirmation = state.pipelinePublications?.[row.snapshot_id];
+        // Missing confirmation or private head still needs the original fully
+        // guarded recovery path. A newer head need never be moved backwards.
+        if (
+          !state.pipelineHeads?.[scopeKey(scope)] ||
+          !Number.isSafeInteger(confirmation?.revision) ||
+          confirmation.revision < 1 ||
+          !confirmationMatches(confirmation, scope, row.snapshot_id, confirmation.revision) ||
+          confirmation.controlsConfigurationRevision !== runConfigurationRevision
+        )
+          return null;
+        publications.push({
+          scopeKey: scopeKey(scope),
+          snapshotId: row.snapshot_id,
+          revision: confirmation.revision,
+        });
+      }
+      await verifyDispatchPublications(tx, lease, publications);
+      return publications;
+    });
+  }
   const dispatch = createWebhookDispatcher({
     outbox,
     config,
@@ -4189,6 +4674,10 @@ export async function createPipeline(options) {
     publicationEligible: (cutoff) =>
       resolveDiscoverablePublicationWindows(config.scopes, cutoff, c.metrics.resolveMetricWindow).length > 0,
     execute: async (lease) => {
+      if (mergeTargetRepositoryIds.length) {
+        const confirmed = await readConfirmedDispatchPublications(lease);
+        if (confirmed) return confirmed;
+      }
       const result = await runOnceInternal({ cutoff: lease.operation.cutoff, dispatch: { lease } });
       if (result.state !== "published") fail("dispatch_collection_incomplete");
       const windows = resolveDiscoverablePublicationWindows(
@@ -4202,68 +4691,11 @@ export async function createPipeline(options) {
         revision: publication.revision,
       }));
     },
-    assertAuthorized: () => assertRunConfiguration(),
+    assertAuthorized: () => assertConfigurationCurrent(),
     prepareCompletion: async (tx) => {
       await lockIssueTransferSources(tx, config.repositories);
     },
-    confirm: async (tx, lease, publications) => {
-      assertRunConfiguration();
-      const saved = (
-        await tx.query(`SELECT source_generations FROM leaderboard_ingestion.outbox WHERE event_key=$1`, [
-          lease.eventKey,
-        ])
-      ).rows[0];
-      const access = (
-        await tx.query(
-          `SELECT repository_id,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=ANY($1::bigint[]) AND state='public' FOR SHARE`,
-          [config.repositories.map((repo) => repo.id)],
-        )
-      ).rows;
-      if (
-        access.length !== config.repositories.length ||
-        access.some(
-          (row) =>
-            !saved.source_generations.some(
-              (prior) =>
-                prior.repositoryId === Number(row.repository_id) && prior.generation === String(row.generation),
-            ),
-        )
-      )
-        fail("dispatch_source_generation_changed");
-      const windows = resolveDiscoverablePublicationWindows(
-        config.scopes,
-        lease.operation.cutoff,
-        c.metrics.resolveMetricWindow,
-      );
-      for (const publication of publications) {
-        const selectedScope = windows.find(({ scope }) => scopeKey(scope) === publication.scopeKey)?.scope;
-        const receipt = (
-          await tx.query(
-            `SELECT snapshot_id FROM leaderboard_pipeline.dispatch_publications WHERE operation_key=$1 AND scope_hash=${pipelineKeySQL("$2")} AND scope_key=$2 AND snapshot_id=$3`,
-            [lease.operation.operationKey, publication.scopeKey, publication.snapshotId],
-          )
-        ).rows[0];
-        const confirmation = controlsStore.read().pipelinePublications?.[publication.snapshotId];
-        if (
-          !receipt ||
-          !selectedScope ||
-          !confirmationMatches(confirmation, selectedScope, publication.snapshotId, publication.revision) ||
-          confirmation?.controlsConfigurationRevision !== runConfigurationRevision
-        )
-          fail("dispatch_publication_unconfirmed");
-        if (!confirmation.aggregateExplanationHash) fail("aggregate_explanation_required");
-        const explanation = aggregateExplanations.verify(publication.snapshotId, {
-          scopeKey: publication.scopeKey,
-          revision: publication.revision,
-          computationVersion,
-          configurationHash: digest(config),
-          digest: confirmation.aggregateExplanationHash,
-        }).document;
-        const normalizationBinding = await publicationNormalizationBinding(tx, selectedScope, publication, explanation);
-        if (normalizationBinding.obsolete) fail(`dispatch_${normalizationBinding.obsolete}_normalization_obsolete`);
-      }
-      assertRunConfiguration();
-    },
+    confirm: verifyDispatchPublications,
   });
   function dispatchOnce() {
     return serialize(() => (stopped || !options.webhookDispatch ? "blocked" : dispatch()));
@@ -4497,17 +4929,30 @@ export async function createPipeline(options) {
         await lockIssueTransferSources(tx, config.repositories, "update", [], "share");
         const candidates = (
           await tx.query(
-            `SELECT n.document,n.document_hash,f.repository_id FROM leaderboard_pipeline.normalizations n
-          JOIN leaderboard_ingestion.source_facts f USING(fact_key) WHERE f.repository_id=ANY($1::bigint[]) AND n.policy_signature=ANY($2::text[])
+            `SELECT n.document,n.document_hash,n.policy_signature,f.repository_id,f.family,f.observed_at,f.document AS source_document FROM leaderboard_pipeline.normalizations n
+          JOIN leaderboard_ingestion.source_facts f USING(fact_key) WHERE f.repository_id=ANY($1::bigint[]) AND
+            (n.policy_signature=ANY($2::text[]) OR
+             (n.document->'pullRequestMergeTargetNormalization'->>'schemaVersion'=$4 AND
+              n.document->'pullRequestMergeTargetNormalization'->>'baseSignature'=$5))
           AND EXISTS(SELECT 1 FROM jsonb_array_elements(n.document->'facts') item WHERE item->>'id'=$3)
           ORDER BY n.fact_key,n.policy_signature LIMIT 10001 FOR SHARE OF n`,
-            [config.repositories.map((repo) => repo.id), identityNormalizationSignatures, factId],
+            [
+              config.repositories.map((repo) => repo.id),
+              identityNormalizationSignatures,
+              factId,
+              mergeTargetNormalizationVersion,
+              normalizationSignature,
+            ],
           )
         ).rows;
         if (candidates.length > 10000) fail("correction_evidence_budget_exceeded");
-        for (const row of candidates)
+        for (const row of candidates) {
           if (digest(row.document) !== row.document_hash || row.document.isSynthetic !== (dataMode === "synthetic"))
             fail("normalization_integrity_error");
+          if (row.document.pullRequestMergeTargetNormalization !== undefined) {
+            await validateMergeTargetRow(row);
+          }
+        }
         const views = candidates
           .flatMap((row) =>
             row.document.facts
@@ -4565,6 +5010,10 @@ export async function createPipeline(options) {
           correctionReceipt: approvalReceipt,
           observedAt: utc(now()),
         };
+        // A new exclusion cannot earn merge credit. Its durable receipt must not
+        // inherit the positive source fact's generation-specific proof projection.
+        // Exact retries retain the original persisted correction bytes.
+        if (!priorCorrection) delete corrected.mergeTarget;
         restrictConfiguration(controlsStore.read());
         await tx.query(
           `INSERT INTO leaderboard_pipeline.corrections (request_id,fact_id,artifact_id,repository_id,document)
@@ -4653,7 +5102,7 @@ export async function createPipeline(options) {
             authorization.configurationHash !== digest(config) ||
             authorization.dataMode !== dataMode ||
             saved.snapshot.dataMode !== dataMode ||
-            canonical(saved.input.policies) !== canonical(config.policies) ||
+            canonical(saved.input.policies) !== canonical(policiesForScope(scope)) ||
             authorization.controlsConfigurationRevision !== overlay.revision ||
             !configuredScope(scope) ||
             !confirmationMatches(confirmation, scope, snapshot.snapshotId, snapshot.revision) ||

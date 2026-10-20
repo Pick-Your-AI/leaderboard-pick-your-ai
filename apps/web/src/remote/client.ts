@@ -7,6 +7,7 @@ import { onlyExportKeys, parseExportJSON } from "./export-json.ts";
 import {
   canonicalPublicScope,
   publicScopeParameters,
+  supportsPullRequestMergeTarget,
   type PublicScope,
   compareSourceInstants,
   participationWeekDenominator,
@@ -73,6 +74,7 @@ const supported = new Set([
   "context",
   "project",
   "role",
+  "branch",
   ...scopeKeys,
   "snapshot",
   "limit",
@@ -107,6 +109,22 @@ export interface Selection extends PublicScope {
 export function selection(query: string, options: { comparison?: boolean } = {}): Selection {
   if (query.length > maxPublicRequestTargetBytes) throw new ReadFailure(400, "selection_too_large");
   const params = new URLSearchParams(query);
+  if (params.has("branch")) {
+    try {
+      const fields = query
+        .replace(/^\?/, "")
+        .split("&")
+        .map((part) => part.split("="))
+        .filter(([key]) => decodeURIComponent(key!.replace(/\+/g, " ")) === "branch");
+      if (
+        fields.length !== 1 ||
+        decodeURIComponent(fields[0]!.slice(1).join("=").replace(/\+/g, " ")) !== params.get("branch")
+      )
+        throw new Error("invalid_branch_encoding");
+    } catch {
+      throw new ReadFailure(400, "invalid_merge_target_branch");
+    }
+  }
   if (!options.comparison && comparisonKeys.some((key) => params.has(key)))
     throw new ReadFailure(400, "comparison_requires_board");
   for (const key of params.keys())
@@ -190,10 +208,14 @@ export function selection(query: string, options: { comparison?: boolean } = {})
       ...(params.has("context") ? { context: params.get("context") } : {}),
       ...(params.has("project") ? { projects: params.get("project")!.split(",") } : {}),
       ...(params.has("role") ? { roles: params.get("role")!.split(",") } : {}),
+      ...(params.has("branch") ? { branch: params.get("branch") } : {}),
     });
   } catch {
     throw new ReadFailure(400, "invalid_public_scope");
   }
+  const metric = id("metric") ?? (scope.branch === undefined ? "pr_opened" : "pr_merged");
+  if (scope.branch !== undefined && !supportsPullRequestMergeTarget(metric))
+    throw new ReadFailure(400, "unsupported_merge_target_metric");
   return {
     ...scope,
     actors: actorFilter.data,
@@ -205,7 +227,7 @@ export function selection(query: string, options: { comparison?: boolean } = {})
     proof: id("proof"),
     ...(compare === null ? {} : { compare, compareStart, compareEnd }),
     snapshot: id("snapshot"),
-    metric: id("metric") ?? "pr_opened",
+    metric,
     limit,
     cursor,
   };
@@ -738,8 +760,13 @@ export function validateExport(value: unknown, selected: Selection, expectedMetr
     "pendingEvidence",
     "comparison",
   ]);
-  const presented = data.exportSchemaVersion === "public-export/v4";
+  const branchExport = scope.branch !== undefined;
+  const presented =
+    data.exportSchemaVersion === "public-export/v4" ||
+    (data.exportSchemaVersion === "public-export/v5" && Object.hasOwn(data, "rankingPresentation"));
   if (
+    (branchExport && data.exportSchemaVersion !== "public-export/v5") ||
+    (!branchExport && data.exportSchemaVersion === "public-export/v5") ||
     (!presented && data.exportSchemaVersion !== scopeExportVersion(scope)) ||
     data.schemaVersion !== "leaderboard/v1" ||
     presented !== Object.hasOwn(data, "rankingPresentation")

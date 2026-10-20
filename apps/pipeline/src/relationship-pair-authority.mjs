@@ -175,7 +175,10 @@ function retainedEntry(row, { dataMode, generationsFor }) {
     row.document.relationshipPairNormalizationVersion === relationshipPairNormalizationVersion,
     "relationship_pair_normalization_obsolete",
   );
-  check(generationsFor(row.family).includes(row.policy_signature), "relationship_pair_normalization_obsolete");
+  check(
+    generationsFor(row.family, row.document).includes(row.policy_signature),
+    "relationship_pair_normalization_obsolete",
+  );
   return {
     document: row.document,
     repositoryId: String(row.repository_id),
@@ -190,26 +193,47 @@ function retainedEntry(row, { dataMode, generationsFor }) {
 /** Retained rows supply dependency, withdrawal and unresolved-history identity.
  * They never replace normalizeStored's current/cutoff calculation facts.
  * All configured source gates are held before these normalization read locks. */
-async function retainedEntries(tx, { repositories, cutoff, dataMode, generationsFor, signatures }) {
+async function validateGeneration(row, options, cutoff = null) {
+  if (row.document.pullRequestMergeTargetNormalization === undefined) return;
+  check(typeof options.mergeTarget?.validate === "function", "relationship_pair_merge_target_unavailable");
+  await options.mergeTarget.validate(row, cutoff);
+}
+
+async function retainedEntries(tx, options) {
+  const { repositories, cutoff, dataMode, generationsFor, signatures, mergeTarget } = options;
   const rows = (
     await tx.query(
-      `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document->>'evidence' AS source_evidence,f.observed_at,f.first_run_id
+      `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document AS source_document,
+       f.document->>'evidence' AS source_evidence,f.observed_at,f.first_run_id
      FROM leaderboard_pipeline.normalizations n JOIN leaderboard_ingestion.source_facts f USING(fact_key)
-     WHERE f.repository_id=ANY($1::bigint[]) AND n.policy_signature=ANY($2::text[])
+     WHERE f.repository_id=ANY($1::bigint[]) AND (n.policy_signature=ANY($2::text[])
+       OR (f.family='pull_requests' AND f.repository_id=ANY($4::bigint[])))
        AND ($3::timestamptz IS NULL OR f.observed_at<=$3)
      ORDER BY n.fact_key,n.policy_signature LIMIT 20001 FOR SHARE OF n`,
-      [repositories.map((repo) => repo.id), signatures, cutoff ?? null],
+      [repositories.map((repo) => repo.id), signatures, cutoff ?? null, mergeTarget?.repositoryIds ?? []],
     )
   ).rows;
   check(
     rows.length <= 20000 && new Set(rows.map((row) => row.fact_key)).size <= 10000,
     "relationship_pair_history_budget_exceeded",
   );
+  // Integrity inspection is independent of mutable generation marker contents.
+  // Unknown historical rows cannot supply dependency or classification hints.
+  for (const row of rows) {
+    check(digest(row.document) === row.document_hash, "relationship_pair_normalization_integrity_error");
+    check(row.document.isSynthetic === (dataMode === "synthetic"), "relationship_pair_data_mode_mismatch");
+  }
   const entries = [];
   for (const row of rows) {
-    // Validate before using any candidate as a classification/dependency hint.
-    check(digest(row.document) === row.document_hash, "relationship_pair_normalization_integrity_error");
-    if (!generationsFor(row.family).includes(row.policy_signature)) continue;
+    const marker = row.document.pullRequestMergeTargetNormalization;
+    if (
+      marker !== undefined &&
+      marker?.baseSignature !== mergeTarget?.baseSignature &&
+      !signatures.includes(row.policy_signature)
+    )
+      continue;
+    await validateGeneration(row, options, cutoff ?? null);
+    if (!generationsFor(row.family, row.document).includes(row.policy_signature)) continue;
     entries.push(retainedEntry(row, { dataMode, generationsFor }));
   }
   // Both actual current pair wrappers can be retained after delivery enrichment
@@ -487,7 +511,8 @@ export async function readCapturedRelationshipPairAuthority(tx, value, options) 
     check(same(saved.selectedRepositoryIds, ids(options.repositoryIds)), "relationship_pair_frozen_scope_changed");
   const rows = (
     await tx.query(
-      `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document->>'evidence' AS source_evidence,f.observed_at,f.first_run_id
+      `SELECT n.*,f.repository_id,f.family,f.subject_id,f.document AS source_document,
+       f.document->>'evidence' AS source_evidence,f.observed_at,f.first_run_id
      FROM leaderboard_pipeline.normalizations n JOIN leaderboard_ingestion.source_facts f USING(fact_key)
      JOIN unnest($1::text[],$2::text[]) AS bound(fact_key,policy_signature) USING(fact_key,policy_signature)
      ORDER BY n.fact_key,n.policy_signature LIMIT 20001 FOR SHARE OF n`,
@@ -495,7 +520,12 @@ export async function readCapturedRelationshipPairAuthority(tx, value, options) 
     )
   ).rows;
   check(rows.length === saved.bindings.length, "relationship_pair_frozen_binding_unavailable");
-  const entries = rows.map((row) => retainedEntry(row, options));
+  const entries = [];
+  for (const row of rows) {
+    const entry = retainedEntry(row, options);
+    await validateGeneration(row, options);
+    entries.push(entry);
+  }
   const included = [];
   const bindings = new Map(
     saved.bindings.map((binding) => [JSON.stringify([binding.factKey, binding.policySignature]), binding]),

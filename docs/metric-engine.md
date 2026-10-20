@@ -14,6 +14,21 @@ Qualified/reviewed facts require a nonempty acceptance receipt, a different acce
 
 The engine selects each fact's latest reviewed revision observed by the frozen cutoff. Nonzero revisions without correction receipts and conflicting same-number revisions cannot silently replace an earlier fact. Original inputs are never mutated. Explicit canonical keys join duplicate adapter observations only when semantic facts agree; conflicting actor/action facts stay ambiguous. Source keys are required: missing identity cannot become a guessed event.
 
+Latest-revision selection keeps a running maximum instead of expanding every
+retained observation into one function call. A wide history therefore does not
+exceed the JavaScript argument limit during that selection. The existing cutoff,
+reviewed-correction, conflict and earliest-observation rules still apply; history
+storage, semantic comparison and sorting retain their separate costs.
+
+The synthetic [revision history cases](../packages/metrics/test/revision-history-width.test.mjs)
+use 200,000–200,003 immutable entries to compare full aggregate results with their
+compact semantic equivalents. They also check portfolio selection, unknown
+participation history, input preservation, empty history and invalid revisions.
+After building the workspace, run
+`node --test --test-isolation=none packages/metrics/test/revision-history-width.test.mjs`.
+This is a calculation regression for [#129](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/129),
+not a production throughput or source-completeness measurement.
+
 Chronological selection compares validated UTC instants, not their text spelling. This applies to the earliest duplicate observation, repeated policy-unit action and first qualifying contribution in reviewed history. Whole-second and one-, two- or three-digit fractional timestamps keep their supplied text but sort by time; equivalent instants use stable fact IDs as the tie-breaker. Unknown action times retain the existing unknown-first ordering where the policy permits them. This does not widen the engine's UTC millisecond input contract. In particular, a later fractional timestamp cannot hide an earlier contribution and incorrectly mark its actor as a newcomer at a fractional window boundary.
 
 Policies can count canonical actions, one actor/artifact participation, or distinct actor/artifact/literal-state/UTC-interval groups. The last mode requires an explicit positive interval; no unreviewed triage interval or semantic state classifier is selected. Qualified work takes precedence over pending evidence for the same policy unit. Repeated policy units produce internal review receipts; they never produce public accusations. A later reviewed exclusion reverses the affected calculation when the immutable dataset is replayed, including historical cutoffs.

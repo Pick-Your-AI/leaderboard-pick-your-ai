@@ -665,7 +665,7 @@ for (const predecessor of ["pair", "field"]) {
 }
 
 test("operator replay reconstructs both pair and field versions and rejects missing content markers", async (t) => {
-  const h = await mixedHarness(t, { operator: true, named: true });
+  const h = await mixedHarness(t, { operator: true, named: true, discoveryAuthority: true });
   const receipt = await queueOperatorReplay(h);
   assert.equal(await h.runtime.inbox.complete(await h.runtime.inbox.claim()), true);
   assert.equal(await h.runtime.dispatchOnce(), "processed");

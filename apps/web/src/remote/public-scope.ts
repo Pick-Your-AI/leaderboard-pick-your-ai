@@ -13,6 +13,7 @@ export function selectionScope(value: PublicScope): PublicScope {
     ...(value.context === undefined ? {} : { context: value.context }),
     ...(value.projects === undefined ? {} : { projects: value.projects }),
     ...(value.roles === undefined ? {} : { roles: value.roles }),
+    ...(value.branch === undefined ? {} : { branch: value.branch }),
   });
 }
 
@@ -31,14 +32,18 @@ export function responseScope(value: unknown, selected: PublicScope): PublicScop
 }
 
 export const scopeReadVersion = (scope: PublicScope) =>
-  scope.schemaVersion === "public-scope/v3"
-    ? "public-read/v3"
-    : scope.schemaVersion === "public-scope/v2"
-      ? "public-read/v2"
-      : "leaderboard/v1";
+  scope.schemaVersion === "public-scope/v4"
+    ? "public-read/v4"
+    : scope.schemaVersion === "public-scope/v3"
+      ? "public-read/v3"
+      : scope.schemaVersion === "public-scope/v2"
+        ? "public-read/v2"
+        : "leaderboard/v1";
 export const scopeExportVersion = (scope: PublicScope) =>
-  scope.schemaVersion === "public-scope/v3"
-    ? "public-export/v3"
-    : scope.schemaVersion === "public-scope/v2"
-      ? "public-export/v2"
-      : "public-export/v1";
+  scope.schemaVersion === "public-scope/v4"
+    ? "public-export/v5"
+    : scope.schemaVersion === "public-scope/v3"
+      ? "public-export/v3"
+      : scope.schemaVersion === "public-scope/v2"
+        ? "public-export/v2"
+        : "public-export/v1";

@@ -690,3 +690,17 @@ test("cross-kind conflict audit is metric-scoped and future counterparts cannot 
   closing.facts[0].observedAt = "2026-10-13T00:00:00Z";
   assert.deepEqual(quantity(calculate([reference, closing], "reference_links")), [["202", 1, "partial", null]]);
 });
+
+for (const definition of kinds) {
+  const { metricId } = definition;
+  test(`${metricId} keeps pair credits independent of merge-target branch scopes`, () => {
+    const input = frozen([normalizeGithubObservation(source(definition))]);
+    const before = stableJSON(input);
+    assert.deepEqual(quantity(aggregateMetric(input, policy(metricId), scope)), [["202", 1, "partial", null]]);
+    assert.throws(
+      () => aggregateMetric(input, policy(metricId), { ...scope, repos: ["2"], branch: "main" }),
+      /Merge-target filtering is unsupported for this metric/,
+    );
+    assert.equal(stableJSON(input), before);
+  });
+}

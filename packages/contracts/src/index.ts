@@ -20,6 +20,7 @@ export {
   publicScopeParameters,
   publicScopeSchemaVersion,
   publicRoleScopeSchemaVersion,
+  publicMergeTargetScopeSchemaVersion,
   publicScopeProjectLimit,
   publicScopeRoleLimit,
   publicContributionRoles,
@@ -210,3 +211,21 @@ export {
   type AcceptedFeedbackThread,
   type DiscussionFeedbackCapture,
 } from "./discussion-feedback.js";
+
+export {
+  githubPullRequestMergeTargetVersion,
+  pullRequestMergeTargetVersion,
+  pullRequestMergeTargetMetricIds,
+  supportsPullRequestMergeTarget,
+  isPullRequestMergeTargetBranch,
+  githubPullRequestMergeTargetUnknownReasons,
+  validateGithubPullRequestMergeTargetCaptureInput,
+  validateGithubPullRequestMergeTargetCapture,
+  validatePullRequestMergeTarget,
+  encodeGithubPullRequestMergeTargetCapture,
+  githubPullRequestMergeTargetHash,
+  verifyGithubPullRequestMergeTargetCapture,
+  type GithubPullRequestMergeTargetCaptureInput,
+  type GithubPullRequestMergeTargetCapture,
+  type PrMergeTarget,
+} from "./pull-request-merge-target.js";

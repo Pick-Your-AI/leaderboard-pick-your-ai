@@ -933,3 +933,111 @@ test("a captured custom provider cannot become builtin when its option is remove
   assert.deepEqual(await caches(h), []);
   assert.equal((await h.db.query("SELECT count(*)::int AS n FROM leaderboard_pipeline.snapshots")).rows[0].n, 0);
 });
+
+test("field provider compatibility is checked inside final visibility before exact same-cutoff recovery", async (t) => {
+  const h = await fieldHarness(t, "issue_field_changed", { includeIssueCreation: true, memoryDatabase: true });
+  const cutoff = clock();
+  let armed = false,
+    changed = false;
+  const databaseTransaction = h.db.transaction;
+  h.db.transaction = async (work) => {
+    let insertedSnapshot = false;
+    const result = await databaseTransaction((tx) =>
+      work({
+        query: async (sql, params) => {
+          const value = await tx.query(sql, params);
+          insertedSnapshot ||= /INSERT\s+INTO\s+leaderboard_pipeline\.snapshots/i.test(sql);
+          return value;
+        },
+      }),
+    );
+    if (insertedSnapshot) armed = true;
+    return result;
+  };
+  const controlsTransaction = h.controlsStore.transaction.bind(h.controlsStore);
+  h.controlsStore.transaction = (work, options) =>
+    controlsTransaction((state) => {
+      if (armed && !changed) {
+        delete h.options.fieldChangeNormalizationVersion;
+        changed = true;
+      }
+      return work(state);
+    }, options);
+
+  await assert.rejects(h.runtime.runOnce({ cutoff }), /field_change_normalizer_version_unverified/);
+  assert.equal(changed, true, "the declaration is lost inside final SQLite visibility, after SQL commits");
+  const saved = (await h.db.query("SELECT * FROM leaderboard_pipeline.snapshots")).rows;
+  const frozen = (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs")).rows;
+  const savedCaches = await caches(h);
+  const savedSource = await sourceRow(h);
+  const hydrations = h.state.hydrations;
+  assert.equal(saved.length, 1);
+  assert.equal(frozen.length, 1);
+  assert.equal(savedCaches.length, 1);
+  assert.equal(fieldRows(savedCaches).length, 1);
+  assert.equal(hydrations, 1, "the real selected normalizer produced the field claim");
+  assert.deepEqual(h.controlsStore.read().pipelinePublications ?? {}, {});
+  assert.deepEqual(h.controlsStore.read().pipelineHeads ?? {}, {});
+  assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM policy_preview_inputs").get().n, 0);
+  assert.equal(h.controlsStore.db.prepare("SELECT count(*) AS n FROM pipeline_aggregate_explanations").get().n, 0);
+  assert.notEqual((await h.runtime.app.inject(paths(h.metric)[0])).statusCode, 200);
+
+  h.options.fieldChangeNormalizationVersion = version;
+  const recovered = (await h.runtime.runOnce({ cutoff })).publications[0];
+  assert.equal(recovered.snapshotId, saved[0].snapshot_id);
+  assert.equal(h.state.hydrations, hydrations, "same-cutoff recovery reuses only the still-current exact cache");
+  assert.deepEqual((await h.db.query("SELECT * FROM leaderboard_pipeline.snapshots")).rows, saved);
+  assert.deepEqual((await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs")).rows, frozen);
+  assert.deepEqual(await caches(h), savedCaches);
+  assert.deepEqual(await sourceRow(h), savedSource);
+  assert.equal(
+    h.controlsStore.read().pipelinePublications[recovered.snapshotId].fieldChangeNormalizationVersion,
+    version,
+  );
+  await assertField(h.runtime, h.metric, 1, recovered.snapshotId);
+});
+
+test("confirmed field dispatch retains immutable authority after its producer declaration disappears", async (t) => {
+  const h = await fieldHarness(t, "issue_field_changed", { includeIssueCreation: true, webhookDispatch: true });
+  assert.equal(await h.runtime.collection.verifyPublic(2, 1, null), true);
+  await insertDelivery(h, 906);
+  h.runtime.outbox.complete = h.runtime.outbox.fail = async () => {
+    throw Error("synthetic field declaration acknowledgment loss");
+  };
+  await assert.rejects(h.runtime.dispatchOnce(), /synthetic field declaration acknowledgment loss/);
+  const first = await savedPublication(h);
+  const confirmation = structuredClone(h.controlsStore.read().pipelinePublications[first.snapshotId]);
+  assert.equal(confirmation.fieldChangeNormalizationVersion, version);
+  const saved = (await h.db.query("SELECT * FROM leaderboard_pipeline.snapshots")).rows;
+  const frozen = (await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs")).rows;
+  const savedCaches = await caches(h);
+  const hydrations = h.state.hydrations;
+  const request = previewRequest(h, first.snapshotId);
+  const preview = await h.runtime.previewPolicy(request);
+  await h.db.query(
+    "UPDATE leaderboard_ingestion.outbox SET lease_until=clock_timestamp()-interval '1 second' WHERE state='leased'",
+  );
+  delete h.options.fieldChangeNormalizationVersion;
+
+  await restart(h, async (runtime, controlsStore) => {
+    assert.equal(await runtime.dispatchOnce(), "processed");
+    assert.deepEqual(controlsStore.read().pipelinePublications[first.snapshotId], confirmation);
+    assert.deepEqual(
+      controlsStore.read().pipelineHeads[components.contracts.publicScopeKey(publicScope)],
+      confirmation,
+    );
+    assert.equal(
+      h.state.hydrations,
+      hydrations,
+      "acknowledging confirmed history does not invoke the withdrawn producer",
+    );
+    assert.deepEqual((await h.db.query("SELECT * FROM leaderboard_pipeline.snapshots")).rows, saved);
+    assert.deepEqual((await h.db.query("SELECT * FROM leaderboard_pipeline.frozen_inputs")).rows, frozen);
+    assert.deepEqual(await caches(h), savedCaches);
+    assert.equal((await h.db.query("SELECT state FROM leaderboard_ingestion.outbox")).rows[0].state, "done");
+    await assertField(runtime, h.metric, 1, first.snapshotId);
+    assert.deepEqual(await runtime.previewPolicy(request), preview);
+    await assert.rejects(runtime.runOnce(), /field_change_normalizer_version_unverified/);
+    await assertField(runtime, h.metric, 1, first.snapshotId);
+  });
+});
