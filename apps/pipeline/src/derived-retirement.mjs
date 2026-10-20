@@ -46,6 +46,13 @@ function request(value) {
     operatorId: value.operatorId,
   });
 }
+export function validateDerivedErasureBatch(batchId, limit) {
+  check(
+    token(batchId) && Number.isInteger(limit) && limit >= 1 && limit <= derivedRetirementLimits.records,
+    "invalid_derived_erasure_batch",
+  );
+}
+
 async function authorized(authorize, value) {
   check(typeof authorize === "function" && (await authorize(value)) === true, "retirement_not_authorized");
 }
@@ -241,6 +248,48 @@ const sqliteStages = Object.freeze({
   preview_inputs: { table: "policy_preview_inputs", key: "id" },
   explanations: { table: "pipeline_aggregate_explanations", key: "snapshot_id" },
 });
+const progressColumns = `m.batch_id,m.batch_limit,m.document_hash AS manifest_hash,
+  r.document_hash AS receipt_hash,
+  LEFT(r.document->>'schemaVersion',129) AS receipt_schema,
+  LEFT(r.document->>'operationId',129) AS receipt_operation,
+  LEFT(r.document->>'repositoryId',17) AS receipt_repository,
+  LEFT(r.document->>'batchId',129) AS receipt_batch,
+  LEFT(r.document->>'manifestHash',65) AS receipt_manifest,
+  LEFT(r.document->>'stage',65) AS receipt_stage,
+  LEFT(r.document->>'status',33) AS receipt_status`;
+const progressStages = new Set([
+  ...Object.keys(postgresStages),
+  ...Object.keys(sqliteStages),
+  "register_snapshot",
+  "confirmations",
+  "complete",
+  "retained_dispatch_authority",
+]);
+function progressBatch(row, value) {
+  validateDerivedErasureBatch(row.batch_id, row.batch_limit);
+  check(isHash(row.manifest_hash));
+  let receipt = null;
+  if (row.receipt_hash !== null) {
+    check(
+      isHash(row.receipt_hash) &&
+        row.receipt_schema === schema &&
+        row.receipt_operation === value.operationId &&
+        row.receipt_repository === String(value.repositoryId) &&
+        row.receipt_batch === row.batch_id &&
+        row.receipt_manifest === row.manifest_hash &&
+        progressStages.has(row.receipt_stage) &&
+        row.receipt_status ===
+          (row.receipt_stage === "complete"
+            ? "owned_scope_erased"
+            : row.receipt_stage === "retained_dispatch_authority"
+              ? "blocked"
+              : "applied"),
+    );
+    receipt = { hash: row.receipt_hash, stage: row.receipt_stage, status: row.receipt_status };
+  }
+  return { batchId: row.batch_id, limit: row.batch_limit, manifestHash: row.manifest_hash, receipt };
+}
+
 async function indexedStorage(tx) {
   // Keep this transaction's legacy/v2 decision valid through manifest selection
   // and application. The migrator holds the conflicting exclusive table locks.
@@ -402,12 +451,87 @@ export class PipelineDerivedRetirementStore {
     return { ...authority, status: "derived_writes_fenced", meaning: "Admission is not a payload-removal receipt." };
   }
 
-  async eraseBatch(input, batchId, limit, authorize) {
+  /** Exact-operation metadata only; replay eraseBatch to obtain a verified receipt. */
+  async readProgress(input, authorize, options = {}) {
     const value = request(input);
     check(
-      token(batchId) && Number.isInteger(limit) && limit >= 1 && limit <= derivedRetirementLimits.records,
-      "invalid_derived_erasure_batch",
+      options !== null &&
+        typeof options === "object" &&
+        !Array.isArray(options) &&
+        Object.keys(options).length <= 1 &&
+        Object.keys(options).every((key) => key === "batchId" || key === "afterBatchId"),
+      "invalid_derived_progress_cursor",
     );
+    const exact = Object.hasOwn(options, "batchId");
+    const after = Object.hasOwn(options, "afterBatchId");
+    if (exact) validateDerivedErasureBatch(options.batchId, 1);
+    if (after) validateDerivedErasureBatch(options.afterBatchId, 1);
+    return this.#transact(value, authorize, async (tx, authority) => {
+      const admission = (
+        await tx.query(
+          "SELECT repository_id,authority_hash,source_generation FROM leaderboard_pipeline.derived_retirements" +
+            " WHERE operation_id=$1",
+          [value.operationId],
+        )
+      ).rows[0];
+      if (admission)
+        check(
+          String(admission.repository_id) === String(value.repositoryId) &&
+            admission.authority_hash === authority.authorityHash &&
+            String(admission.source_generation) === authority.sourceGeneration,
+          "retirement_operation_conflict",
+        );
+      if (exact) {
+        const row = (
+          await tx.query(
+            "SELECT " +
+              progressColumns +
+              " FROM leaderboard_pipeline.derived_retirement_manifests m" +
+              " LEFT JOIN leaderboard_pipeline.derived_retirement_receipts r USING(operation_id,batch_id)" +
+              " WHERE m.operation_id=$1 AND m.batch_id=$2",
+            [value.operationId, options.batchId],
+          )
+        ).rows[0];
+        check(!row || admission, "retirement_operation_conflict");
+        return {
+          ...authority,
+          admitted: Boolean(admission),
+          batch: row ? progressBatch(row, value) : null,
+          entries: [],
+          nextCursor: null,
+        };
+      }
+      // Select the bounded primary-key page before the receipt join. Filtering
+      // for pending work before LIMIT would scan an unbounded completed history.
+      const page = (
+        await tx.query(
+          "WITH page AS MATERIALIZED (" +
+            "SELECT operation_id,batch_id,batch_limit,document_hash" +
+            " FROM leaderboard_pipeline.derived_retirement_manifests WHERE operation_id=$1" +
+            (after ? " AND batch_id>$2" : "") +
+            " ORDER BY batch_id LIMIT 65)" +
+            " SELECT " +
+            progressColumns +
+            " FROM page m LEFT JOIN leaderboard_pipeline.derived_retirement_receipts r" +
+            " USING(operation_id,batch_id) ORDER BY m.batch_id",
+          after ? [value.operationId, options.afterBatchId] : [value.operationId],
+        )
+      ).rows;
+      check(!page.length || admission, "retirement_operation_conflict");
+      const entries = page.slice(0, 64).map((row) => progressBatch(row, value));
+      return {
+        ...authority,
+        admitted: Boolean(admission),
+        batch: null,
+        entries,
+        nextCursor: page.length > 64 ? entries.at(-1).batchId : null,
+      };
+    });
+  }
+
+  async eraseBatch(input, batchId, limit, authorize) {
+    const value = request(input);
+    validateDerivedErasureBatch(batchId, limit);
     await this.admit(value, authorize);
     const retained = await this.#transact(value, authorize, async (tx, _authority, indexed) => {
       const prior = (

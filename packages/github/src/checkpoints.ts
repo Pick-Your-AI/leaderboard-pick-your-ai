@@ -24,9 +24,19 @@ export interface RepositoryCheckpointRetirementReceipt extends RepositoryCheckpo
   legacyUnscopedPayloads: "outside_scope";
 }
 
+export interface RepositoryCheckpointRetirementPreflight extends RepositoryCheckpointRetirementBinding {
+  schemaVersion: "repository-checkpoint-retirement-preflight/v1";
+  repositoryId: number;
+  state: "active" | "fenced";
+}
+
 export interface RepositoryCheckpointStore extends CheckpointStore {
   readonly repositoryId: number;
   assertActive(): Promise<void>;
+  /** Optional capability for protected drivers; existing scoped clients remain compatible. */
+  preflightRetirement?(
+    binding: RepositoryCheckpointRetirementBinding,
+  ): Promise<RepositoryCheckpointRetirementPreflight>;
   /** The protected host must authorize this exact binding before calling retirement. */
   retire(binding: RepositoryCheckpointRetirementBinding): Promise<RepositoryCheckpointRetirementReceipt>;
 }
@@ -80,6 +90,8 @@ function binding(value: RepositoryCheckpointRetirementBinding): RepositoryCheckp
     throw new Error("invalid_repository_checkpoint_retirement");
   return { operationId: value.operationId, policyId: value.policyId, authorizationId: value.authorizationId };
 }
+
+export { binding as validateRepositoryCheckpointRetirementBinding };
 
 function contains(parent: string, child: string): boolean {
   const path = relative(parent, child);
@@ -291,6 +303,18 @@ export class FileCheckpointStore implements CheckpointStore {
         await file.close();
       }
     };
+    const requireBinding = (
+      prior: RepositoryCheckpointTombstone | undefined,
+      approved: RepositoryCheckpointRetirementBinding,
+    ) => {
+      if (
+        !prior ||
+        prior.operationId !== approved.operationId ||
+        prior.policyId !== approved.policyId ||
+        prior.authorizationId !== approved.authorizationId
+      )
+        throw new Error("repository_checkpoint_retirement_conflict");
+    };
     const assertActive = async () => {
       await locations();
       if (await readMarker()) throw new Error("repository_checkpoint_retired");
@@ -312,6 +336,23 @@ export class FileCheckpointStore implements CheckpointStore {
           const serialized = encode(value, this.maxBytes);
           await replace(join(payload, `${createHash("sha256").update(key).digest("hex")}.json`), serialized);
         }),
+      preflightRetirement: async (requested: RepositoryCheckpointRetirementBinding) => {
+        const approved = binding(requested);
+        return queue(async () => {
+          await locations();
+          const prior = await readMarker();
+          if (prior) requireBinding(prior, approved);
+          await directoryIfPresent(namespace);
+          await directoryIfPresent(payload);
+          const result: RepositoryCheckpointRetirementPreflight = {
+            schemaVersion: "repository-checkpoint-retirement-preflight/v1",
+            repositoryId,
+            ...approved,
+            state: prior ? "fenced" : "active",
+          };
+          return result;
+        });
+      },
       retire: async (requested: RepositoryCheckpointRetirementBinding) => {
         const approved = binding(requested);
         return queue(async () => {
@@ -342,13 +383,7 @@ export class FileCheckpointStore implements CheckpointStore {
             }
             prior = await readMarker();
           }
-          if (
-            !prior ||
-            prior.operationId !== approved.operationId ||
-            prior.policyId !== approved.policyId ||
-            prior.authorizationId !== approved.authorizationId
-          )
-            throw new Error("repository_checkpoint_retirement_conflict");
+          requireBinding(prior, approved);
           // Also sync on retries: a previous attempt may have stopped after linking its marker.
           await syncDirectory(this.tombstoneDirectory);
           await directoryIfPresent(namespace);
