@@ -796,6 +796,11 @@ test("operations: unaffected automatic metrics retain prior fingerprints while m
   for (const definition of metricRegistryV1.metrics) {
     if (metrics.includes(definition.id)) continue;
     const bindings = [{ ...s.binding, metricId: definition.id }];
+    if (definition.id === "helpful_feedback") {
+      for (const state of [s.state, empty])
+        assert.throws(() => recognitionFingerprint(state, bindings), /invalid_discussion_feedback_contract/);
+      continue;
+    }
     assert.notEqual(recognitionFingerprint(s.state, bindings), priorAuthority(s.state, bindings));
     if (["release_changes", "issue_ordering", "release_stewardship"].includes(definition.id))
       assert.notEqual(recognitionFingerprint(empty, bindings), priorAuthority(empty, bindings));

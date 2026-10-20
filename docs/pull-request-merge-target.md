@@ -51,6 +51,8 @@ The browser's **Merge target at merge** field preserves the literal name. Boards
 
 Branch scopes serialize as `public-scope/v4`, with explicit membership context, Project union, role union and branch. Reads use `public-read/v4`; JSON and CSV exports use `public-export/v5`. CSV includes a dedicated branch column, including empty exports. Existing captured ranking presentation may accompany v5, with its original policy identity. The new version does not reinterpret v1–v4 exports. Without a branch, the previous five-field, v2/v3 scopes and all legacy key/export formats remain unchanged.
 
+The v5 CSV branch column doubles a literal leading apostrophe before the existing formula-safety escaping. Its reader reverses that dedicated escape and requires its canonical encoding, so a real branch such as `'=main` remains distinct from `=main`. Formula-like names stay protected for spreadsheet import, and the parsed branch must still match the exact selected scope. This rule applies only to the new branch column; legacy CSV columns and JSON branch strings are unchanged.
+
 ## Verification and remaining acceptance
 
 Focused source tests cover strict native event selection, no current-ref fallback, retained digest/fact binding, a real collector→normalizer→persisted publication→public board/proof/export journey, unknown-to-known refresh, immutable frozen retries, empty-board dependency withdrawal, exact scope/cursor/navigation identity, unsupported queries and legacy serialization controls. Test execution and hosted results must be reported against their actual source; these examples are synthetic and do not prove production access or deployment.

@@ -4,6 +4,7 @@ import {
   sourceEventSchema,
   maintenanceClassificationVersion,
   documentationPurposeVersion,
+  acceptedFeedbackThreadsVersion,
 } from "@pick-your-ai/contracts";
 import {
   validateAutomationSource,
@@ -17,6 +18,7 @@ import {
   validateMaintenanceClassificationBinding,
 } from "./maintenance-classification.mjs";
 import { qualifyDocumentationPurpose, validateDocumentationPurposeBinding } from "./documentation-purpose.mjs";
+import { qualifyHelpfulFeedback, validateHelpfulFeedbackBinding } from "./helpful-feedback.mjs";
 import {
   domainDateBasis,
   qualifyDomainRecognition,
@@ -38,6 +40,7 @@ export function recognitionFingerprint(state, bindings = []) {
   for (const binding of bindings) {
     validateMaintenanceClassificationBinding(binding);
     validateDocumentationPurposeBinding(binding);
+    validateHelpfulFeedbackBinding(binding);
   }
   const requests = Object.values(state.requests ?? {})
     .filter((r) => r.kind === "evidence")
@@ -97,6 +100,8 @@ export function recognitionFingerprint(state, bindings = []) {
     authority.push("release-inclusion-recognition/v2");
   // Even an empty current intake must retire the former generic ordering authority.
   if (bindings.some((binding) => binding.metricId === "issue_ordering")) authority.push("reviewed-ordering-plan/v1");
+  if (bindings.some((binding) => binding.metricId === "helpful_feedback"))
+    authority.push(acceptedFeedbackThreadsVersion);
   // Earlier same-metric receipts lacked original publication/clock/unit admission.
   // Retire only this destination; unrelated source and receipt authority stay exact.
   if (bindings.some((binding) => binding.metricId === "release_stewardship"))
@@ -135,7 +140,7 @@ export function materializeRecognition(
   cutoff,
   publicReasons = () => [],
 ) {
-  if (bindings.some((binding) => binding.metricId === "issue_ordering")) {
+  if (bindings.some((binding) => ["issue_ordering", "helpful_feedback"].includes(binding.metricId))) {
     // Freeze the invocation before any host receipt callback can change a later
     // source, claim, scope enrollment or policy used by this same evaluation.
     input = structuredClone(input);
@@ -144,6 +149,13 @@ export function materializeRecognition(
     policies = structuredClone(policies);
   }
   for (const binding of bindings) validateDocumentationPurposeBinding(binding);
+  for (const binding of bindings) validateHelpfulFeedbackBinding(binding);
+  // Invocation snapshots may preserve aliases between bindings or source
+  // records. A callback gets detached arguments, never an authority reference
+  // that it could mutate before a later request is admitted.
+  const invokeReceipt = (current, receipt, reviewers) =>
+    applyReceipt(current, structuredClone(receipt), structuredClone(reviewers));
+  const recognitionReasons = (contribution) => structuredClone(publicReasons(structuredClone(contribution)));
   let output = structuredClone(input);
   const domainUnits = new Set();
   const projectChangesets = new Map();
@@ -155,6 +167,8 @@ export function materializeRecognition(
   const reviewedOperationArtifacts = new Map();
   const orderingPlans = new Map();
   const orderingJobs = [];
+  const feedbackJobs = [];
+  const feedbackUnits = new Set();
   const decisionTime = (request) => {
     const at = request.history?.findLast((event) => event.action === "accepted")?.at;
     const time = typeof at === "number" ? at : typeof at === "string" ? Date.parse(at) : NaN;
@@ -200,7 +214,7 @@ export function materializeRecognition(
         ![locale.policyVersion, locale.locale, locale.category].every((value) => typeof value === "string")
       )
         throw new Error("invalid_localization_binding");
-      localeReasons = publicReasons({
+      localeReasons = recognitionReasons({
         metricIds: ["localization"],
         reasonCodes: [
           `documentation_path_policy:${locale.policyVersion}`,
@@ -214,12 +228,19 @@ export function materializeRecognition(
       binding.metricId,
     )
       ? "occurredAt"
-      : domainDateBasis(binding.metricId);
+      : binding.metricId === "helpful_feedback"
+        ? "acceptedAt"
+        : domainDateBasis(binding.metricId);
     if (
       !policies.some(
         (p) =>
           p.policy.metricId === binding.metricId &&
           p.policy.version === binding.policyVersion &&
+          (binding.metricId !== "helpful_feedback" ||
+            (p.policy.aggregation === "count" &&
+              p.policy.groupingPolicyVersion === acceptedFeedbackThreadsVersion &&
+              p.policy.roles?.length === 1 &&
+              p.policy.roles[0] === "author")) &&
           (binding.metricId !== "release_changes" ||
             (p.policy.groupingPolicyVersion === "release-inclusion-units/v1" &&
               p.policy.roles?.length === 1 &&
@@ -329,10 +350,18 @@ export function materializeRecognition(
             e.artifact.visibility === "public" &&
             (localeTarget === null ||
               (e.sourceRevision === localeTarget.sourceRevision && e.occurredAt === f.occurredAt)) &&
-            (localeReasons === null || JSON.stringify(publicReasons(e.contribution)) === JSON.stringify(localeReasons)),
+            (localeReasons === null ||
+              JSON.stringify(recognitionReasons(e.contribution)) === JSON.stringify(localeReasons)),
         ),
     );
-    if (!candidates.length) continue;
+    if (!candidates.length) {
+      if (
+        binding.metricId === "helpful_feedback" &&
+        input.discussionFeedbackRepositoryIds?.includes(Number(binding.repositoryId))
+      )
+        throw new Error("discussion_feedback_source_unverified");
+      continue;
+    }
     if (candidates.length !== 1) throw new Error("ambiguous_recognition_target");
     // Check after uniqueness: chronology must not silently select one of two
     // matching facts. Unknown source time supplies no invented lower bound.
@@ -363,6 +392,25 @@ export function materializeRecognition(
         proof.contribution.actorId !== target.actorId
       )
         throw new Error("recognition_source_unverified");
+    }
+    const feedback = qualifyHelpfulFeedback({
+      input,
+      request,
+      decision,
+      binding,
+      candidate: candidates[0],
+      acceptedAt,
+      cutoff,
+    });
+    if (feedback) {
+      // Every alias has passed the original/current observation, audit, policy,
+      // consent and clock boundary before any helpful-feedback host callback.
+      // Only then does accepted-time ordering choose one author/thread receipt.
+      if (!feedbackUnits.has(feedback.unit)) {
+        feedbackUnits.add(feedback.unit);
+        feedbackJobs.push({ feedback, decision, binding, request, target: candidates[0], acceptedAt });
+      }
+      continue;
     }
     // Validate source authority before even a host-supplied receipt callback.
     const mergedChange =
@@ -445,7 +493,7 @@ export function materializeRecognition(
     }
     const previousFacts = output.facts.length;
     const previousEvidence = output.evidence.length;
-    output = applyReceipt(
+    output = invokeReceipt(
       output,
       {
         id: decision.id,
@@ -487,9 +535,27 @@ export function materializeRecognition(
       }
     }
   }
+  for (const { feedback, decision, binding, request, target, acceptedAt } of feedbackJobs) {
+    output = invokeReceipt(
+      output,
+      {
+        id: decision.id,
+        verified: true,
+        targetFactId: target.id,
+        metricId: "helpful_feedback",
+        actorId: request.owner,
+        reviewerId: decision.actor,
+        acceptedAt,
+        decision: "accepted",
+        evidenceIds: [target.id],
+        helpfulFeedback: feedback.review,
+      },
+      binding.reviewerIds,
+    );
+  }
   for (const { domain, decision, binding, request, target, acceptedAt } of orderingJobs) {
     const previousEvidence = output.evidence.length;
-    output = applyReceipt(
+    output = invokeReceipt(
       output,
       {
         id: decision.id,
@@ -513,7 +579,7 @@ export function materializeRecognition(
   for (const entry of output.evidence.slice(input.evidence.length))
     entry.contribution.reasonCodes = [
       ...(domainReasons.get(entry.contribution.contributionId) ?? ["independent_recognition_receipt"]),
-      ...publicReasons(entry.contribution),
+      ...recognitionReasons(entry.contribution),
     ];
   return output;
 }

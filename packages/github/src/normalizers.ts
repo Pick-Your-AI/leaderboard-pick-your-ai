@@ -21,11 +21,21 @@ import {
   type PublicEvidenceAction,
   physicalMetricIds,
   type GithubPhysicalContextReceipt,
+  type DiscussionFeedbackObservation,
+  type DiscussionFeedbackSource,
+  type AcceptedFeedbackThread,
+  discussionFeedbackFields,
+  parseDiscussionFeedbackSource,
   supportsPullRequestMergeTarget,
   validatePullRequestMergeTarget,
   type PrMergeTarget,
   type GithubPullRequestMergeTargetCapture,
 } from "@pick-your-ai/contracts";
+import {
+  verifyDiscussionFeedbackObservation,
+  discussionFeedbackPublicRevision,
+  validateHelpfulFeedbackSource,
+} from "./discussion-feedback.js";
 import { physicalContextReceipt } from "./physical-context.js";
 import { GithubReadClient } from "./client.js";
 import { readGithubCommentSource, readGithubCommentIdentity } from "./comment-identity.js";
@@ -322,6 +332,12 @@ export interface GithubIssueCreationScope {
 }
 export interface NormalizedGithubResult {
   isSynthetic: boolean;
+  /** Private observed content and coverage proof; never public evidence metadata. */
+  discussionFeedbackSources?: readonly DiscussionFeedbackSource[];
+  /** Exact original collection observations loaded from protected storage for review. */
+  discussionFeedbackOriginals?: readonly DiscussionFeedbackSource[];
+  /** Exact protected scope of the current feedback projection, including empty repositories. */
+  discussionFeedbackRepositoryIds?: readonly number[];
   /** Private provenance retained when the pipeline combines observation results. */
   syntheticFactIds?: readonly string[];
   /** Private output of the bounded authorized release collector. */
@@ -1599,6 +1615,8 @@ export interface VerifiedRecognitionReceipt {
   /** Audited manual-ordering claim and independently configured source scope. */
   ordering?: OrderingReview;
   orderingAuthority?: OrderingSourceAuthority;
+  /** Closed original observation reviewed through the protected evidence intake. */
+  helpfulFeedback?: AcceptedFeedbackThread;
 }
 const receiptMetrics = new Set([
   "catalog_proposals",
@@ -1641,6 +1659,7 @@ const receiptMetrics = new Set([
   "onboarding",
   "project_configuration",
   "issue_ordering",
+  "helpful_feedback",
 ]);
 function verifiedOrderingReceipt(
   input: NormalizedGithubResult,
@@ -1785,19 +1804,35 @@ export function applyRecognitionReceipt(
     receipt.metricId === "issue_ordering" && receipt.decision === "accepted"
       ? verifiedOrderingReceipt(input, receipt, authorizedReviewerIds)
       : null;
-  const unit = ordering
-    ? ordering.unit
-    : release
-      ? release.membershipUnit
-      : documentationUnit
-        ? documentationUnit
-        : mergedChange
-          ? mergedChange.unit
-          : stewardship
-            ? stewardship.unit
-            : receipt.metricId === "localization"
-              ? target.canonicalKey
-              : (receipt.changesetId ?? target.canonicalKey);
+  if (
+    receipt.helpfulFeedback !== undefined &&
+    (receipt.metricId !== "helpful_feedback" || receipt.decision !== "accepted")
+  )
+    throw new Error("discussion_feedback_source_unverified");
+  const feedback =
+    receipt.metricId === "helpful_feedback"
+      ? validateHelpfulFeedbackSource(input, target.id, receipt.acceptedAt, receipt.helpfulFeedback)
+      : null;
+  if (
+    feedback &&
+    (receipt.decision !== "accepted" || receipt.evidenceIds.length !== 1 || receipt.evidenceIds[0] !== target.id)
+  )
+    throw new Error("discussion_feedback_source_unverified");
+  const unit = feedback
+    ? feedback.unit
+    : ordering
+      ? ordering.unit
+      : release
+        ? release.membershipUnit
+        : documentationUnit
+          ? documentationUnit
+          : mergedChange
+            ? mergedChange.unit
+            : stewardship
+              ? stewardship.unit
+              : receipt.metricId === "localization"
+                ? target.canonicalKey
+                : (receipt.changesetId ?? target.canonicalKey);
   if (receipt.metricId === "localization" && target.state !== "observed")
     throw new Error("Localization acceptance must target its original observed source fact");
   if (
@@ -1920,6 +1955,7 @@ export interface CollectionNormalizerInput {
     issueFieldId?: string;
     projectSubjectId?: string;
     contentEditMetadata?: ContentEditMetadata;
+    discussionFeedback?: DiscussionFeedbackObservation;
     sourceRevision: string;
     sourceUrl: string;
     evidence: "current_state" | "observed_transition";
@@ -1941,6 +1977,9 @@ export interface GithubEvidenceNormalizerOptions {
   enrich?: (input: CollectionNormalizerInput) => Promise<GithubEvidenceEnvelope | null>;
   /** Collection adapters may use opaque revisions; verify those through their trusted provenance store. */
   verifyRevision?: (input: CollectionNormalizerInput, payload: unknown) => Promise<boolean>;
+  /** Protected store verifies this exact minimized collection row and completed scan.
+   * A descriptor alone, an adapter flag or ordinary Discussion capability is insufficient. */
+  verifyDiscussionFeedbackSource?: (input: CollectionNormalizerInput) => Promise<boolean>;
   acceptance?: (
     input: CollectionNormalizerInput,
     normalized: NormalizedGithubResult,
@@ -2049,6 +2088,107 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
       return none("hydrated_source_revision_unverified");
     let repositoryClient: GithubReadClient | undefined;
     const client = () => (repositoryClient ??= options.client.forRepository(input.repository.id));
+    if (input.fact.discussionFeedback !== undefined || input.fact.sourceRevision.startsWith("gdf")) {
+      discussionFeedbackFields(input.fact, [
+        "subjectId",
+        "sourceRevision",
+        "sourceUrl",
+        "evidence",
+        "actorId",
+        "occurredAt",
+        "state",
+        "discussionFeedback",
+      ]);
+      const captured = detachedCollectionInput(input);
+      const metadata = verifyDiscussionFeedbackObservation(
+        captured.fact.discussionFeedback,
+        captured.fact.sourceRevision,
+      );
+      parseDiscussionFeedbackSource({
+        metadata,
+        sourceRevision: captured.fact.sourceRevision,
+        observedAt: captured.observedAt,
+        selectedCurrentState: captured.selectedCurrentState === true,
+      });
+      const descriptor = metadata.descriptor;
+      if (
+        captured.family !== "discussions" ||
+        captured.fact.evidence !== "current_state" ||
+        captured.fact.actorId !== null ||
+        captured.fact.occurredAt !== null ||
+        captured.fact.state !== "present" ||
+        descriptor.repositoryId !== captured.repository.id ||
+        descriptor.discussionId !== captured.fact.subjectId ||
+        descriptor.threadUrl !== captured.fact.sourceUrl ||
+        !descriptor.threadUrl.startsWith(`https://github.com/${captured.repository.slug}/discussions/`) ||
+        descriptor.updatedAt > captured.observedAt ||
+        (descriptor.answer !== null && descriptor.answer.updatedAt > captured.observedAt) ||
+        typeof options.verifyDiscussionFeedbackSource !== "function"
+      )
+        throw new Error("discussion_feedback_source_unverified");
+      options.assertAuthorized?.();
+      if ((await options.verifyDiscussionFeedbackSource(detachedCollectionInput(captured))) !== true)
+        throw new Error("discussion_feedback_source_unverified");
+      options.assertAuthorized?.();
+      // This already-observed native metadata does not require a second content
+      // read. Every content observation is owned by the durable scan generation.
+      const nativeActor = (value: typeof descriptor.author) =>
+        value === null
+          ? null
+          : {
+              __typename: value.kind,
+              id: value.id,
+              databaseId: value.databaseId,
+              login: value.login,
+            };
+      const normalized = normalizeGithubObservation({
+        repository: { id: captured.repository.id, slug: captured.repository.slug, visibility: "public" },
+        proof: {
+          verified: true,
+          source: "github_graphql",
+          revision: captured.fact.sourceRevision,
+          isSynthetic: options.isSynthetic === true,
+        },
+        family: "discussion",
+        action: "snapshot",
+        observedAt: captured.observedAt,
+        payload: {
+          id: descriptor.discussionId,
+          url: descriptor.threadUrl,
+          createdAt: descriptor.createdAt,
+          updatedAt: descriptor.updatedAt,
+          author: nativeActor(descriptor.author),
+          answerChosenAt: descriptor.answerChosenAt,
+          answerChosenBy: nativeActor(descriptor.answerChosenBy),
+          answer:
+            descriptor.answer === null
+              ? null
+              : {
+                  id: descriptor.answer.id,
+                  isAnswer: true,
+                  createdAt: descriptor.answer.createdAt,
+                  author: nativeActor(descriptor.answer.author),
+                },
+        },
+        ...(captured.selectedCurrentState ? { discussionAnswerSelection: { verified: true as const } } : {}),
+        ...(options.reviewedServiceAccounts === undefined
+          ? {}
+          : { reviewedServiceAccounts: options.reviewedServiceAccounts }),
+        ...(options.authorizedClassifierIds === undefined
+          ? {}
+          : { authorizedClassifierIds: options.authorizedClassifierIds }),
+      });
+      normalized.discussionFeedbackSources = [
+        {
+          metadata,
+          sourceRevision: captured.fact.sourceRevision,
+          observedAt: captured.observedAt,
+          selectedCurrentState: captured.selectedCurrentState === true,
+        },
+      ];
+      for (const evidence of normalized.evidence) evidence.sourceRevision = discussionFeedbackPublicRevision(metadata);
+      return normalized;
+    }
     if (
       input.fact.contentEditMetadata !== undefined ||
       (typeof input.fact.sourceRevision === "string" && input.fact.sourceRevision.startsWith("gh-content-edit-"))

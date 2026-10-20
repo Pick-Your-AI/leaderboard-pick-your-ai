@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import type { SqlDatabase, SqlSession } from "./store.js";
 import { collectionContentEditMetadata, type ContentEditMetadata } from "./content-edit-metadata.js";
+import { collectionDiscussionFeedback } from "./discussion-feedback.js";
+import type { DiscussionFeedbackObservation } from "@pick-your-ai/contracts";
 
 export const sourceFamilies = [
   "issues",
@@ -36,6 +38,8 @@ export interface SourceFact {
   projectSubjectId?: string;
   /** Private native-parent metadata, never transition or recognition evidence. */
   contentEditMetadata?: ContentEditMetadata;
+  /** Private content fingerprints and complete-observation generation; never raw text. */
+  discussionFeedback?: DiscussionFeedbackObservation;
   sourceRevision: string;
   sourceUrl: string;
   /** Snapshot state never establishes a transition's actor or occurrence time. */
@@ -90,6 +94,7 @@ function validateScanRequest(request: ScanRequest): void {
 }
 function normalizeFact(value: SourceFact, family: SourceFamily): SourceFact {
   const contentEditMetadata = collectionContentEditMetadata(value, family);
+  const discussionFeedback = collectionDiscussionFeedback(value, family);
   id(value.subjectId);
   if (value.historySubjectId !== undefined) id(value.historySubjectId);
   if (value.issueFieldId !== undefined) {
@@ -138,7 +143,10 @@ function normalizeFact(value: SourceFact, family: SourceFamily): SourceFact {
     occurredAt: value.occurredAt,
     state: value.state,
     ...(contentEditMetadata !== undefined ? { contentEditMetadata } : {}),
+    ...(discussionFeedback !== undefined ? { discussionFeedback } : {}),
   };
+  if (discussionFeedback === undefined && normalized.sourceRevision.startsWith("gdf"))
+    throw new Error("invalid_discussion_feedback_source_fact");
   // Check the captured value, including legacy inherited/accessor properties, without rereading the input.
   if (
     contentEditMetadata === undefined &&
