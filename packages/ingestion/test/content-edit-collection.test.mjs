@@ -541,3 +541,138 @@ test("late host authorization rolls back metadata and keeps repository locking b
   assert.equal(JSON.stringify(run).includes("PRIVATE AUTHORIZATION"), false);
   await noDerivedEffects();
 });
+
+test("metadata-only expected count stays unknown after provider mutation during the first transaction query", async () => {
+  const runId = "synthetic-page-count-detached";
+  const value = fact(metadata(), runId);
+  const response = page([value]);
+  await collection.start(scan(runId));
+  let mutated = false;
+  const store = new CollectionStore({
+    query: db.query,
+    transaction: (work) =>
+      db.transaction((tx) =>
+        work({
+          query: async (sql, parameters) => {
+            const result = await tx.query(sql, parameters);
+            if (!mutated) {
+              assert.match(sql, /SELECT state, generation/);
+              assert.equal(response.expectedCount, null);
+              response.expectedCount = 1;
+              mutated = true;
+            }
+            return result;
+          },
+        }),
+      ),
+  });
+  assert.equal(await store.step(runId, { readPage: async () => response }), "complete");
+  assert.equal(mutated, true);
+  assert.equal(response.expectedCount, 1, "the provider really changed its retained wrapper");
+  const retained = (await rows("collection_runs"))[0];
+  assert.equal(retained.expected_count, null, "unverified metadata count must not become finite coverage");
+  assert.equal(retained.page_count, 1);
+  assert.equal(retained.item_count, 1);
+  assert.equal(retained.state, "complete");
+  assert.equal(retained.cursor, null);
+  assert.deepEqual((await rows("source_facts"))[0].document, value);
+  assert.equal((await rows("collection_items")).length, 1);
+  assert.equal((await rows("collection_pages")).length, 1);
+  const diagnostic = (await store.diagnostics(repository.id))[0];
+  assert.equal(diagnostic.historical_counts_reconciled, false);
+  assert.equal(diagnostic.counts_reconciled, false);
+  await noDerivedEffects();
+});
+
+test("the validated next cursor survives provider mutation and resumes the exact second page", async () => {
+  const runId = "synthetic-page-cursor-detached";
+  const first = fact(metadata(), runId);
+  const second = fact(metadata("pull_request", 12), runId);
+  const response = page([first], { nextCursor: "native-parent-page-2" });
+  await collection.start(scan(runId));
+  let mutated = false;
+  const store = new CollectionStore({
+    query: db.query,
+    transaction: (work) =>
+      db.transaction((tx) =>
+        work({
+          query: async (sql, parameters) => {
+            const result = await tx.query(sql, parameters);
+            if (!mutated) {
+              assert.match(sql, /SELECT state, generation/);
+              response.nextCursor = null;
+              mutated = true;
+            }
+            return result;
+          },
+        }),
+      ),
+  });
+  assert.equal(await store.step(runId, { readPage: async () => response }), "progress");
+  assert.equal(mutated, true);
+  assert.equal(response.nextCursor, null, "the provider really changed its retained wrapper");
+  const pending = (await rows("collection_runs"))[0];
+  assert.equal(pending.cursor, "native-parent-page-2");
+  assert.equal(pending.state, "pending");
+  assert.equal(pending.page_count, 1);
+  assert.equal(pending.item_count, 1);
+  assert.equal(pending.expected_count, null);
+  const original = (await rows("source_facts"))[0];
+  assert.deepEqual(original.document, first);
+  let resumed = false;
+  assert.equal(
+    await collection.step(runId, {
+      readPage: async (request) => {
+        assert.equal(request.cursor, "native-parent-page-2");
+        resumed = true;
+        return page([second]);
+      },
+    }),
+    "complete",
+  );
+  assert.equal(resumed, true);
+  const complete = (await rows("collection_runs"))[0];
+  assert.equal(complete.cursor, null);
+  assert.equal(complete.state, "complete");
+  assert.equal(complete.page_count, 2);
+  assert.equal(complete.item_count, 2);
+  assert.equal(complete.expected_count, null);
+  const retained = await rows("source_facts");
+  assert.equal(retained.length, 2);
+  assert.deepEqual(
+    retained.find((row) => row.fact_key === original.fact_key),
+    original,
+  );
+  assert.deepEqual(retained.find((row) => row.subject_id === second.subjectId).document, second);
+  assert.equal((await rows("collection_items")).length, 2);
+  assert.equal((await rows("collection_pages")).length, 2);
+  await noDerivedEffects();
+});
+
+test("final authorization cannot change the returned status of an already captured terminal page", async () => {
+  const runId = "synthetic-terminal-page-detached";
+  const value = fact(metadata(), runId);
+  const response = page([value]);
+  await collection.start(scan(runId));
+  let authorizedReads = 0;
+  assert.equal(
+    await collection.step(runId, {
+      readPage: async () => response,
+      assertAuthorized: () => {
+        authorizedReads++;
+        if (authorizedReads === 2) response.nextCursor = "synthetic-late-cursor";
+      },
+    }),
+    "complete",
+  );
+  assert.equal(authorizedReads, 2);
+  assert.equal(response.nextCursor, "synthetic-late-cursor");
+  const complete = (await rows("collection_runs"))[0];
+  assert.equal(complete.cursor, null);
+  assert.equal(complete.state, "complete");
+  assert.equal(complete.expected_count, null);
+  assert.equal(complete.page_count, 1);
+  assert.equal(complete.item_count, 1);
+  assert.deepEqual((await rows("source_facts"))[0].document, value);
+  await noDerivedEffects();
+});

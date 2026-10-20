@@ -330,7 +330,12 @@ test("counts, page shape and the complete cursor chain remain stable across nest
     ],
     ["missing target", (connection) => (connection.nodes = [])],
     ["more than requested", (connection) => connection.nodes.push(clone(connection.nodes[0]))],
-    ["repeated cursor", (connection) => (connection.pageInfo.endCursor = "repeated-synthetic-cursor")],
+    [
+      "repeated cursor",
+      (connection, request) => {
+        if (request.variables.after !== null) connection.pageInfo.endCursor = request.variables.after;
+      },
+    ],
     ["premature terminal", (connection) => (connection.pageInfo.hasNextPage = false)],
     [
       "missing next cursor",
@@ -348,7 +353,19 @@ test("counts, page shape and the complete cursor chain remain stable across nest
         if (matching(request, "I_SYNTHETIC_11")) mutate(response.data.node.comments, request);
         return response;
       };
-      await assert.rejects(h.read());
+      if (name === "repeated cursor") {
+        await assert.rejects(h.read(), {
+          name: "TypeError",
+          message: "github_comment_inventory_pagination_unverified",
+        });
+        assert.deepEqual(
+          h.calls.filter(isInventory).map((request) => request.variables),
+          [
+            { id: "I_SYNTHETIC_11", first: 1, after: null },
+            { id: "I_SYNTHETIC_11", first: 1, after: "I_SYNTHETIC_11:comments:1" },
+          ],
+        );
+      } else await assert.rejects(h.read());
       assert.equal(h.calls.filter(isHistory).length, 0);
     });
   const h = await harness(t);
