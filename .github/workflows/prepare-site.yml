@@ -1,0 +1,125 @@
+name: Prepare checked site build
+
+on:
+  workflow_run:
+    workflows: [Runtime scaffold checks]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.head_repository.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+      SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+    steps:
+      - name: Check out the exact checked source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Verify checkout and run identities
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          python3 - <<'PY'
+          import os
+          import re
+          for name in ("SOURCE_SHA", "GITHUB_WORKFLOW_SHA"):
+              if re.fullmatch(r"[0-9a-f]{40}", os.environ[name]) is None:
+                  raise SystemExit(f"Invalid immutable revision: {name}")
+          for name in ("SOURCE_RUN_ID", "SOURCE_RUN_ATTEMPT", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT"):
+              if re.fullmatch(r"[1-9][0-9]*", os.environ[name]) is None:
+                  raise SystemExit(f"Invalid run identity: {name}")
+          PY
+      - name: Set up the repository Node version
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Use the repository npm version
+        run: npm install --global npm@12.2.0
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build production workspaces
+        run: npm run build
+      - name: Prepare web files and exact build provenance
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import stat
+
+          source = Path("apps/web/dist")
+          if source.is_symlink() or not source.is_dir():
+              raise SystemExit("Missing regular web build directory")
+          paths = sorted(source.rglob("*"))
+          files = []
+          for path in paths:
+              relative = path.relative_to(source)
+              mode = path.lstat().st_mode
+              if any(part.startswith(".") for part in relative.parts):
+                  raise SystemExit("Hidden build entries require explicit receiving review")
+              if stat.S_ISREG(mode):
+                  files.append((path, relative))
+              elif not stat.S_ISDIR(mode):
+                  raise SystemExit("Build output must contain only regular files and directories")
+          if not any(relative.as_posix() == "index.html" for _, relative in files):
+              raise SystemExit("Web build has no regular index.html")
+
+          output = Path(os.environ["RUNNER_TEMP"]) / "site-build"
+          output.mkdir()
+          entries = []
+          for path, relative in files:
+              data = path.read_bytes()
+              if relative.as_posix() == "index.html" and not data:
+                  raise SystemExit("Web build has an empty index.html")
+              target = output / "public" / relative
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(data)
+              entries.append({"path": relative.as_posix(), "bytes": len(data),
+                              "sha256": hashlib.sha256(data).hexdigest()})
+          provenance = {
+              "schema_version": 1,
+              "kind": "static-build-preparation",
+              "source": {
+                  "repository": os.environ["GITHUB_REPOSITORY"],
+                  "commit": os.environ["SOURCE_SHA"],
+                  "runtime_run_id": os.environ["SOURCE_RUN_ID"],
+                  "runtime_run_attempt": os.environ["SOURCE_RUN_ATTEMPT"],
+              },
+              "preparation": {
+                  "run_id": os.environ["GITHUB_RUN_ID"],
+                  "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+                  "workflow_ref": os.environ["GITHUB_WORKFLOW_REF"],
+                  "workflow_commit": os.environ["GITHUB_WORKFLOW_SHA"],
+              },
+              "files": entries,
+          }
+          (output / "build-provenance.json").write_text(
+              json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
+          print(f"Prepared {len(entries)} web files for source {os.environ['SOURCE_SHA']}")
+          PY
+      - name: Retain the source-bound build candidate
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: site-build-${{ github.event.workflow_run.head_sha }}-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/site-build/
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false
+          overwrite: false
