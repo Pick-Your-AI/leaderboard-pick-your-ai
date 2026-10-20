@@ -223,6 +223,8 @@ const postgresStages = Object.freeze({
   modes: { table: "source_modes", keys: ["fact_key"] },
   normalizations: { table: "normalizations", keys: ["fact_key", "policy_signature"], doc: true },
   corrections: { table: "corrections", keys: ["request_id"], doc: true },
+  discussion_feedback_scans: { table: "discussion_feedback_scans", keys: ["repository_id", "scan_id"], doc: true },
+  discussion_feedback_heads: { table: "discussion_feedback_heads", keys: ["repository_id"], doc: true },
 });
 // Read only source metadata while resolving legacy scope, in bounded pages.
 const snapshotScopeQuery = `SELECT s.snapshot_id,s.scope_key,s.revision,s.repository_ids,s.document_hash,
@@ -705,8 +707,24 @@ export class PipelineDerivedRetirementStore {
         retainedSnapshotHash: causal.document_hash,
         records: [],
       };
-    // Normalizations go first, while the source fact is still protected by this
-    // migration's FK. Ingestion's independent source eraser cannot strand them.
+    // Coverage receipts contain protected source descriptors. Include their
+    // actual rows in the authorized manifest; a completed erasure cannot leave
+    // a private feedback generation behind or claim an invented retention TTL.
+    for (const stage of ["discussion_feedback_scans", "discussion_feedback_heads"]) {
+      const spec = postgresStages[stage];
+      if (!(await tx.query("SELECT to_regclass($1) AS name", [`leaderboard_pipeline.${spec.table}`])).rows[0]?.name)
+        continue;
+      const rows = (
+        await tx.query(
+          `SELECT * FROM leaderboard_pipeline.${spec.table} WHERE repository_id=$1
+        ORDER BY ${spec.keys.join(",")} LIMIT 1`,
+          [value.repositoryId],
+        )
+      ).rows;
+      if (rows.length) return { stage, snapshotId: null, records: rows.map((row) => pgRecord(stage, row)) };
+    }
+    // Normalizations precede their source references, while this migration's
+    // FK prevents ingestion's independent source eraser from stranding them.
     for (const stage of ["normalizations", "artifacts", "modes"]) {
       const spec = postgresStages[stage];
       const rows = (
@@ -1049,6 +1067,11 @@ export class PipelineDerivedRetirementStore {
           check(same(pgRecord(manifest.stage, row, indexed), record), "derived_row_changed");
           if (binding) this.#checkPgScope(manifest.stage, row, binding, value.repositoryId);
           else if (manifest.stage === "corrections") this.#checkPgScope(manifest.stage, row, null, value.repositoryId);
+          else if (["discussion_feedback_scans", "discussion_feedback_heads"].includes(manifest.stage))
+            check(
+              Number(row.repository_id) === value.repositoryId && row.document.repositoryId === value.repositoryId,
+              "derived_source_binding_invalid",
+            );
           else {
             const fact = (
               await tx.query("SELECT repository_id FROM leaderboard_ingestion.source_facts WHERE fact_key=$1", [
