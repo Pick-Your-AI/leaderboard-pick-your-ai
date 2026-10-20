@@ -278,3 +278,91 @@ test("unresolved category metadata retains the full catalog without invented cat
     await service.close();
   }
 });
+
+test("requested API scope stays visible across catalog and method navigation without claiming snapshot evidence", async ({
+  page,
+}) => {
+  const service = await catalogService(page);
+  const selected = {
+    ui: "api",
+    organization: "Pick-Your-AI",
+    repository: "repo-1",
+    branch: "release/Δ=1",
+    workstream: "docs",
+    context: "current",
+    project: "PVT_native",
+    start: "2026-10-01T00:00:00.000Z",
+    end: "2026-10-18T00:00:00.000Z",
+    snapshot: "unavailable-pin",
+  };
+  const expectRequestedScope = async () => {
+    const summary = page.getByRole("region", { name: "Requested scope", exact: true });
+    await expect(summary).toBeVisible();
+    for (const text of [
+      "Date window (UTC)",
+      `${selected.start} inclusive`,
+      `${selected.end} exclusive`,
+      `Organization: ${selected.organization}`,
+      `Repository: ${selected.repository}`,
+      `Workstream: ${selected.workstream}`,
+      `Merge target at merge: ${selected.branch}`,
+      `GitHub Project IDs: ${selected.project}`,
+      "Membership basis: current at snapshot cutoff",
+      "Requested filters only. Availability and published results are checked separately.",
+    ])
+      await expect(summary).toContainText(text);
+    await expect(page.getByRole("region", { name: "Snapshot provenance", exact: true })).toHaveCount(0);
+    const editor = page.locator("details").filter({ has: page.getByText("Exact scope and snapshot", { exact: true }) });
+    await expect(editor).toHaveJSProperty("open", false);
+    await expect(page.getByLabel("GitHub Project IDs", { exact: true })).not.toBeVisible();
+    await expect(page.getByLabel("Merge target at merge", { exact: true })).not.toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  };
+  try {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.goto(`/leaderboards?${new URLSearchParams(selected)}`);
+    await expect(page.getByRole("status").filter({ hasText: "98 of 98" })).toBeVisible();
+    await expectRequestedScope();
+    const entry = page
+      .getByRole("listitem")
+      .filter({ has: page.getByRole("link", { name: "PRs merged", exact: true }) });
+    await entry.getByRole("link", { name: "Method sheet", exact: true }).press("Enter");
+    await expect(page.getByText("Candidate state/date combinations", { exact: true })).toBeVisible();
+    await expectRequestedScope();
+    const copied = page.url();
+    expect(Object.fromEntries(new URL(copied).searchParams)).toMatchObject(selected);
+    await page.goBack();
+    await expect(page.getByRole("status").filter({ hasText: "98 of 98" })).toBeVisible();
+    await expectRequestedScope();
+    await page.goForward();
+    await expect(page.getByText("Candidate state/date combinations", { exact: true })).toBeVisible();
+    await expectRequestedScope();
+    await page.goto(copied);
+    await expect(page.getByText("Candidate state/date combinations", { exact: true })).toBeVisible();
+    await expectRequestedScope();
+
+    const invalid = new URL(copied);
+    invalid.searchParams.set("start", "not-a-date");
+    const callsBeforeInvalid = service.calls.length;
+    await page.goto(invalid.href);
+    await expect(page.getByRole("alert")).toContainText("invalid_utc_window");
+    await expect(page.getByRole("region", { name: "Requested scope", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Snapshot provenance", exact: true })).toHaveCount(0);
+    expect(service.calls).toHaveLength(callsBeforeInvalid);
+
+    await page.goto("/leaderboards?ui=api");
+    await expect(page.getByRole("status").filter({ hasText: "98 of 98" })).toBeVisible();
+    const summary = page.getByRole("region", { name: "Requested scope", exact: true });
+    await expect(summary).toBeVisible();
+    await expect(summary).toContainText("All time requested");
+    await expect(summary).toContainText("Repository: no repository filter");
+    await expect(summary).not.toContainText("Merge target at merge");
+    await expect(summary).toContainText("GitHub Project IDs: no Project filter");
+    await expect(summary).toContainText("Membership basis: at event time");
+    await expect(page.getByRole("region", { name: "Snapshot provenance", exact: true })).toHaveCount(0);
+    expect(service.calls.every((url) => url.pathname === "/api/v1/metrics")).toBe(true);
+    expect(service.reads).toBe(0);
+  } finally {
+    await service.close();
+  }
+});

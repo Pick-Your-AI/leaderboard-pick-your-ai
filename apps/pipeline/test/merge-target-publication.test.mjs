@@ -874,3 +874,184 @@ test("field-enriched native merge generations retain current, frozen and correct
   assert.equal(state.calls, 10);
   assert.equal(p.state.graphql, 10);
 });
+
+// Exercise the actual protected-history SQL projection through a real native
+// publication. The wrapper observes unchanged query results and never rewrites them.
+async function boundedMergeSourceRead(h, runtime) {
+  const transaction = h.db.transaction;
+  let captured = null;
+  h.db.transaction = (work) =>
+    transaction((tx) =>
+      work({
+        query: async (sql, params) => {
+          const result = await tx.query(sql, params);
+          if (sql.startsWith("WITH retained AS MATERIALIZED") && sql.includes("history_records")) {
+            captured ??= { sql, params: structuredClone(params), rows: structuredClone(result.rows) };
+          }
+          return result;
+        },
+      }),
+    );
+  try {
+    const read = await runtime.source.read(scope, null, new AbortController().signal, undefined, false, true);
+    assert.ok(captured, "history read must execute its bounded normalization query");
+    return { read, captured };
+  } finally {
+    h.db.transaction = transaction;
+  }
+}
+
+test("bounded history reads retain native merge-target source authority without provider reads", async (t) => {
+  const { h, p, runtime } = await setup(t, { memoryDatabase: true, configuredScopes: [scope] });
+  assert.equal((await runtime.runOnce({ cutoff: iso(Date.now() - 1000) })).state, "published");
+  const ordinary = await readScope(runtime);
+  const saved = await caches(h.db);
+  const requests = p.state.calls.length;
+  p.state.forbid = true;
+  const { read, captured } = await boundedMergeSourceRead(h, runtime);
+  assert.ok(read);
+  assert.deepEqual(read.selected.snapshot, ordinary.selected.snapshot);
+  assert.deepEqual(read.selected.rows, ordinary.selected.rows);
+  assert.equal(read.controls.version, ordinary.controls.version);
+  assert.equal(captured.rows.length, 5);
+  for (const row of captured.rows) {
+    assert.deepEqual(Object.keys(row.source_document).sort(), ["sourceRevision", "sourceUrl", "subjectId"]);
+    assert.equal(typeof row.policy_signature, "string");
+    assert.equal(String(row.repository_id), "2");
+    assert.ok(Number(row.history_bytes) > 0 && Number(row.history_bytes) <= 8_000_000);
+  }
+  assert.equal(p.state.calls.length, requests);
+  assert.deepEqual(await caches(h.db), saved);
+});
+
+test("bounded history SQL minimizes source documents and withholds oversized merge bindings", async (t) => {
+  const { h, p, runtime } = await setup(t, { memoryDatabase: true, configuredScopes: [scope] });
+  assert.equal((await runtime.runOnce({ cutoff: iso(Date.now() - 1000) })).state, "published");
+  const { read, captured } = await boundedMergeSourceRead(h, runtime);
+  const savedCaches = await caches(h.db);
+  const savedSnapshots = await mergeSnapshots(h);
+  const savedControls = h.controlsStore.read();
+  const requests = p.state.calls.length;
+  p.state.forbid = true;
+  const original = captured.rows[0];
+  // Append hostile synthetic copies for the identical production query only.
+  // Existing immutable source facts, frozen inputs and confirmation rows stay exact.
+  for (const [label, field, oversized] of [
+    ["unselected metadata", "ignoredFixturePadding", false],
+    ["selected source binding", "sourceUrl", true],
+  ]) {
+    const key = comparisonHash(["synthetic-history-merge-binding", label, original.fact_key]);
+    await h.db.query(
+      `INSERT INTO leaderboard_ingestion.source_facts
+        (fact_key,repository_id,family,subject_id,source_revision,document,first_run_id,observed_at)
+       SELECT $1,repository_id,family,subject_id,source_revision,
+         document || jsonb_build_object($3::text,repeat('x',8000001)),first_run_id,observed_at
+       FROM leaderboard_ingestion.source_facts WHERE fact_key=$2`,
+      [key, original.fact_key, field],
+    );
+    await h.db.query(
+      `INSERT INTO leaderboard_pipeline.normalizations (fact_key,policy_signature,document,document_hash)
+       SELECT $1,policy_signature,document,document_hash FROM leaderboard_pipeline.normalizations
+       WHERE fact_key=$2 AND policy_signature=$3`,
+      [key, original.fact_key, original.policy_signature],
+    );
+    const params = structuredClone(captured.params);
+    params[0] = [original.document_hash];
+    params[3] = JSON.stringify([{ fact_key: key, document_hash: original.document_hash }]);
+    const rows = (await h.db.query(captured.sql, params)).rows;
+    assert.equal(rows.length, 1);
+    const row = rows[0];
+    assert.equal(Number(row.history_records), 1);
+    if (oversized) {
+      assert.ok(Number(row.history_bytes) > 8_000_000);
+      assert.equal(row.document, null);
+      assert.equal(row.source_document, null);
+      assert.equal(row.policy_signature, null);
+      assert.ok(Buffer.byteLength(JSON.stringify(row)) < 1024, "oversized source data never reaches the reader");
+    } else {
+      assert.deepEqual(row.document, original.document);
+      assert.deepEqual(row.source_document, original.source_document);
+      assert.equal(row.policy_signature, original.policy_signature);
+      const expected = (
+        await h.db.query(
+          "SELECT octet_length($1::jsonb::text)+octet_length($2::jsonb::text)+octet_length($3::text) AS bytes",
+          [JSON.stringify(original.document), JSON.stringify(original.source_document), original.policy_signature],
+        )
+      ).rows[0];
+      assert.equal(Number(row.history_bytes), Number(expected.bytes));
+      assert.ok(Number(row.history_bytes) < 8_000_000);
+    }
+  }
+  // The profiled OR branch admits retained generation signatures before the
+  // JS validator sees them. Many individually indexable signatures must also
+  // stay within the aggregate transport budget, independently of document size.
+  const mergeDocument = {
+    pullRequestMergeTargetNormalization: structuredClone(original.document.pullRequestMergeTargetNormalization),
+    facts: [],
+    actors: [],
+    evidence: [],
+  };
+  const mergeHash = comparisonHash(mergeDocument);
+  const signatureCount = 3600;
+  const signatureBytes = 2300;
+  const bindingBytes = Number(
+    (
+      await h.db.query("SELECT octet_length($1::jsonb::text)+octet_length($2::jsonb::text) AS bytes", [
+        JSON.stringify(mergeDocument),
+        JSON.stringify(original.source_document),
+      ])
+    ).rows[0].bytes,
+  );
+  assert.ok(bindingBytes * signatureCount <= 8_000_000, "documents and source bindings alone fit the budget");
+  assert.ok(signatureBytes * signatureCount > 8_000_000, "the signature bytes alone exceed the budget");
+  await h.db.query(
+    `INSERT INTO leaderboard_pipeline.normalizations (fact_key,policy_signature,document,document_hash)
+     SELECT $1,lpad(fixture.n::text,8,'0') || repeat('x',2292),$2::jsonb,$3
+     FROM generate_series(1,3600) AS fixture(n)`,
+    [original.fact_key, JSON.stringify(mergeDocument), mergeHash],
+  );
+  const mergeParams = structuredClone(captured.params);
+  mergeParams[0] = [mergeHash];
+  mergeParams[3] = JSON.stringify([{ fact_key: original.fact_key, document_hash: mergeHash }]);
+  assert.deepEqual(mergeParams[1], captured.params[1], "the admitted signature allowlist stays unchanged");
+  const oversizedRows = (await h.db.query(captured.sql, mergeParams)).rows;
+  assert.equal(oversizedRows.length, signatureCount);
+  assert.ok(
+    oversizedRows.every(
+      (row) =>
+        Number(row.history_records) === signatureCount &&
+        Number(row.history_bytes) === (bindingBytes + signatureBytes) * signatureCount &&
+        row.document === null &&
+        row.source_document === null &&
+        row.policy_signature === null,
+    ),
+    "the captured SQL must withhold every variable field before returning oversized profiled signatures",
+  );
+  assert.ok(Buffer.byteLength(JSON.stringify(oversizedRows)) < 2_000_000);
+
+  // Without the generation marker, a foreign signature is never admitted by
+  // the unchanged digest allowlist. This does not invent a giant legacy allowlist.
+  const legacyDocument = { facts: [], actors: [], evidence: [] };
+  const legacyHash = comparisonHash(legacyDocument);
+  await h.db.query(
+    "INSERT INTO leaderboard_pipeline.normalizations (fact_key,policy_signature,document,document_hash) VALUES($1,$2,$3::jsonb,$4)",
+    [original.fact_key, "u".repeat(signatureBytes), JSON.stringify(legacyDocument), legacyHash],
+  );
+  const legacyParams = structuredClone(captured.params);
+  legacyParams[0] = [legacyHash];
+  legacyParams[3] = JSON.stringify([{ fact_key: original.fact_key, document_hash: legacyHash }]);
+  assert.deepEqual(legacyParams[1], captured.params[1]);
+  assert.deepEqual((await h.db.query(captured.sql, legacyParams)).rows, []);
+
+  const after = await boundedMergeSourceRead(h, runtime);
+  assert.deepEqual(after.read.selected.snapshot, read.selected.snapshot);
+  assert.deepEqual(after.read.selected.rows, read.selected.rows);
+  assert.deepEqual(await mergeSnapshots(h), savedSnapshots);
+  assert.deepEqual(h.controlsStore.read(), savedControls);
+  const originals = new Set(savedCaches.map((row) => JSON.stringify([row.fact_key, row.policy_signature])));
+  assert.deepEqual(
+    (await caches(h.db)).filter((row) => originals.has(JSON.stringify([row.fact_key, row.policy_signature]))),
+    savedCaches,
+  );
+  assert.equal(p.state.calls.length, requests);
+});
