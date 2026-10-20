@@ -701,9 +701,9 @@ for (const metric of ["reference_links", "closing_links"]) {
       );
       assert.equal(
         frozen.identityAuthorization.relationshipPairEvidence.schemaVersion,
-        "pipeline-relationship-pair-authority/v3",
+        "pipeline-relationship-pair-authority/v4",
       );
-      for (const obsoleteVersion of ["v1", "v2"]) {
+      for (const obsoleteVersion of ["v1", "v2", "v3"]) {
         const obsolete = structuredClone(frozen.identityAuthorization.relationshipPairEvidence);
         obsolete.schemaVersion = `pipeline-relationship-pair-authority/${obsoleteVersion}`;
         assert.throws(() => validateRelationshipPairCapture(obsolete), /relationship_pair_frozen_binding_invalid/);
@@ -745,7 +745,7 @@ for (const metric of ["reference_links", "closing_links"]) {
           assert.deepEqual(
             await runtime.previewPolicy(request),
             preview,
-            "actual database reopen preserves v3 uncertainty",
+            "actual database reopen preserves v4 uncertainty",
           );
           assert.deepEqual(values(await board(runtime, metric, null, current.snapshotId)), []);
         });
@@ -1460,9 +1460,9 @@ function preserveSemanticRows(before, after) {
 
 async function assertSemanticCapture(h, input) {
   const capture = input.identityAuthorization.relationshipPairEvidence;
-  assert.equal(capture.schemaVersion, "pipeline-relationship-pair-authority/v3");
+  assert.equal(capture.schemaVersion, "pipeline-relationship-pair-authority/v4");
   assert.deepEqual(validateRelationshipPairCapture(capture), capture);
-  for (const oldVersion of ["v1", "v2"]) {
+  for (const oldVersion of ["v1", "v2", "v3"]) {
     const obsolete = {
       ...structuredClone(capture),
       schemaVersion: `pipeline-relationship-pair-authority/${oldVersion}`,
@@ -1743,7 +1743,7 @@ async function combinedNormalizationRows(h) {
 }
 
 // Match the accepted field-generation fixture's complete SQL/SQLite binding
-// reconstruction. The pair-only predecessor retains its exact v3 pair capture;
+// reconstruction. The pair-only predecessor retains its exact v4 pair capture;
 // its field claims deliberately predate field-version authority.
 async function retainSeparatePairFieldPredecessors(h, publication) {
   const { AggregateExplanationStore, buildAggregateExplanation } = await import("../src/aggregate-explanations.mjs");
@@ -1929,7 +1929,7 @@ test("combined pair and field generations retain both predecessors and replay co
   const frozen = await frozenInput(h, fresh.snapshotId);
   const capture = frozen.identityAuthorization.relationshipPairEvidence;
   assert.deepEqual(validateRelationshipPairCapture(capture), capture);
-  assert.equal(capture.schemaVersion, "pipeline-relationship-pair-authority/v3");
+  assert.equal(capture.schemaVersion, "pipeline-relationship-pair-authority/v4");
   assert.ok(capture.bindings.some((binding) => binding.policySignature === old.pairSignature));
   assert.ok(capture.bindings.some((binding) => binding.policySignature === old.combinedSignature));
   const rows = await combinedNormalizationRows(h);
@@ -2010,3 +2010,59 @@ test("combined pair-field cache does not hide a hash-corrupt pair-only predecess
 test("combined pair-field cache does not hide a field-only predecessor from another data mode", async (t) => {
   await rejectCorruptPairFieldPredecessor(t, "field", "mode");
 });
+
+for (const metric of ["reference_links", "closing_links"]) {
+  test(`${metric}: a legacy v3 equal-instant clock result cannot authorize private restoration`, async (t) => {
+    const h = await crossRepositoryHarness(t, metric, {
+      earlierPeerHistory: true,
+      reviewedPeerHistory: true,
+      wholeSecondPeerClock: true,
+    });
+    await published(h);
+    const prior = await board(h.runtime, metric);
+    assert.deepEqual(values(prior), [["303", 1]]);
+    const priorInput = await frozenInput(h, prior.snapshotId);
+    const original = priorInput.frozen.facts.find((fact) => fact.actorId === "303" && fact.metricId === metric);
+    assert.ok(original);
+    h.history.revision = "v2";
+    h.history.factChanges.occurredAt = original.occurredAt.replace(".000Z", "Z");
+    assert.notEqual(h.history.factChanges.occurredAt, original.occurredAt);
+    assert.equal(components.contracts.compareSourceInstants(h.history.factChanges.occurredAt, original.occurredAt), 0);
+    await published(h);
+    const current = await board(h.runtime, metric);
+    assert.deepEqual(values(current), [], "exact source-clock drift keeps the known pair unresolved");
+    const input = await frozenInput(h, current.snapshotId);
+    await assertSemanticCapture(h, input);
+    const rows = await semanticNormalizationRows(h);
+    const selected = input.identityAuthorization.identityEvidence.normalizationSources;
+    const originals = new Map(
+      rows
+        .filter((row) =>
+          selected.some((source) => source.factKey === row.fact_key && source.documentHash === row.document_hash),
+        )
+        .flatMap((row) => row.document.facts)
+        .map((fact) => [fact.id, fact]),
+    );
+    const legacy = structuredClone(input);
+    // The earlier v3 interpretation canonicalized these equal-instant clocks and
+    // retained positive current facts. Preserve its exact source/hash bindings.
+    legacy.frozen.facts = legacy.frozen.facts.map((fact) => structuredClone(originals.get(fact.id) ?? fact));
+    legacy.identityAuthorization.relationshipPairEvidence.schemaVersion = "pipeline-relationship-pair-authority/v3";
+    const unsafe = components.metrics.aggregateMetric(legacy.frozen, h.config.policies[0].policy, legacy.engineScope);
+    assert.deepEqual(
+      unsafe.rows.map((row) => [row.actorId, row.value]),
+      [["303", 1]],
+      "the obsolete frozen interpretation would restore positive credit",
+    );
+    let entered = false;
+    await assert.rejects(
+      h.runtime.policyComparisons.withAuthorizedInputs([legacy.identityAuthorization], () => {
+        entered = true;
+      }),
+      /relationship_pair_frozen_binding_invalid/,
+    );
+    assert.equal(entered, false, "the v3 capture must fail before private restoration");
+    assert.deepEqual(await frozenInput(h, current.snapshotId), input);
+    assert.deepEqual(await semanticNormalizationRows(h), rows);
+  });
+}

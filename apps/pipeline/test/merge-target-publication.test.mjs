@@ -1115,7 +1115,7 @@ async function assertPairMergeCapture(h, runtime, publication, rows) {
   const record = runtime.policyComparisons.comparisons.input(publication.comparisonInput.inputId);
   const explanation = new AggregateExplanationStore(h.controlsStore).read(publication.snapshotId).document;
   const captured = frozen.document.identityAuthorization.relationshipPairEvidence;
-  assert.equal(captured.schemaVersion, "pipeline-relationship-pair-authority/v3");
+  assert.equal(captured.schemaVersion, "pipeline-relationship-pair-authority/v4");
   assert.deepEqual(record.authorization.relationshipPairEvidence, captured);
   assert.deepEqual(explanation.authorization.relationshipPairEvidence, captured);
   for (const row of rows) {
@@ -1518,4 +1518,349 @@ test("already confirmed pair field and merge publications acknowledge without a 
   assert.equal(state.collections, collections);
   assert.deepEqual(p.state.calls, nativeCalls);
   assert.deepEqual(await retainedPairMergeState(h), saved);
+});
+
+async function pendingPairMergeRetry(t) {
+  const fixture = await pairFieldMergeSetup(t);
+  const { h, p, runtime, state } = fixture;
+  const sourceRows = async () =>
+    structuredClone((await h.db.query("SELECT * FROM leaderboard_ingestion.source_facts ORDER BY fact_key")).rows);
+  const scanRows = async () =>
+    structuredClone(
+      (await h.db.query("SELECT * FROM leaderboard_pipeline.scan_continuations ORDER BY configuration_key")).rows,
+    );
+  const cutoff = p.state.clock;
+  await assert.rejects(runtime.runOnce(), /synthetic_stop_after_pair_field_merge_freeze/);
+  assert.equal(state.calls, 5);
+  assert.equal(state.collections, 1);
+  assert.equal(p.state.graphql, 5);
+  const original = structuredClone(await caches(h.db));
+  const sources = await sourceRows();
+  const scans = await scanRows();
+  assert.equal(original.length, 5);
+  assert.equal(sources.length, 5);
+  assert.equal(scans.length, 1);
+  assert.equal(iso(scans[0].event_cutoff), cutoff);
+  assert.equal(iso(scans[0].observation_cutoff), cutoff);
+  assert.ok(Object.values(scans[0].scope_heads).every((head) => head === null));
+  assert.deepEqual(original.map((row) => row.fact_key), sources.map((row) => row.fact_key));
+
+  // B changes only its capture clock and generation. Its native source rows
+  // remain A's exact five observations, and neither cycle has a publication.
+  const payloads = JSON.stringify(p.payloads);
+  p.state.clock = iso(Date.parse(cutoff) + 5000);
+  let committed = 0;
+  const transaction = h.db.transaction;
+  afterMergeTransaction(
+    h,
+    (sql) => /INSERT\s+INTO\s+leaderboard_pipeline\.normalizations\b/.test(sql),
+    () => {
+      if (++committed === 5) throw new Error("synthetic_stop_after_later_merge_generation_commit");
+    },
+  );
+  try {
+    await assert.rejects(
+      runtime.runOnce({ cutoff: iso(Date.parse(cutoff) + 2000) }),
+      /synthetic_stop_after_later_merge_generation_commit/,
+    );
+  } finally {
+    h.db.transaction = transaction;
+  }
+  assert.equal(committed, 5, "the fault follows all five committed B normalizations");
+  assert.equal(state.calls, 10);
+  assert.equal(state.collections, 2);
+  assert.equal(p.state.graphql, 10);
+  assert.equal(JSON.stringify(p.payloads), payloads);
+  assert.deepEqual(await sourceRows(), sources);
+  assert.deepEqual(await scanRows(), scans);
+  const all = structuredClone(await caches(h.db));
+  assert.equal(all.length, 10);
+  const later = all.filter(
+    (row) =>
+      !original.some((prior) => prior.fact_key === row.fact_key && prior.policy_signature === row.policy_signature),
+  );
+  assert.equal(later.length, 5);
+  assert.deepEqual(later.map((row) => row.fact_key), original.map((row) => row.fact_key));
+  for (const prior of original) {
+    assert.deepEqual(
+      all.find((row) => row.fact_key === prior.fact_key && row.policy_signature === prior.policy_signature),
+      prior,
+    );
+    const next = later.find((row) => row.fact_key === prior.fact_key);
+    assert.notEqual(next.policy_signature, prior.policy_signature);
+    assert.notEqual(
+      next.document.pullRequestMergeTargetNormalization.generation,
+      prior.document.pullRequestMergeTargetNormalization.generation,
+    );
+    assert.equal(prior.document.pullRequestMergeTargets.length, 1);
+    assert.equal(next.document.pullRequestMergeTargets.length, 1);
+    const before = await components.contracts.verifyGithubPullRequestMergeTargetCapture(
+      prior.document.pullRequestMergeTargets[0],
+    );
+    const after = await components.contracts.verifyGithubPullRequestMergeTargetCapture(
+      next.document.pullRequestMergeTargets[0],
+    );
+    assert.equal(before.status, "known");
+    assert.equal(after.status, "known");
+    assert.equal(before.observedAt, cutoff);
+    assert.equal(after.observedAt, p.state.clock);
+    assert.ok(after.observedAt > cutoff);
+    const { observedAt: _beforeClock, proofHash: _beforeHash, ...beforeMeaning } = before;
+    const { observedAt: _afterClock, proofHash: _afterHash, ...afterMeaning } = after;
+    assert.deepEqual(afterMeaning, beforeMeaning);
+    assert.equal(comparisonHash(prior.document), prior.document_hash);
+    assert.equal(comparisonHash(next.document), next.document_hash);
+    assert.ok(prior.document.facts.some((fact) => fact.metricId === "closing_links" && fact.relationshipPair));
+    assert.ok(next.document.facts.some((fact) => fact.metricId === "closing_links" && fact.relationshipPair));
+    assert.equal(prior.document.fieldChangeNormalizationVersion, components.github.fieldChangeNormalizationVersion);
+    assert.equal(next.document.fieldChangeNormalizationVersion, components.github.fieldChangeNormalizationVersion);
+  }
+  const pending = await retainedPairMergeState(h);
+  for (const key of ["snapshots", "frozen", "privateInputs", "explanations"]) assert.equal(pending[key].length, 0);
+  assert.equal(Object.keys(pending.confirmations ?? {}).length, 0);
+  assert.equal(Object.keys(pending.heads ?? {}).length, 0);
+  assert.equal(pending.normalized.length, 10);
+  state.forbid = true;
+  p.state.forbid = true;
+  const calls = { normalized: state.calls, collections: state.collections, graphql: p.state.graphql };
+  const nativeCalls = [...p.state.calls];
+  return {
+    ...fixture,
+    cutoff,
+    original,
+    later,
+    all,
+    pending,
+    sources,
+    scans,
+    sourceRows,
+    scanRows,
+    assertNoRecollection() {
+      assert.deepEqual({ normalized: state.calls, collections: state.collections, graphql: p.state.graphql }, calls);
+      assert.deepEqual(p.state.calls, nativeCalls);
+    },
+  };
+}
+
+async function assertPendingPairMergeRetry(fixture, expected = fixture.pending) {
+  fixture.assertNoRecollection();
+  assert.deepEqual(await fixture.sourceRows(), fixture.sources);
+  assert.deepEqual(await fixture.scanRows(), fixture.scans);
+  assert.deepEqual(await retainedPairMergeState(fixture.h), expected);
+}
+
+async function completePairMergeRetry(fixture) {
+  const { h, runtime, cutoff, original, all } = fixture;
+  await assertPendingPairMergeRetry(fixture);
+  const result = await runtime.runOnce();
+  assert.equal(result.state, "published");
+  assert.equal(result.publications.length, 2);
+  fixture.assertNoRecollection();
+  assert.deepEqual(await fixture.sourceRows(), fixture.sources);
+  assert.deepEqual(await caches(h.db), all);
+  assert.deepEqual(await fixture.scanRows(), [], "only successful confirmation retires A's continuation");
+  await assertPairMergeQuantity(runtime, 5);
+  const publication = pairMergePublication(result, h);
+  await assertPairMergeCapture(h, runtime, publication, original);
+  const expectedBindings = original
+    .map((row) => JSON.stringify([row.fact_key, row.policy_signature, row.document_hash]))
+    .sort();
+  const originalProofs = new Set(
+    original.flatMap((row) => row.document.pullRequestMergeTargets.map((p) => p.proofHash)),
+  );
+  const laterProofs = new Set(
+    fixture.later.flatMap((row) => row.document.pullRequestMergeTargets.map((p) => p.proofHash)),
+  );
+  for (const selected of result.publications) {
+    const frozen = (
+      await h.db.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
+        selected.snapshotId,
+      ])
+    ).rows[0];
+    const record = runtime.policyComparisons.comparisons.input(selected.comparisonInput.inputId);
+    const explanation = new AggregateExplanationStore(h.controlsStore).read(selected.snapshotId).document;
+    assert.equal(comparisonHash(frozen.document), frozen.document_hash);
+    assert.equal(frozen.document.frozen.cutoff, cutoff);
+    assert.equal(record.input.cutoff, cutoff);
+    assert.equal(explanation.cutoff, cutoff);
+    const capture = frozen.document.identityAuthorization.relationshipPairEvidence;
+    assert.equal(capture.schemaVersion, "pipeline-relationship-pair-authority/v4");
+    assert.deepEqual(
+      capture.bindings
+        .map((entry) => JSON.stringify([entry.factKey, entry.policySignature, entry.documentHash]))
+        .sort(),
+      expectedBindings,
+      "only A's exact five bindings authorize the resumed frozen publication",
+    );
+    assert.deepEqual(record.authorization.relationshipPairEvidence, capture);
+    assert.deepEqual(explanation.authorization.relationshipPairEvidence, capture);
+    const proofs = frozen.document.frozen.facts
+      .filter((fact) => fact.mergeTarget)
+      .map((fact) => fact.mergeTarget.proofHash);
+    assert.ok(proofs.length >= 5);
+    assert.ok(proofs.every((proof) => originalProofs.has(proof) && !laterProofs.has(proof)));
+  }
+  fixture.assertNoRecollection();
+  assert.deepEqual(await caches(h.db), all);
+  return publication;
+}
+
+async function writePairMergeRetryCache(h, row, document, hash = comparisonHash(document)) {
+  const result = await h.db.query(
+    "UPDATE leaderboard_pipeline.normalizations SET document=$3::jsonb,document_hash=$4 WHERE fact_key=$1 AND policy_signature=$2 RETURNING document_hash",
+    [row.fact_key, row.policy_signature, JSON.stringify(document), hash],
+  );
+  assert.deepEqual(result.rows, [{ document_hash: hash }]);
+}
+
+test("an unconfirmed pair and field merge cycle retries before a later unconfirmed generation", async (t) => {
+  await completePairMergeRetry(await pendingPairMergeRetry(t));
+});
+
+for (const malformed of ["hash", "pair fact"]) {
+  test("an unconfirmed retry validates a future merge generation's " + malformed, async (t) => {
+    const fixture = await pendingPairMergeRetry(t);
+    const previous = fixture.later[0];
+    const document = structuredClone(previous.document);
+    if (malformed === "hash") document.reasons.push("synthetic_future_hash_mismatch");
+    else document.facts.find((fact) => fact.metricId === "closing_links").id = 17;
+    const hash = malformed === "hash" ? previous.document_hash : comparisonHash(document);
+    await writePairMergeRetryCache(fixture.h, previous, document, hash);
+    try {
+      const altered = await retainedPairMergeState(fixture.h);
+      await assert.rejects(
+        fixture.runtime.runOnce(),
+        malformed === "hash" ? /normalization_integrity_error/ : /relationship_pair_authority_integrity_error/,
+      );
+      await assertPendingPairMergeRetry(fixture, altered);
+    } finally {
+      await writePairMergeRetryCache(fixture.h, previous, previous.document, previous.document_hash);
+    }
+    await completePairMergeRetry(fixture);
+  });
+}
+
+test("a frozen retry cannot admit its selected merge proof after the original cutoff", async (t) => {
+  const fixture = await pendingPairMergeRetry(t);
+  const previous = fixture.original[0];
+  const document = structuredClone(previous.document);
+  const capture = document.pullRequestMergeTargets[0];
+  const { proofHash, ...body } = capture;
+  body.observedAt = fixture.p.state.clock;
+  const replacement = { ...body, proofHash: await components.contracts.githubPullRequestMergeTargetHash(body) };
+  await components.contracts.verifyGithubPullRequestMergeTargetCapture(replacement);
+  document.pullRequestMergeTargets[0] = replacement;
+  for (const fact of document.facts)
+    if (fact.mergeTarget?.proofHash === proofHash) fact.mergeTarget.proofHash = replacement.proofHash;
+  assert.ok(replacement.observedAt > fixture.cutoff);
+  await writePairMergeRetryCache(fixture.h, previous, document);
+  try {
+    const altered = await retainedPairMergeState(fixture.h);
+    await assert.rejects(fixture.runtime.runOnce(), /merge_target_normalization_binding_unavailable/);
+    await assertPendingPairMergeRetry(fixture, altered);
+  } finally {
+    await writePairMergeRetryCache(fixture.h, previous, previous.document, previous.document_hash);
+  }
+  await completePairMergeRetry(fixture);
+});
+
+async function assertRetriedPairMergeWithdrawn(fixture, publication) {
+  const { runtime } = fixture;
+  for (const snapshot of [null, publication.snapshotId]) {
+    const parameters = new URLSearchParams({
+      ...components.contracts.publicScopeParameters(plain),
+      metric: "closing_links",
+      ...(snapshot ? { snapshot } : {}),
+    });
+    for (const suffix of ["/boards", "/exports"]) {
+      const response = await runtime.app.inject("/api/v1" + suffix + "?" + parameters);
+      if (response.statusCode === 200) {
+        if (suffix === "/boards") assert.deepEqual(response.json().rows.filter((row) => row.result.value > 0), []);
+        else assert.doesNotMatch(response.body, /synthetic-merge-linker/);
+      } else assert.equal(response.statusCode, snapshot ? 410 : 503, response.body);
+      assert.doesNotMatch(response.body, /I_SYNTHETIC_MERGE_PAIR|PR_BRANCH_|relationshipPair|normalizationSources/);
+    }
+  }
+  const record = runtime.policyComparisons.comparisons.input(publication.comparisonInput.inputId);
+  await assert.rejects(
+    runtime.policyComparisons.withAuthorizedInputs([record.authorization], () => {
+      assert.fail("withdrawn current authority must not reach private restoration");
+    }),
+    /Frozen|unavailable|changed/,
+  );
+  await assert.rejects(runtime.aggregateExplanations.read(publication.snapshotId), /Frozen|unavailable|changed/);
+  fixture.assertNoRecollection();
+}
+
+test("a retried pair and field merge publication still withdraws a currently deleted endpoint", async (t) => {
+  const fixture = await pendingPairMergeRetry(t);
+  const publication = await completePairMergeRetry(fixture);
+  const { h, p, runtime } = fixture;
+  const before = await retainedPairMergeState(h);
+  const runId = fixtureId(9641);
+  await runtime.collection.start({
+    runId,
+    repositoryId: 2,
+    family: "issues",
+    mode: "audit",
+    since: null,
+    until: p.state.clock,
+  });
+  assert.equal(
+    await runtime.collection.step(runId, {
+      async readPage(request) {
+        assert.equal(request.repositoryId, 2);
+        assert.equal(request.family, "issues");
+        return {
+          repositoryId: 2,
+          visibility: "public",
+          isSynthetic: true,
+          expectedCount: 1,
+          nextCursor: null,
+          facts: [
+            {
+              subjectId: "I_SYNTHETIC_MERGE_PAIR",
+              sourceRevision: "synthetic-frozen-pair-endpoint-deleted-v1",
+              sourceUrl: "https://github.com/" + slug + "/issues/9473",
+              evidence: "current_state",
+              actorId: null,
+              occurredAt: null,
+              state: "deleted",
+            },
+          ],
+        };
+      },
+    }),
+    "complete",
+  );
+  assert.deepEqual(
+    (
+      await h.db.query(
+        "SELECT subject_id,reason FROM leaderboard_ingestion.object_suppressions WHERE repository_id=2 ORDER BY subject_id",
+      )
+    ).rows,
+    [{ subject_id: "I_SYNTHETIC_MERGE_PAIR", reason: "deleted" }],
+  );
+  assert.equal(
+    (await h.db.query("SELECT state FROM leaderboard_ingestion.repository_access WHERE repository_id=2")).rows[0].state,
+    "public",
+  );
+  await assertRetriedPairMergeWithdrawn(fixture, publication);
+  assert.deepEqual(await retainedPairMergeState(h), before);
+});
+
+test("a retried pair and field merge publication still withdraws a currently private repository", async (t) => {
+  const fixture = await pendingPairMergeRetry(t);
+  const publication = await completePairMergeRetry(fixture);
+  const before = await retainedPairMergeState(fixture.h);
+  assert.equal(
+    await fixture.runtime.collection.suppress(fixtureId(9642), "d".repeat(64), 1, [2], "private"),
+    "accepted",
+  );
+  const access = await fixture.h.db.query(
+    "SELECT state FROM leaderboard_ingestion.repository_access WHERE repository_id=2",
+  );
+  assert.equal(access.rows[0].state, "unavailable");
+  await assertRetriedPairMergeWithdrawn(fixture, publication);
+  assert.deepEqual(await retainedPairMergeState(fixture.h), before);
 });

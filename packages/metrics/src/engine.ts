@@ -557,7 +557,7 @@ function prepare(
         "ambiguous_canonical_action",
       ].includes(reason)
     )
-      rejectedRelationshipEvents.push(...facts);
+      for (const fact of facts) rejectedRelationshipEvents.push(fact);
     audit.push({
       factIds: unique(facts.map((fact) => fact.id)),
       actorId:
@@ -760,7 +760,7 @@ function prepare(
         [...versions.values()].flat(),
       )
     : { facts: eventFacts, audit: [] };
-  audit.push(...conserved.audit);
+  for (const entry of conserved.audit) audit.push(entry);
   const facts: MetricFact[] = [];
   for (const fact of conserved.facts) {
     if (fact.metricId !== policy.metricId) continue;

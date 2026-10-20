@@ -9,9 +9,9 @@ import { issueTransferClosure, issueTransferLimits } from "./issue-transfer-priv
 import { selectIssueTransferSources } from "./issue-transfers.mjs";
 import { hasRelationshipPairMarker, isRelationshipPairMetric } from "./relationship-pair-generation.mjs";
 
-// v3 binds complete engine-semantic equivalence for displaced known history.
-// Earlier captures may have lost a binding or discarded its scope contradiction.
-export const relationshipPairAuthorityVersion = "pipeline-relationship-pair-authority/v3";
+// v4 binds exact source-clock representations in displaced-history semantics.
+// Earlier captures may have lost bindings or discarded semantic contradictions.
+export const relationshipPairAuthorityVersion = "pipeline-relationship-pair-authority/v4";
 const check = (value, code = "relationship_pair_authority_integrity_error") => {
   if (!value) throw new Error(code);
 };
@@ -194,9 +194,9 @@ function retainedEntry(row, { dataMode, generationsFor }) {
  * They never replace normalizeStored's current/cutoff calculation facts.
  * All configured source gates are held before these normalization read locks. */
 async function validateGeneration(row, options, cutoff = null) {
-  if (row.document.pullRequestMergeTargetNormalization === undefined) return;
+  if (row.document.pullRequestMergeTargetNormalization === undefined) return [];
   check(typeof options.mergeTarget?.validate === "function", "relationship_pair_merge_target_unavailable");
-  await options.mergeTarget.validate(row, cutoff);
+  return options.mergeTarget.validate(row, cutoff);
 }
 
 async function retainedEntries(tx, options) {
@@ -224,6 +224,7 @@ async function retainedEntries(tx, options) {
     check(row.document.isSynthetic === (dataMode === "synthetic"), "relationship_pair_data_mode_mismatch");
   }
   const entries = [];
+  const future = new Set();
   for (const row of rows) {
     const marker = row.document.pullRequestMergeTargetNormalization;
     if (
@@ -232,14 +233,19 @@ async function retainedEntries(tx, options) {
       !signatures.includes(row.policy_signature)
     )
       continue;
-    await validateGeneration(row, options, cutoff ?? null);
+    const captures = await validateGeneration(row, options);
     if (!generationsFor(row.family, row.document).includes(row.policy_signature)) continue;
-    entries.push(retainedEntry(row, { dataMode, generationsFor }));
+    const entry = retainedEntry(row, { dataMode, generationsFor });
+    entries.push(entry);
+    if (cutoff != null && captures.some((capture) => compareSourceInstants(capture.observedAt, cutoff) > 0))
+      future.add(entry);
   }
-  // Both actual current pair wrappers can be retained after delivery enrichment
-  // changes. Their original bindings remain withdrawal identity, never a second
-  // active observation or a reason to discard a frozen predecessor's proof.
-  return entries;
+  // Validate every admitted pair and the aggregate fact budget before excluding
+  // a later verified generation from an earlier frozen calculation.
+  records(entries);
+  // Both actual current pair wrappers remain withdrawal identity for no-cutoff
+  // authority reads; a frozen calculation uses only its observed history.
+  return entries.filter((entry) => !future.has(entry));
 }
 
 const suppressionSQL = `SELECT subject_id FROM leaderboard_ingestion.object_suppressions WHERE repository_id=ANY($1::bigint[])

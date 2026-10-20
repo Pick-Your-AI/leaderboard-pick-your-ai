@@ -590,7 +590,7 @@ export async function createPipeline(options) {
       defaultDeliverySignature,
       ...mergeTargetWrappers(),
     );
-    await readMergeTargetNormalization(row.document, row, repository, cutoff);
+    return readMergeTargetNormalization(row.document, row, repository, cutoff);
   }
   const currentPairGenerationsFor = (family, document = null) => {
     let base =

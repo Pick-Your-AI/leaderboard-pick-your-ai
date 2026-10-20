@@ -138,10 +138,17 @@ export function conserveRelationshipPairs(
     history.push(prior);
     historyById.set(prior.id, history);
   }
+  const unresolvedById = new Map<string, Map<string, number>>();
   for (const unresolved of [...unboundCurrent, ...rejectedEvents]) {
     if ((resolvedRevision.get(unresolved.id) ?? -1) > unresolved.revision) continue;
-    for (const prior of historyById.get(unresolved.id) ?? []) {
-      if (prior.metricId !== unresolved.metricId || prior.revision >= unresolved.revision) continue;
+    const revisions = unresolvedById.get(unresolved.id) ?? new Map<string, number>();
+    revisions.set(unresolved.metricId, Math.max(revisions.get(unresolved.metricId) ?? -1, unresolved.revision));
+    unresolvedById.set(unresolved.id, revisions);
+  }
+  for (const [id, revisions] of unresolvedById) {
+    for (const prior of historyById.get(id) ?? []) {
+      const revision = revisions.get(prior.metricId);
+      if (revision === undefined || prior.revision >= revision) continue;
       const binding = read(prior);
       if (
         !binding ||
