@@ -6,7 +6,6 @@ import {
 import {
   createDiscussionFeedbackAuthority,
   DiscussionFeedbackStore,
-  migrateDiscussionFeedback,
   privateDiscussionFeedbackMetadata,
 } from "./discussion-feedback-store.mjs";
 import { validatePublicationPeriods, publicScopeFromTemplate } from "./publication-windows.mjs";
@@ -253,7 +252,6 @@ async function retainSourceArtifacts(tx, factKey, document) {
 export async function migratePipeline(db) {
   await migrateScopeStorage(db);
   await migrateIssueTransferMetadata(db);
-  await migrateDiscussionFeedback(db);
   // Keep the continuation schema outside the retained v2 migration fingerprint.
   // Serialize first-time creation independently after that migration commits.
   await db.transaction(async (tx) => {
@@ -3572,6 +3570,7 @@ export async function createPipeline(options) {
       fail("dispatch_configuration_changed");
     if (!Number.isInteger(maxPages) || maxPages < 1 || maxPages > 10000) fail("invalid_pipeline_page_budget");
     if (!["backfill", "reconcile", "audit"].includes(mode)) fail("invalid_scan_scope");
+    if (feedbackAuthority.enabled) await feedbackStore.assertStorage();
     let scan = null;
     if (implicitCutoff && !dispatch) {
       // Verify all configured sources before choosing a durable scan context.

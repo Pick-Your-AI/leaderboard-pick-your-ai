@@ -113,14 +113,17 @@ test("stored sentinel and actual pipeline: independent author/thread acceptance 
 test("content enrollment is disabled by default; absent exact source-use authority prevents all content reads", async (t) => {
   await t.test("metadata-only default", async (t) => {
     const h = await helpfulFeedbackHarness(t, { enrolled: false, memoryDatabase: true });
-    assert.equal((await h.collect()).state, "published");
+    const result = await h.collect();
+    assert.equal(result.state, "published");
     assert.ok(h.state.queries.length > 0);
     assert.ok(h.state.queries.every((query) => !/\bbody\b|\btitle\b|lastEditedAt/.test(query)));
-    assert.equal(await head(h), undefined);
-    assert.equal(
-      (await h.db.query("SELECT count(*) AS n FROM leaderboard_pipeline.discussion_feedback_scans")).rows[0].n,
-      0,
-    );
+    for (const snapshotId of [null, result.publications[0].snapshotId]) assert.ok((await read(h, snapshotId)).selected);
+    for (const table of ["migrations", "heads", "scans"])
+      assert.equal(
+        (await h.db.query("SELECT to_regclass($1) AS name", [`leaderboard_pipeline.discussion_feedback_${table}`]))
+          .rows[0].name,
+        null,
+      );
   });
   await t.test("exact enrolled authority is unavailable", async (t) => {
     const h = await helpfulFeedbackHarness(t, { memoryDatabase: true });
@@ -129,6 +132,26 @@ test("content enrollment is disabled by default; absent exact source-use authori
     assert.equal(h.state.reads, 0);
     assert.deepEqual(await readdir(h.checkpointDirectory), []);
   });
+});
+
+test("enrolled content requires explicit complete versioned schema setup before any content request", async (t) => {
+  for (const scenario of ["absent", "incomplete", "wrong fingerprint"])
+    await t.test(scenario, async (t) => {
+      const h = await helpfulFeedbackHarness(t, { memoryDatabase: true, migrateFeedback: scenario !== "absent" });
+      if (scenario === "incomplete") await h.db.query("DROP TABLE leaderboard_pipeline.discussion_feedback_heads");
+      if (scenario === "wrong fingerprint")
+        await h.db.query("UPDATE leaderboard_pipeline.discussion_feedback_migrations SET fingerprint=$1", [
+          "0".repeat(64),
+        ]);
+      await assert.rejects(
+        h.collect(),
+        new RegExp(
+          `discussion_feedback_migration_${scenario === "absent" ? "required" : scenario === "incomplete" ? "incomplete" : "mismatch"}`,
+        ),
+      );
+      assert.equal(h.state.reads, 0);
+      assert.deepEqual(await readdir(h.checkpointDirectory), []);
+    });
 });
 
 test("complete scan receipts are immutable and exact collection replay does not reread or relabel withdrawn feedback", async (t) => {

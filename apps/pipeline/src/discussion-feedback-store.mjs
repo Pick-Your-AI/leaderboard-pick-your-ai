@@ -176,6 +176,23 @@ export async function migrateDiscussionFeedback(db) {
     }
   });
 }
+/** Optional host setup is explicit. Never create metadata from a content read. */
+async function assertDiscussionFeedbackStorage(tx) {
+  const tables = (
+    await tx.query(`SELECT
+      to_regclass('leaderboard_pipeline.discussion_feedback_migrations') AS migrations,
+      to_regclass('leaderboard_pipeline.discussion_feedback_heads') AS heads,
+      to_regclass('leaderboard_pipeline.discussion_feedback_scans') AS scans`)
+  ).rows[0];
+  check(tables?.migrations, "discussion_feedback_migration_required");
+  check(tables.heads && tables.scans, "discussion_feedback_migration_incomplete");
+  const saved = (
+    await tx.query("SELECT fingerprint FROM leaderboard_pipeline.discussion_feedback_migrations WHERE version=$1", [
+      version,
+    ])
+  ).rows[0];
+  check(saved?.fingerprint === migrationHash, "discussion_feedback_migration_mismatch");
+}
 function savedDocument(row) {
   check(row && discussionFeedbackDigest(row.document) === row.document_hash, "discussion_feedback_integrity_error");
   return limitDocument(row.document);
@@ -282,10 +299,14 @@ export class DiscussionFeedbackStore {
     this.authority = authority;
     this.assertAuthorized = assertAuthorized;
   }
+  async assertStorage() {
+    if (this.authority.enabled) await this.db.transaction(assertDiscussionFeedbackStorage);
+  }
   async gate(tx, repositoryId, expectedAuthority) {
     this.assertAuthorized();
     const current = this.authority.current(repositoryId);
     check(current && current.authorityHash === expectedAuthority);
+    await assertDiscussionFeedbackStorage(tx);
     const access = (
       await tx.query(
         "SELECT installation_id,state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=$1 FOR SHARE",

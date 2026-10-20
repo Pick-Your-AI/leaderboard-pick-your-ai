@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { harness, components, clock } from "./harness.mjs";
+import { migrateDiscussionFeedback } from "../src/index.mjs";
 import {
   feedbackNode,
   feedbackEnrollment,
@@ -16,7 +17,7 @@ import {
  * controls and publication with explicitly synthetic field-scope authority. */
 export async function helpfulFeedbackHarness(
   t,
-  { enrolled = true, memoryDatabase = false, sameAuthor = true, runtimeOptions = {} } = {},
+  { enrolled = true, migrateFeedback = true, memoryDatabase = false, sameAuthor = true, runtimeOptions = {} } = {},
 ) {
   const checkpointDirectory = await mkdtemp(join(tmpdir(), "leaderboard-feedback-checkpoints-"));
   t.after(() => rm(checkpointDirectory, { recursive: true, force: true }));
@@ -119,6 +120,7 @@ export async function helpfulFeedbackHarness(
       runtimeOptions.configure?.(config);
     },
   });
+  if (enrolled && migrateFeedback) await migrateDiscussionFeedback(h.db);
   const collect = (options = {}) => h.runtime.runOnce({ cutoff: clock(), mode: "audit", ...options });
   const accept = async ({
     sourceMetricId = "discussions_started",

@@ -42,6 +42,31 @@ and [Discussions API guide](https://docs.github.com/en/graphql/guides/using-the-
 describe the selected API fields. Documentation is distinct from a successful
 probe under the product's installed App. No live source is activated here.
 
+## Explicit optional schema setup
+
+Ordinary `migratePipeline(db)` preserves the default metadata-only schema. A
+host choosing this optional feature must explicitly apply the exported
+`migrateDiscussionFeedback(db)` after its base migrations and before starting
+enrolled collection:
+
+```js
+import { migratePipeline, migrateDiscussionFeedback } from "./apps/pipeline/src/index.mjs";
+
+await migratePipeline(db);
+await migrateDiscussionFeedback(db);
+```
+
+The optional migration is idempotent and records the exact versioned schema
+fingerprint. It creates the private coverage heads and immutable complete-scan
+receipts; it grants no source-use authority. The first content request and
+subsequent coverage verification require the matching receipt and both tables.
+Missing setup fails with `discussion_feedback_migration_required` before any
+content request or checkpoint; partial or mismatched setup also fails closed.
+Content reads never create or repair this schema. Metadata-only collection,
+current/pinned reads and authorized retirement work without these tables.
+Disabling enrollment does not erase previously retained coverage records;
+those remain subject to the explicit protected-data retirement path.
+
 ## Minimize before the first checkpoint
 
 The optional repository query uses ten Discussions per GraphQL page. It adds
