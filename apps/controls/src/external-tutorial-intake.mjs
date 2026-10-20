@@ -39,8 +39,7 @@ export function externalTutorialTerms() {
 
 export const isExternalTutorialIntake = (value) => value?.schemaVersion === externalTutorialIntakeVersion;
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const keys = (value, names) =>
-  record(value) && Object.keys(value).sort().join("\n") === [...names].sort().join("\n");
+const keys = (value, names) => record(value) && Object.keys(value).sort().join("\n") === [...names].sort().join("\n");
 const bounded = (value, maximum) =>
   typeof value === "string" &&
   value.trim().length > 0 &&

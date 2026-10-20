@@ -96,12 +96,10 @@ export function parseEvidenceIntake(value, participantIds, context) {
   )
     return null;
   const basis = value.sourceUseBasis;
-  if (
-    !(
-      (keys(basis, ["state"]) && basis.state === "unresolved") ||
-      (keys(basis, ["state", "statement"]) && basis.state === "declared" && boundedText(basis.statement, 1000))
-    )
-  )
+  if (!(
+    (keys(basis, ["state"]) && basis.state === "unresolved") ||
+    (keys(basis, ["state", "statement"]) && basis.state === "declared" && boundedText(basis.statement, 1000))
+  ))
     return null;
   const parsed = {
     schemaVersion: external ? externalTutorialIntakeVersion : schemaVersion,

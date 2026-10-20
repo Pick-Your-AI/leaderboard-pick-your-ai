@@ -203,7 +203,8 @@ export function EvidenceIntakeFields({
           <legend>Declared tutorial and manifest pins</legend>
           <p>
             Keep the canonical artifact identity separate from its revision. These pins and the complete proposed
-            account attribution below will be shown to every invited participant. Publication time remains a declaration.
+            account attribution below will be shown to every invited participant. Publication time remains a
+            declaration.
           </p>
           <IntakeField name="tutorialUrl" label="Canonical tutorial HTTPS URL" errors={errors}>
             {(attributes) => (

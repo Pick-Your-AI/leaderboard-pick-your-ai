@@ -312,7 +312,10 @@ test("tutorial amendment starts without consent and sends changed attribution an
   expect(writes[0]!.body.intake.externalTutorial).toEqual({
     ...declaration(),
     revision: { id: "revision-two", contentSha256: "b".repeat(64) },
-    attribution: [{ actorId: "1", role: "Declared coauthor" }, { actorId: "3", role: null }],
+    attribution: [
+      { actorId: "1", role: "Declared coauthor" },
+      { actorId: "3", role: null },
+    ],
   });
 });
 

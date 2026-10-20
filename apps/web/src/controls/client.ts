@@ -349,9 +349,7 @@ export function evidenceSubmissionInput(
       errors.manifestHash = "Enter the 64-character lowercase SHA-256 of the pinned manifest.";
     try {
       const url = new URL(locator);
-      const pin = url.pathname.match(
-        /^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/blob\/(?:[a-f0-9]{40}|[a-f0-9]{64})\/(.+)$/,
-      );
+      const pin = url.pathname.match(/^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/blob\/(?:[a-f0-9]{40}|[a-f0-9]{64})\/(.+)$/);
       const file = pin?.[1];
       if (
         !safeEvidenceLocator(locator) ||

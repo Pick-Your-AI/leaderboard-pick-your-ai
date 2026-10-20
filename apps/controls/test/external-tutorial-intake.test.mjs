@@ -12,6 +12,7 @@ import {
   createSourceUseReview,
   evidenceTerms,
   hasConsentedEvidenceIntake,
+  hasCurrentEvidenceConsent,
   hasReviewedEvidenceIntake,
   projectEvidenceInvitation,
 } from "../src/evidence-intake.mjs";
@@ -300,8 +301,9 @@ test("tutorial capability is absent by default and preserves the legacy terms, c
     },
   });
   assert.equal(legacy.status, 201, legacy.text);
-  assert.equal(legacy.data.intake.schemaVersion, "evidence-intake/v1");
-  assert.equal(Object.hasOwn(legacy.data.intake, "externalTutorial"), false);
+  const saved = h.store.read().requests[legacy.data.id].intake;
+  assert.equal(saved.schemaVersion, "evidence-intake/v1");
+  assert.equal(Object.hasOwn(saved, "externalTutorial"), false);
 });
 
 test("tutorial invitations share the exact declaration and all attribution without protected rationale or external fetches", async (t) => {
@@ -489,11 +491,7 @@ test("tutorial malformed declarations cannot enter real private state or confer 
   }
   const input = tutorialInput();
   input.category = "governance";
-  await denyWithoutMutation(
-    h,
-    () => h.call("/controls/requests", { user: owner, method: "POST", input }),
-    400,
-  );
+  await denyWithoutMutation(h, () => h.call("/controls/requests", { user: owner, method: "POST", input }), 400);
 });
 
 test("tutorial declaration copying rejects hooks and detaches the complete participant descriptor", () => {
@@ -527,4 +525,103 @@ test("tutorial declaration copying rejects hooks and detaches the complete parti
   input.intake.externalTutorial.attribution[0].role = "Changed after admission";
   assert.equal(parsed.attribution[0].role, "Declared tutorial author");
   assert.equal(parsed.publishedAt, null);
+});
+
+test("tutorial persisted declaration tampering cannot reuse completed consent", async (t) => {
+  const h = await scenario(t);
+  assert.equal((await change(h, "consent", h.peer, affirmative(await invitation(h)))).status, 200);
+  const baseline = stored(h);
+  assert.equal(hasConsentedEvidenceIntake(baseline), true);
+  assert.equal(hasCurrentEvidenceConsent(baseline, baseline.owner), true);
+  assert.equal(hasCurrentEvidenceConsent(baseline, "3"), true);
+  const fixedConsentBytes = (request) =>
+    JSON.stringify({
+      id: request.id,
+      version: request.version,
+      claimRevision: request.intake.claimRevision,
+      claimDigest: request.intake.claimDigest,
+      submitterConsent: request.intake.submitterConsent,
+      participantConsents: request.intake.participantConsents,
+    });
+  const originalConsentBytes = fixedConsentBytes(baseline);
+  const mutations = [
+    {
+      label: "canonical tutorial identity",
+      mutate(request) {
+        request.intake.externalTutorial.canonicalUrl = "https://tutorial.example.invalid/lessons/other";
+      },
+    },
+    {
+      label: "tutorial revision identity",
+      mutate(request) {
+        request.intake.externalTutorial.revision.id = "declared-revision-2";
+      },
+    },
+    {
+      label: "tutorial content hash",
+      mutate(request) {
+        request.intake.externalTutorial.revision.contentSha256 = "d".repeat(64);
+      },
+    },
+    {
+      label: "manifest content hash",
+      mutate(request) {
+        request.intake.externalTutorial.manifest.contentSha256 = "e".repeat(64);
+      },
+    },
+    {
+      label: "declared publication time",
+      mutate(request) {
+        request.intake.externalTutorial.publishedAt = "2026-10-18T12:30:00.000Z";
+      },
+    },
+    {
+      label: "submitter role",
+      mutate(request) {
+        request.intake.roles.submitter = "Declared tutorial editor";
+        request.intake.externalTutorial.attribution[0].role = request.intake.roles.submitter;
+      },
+    },
+    {
+      label: "peer role",
+      mutate(request) {
+        request.intake.roles.collaborators["3"] = "Declared translator";
+        request.intake.externalTutorial.attribution[1].role = request.intake.roles.collaborators["3"];
+      },
+    },
+    {
+      label: "pinned GitHub carrier",
+      mutate(request) {
+        request.locator = carrier.replace("a".repeat(40), "f".repeat(40));
+        request.intake.externalTutorial.manifest.locator = request.locator;
+      },
+    },
+  ];
+  assert.equal(mutations.length, 8);
+  for (const { label, mutate } of mutations) {
+    const candidate = structuredClone(baseline);
+    mutate(candidate);
+    assert.deepEqual(
+      parseExternalTutorialDeclaration(candidate.intake.externalTutorial, {
+        owner: candidate.owner,
+        locator: candidate.locator,
+        category: candidate.category,
+        roles: candidate.intake.roles,
+        participantIds: Object.keys(candidate.collaborators),
+      }),
+      candidate.intake.externalTutorial,
+      label,
+    );
+    assert.equal(fixedConsentBytes(candidate), originalConsentBytes, label);
+    assert.equal(hasConsentedEvidenceIntake(candidate), false, label);
+    // Each participant consented to the complete attribution, including the other participant's role.
+    if (label === "submitter role")
+      assert.equal(candidate.intake.roles.collaborators["3"], baseline.intake.roles.collaborators["3"], label);
+    if (label === "peer role") assert.equal(candidate.intake.roles.submitter, baseline.intake.roles.submitter, label);
+    assert.equal(hasCurrentEvidenceConsent(candidate, baseline.owner), false, label);
+    assert.equal(hasCurrentEvidenceConsent(candidate, "3"), false, label);
+    assert.equal(fixedConsentBytes(candidate), originalConsentBytes, label);
+  }
+  assert.equal(fixedConsentBytes(baseline), originalConsentBytes);
+  assert.deepEqual(stored(h), baseline);
 });
