@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import {
   defaultDeliveryNormalizationVersion,
+  fieldChangeNormalizationVersion,
   discussionSourceNormalizationVersion,
   reviewSourceNormalizationVersion,
 } from "@pick-your-ai/github";
 import {
   canonicalPublicScope,
+  discussionFeedbackContentVersion,
   parsePublicWindows,
   publicScopeFilterKey,
   publicScopeKey,
@@ -38,6 +40,7 @@ const confirmationVersions = {
   reviewSourceNormalizationVersion,
   discussionSourceNormalizationVersion,
   defaultDeliveryNormalizationVersion,
+  fieldChangeNormalizationVersion,
 };
 const digest = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 const filterScope = (scope) => canonicalPublicScope({ ...scope, start: null, end: null });
@@ -81,9 +84,14 @@ export function createPublicationWindowIndex({
   const copyConfirmation = (input, scope) => {
     if (!object(input)) fail();
     const versionKeys = Object.keys(confirmationVersions).filter((key) => Object.hasOwn(input, key));
-    const keys = [...confirmationKeys, ...versionKeys];
+    const feedbackKeys = ["discussionFeedbackNormalizationVersion", "discussionFeedbackAuthorityHash"];
+    const feedbackPresent = feedbackKeys.some((key) => Object.hasOwn(input, key));
+    const keys = [...confirmationKeys, ...versionKeys, ...(feedbackPresent ? feedbackKeys : [])];
     exact(input, keys);
     if (
+      (feedbackPresent &&
+        (input.discussionFeedbackNormalizationVersion !== discussionFeedbackContentVersion ||
+          !digest(input.discussionFeedbackAuthorityHash))) ||
       versionKeys.some((key) => input[key] !== confirmationVersions[key]) ||
       input.configurationVersion !== configurationVersion ||
       input.configurationHash !== configurationHash ||

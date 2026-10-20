@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
+import { AggregateExplanationStore, buildAggregateExplanation } from "../src/aggregate-explanations.mjs";
 import { createPipeline } from "../src/index.mjs";
 import { normalizationDocumentVersion } from "../src/private-attribution.mjs";
 import { createGithubCollectionSource } from "../src/github-source.mjs";
@@ -197,6 +198,7 @@ for (const family of Object.keys(metrics))
         authorizePolicyPreview: async () => true,
         policyComparisonAuthorityCurrent: () => true,
         defaultDeliveryNormalizationVersion: components.github.defaultDeliveryNormalizationVersion,
+        fieldChangeNormalizationVersion: components.github.fieldChangeNormalizationVersion,
         configure(config) {
           Object.assign(config.repositories[0], repository);
           config.repositories[0].families = droppedFamily ? ["issues"] : ["issues", family];
@@ -323,17 +325,77 @@ for (const family of Object.keys(metrics))
             publication.snapshotId,
           ])
         ).rows[0].document;
-        const binding = frozen.identityAuthorization.identityEvidence;
-        binding.normalizationHashes = binding.normalizationHashes.map((hash) =>
-          hash === produced[0].document_hash ? oldHash : hash,
-        );
-        if (binding.normalizationSources !== undefined)
-          binding.normalizationSources = binding.normalizationSources.map((entry) =>
-            entry.factKey === sourceRow.fact_key ? { ...entry, documentHash: oldHash } : entry,
+        const replaceBinding = (binding) => {
+          binding.normalizationHashes = binding.normalizationHashes.map((hash) =>
+            hash === produced[0].document_hash ? oldHash : hash,
           );
+          if (binding.normalizationSources !== undefined)
+            binding.normalizationSources = binding.normalizationSources.map((entry) =>
+              entry.factKey === sourceRow.fact_key ? { ...entry, documentHash: oldHash } : entry,
+            );
+        };
+        replaceBinding(frozen.identityAuthorization.identityEvidence);
         await h.db.query(
           "UPDATE leaderboard_pipeline.frozen_inputs SET document=$2::jsonb,document_hash=$3 WHERE snapshot_id=$1",
           [publication.snapshotId, JSON.stringify(frozen), comparisonHash(frozen)],
+        );
+        // The public field guard reads the independently retained explanation.
+        // Keep every disposable authority bound to this exact historical hash;
+        // updating SQL alone leaves an inconsistent SQLite explanation/input.
+        const capture = {
+          input: frozen.frozen,
+          scope: frozen.engineScope,
+          policies: frozen.policies.map((entry) => entry.policy),
+          aggregates: frozen.policies.map((entry) =>
+            components.metrics.aggregateMetric(frozen.frozen, entry.policy, frozen.engineScope),
+          ),
+          snapshot: { snapshotId: publication.snapshotId, revision: publication.revision },
+          authorization: frozen.identityAuthorization,
+        };
+        const precedingExplanation = new AggregateExplanationStore(h.controlsStore).read(
+          publication.snapshotId,
+        ).document;
+        const explanation = buildAggregateExplanation(capture, {
+          scopeKey: precedingExplanation.scopeKey,
+          computationVersion: precedingExplanation.snapshot.computationVersion,
+        });
+        const explanationHash = comparisonHash(explanation);
+        h.controlsStore.db
+          .prepare("UPDATE pipeline_aggregate_explanations SET document=?,digest=? WHERE snapshot_id=?")
+          .run(JSON.stringify(explanation), explanationHash, publication.snapshotId);
+        if (publication.comparisonInput) {
+          const row = h.controlsStore.db
+            .prepare("SELECT * FROM policy_preview_inputs WHERE id=?")
+            .get(publication.comparisonInput.inputId);
+          const input = JSON.parse(row.document);
+          replaceBinding(input.authorization.identityEvidence);
+          const inputId = comparisonHash(input);
+          h.controlsStore.db
+            .prepare("UPDATE policy_preview_inputs SET id=?,document=?,digest=? WHERE id=?")
+            .run(inputId, JSON.stringify(input), inputId, row.id);
+          assert.equal(h.runtime.policyComparisons.comparisons.input(inputId).id, inputId);
+        }
+        const receipt = (
+          await h.db.query(
+            "SELECT receipt_id,document FROM leaderboard_pipeline.receipts WHERE kind='snapshot_published'",
+          )
+        ).rows.find((entry) => entry.document.snapshotId === publication.snapshotId);
+        receipt.document.comparisonInputHash = comparisonHash(capture);
+        await h.db.query(
+          "UPDATE leaderboard_pipeline.receipts SET document=$2::jsonb,document_hash=$3 WHERE receipt_id=$1",
+          [receipt.receipt_id, JSON.stringify(receipt.document), comparisonHash(receipt.document)],
+        );
+        h.controlsStore.transaction((state) => {
+          for (const confirmation of [
+            state.pipelinePublications[publication.snapshotId],
+            ...Object.values(state.pipelineHeads),
+          ])
+            if (confirmation.snapshotId === publication.snapshotId)
+              confirmation.aggregateExplanationHash = explanationHash;
+        });
+        assert.equal(
+          new AggregateExplanationStore(h.controlsStore).read(publication.snapshotId).digest,
+          explanationHash,
         );
       }
       const oldCache = (
