@@ -3,11 +3,11 @@
 This is a partial implementation of [LB-19.01 / issue #72](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/72).
 The new suite feeds synthetic GitHub source payloads through the actual normalizer
 and metric engine. It adds explicit actor, clock, source-proof and grouping
-checks for 18 metric IDs. The inventory separately maps 61 other IDs to existing
-meaningful source cases, with exact test names and their limits. Nineteen IDs
-remain explicitly deferred in the inventory. The accepted eleven-reference update
-and two pair mappings below do not requalify those remaining dispositions or
-certify all 98 public definitions.
+checks for 18 metric IDs. The inventory separately maps 63 other IDs to existing
+meaningful source cases, with exact test names and their limits. Seventeen IDs
+remain explicitly deferred in the inventory. The accepted eleven-reference update,
+two pair mappings and two accepted-source mappings below do not certify all 98
+public definitions.
 
 The [machine-readable inventory](../packages/metrics/test/fixtures/metric-source-semantics.json)
 accounts for every registry ID exactly once. A metric with new cases has an
@@ -121,6 +121,20 @@ describes the synthetic typed endpoint bindings, first-known-history limit and
 retained-generation guards. Both pair mappings retain their source completeness,
 capability and public-activation limits beside the inventory entries.
 
+A bounded review of accepted `21bdfbe0790d63c5502ab8d24f34f0829b189ae2`
+adds two further source references. The [direct-change cases](../packages/metrics/test/direct-changes-source-semantics.test.js)
+exercise linked-author credit, the supplied first-integration clock, replay and
+PR/ordinary-commit exclusion through the actual normalizer and engine. Their
+protected host supplies direct-versus-PR classification; these cases do not
+implement a push/DAG collector or complete PR-overlap resolution. The
+[helpful-feedback cases](../apps/pipeline/test/helpful-feedback-recognition.test.mjs)
+bind exact original/current Discussion observations to synthetic intake whose
+enrolled reviewer is distinct from the source author, followed by actual receipt
+application/aggregation. Acceptance windows,
+distinct authors, self/unlisted-reviewer rejection, duplicate audits and ambiguous
+targets have explicit assertions. These references do not establish real
+participant consent, live permission, public policy approval or public activation.
+
 An inclusion and an exclusion may be asserted by the same named test. The
 milestone reference uses the body that actually constructs milestone no-ops and
 repeated day units; a label-only midnight test is not substituted for it. The
@@ -131,10 +145,12 @@ week. It does not borrow an out-of-window, other-role newcomer uncertainty case
 as evidence for unknown in-scope active-week exclusion. Its calendar denominator
 is context, not a certified fully covered participation share or month projection.
 
-The remaining dispositions retain seven derivation/admission prerequisites and
-twelve IDs needing additional semantic cases. The accepted eleven-reference review
-left 21 entries; this composition adds only the two pair mappings and does not
-establish whether other source changes resolve any of the remaining 19 entries.
+The remaining dispositions retain six derivation/admission prerequisites and
+eleven IDs needing additional semantic cases. The accepted eleven-reference review
+left 21 entries; this composition maps two pairs plus direct changes and helpful
+feedback, leaving 17. Project field/update cases already establish bounded raw
+transitions, but do not establish complete item/day or substantive-update semantics;
+those entries remain deferred.
 The optional retained-line and commit-attributed
 lenses are not silently assigned to the adjacent physical-context PRs. A raw
 relationship cannot establish preserved duplicate evidence; a generic accepted

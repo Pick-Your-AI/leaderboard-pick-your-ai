@@ -291,7 +291,6 @@
         "cross_workstream_reviews",
         "evidence_reviews",
         "project_items_curated",
-        "helpful_feedback",
         "outreach",
         "commit_attributed_lines",
         "retained_lines"
@@ -301,7 +300,6 @@
     {
       "id": "additional-semantic-cases",
       "metric_ids": [
-        "direct_changes",
         "accepted_suggestions",
         "accepted_findings",
         "issue_resolution",
@@ -770,6 +768,20 @@
       "negative_test": "${metricId} does not move an old pair into a later reporting window or actor lens",
       "limitation": "Synthetic protected enrichment verifies typed endpoint bindings and conserves one canonical PR/issue closing pair in authorized known history. Missing or conflicting attribution remains unavailable; partial observations do not prove first-ever history, native event collection, approved source capability or public activation.",
       "case_parameter": "closing_links"
+    },
+    {
+      "metric_id": "direct_changes",
+      "path": "packages/metrics/test/direct-changes-source-semantics.test.js",
+      "positive_test": "direct changes use the witnessed first integration and half-open windows, not Git or collection dates",
+      "negative_test": "PR delivery and an ordinarily classified integrated commit do not manufacture an additional direct change",
+      "limitation": "Synthetic protected-host integration witnesses exercise the actual normalizer and engine, conserving one repository/SHA at the supplied first-integration clock and separating linked author, committer and pusher. The host supplies direct-versus-PR classification. These cases do not implement a push/DAG collector, complete PR-overlap resolution, independent acceptance or public activation; coverage remains incomplete and ranking/public output disabled."
+    },
+    {
+      "metric_id": "helpful_feedback",
+      "path": "apps/pipeline/test/helpful-feedback-recognition.test.mjs",
+      "positive_test": "the metric uses independent acceptance windows while native facts, distinct authors and definition-only maturity remain intact",
+      "negative_test": "self-review, an unenrolled reviewer, a duplicated audit and an ambiguous source target cannot earn feedback",
+      "limitation": "Actual Discussion normalization, exact original/current source validation and synthetic intake whose enrolled reviewer is distinct from the source author feed receipt application and aggregation. Inclusion checks acceptance-time windows, distinct authors and unchanged native facts; exclusion rejects self or unenrolled reviewers, duplicate audits and ambiguous targets before callbacks. No real participant consent, live source-use permission or public metric approval is established; maturity remains definition_only and publicEnabled remains false."
     }
   ]
 }
