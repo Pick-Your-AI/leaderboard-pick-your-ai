@@ -75,9 +75,7 @@ async function setup(t, { memoryDatabase = true, enabled = true, empty = false, 
         __typename: { closed: "ClosedEvent", reopened: "ReopenedEvent", merged: "MergedEvent" }[event.kind],
         id: "E_SYNTHETIC_DECIDED_" + number + "_" + index,
         createdAt: event.at,
-        ...(event.kind === "merged"
-          ? { pullRequest: parent, commit: { oid: "a".repeat(40) } }
-          : { closable: parent }),
+        ...(event.kind === "merged" ? { pullRequest: parent, commit: { oid: "a".repeat(40) } } : { closable: parent }),
       })),
     );
   };
@@ -136,9 +134,7 @@ async function setup(t, { memoryDatabase = true, enabled = true, empty = false, 
                 state: pull.merged ? "MERGED" : pull.state === "closed" ? "CLOSED" : "OPEN",
                 closedAt: pull.closed_at,
                 mergedAt: pull.merged_at,
-                author: pull.user
-                  ? { __typename: "User", id: pull.user.node_id, databaseId: pull.user.id }
-                  : null,
+                author: pull.user ? { __typename: "User", id: pull.user.node_id, databaseId: pull.user.id } : null,
                 timelineItems: connection,
               },
             },
@@ -153,8 +149,7 @@ async function setup(t, { memoryDatabase = true, enabled = true, empty = false, 
         if (incomplete && url.searchParams.get("page") === "2")
           return new Response(JSON.stringify({ message: "synthetic inventory unavailable" }), { status: 503, headers });
         body = [...pulls.values()].map((pull) => structuredClone(pull));
-        if (incomplete)
-          headers.link = "<https://api.synthetic.invalid/repos/" + slug + '/pulls?page=2>; rel="next"';
+        if (incomplete) headers.link = "<https://api.synthetic.invalid/repos/" + slug + '/pulls?page=2>; rel="next"';
       } else {
         assert.equal(state.forbidCollection, false, "frozen reads cannot rehydrate source records");
         const number = Number(url.pathname.match(/\/pulls\/(\d+)$/)?.[1]);
