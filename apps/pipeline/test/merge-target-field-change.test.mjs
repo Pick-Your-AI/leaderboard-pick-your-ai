@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { defaultDeliveryNormalizationVersion, fieldChangeNormalizationVersion } from "@pick-your-ai/github";
+import {
+  defaultDeliveryNormalizationVersion,
+  fieldChangeNormalizationVersion,
+  relationshipPairNormalizationVersion,
+} from "@pick-your-ai/github";
 import {
   mergeTargetGenerationSignature,
   mergeTargetNormalizationVersion,
@@ -98,6 +102,94 @@ test("outer field wrapping cannot conceal the wrong merge base or run generation
   ])
     assert.throws(
       () => validate({ ...withField(), pullRequestMergeTargetNormalization: changed }, field(merge), fieldOption),
+      unavailable,
+    );
+});
+
+const pair = (signature) => digest([relationshipPairNormalizationVersion, signature]);
+const pairOption = { version: relationshipPairNormalizationVersion, signature: pair };
+const paired = (document) => ({ ...document, relationshipPairNormalizationVersion });
+const validatePair = (document, signature, field = null, option = pairOption) =>
+  validateMergeTargetGeneration(document, signature, baseSignature, digest, delivery, field, option);
+
+test("pair markers compose only outside the exact merge, delivery and field generations", () => {
+  for (const inner of [merge, delivery(merge)]) {
+    assert.deepEqual(validatePair(ordinary(), inner), marker);
+    assert.deepEqual(validatePair(paired(ordinary()), pair(inner)), marker);
+  }
+  for (const inner of [field(merge), field(delivery(merge))]) {
+    assert.deepEqual(validatePair(withField(), inner, fieldOption), marker);
+    assert.deepEqual(validatePair(paired(withField()), pair(inner), fieldOption), marker);
+  }
+  assert.deepEqual(paired(withField()).facts, [], "empty corrected output still retains both generation markers");
+});
+
+test("pair wrapping cannot hide absent markers, incompatible options or a different merge generation", () => {
+  for (const inner of [merge, delivery(merge)]) {
+    assert.throws(() => validatePair(ordinary(), pair(inner)), unavailable);
+    assert.throws(() => validatePair(paired(ordinary()), inner), unavailable);
+  }
+  for (const inner of [field(merge), field(delivery(merge))]) {
+    assert.throws(() => validatePair(withField(), pair(inner), fieldOption), unavailable);
+    assert.throws(() => validatePair(paired(withField()), inner, fieldOption), unavailable);
+  }
+  assert.throws(() => validatePair(paired(withField()), pair(field(merge))), unavailable);
+  for (const option of [
+    null,
+    {},
+    { version: "relationship-pair-units/old", signature: pair },
+    { version: relationshipPairNormalizationVersion },
+    { version: relationshipPairNormalizationVersion, signature: null },
+    { version: relationshipPairNormalizationVersion, signature: field },
+  ])
+    assert.throws(() => validatePair(paired(withField()), pair(field(merge)), fieldOption, option), unavailable);
+  assert.throws(
+    () => validateMergeTargetGeneration(paired(ordinary()), pair(merge), baseSignature, digest, delivery),
+    unavailable,
+  );
+  for (const version of [
+    undefined,
+    null,
+    false,
+    1,
+    "",
+    "relationship-pair-units/old",
+    { version: relationshipPairNormalizationVersion },
+  ])
+    assert.throws(
+      () =>
+        validatePair(
+          { ...withField(), relationshipPairNormalizationVersion: version },
+          pair(field(merge)),
+          fieldOption,
+        ),
+      unavailable,
+    );
+  for (const signature of [
+    field(pair(merge)),
+    delivery(pair(field(merge))),
+    pair(pair(field(merge))),
+    pair(field(field(merge))),
+    pair(field(delivery(delivery(merge)))),
+    pair(field(mergeTargetGenerationSignature("c".repeat(64), generation, digest))),
+    pair(field(mergeTargetGenerationSignature(baseSignature, "d".repeat(64), digest))),
+    mergeTargetGenerationSignature(pair(baseSignature), generation, digest),
+  ])
+    assert.throws(() => validatePair(paired(withField()), signature, fieldOption), unavailable);
+  for (const changed of [
+    { ...marker, baseSignature: "c".repeat(64) },
+    { ...marker, generation: "d".repeat(64) },
+    { ...marker, generation: "not-a-hash" },
+    { ...marker, schemaVersion: "pr-merge-target-normalization/old" },
+    { ...marker, extra: true },
+  ])
+    assert.throws(
+      () =>
+        validatePair(
+          { ...paired(withField()), pullRequestMergeTargetNormalization: changed },
+          pair(field(merge)),
+          fieldOption,
+        ),
       unavailable,
     );
 });

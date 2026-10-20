@@ -210,9 +210,10 @@ revision must equal the current private revision. No caller-provided revision
 can replace it. A link appends its private association and moves no contributions;
 a merge or split appends only the exact named assignments, preserving their
 roles. An original contribution already present in an accepted overlay is
-superseded and cannot be assigned again through this consumer. Reversal and
-review of a subsequent attribution generation require their separate protected
-implementation; reusing the old original-source binding cannot bypass it.
+superseded and cannot be assigned again through this consumer. The separate
+private cancellation consumer below can withdraw an application without reusing
+its attribution. Review and application of a subsequent attribution generation
+remain separate work; reusing the old original-source binding cannot bypass it.
 
 One transaction appends the overlay, retains the complete decision and immutable
 authorization, stores its application receipt and advances the private revision
@@ -240,12 +241,139 @@ write contention, failures at each durable write and deferred commit, throwing
 first/final readers, reopening and repeated delivery. These are local engineering
 controls; they are not real identity decisions or live propagation evidence.
 
+## Private cancellation of an accepted application
+
+The optional [cancellation consumer](../apps/controls/src/identity-correction-reversals.mjs)
+provides `createVerifiedIdentityCorrectionReversalConsumer({ store, readAuthority, now })`
+and returns `reverse(decisionId)`. The sole request value is the new reversal
+decision ID. It requires the accepted consumer's existing private tables and
+adds `identity_correction_cancellations`; it does not initialize an absent
+accepted-decision store. The module has no server route or automatic activation.
+
+This operation appends a private cancellation of exactly one retained accepted
+link, merge or split. It keeps the original overlay, original decision,
+authorization, receipt and source records. Its receipt explicitly records
+`outcome: cancelled_private` and `restoration: withheld`. Neither the original
+source attribution nor a public identity, profile, snapshot or previously
+suppressed result is restored. Public propagation and a subsequent attribution
+generation require their own implementation and current authority.
+
+### Protected cancellation authority
+
+The reader must resolve canonical protected records through the same locked
+`DatabaseSync` connection, twice in one `ControlStore` transaction. All writers
+must use the same transaction discipline. Its strict version is
+`leaderboard-private-identity-reversal-authority/v1`:
+
+| Field | Required protected content |
+| --- | --- |
+| `revision`, `validUntil` | A positive safe authority revision and an exclusive current deadline. |
+| `decision`, `currentDecisionId` | The exact new `reversed` decision and the current decision ID for this lineage. Its proposal must equal the retained accepted target's entire historical proposal; changing assignments or attribution generations is outside this operation. |
+| `priorDecisions` | The complete ordered history, including the exact target acceptance and every locally retained application or cancellation in the lineage. Each decision binds its complete earlier prefix. Reviewers are independent; provider identity mappings and proposal digests remain consistent. |
+| `reviewer` | The new decision's exact provider identity, exclusive current `expiresAt`, `verified: true` and `revoked: false`. The reviewer is independent of the requester, affected identities and every previous reviewer. |
+| `authorization` | A fresh purpose-specific receipt with `scope: private_identity_cancellation`, `receiptId`, new `decisionId`, accepted `reversesDecisionId`, `targetApplicationSha256`, `proposalSha256`, exact `reviewer`, `policyVersion`, `kind`, reviewed `attributionRevision`, `grantedAt`, exclusive `expiresAt` and `revoked: false`. |
+| `reason` | A current verified, nonrevoked receipt with exact `receiptId`, new `decisionId` and `proposalSha256`. Private reason contents are not copied. |
+| `observations` | Exact, complete current actor and source observations described below. These describe present restrictions and availability; they grant no permission to restore anything. |
+
+The target application must exist before the new grant and review:
+`target.appliedAt <= authorization.grantedAt <= decision.reviewedAt <= now`.
+Its after-revision must not exceed the grant's reviewed private revision. A new
+cancellation also requires that reviewed revision to equal the current private
+revision. This prevents a reversal reviewed before an accepted application
+exists from authorizing that later application. Both authority snapshots must
+be identical, the final clock cannot move backwards, and all new authority
+deadlines must remain current before commit.
+
+The old target's proof, identity and source descriptors remain historical.
+Current expiry, revocation, withdrawal or unavailability of that old evidence
+cannot grant attribution again and does not prevent a newly authorized
+restrictive cancellation. The retained bundle is still validated: the old
+application time must be at or after its accepted review, inside the original
+authorization lifetime and before every bounded original proof expiry. Its
+before-revision must equal the original authorization's reviewed revision; the
+after-revision must be exactly one higher and equal the overlay revision. The
+consumer does not invent unavailable historical identity snapshots.
+
+### Current observations without restoration authority
+
+`observations.actors` contains exactly one closed record for every unique actor
+in the target's source/result sets, with no missing, duplicate or foreign actor.
+The requester or reviewer is not added unless also affected. Each record has
+`actorId` and all three state fields:
+
+| Field | Allowed values |
+| --- | --- |
+| `suppression` | `clear`, `suppressed`, `unavailable` |
+| `deletion` | `retained`, `deleted`, `unavailable` |
+| `consent` | `current`, `withdrawn`, `expired`, `not_applicable`, `unavailable` |
+
+`not_applicable` is admitted only when the historical target has no consent
+proof scoped to that actor. A missing or inaccessible record must be represented
+explicitly as `unavailable`, never inferred to be clear, retained or current.
+
+`observations.sources` contains exactly one closed record for each target
+assignment, with `contributionId` and `validity`. Allowed validity values are
+`current`, `changed`, `revoked`, `deleted` and `unavailable`. A link has no
+assignments and therefore has an empty source observation list. Source binding
+details remain in the exact retained target bundle; unavailable current source
+records are not fabricated from those old details.
+
+Suppressed/deleted actors, withdrawn/expired consent and changed, revoked or
+unavailable sources all allow cancellation under the fresh cancellation grant.
+Every combination still yields `restoration: withheld`. The reader must resolve
+these observations from actual protected current state; a synthetic callback or
+literal enum value is not operational evidence that this integration exists.
+
+### Whole-target binding, durable history and retry
+
+`digestPrivateIdentityCorrectionApplication(input)` validates the complete
+retained `{ decision, authorization, receipt, overlay }` target bundle and returns
+its SHA-256 binding. It is separate from the proposal-only digest. Its exact
+encoding is the ASCII marker
+`leaderboard-private-identity-application-binding/v1`, one LF byte, then the
+complete parsed bundle as canonical JSON in UTF-8, with no trailing newline.
+Object keys use ascending UTF-16 code-unit order, arrays retain order and scalar
+escaping follows well-formed `JSON.stringify`, as specified for proposal encoding
+above. No normalization or timestamp-spelling conversion occurs. A matching hash
+does not establish authority or apply a cancellation.
+
+The consumer reads the target directly from the retained accepted receipt and
+overlay tables. It cross-validates every decision, authorization, proposal,
+receipt, revision, time and overlay binding before comparing the new grant's
+target digest. A caller-supplied target record is never an application input.
+
+One transaction appends the cancellation state, stores the new reversal
+decision, immutable cancellation authorization and receipt in the existing
+`identity_correction_receipts` table, then advances the private revision once.
+The cancellation table is unique by target acceptance, reversal decision and
+resulting revision. Using the shared receipt history means the unchanged
+accepted consumer rejects a later history that omits or replaces this local
+reversal. Keeping the old overlay also preserves its superseded-source guard:
+a later acceptance cannot reuse the old original contribution attribution.
+
+The cancellation receipt and state retain the observations at the original
+cancellation application time. An exact retry requires two identical fresh
+authority reads and the same immutable decision and grant, and validates the
+durable cancellation/receipt pair. It returns a detached copy of the original
+receipt without changing its observations, even after a reopen, an unrelated
+private revision or a later negative/unavailable current observation. Current
+revocation or expiry of the cancellation grant still rejects the retry. A
+different reversal cannot cancel the same target a second time.
+
+Any failed read, target/history check, append, receipt write, revision update,
+final guard or deferred database commit rolls back the whole transaction. The
+[focused synthetic suite](../apps/controls/test/identity-correction-reversals.test.mjs)
+covers these cancellation boundaries alongside the unchanged accepted-consumer
+suite. These synthetic cases do not establish live reviewer authorization,
+real identity decisions, public propagation or completion of issue #94.
+
 ## Remaining application and acceptance
 
 The protected authority provider and its real proof/source admission must be
 integrated and independently qualified before this consumer is enabled for any
 operational identity decision. Authenticated intake, private request delivery,
-reviewer custody, reversal and public propagation retain their separate gates.
+reviewer custody, operational cancellation admission and public propagation
+retain their separate gates.
 Whole LB-17.03 remains open.
 
 Downstream application must consume the private overlay and durable receipt,

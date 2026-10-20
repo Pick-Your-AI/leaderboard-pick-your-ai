@@ -366,7 +366,9 @@ for (const defaultWrapper of [false, true]) {
       h.db.query = async (sql, values) => {
         const result = await query.call(h.db, sql, values);
         if (
-          sql.includes("FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=ANY") &&
+          /FROM\s+leaderboard_pipeline\.normalizations\s+WHERE\s+fact_key=\$1\s+AND\s+\(?policy_signature=ANY\(/.test(
+            sql,
+          ) &&
           values[0] === row.fact_key
         )
           lookups.push({
@@ -604,7 +606,9 @@ for (const oldVersion of ["review-source-identity/v1", "review-source-identity/v
           h.db.query = async (sql, values) => {
             const result = await query.call(h.db, sql, values);
             if (
-              sql.includes("FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=ANY") &&
+              /FROM\s+leaderboard_pipeline\.normalizations\s+WHERE\s+fact_key=\$1\s+AND\s+\(?policy_signature=ANY\(/.test(
+                sql,
+              ) &&
               values[0] === original.fact_key
             )
               reads.push({ keys: result.rows.map((row) => row.policy_signature), hydrations: h.state.hydrations });
@@ -724,7 +728,9 @@ for (const oldVersion of ["review-source-identity/v1", "review-source-identity/v
         h.db.query = async (sql, values) => {
           const result = await query.call(h.db, sql, values);
           if (
-            sql.includes("FROM leaderboard_pipeline.normalizations WHERE fact_key=$1 AND policy_signature=ANY") &&
+            /FROM\s+leaderboard_pipeline\.normalizations\s+WHERE\s+fact_key=\$1\s+AND\s+\(?policy_signature=ANY\(/.test(
+              sql,
+            ) &&
             values[0] === original.fact_key
           )
             reads.push({ keys: result.rows.map((row) => row.policy_signature), hydrations: h.state.hydrations });
