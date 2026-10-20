@@ -48,8 +48,9 @@ It does not reinterpret this selected-summary contract or install a real history
 admission in the stock pipeline. The earliest visible receipt below remains
 limited to this selection; it is not a joining date or proof of no earlier work.
 The metric-engine `participationView` also retains its own reviewed-history
-calculation. Real origin/source admission and producer integration remain
-explicit acceptance work.
+calculation. The protected pipeline producer implements that protocol with paired
+immutable publications and an optional host-code admission capability. Real
+origin/source admission remains explicit acceptance work.
 
 The client validates the versioned extension, its selected-window denominator and
 its metric membership against the same profile response. Older publications that
