@@ -129,7 +129,7 @@ function githubUrl(value: unknown): URL {
       !result.username &&
       !result.password &&
       !result.port &&
-      !result.search &&
+      !raw.includes("?") &&
       result.href === raw &&
       !/[%\\]/.test(result.pathname),
   );
@@ -147,7 +147,7 @@ function reference(value: unknown): { locator: string; revision: string } {
   requireValue(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(revision));
   const url = githubUrl(input.locator);
   const parts = url.pathname.split("/");
-  requireValue(parts.length >= 6 && parts[3] === "blob" && parts[4] === revision && !url.hash);
+  requireValue(parts.length >= 6 && parts[3] === "blob" && parts[4] === revision && !url.href.includes("#"));
   slug(parts[1] + "/" + parts[2]);
   return { locator: url.href, revision };
 }

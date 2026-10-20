@@ -556,3 +556,36 @@ test("refuses unrecognized versions and top-level values with stable sanitized e
   state.request.status = "accepted";
   invalid(() => bindPublicStewardshipReview(input, state));
 });
+
+for (const suffix of ["?", "#", "?#"]) {
+  for (const side of ["before", "after"]) {
+    test("rejects empty URL components in " + side + " evidence: " + suffix, () => {
+      const input = fixture();
+      assert.deepEqual(parsePublicStewardshipReview(input), input);
+      assert.deepEqual(bindPublicStewardshipReview(input, current(input)).review, input);
+      input[side].evidence.locator += suffix;
+      invalid(() => parsePublicStewardshipReview(input));
+      invalid(() => publicStewardshipReviewDigest(input));
+    });
+  }
+
+  test("rejects empty URL components in an unused decision reference: " + suffix, () => {
+    const input = fixture();
+    const state = current(input);
+    const { locator, revision } = evidence("unused-reviewed-source");
+    const extra = { locator, revision };
+    state.decision.references.push(extra);
+    assert.deepEqual(bindPublicStewardshipReview(input, state).review, input);
+    extra.locator += suffix;
+    invalid(() => bindPublicStewardshipReview(input, state));
+  });
+
+  test("rejects delimiter aliases between snapshots with conflicting artifact hashes: " + suffix, () => {
+    const input = fixture();
+    input.after.evidence = structuredClone(input.before.evidence);
+    assert.deepEqual(parsePublicStewardshipReview(input), input);
+    input.after.evidence.locator += suffix;
+    input.after.evidence.sha256 = sha("conflicting bytes behind the same pinned artifact");
+    invalid(() => parsePublicStewardshipReview(input));
+  });
+}

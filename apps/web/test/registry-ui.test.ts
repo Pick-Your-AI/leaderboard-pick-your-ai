@@ -165,6 +165,32 @@ test("rendered methods, paired filters and invalid wall errors consume registry 
         assert.match(html, /No selectable view; not measured/);
         assert.doesNotMatch(html, /Raw triage grouping policy/);
       }
+      if (["project_field_updates", "public_moderation"].includes(metric.id)) {
+        const label =
+          metric.id === "project_field_updates" ? "Project item-day grouping" : "Public stewardship item-day grouping";
+        const detail = html.match(new RegExp("<dt>" + label + " policy</dt><dd>([\\s\\S]*?)</dd>"))?.[1];
+        assert.ok(detail, metric.id);
+        const normalized = detail.replace(/\s+/g, " ");
+        assert.match(normalized, /per UTC calendar day within its repository/);
+        assert.match(html, /No selectable view; not measured/);
+        assert.doesNotMatch(normalized, /stable definition|definition kind/);
+        if (metric.id === "project_field_updates") {
+          assert.match(normalized, /project-field-day\/v1/);
+          assert.match(normalized, /one observed actor and stable Project item/);
+          assert.match(normalized, /Different field facets, repeated changes and reversals share one item day/);
+          assert.match(normalized, /Only the proven source event time chooses the day/);
+          assert.match(normalized, /collection or acceptance time cannot replace it/);
+          assert.doesNotMatch(normalized, /Independently qualified|source or acceptance day/);
+        } else {
+          assert.match(normalized, /public-stewardship-day\/v1/);
+          assert.match(normalized, /one actor and stable item/);
+          assert.match(normalized, /Pin, unpin, lock and unlock facets and repeated toggles share one daily unit/);
+          assert.match(normalized, /Independently qualified same-metric receipts/);
+          assert.match(normalized, /separate source or acceptance day lenses/);
+          assert.match(normalized, /acceptance never supplies a missing raw event time/);
+          assert.match(normalized, /Totals remain descriptive and are never ranked/);
+        }
+      }
     }
     const filter = render(React.createElement(ScopeBar, { metricId: "pr_merged", timeWindow: null }));
     assert.match(filter, /Unsupported: observed:acceptedAt/);

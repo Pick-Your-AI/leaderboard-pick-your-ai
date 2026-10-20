@@ -292,6 +292,11 @@ test("prototype follow pauses when reduced motion is enabled and manual apply re
   await page.clock.runFor(200);
   await expect(freshness).toContainText("Snapshot syn-r43");
   await expect(follow).toBeDisabled();
+  await expect(apply).toBeFocused();
+  await expect(apply).toHaveAttribute("aria-disabled", "true");
+  const proof = page.locator(".proof-link").first();
+  await proof.focus();
+  await expect(proof).toBeFocused();
   await expect(apply).toHaveCount(0);
   await expect(page.getByRole("status")).toHaveCount(1);
   await expect(page.getByRole("status")).toContainText("Updated to snapshot syn-r43");
@@ -477,4 +482,135 @@ test("scoped keyboard navigation preserves the snapshot and privacy states keep 
   await ready(page, "/contributions/syn-c-032");
   await expect(page.getByText("Source no longer public; the link was removed.")).toBeVisible();
   await expect(page.locator('main a[href^="https://synthetic.example"]')).toHaveCount(0);
+});
+
+for (const moveFocus of [false, true]) {
+  test(
+    moveFocus
+      ? "manual prototype snapshot application respects focus moved away during its pending read"
+      : "manual prototype snapshot application preserves its exact keyboard control during and after the read",
+    async ({ page }) => {
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      const start = new Date("2026-10-20T12:00:00Z");
+      await page.clock.install({ time: start });
+      await page.clock.pauseAt(new Date(start.getTime() + 1_000));
+      await page.goto("/leaderboards/prs_reviewed?ui=prototype");
+      await expect(page.locator("h1")).toBeVisible();
+      await page.clock.runFor(200);
+
+      const freshness = page.locator(".freshness");
+      const follow = page.getByRole("checkbox", { name: /Follow updates/ });
+      const status = page.getByRole("status");
+      await expect(freshness).toContainText("Snapshot syn-r42");
+      await expect(follow).not.toBeChecked();
+      const rows = await page.locator("tbody").innerText();
+      await page.clock.runFor(20_000);
+
+      const apply = page.getByRole("button", { name: "Apply updates", exact: true });
+      await expect(apply).toBeVisible();
+      await expect(freshness).toContainText("Snapshot syn-r42");
+      expect(await page.locator("tbody").innerText()).toBe(rows);
+      await expect(status).toBeEmpty();
+      await apply.focus();
+      const button = await apply.elementHandle();
+      if (!button) throw new Error("The pending prototype Apply control is missing.");
+      await page.keyboard.press("Enter");
+
+      // The clock stays paused while the real 120ms prototype read is pending.
+      await expect(apply).toHaveAttribute("aria-disabled", "true");
+      await expect(freshness).toContainText("Snapshot syn-r42");
+      expect(await page.locator("tbody").innerText()).toBe(rows);
+      expect(await button.evaluate((element) => element.isConnected && document.activeElement === element)).toBe(true);
+      await page.keyboard.press("Enter");
+      await expect(freshness).toContainText("Snapshot syn-r42");
+
+      if (moveFocus) {
+        await page.keyboard.press("Tab");
+        await expect(follow).toBeFocused();
+        await expect(apply).toHaveCount(0);
+      }
+      const followedControl = await follow.elementHandle();
+      if (!followedControl) throw new Error("The prototype Follow control is missing.");
+
+      await page.clock.runFor(200);
+      await expect(freshness).toContainText("Snapshot syn-r43");
+      expect(await page.locator("tbody").innerText()).not.toBe(rows);
+      await expect(status).toHaveCount(1);
+      await expect(status).toContainText("Updated to snapshot syn-r43");
+      await expect(follow).not.toBeChecked();
+
+      if (moveFocus) {
+        await expect(apply).toHaveCount(0);
+        expect(
+          await followedControl.evaluate((element) => element.isConnected && document.activeElement === element),
+        ).toBe(true);
+      } else {
+        await expect(apply).toHaveAttribute("aria-disabled", "true");
+        expect(await button.evaluate((element) => element.isConnected && document.activeElement === element)).toBe(
+          true,
+        );
+        await page.keyboard.press("Enter");
+        await page.clock.runFor(200);
+        await expect(freshness).toContainText("Snapshot syn-r43");
+        expect(await button.evaluate((element) => element.isConnected && document.activeElement === element)).toBe(
+          true,
+        );
+        await page.keyboard.press("Tab");
+        await expect(follow).toBeFocused();
+        await expect(apply).toHaveCount(0);
+      }
+    },
+  );
+}
+
+test("automatic prototype follow preserves the focused Apply control when reduced motion becomes eligible", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  const start = new Date("2026-10-20T12:00:00Z");
+  await page.clock.install({ time: start });
+  await page.clock.pauseAt(new Date(start.getTime() + 1_000));
+  await page.goto("/leaderboards/prs_reviewed?ui=prototype");
+  await expect(page.locator("h1")).toBeVisible();
+  await page.clock.runFor(200);
+
+  const freshness = page.locator(".freshness");
+  const follow = page.getByRole("checkbox", { name: /Follow updates/ });
+  const status = page.getByRole("status");
+  await expect(freshness).toContainText("Snapshot syn-r42");
+  const rows = await page.locator("tbody").innerText();
+  await follow.focus();
+  await page.keyboard.press("Space");
+  await expect(follow).toBeChecked();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(follow).toBeDisabled();
+  await page.clock.runFor(20_000);
+
+  const apply = page.getByRole("button", { name: "Apply updates", exact: true });
+  await expect(apply).toBeVisible();
+  await expect(freshness).toContainText("Snapshot syn-r42");
+  expect(await page.locator("tbody").innerText()).toBe(rows);
+  await expect(status).toBeEmpty();
+  await apply.focus();
+  const button = await apply.elementHandle();
+  if (!button) throw new Error("The pending prototype Apply control is missing.");
+
+  // Do not activate Apply: the opted-in follow effect admits this update.
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect(follow).toBeEnabled();
+  await expect(apply).toHaveAttribute("aria-disabled", "true");
+  await expect(freshness).toContainText("Snapshot syn-r42");
+  expect(await page.locator("tbody").innerText()).toBe(rows);
+  expect(await button.evaluate((element) => element.isConnected && document.activeElement === element)).toBe(true);
+
+  await page.clock.runFor(200);
+  await expect(freshness).toContainText("Snapshot syn-r43");
+  expect(await page.locator("tbody").innerText()).not.toBe(rows);
+  await expect(status).toHaveCount(1);
+  await expect(status).toContainText("Updated to snapshot syn-r43");
+  await expect(follow).toBeChecked();
+  expect(await button.evaluate((element) => element.isConnected && document.activeElement === element)).toBe(true);
+  await page.keyboard.press("Tab");
+  await expect(follow).toBeFocused();
+  await expect(apply).toHaveCount(0);
 });
