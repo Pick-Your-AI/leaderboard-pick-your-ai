@@ -709,9 +709,7 @@ export function RemoteApp() {
     const pin = readPin;
     const candidate = applying.current;
     const batch =
-      candidate?.location === url && candidate.snapshotId === pin && candidate.phase === "reading"
-        ? candidate
-        : null;
+      candidate?.location === url && candidate.snapshotId === pin && candidate.phase === "reading" ? candidate : null;
     const exact: Selection = { ...selected, snapshot: pin };
     const qs = parameters(exact);
     const boardQuery = parameters(exact, { board: true, cursor: selected.cursor });
@@ -874,11 +872,7 @@ export function RemoteApp() {
         }
       })
       .catch((error) => {
-        if (
-          !controller.signal.aborted &&
-          generation === readGeneration.current &&
-          urlRef.current === url
-        ) {
+        if (!controller.signal.aborted && generation === readGeneration.current && urlRef.current === url) {
           cancelApplication(false);
           setOverviewActivity({ status: "loading" });
           setChecking(false);
@@ -1194,9 +1188,7 @@ export function RemoteApp() {
           {checking && <span className="muted"> Rechecking…</span>}
         </p>
         {liveScope !== null && <CurrentFreshness value={liveState} />}
-        {state.status === "loading" && (
-          <p role={activeBatch ? undefined : "status"}>Loading current public data…</p>
-        )}
+        {state.status === "loading" && <p role={activeBatch ? undefined : "status"}>Loading current public data…</p>}
         {state.status === "error" && (
           <section className="notice notice-error" role="alert">
             <h2>
@@ -1625,7 +1617,7 @@ export function RemoteApp() {
             </>
           )}
           {data?.kind === "evidence" && <EvidenceProof value={data.value} selected={pinned} />}
-          {data?.kind === "unavailable" && (
+          {(url.pathname === "/corrections" || data?.kind === "unavailable") && (
             <section className="notice notice-info">
               <h2>This capability is not available in this UI</h2>
               <p>

@@ -7,6 +7,7 @@ export {
 } from "./v1/index.js";
 
 export * from "./engine.js";
+export { relationshipPairNormalizationVersion } from "@pick-your-ai/contracts";
 
 export * from "./breadth.js";
 

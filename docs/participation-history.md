@@ -165,9 +165,16 @@ retained even when no corresponding public payload can be disclosed.
 Host-returned JSON is bounded before copying, schema checks or hashing, using the
 same byte, depth, node and array budgets described below. Producer-only SQL
 projections withhold selected and latest snapshot JSON and frozen inputs above
-8,000,000 bytes before the driver returns their documents. Consumed normalization
-evidence is admitted as one locked query only when at most 10,000 rows total at most
-8,000,000 JSON bytes; every decoded document also passes the structural bounds.
+8,000,000 bytes before the driver returns their documents. Each consumed
+normalization or pair-authority result set is admitted in a locked query only when
+at most 10,000 rows fit its 8,000,000-byte SQL budget. The normalization-evidence
+query counts its documents, required merge-source bindings and policy signatures.
+Pair-authority queries count the complete projected rows, including variable-width
+scalar fields, and return only the three required merge-source identity fields
+instead of unused source bodies. After SQL admission, every normalization document
+and each non-null projected pair source binding passes the depth, node, array and
+byte checks before copying, generation validation or hashing. These are per-result-set
+limits, not a cumulative budget for all queries in a read.
 These limits apply on head retries and to both input restorations, without changing
 ordinary board, health or comparison query behavior. The service separately
 validates the complete assembled private response and public projection; combining

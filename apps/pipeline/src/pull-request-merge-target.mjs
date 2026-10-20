@@ -27,6 +27,8 @@ export function validateMergeTargetGeneration(
   digest,
   deliverySignature,
   fieldChange = null,
+  relationshipPair = null,
+  triageMetadata = null,
 ) {
   const marker = document.pullRequestMergeTargetNormalization;
   if (
@@ -49,6 +51,30 @@ export function validateMergeTargetGeneration(
     // A marker requires that exact outer wrapper; arbitrary unwrapping is forbidden.
     expected = fieldChange.signature(expected);
     expectedDelivery = fieldChange.signature(expectedDelivery);
+  }
+  if (document.triageMetadataNormalizationVersion !== undefined) {
+    if (
+      !triageMetadata ||
+      document.triageMetadataNormalizationVersion !== triageMetadata.version ||
+      typeof triageMetadata.signature !== "function"
+    )
+      fail();
+    // Triage semantics wrap the complete merge-target, delivery, and field generation.
+    // Even an empty corrected result requires its exact outer triage wrapper.
+    expected = triageMetadata.signature(expected);
+    expectedDelivery = triageMetadata.signature(expectedDelivery);
+  }
+  if (Object.hasOwn(document, "relationshipPairNormalizationVersion")) {
+    if (
+      !relationshipPair ||
+      document.relationshipPairNormalizationVersion !== relationshipPair.version ||
+      typeof relationshipPair.signature !== "function"
+    )
+      fail();
+    // Pair conservation wraps the complete triage/field/delivery/merge-target key.
+    // Its marker never authorizes dropping or inventing an inner generation.
+    expected = relationshipPair.signature(expected);
+    expectedDelivery = relationshipPair.signature(expectedDelivery);
   }
   if (signature !== expected && signature !== expectedDelivery) fail();
   return marker;

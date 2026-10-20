@@ -1280,7 +1280,6 @@ for (const moveFocusDuringRead of [false, true])
     },
   );
 
-
 // These are real public-service requests with a controlled browser clock. Gates
 // delay delivery to that service; they never rewrite a successful response.
 async function pacedUpdatePage(page: Page) {
@@ -1319,12 +1318,12 @@ async function pacedUpdatePage(page: Page) {
       apply: page.getByRole("button", { name: "Apply new snapshot", exact: true }),
       follow: page.getByRole("checkbox", { name: /Follow while/ }),
       summary: page.locator('.visually-hidden[role="status"]'),
-      summaries: () => page.evaluate(() =>
-        Reflect.get(window, "syntheticSnapshotSummaryRecords") as Array<{ text: string; at: number }>,
-      ),
-      boardReads: (pin: string) => api.calls.filter((url) =>
-        url.pathname.endsWith("/boards") && url.searchParams.get("snapshot") === pin,
-      ).length,
+      summaries: () =>
+        page.evaluate(
+          () => Reflect.get(window, "syntheticSnapshotSummaryRecords") as Array<{ text: string; at: number }>,
+        ),
+      boardReads: (pin: string) =>
+        api.calls.filter((url) => url.pathname.endsWith("/boards") && url.searchParams.get("snapshot") === pin).length,
       async refresh() {
         const before = api.calls.length;
         await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -1341,8 +1340,12 @@ async function holdSnapshotRead(page: Page, pin: string) {
   let release = () => {};
   let reached = () => {};
   let count = 0;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  const requested = new Promise<void>((resolve) => { reached = resolve; });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const requested = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
   await page.route("**/api/v1/boards?**", async (route) => {
     if (new URL(route.request().url()).searchParams.get("snapshot") === pin) {
       count += 1;
@@ -1446,7 +1449,8 @@ test("automatic API batches coalesce only unstarted heads and give each applied 
     await expect(view.provenance).toContainText("Snapshot api-4");
     await expect(page.getByRole("row", { name: /Synthetic API A/ }).locator("strong")).toHaveText("30");
     await expect.poll(async () => (await view.summaries()).map((entry) => entry.text)).toEqual([
-      snapshotSummary("api-2"), snapshotSummary("api-4"),
+      snapshotSummary("api-2"),
+      snapshotSummary("api-4"),
     ]);
     const summaries = await view.summaries();
     expect(summaries[1]!.at - summaries[0]!.at).toBeGreaterThanOrEqual(1000);
@@ -1456,7 +1460,8 @@ test("automatic API batches coalesce only unstarted heads and give each applied 
     await view.refresh();
     expect(view.boardReads("api-4")).toBeGreaterThan(currentReads);
     expect((await view.summaries()).map((entry) => entry.text)).toEqual([
-      snapshotSummary("api-2"), snapshotSummary("api-4"),
+      snapshotSummary("api-2"),
+      snapshotSummary("api-4"),
     ]);
   } finally {
     second.release();
@@ -1493,7 +1498,8 @@ test("a slow API batch starts the next announcement interval only after its matc
     third.release();
     await expect(view.provenance).toContainText("Snapshot api-3");
     await expect.poll(async () => (await view.summaries()).map((entry) => entry.text)).toEqual([
-      snapshotSummary("api-2"), snapshotSummary("api-3"),
+      snapshotSummary("api-2"),
+      snapshotSummary("api-3"),
     ]);
     const summaries = await view.summaries();
     expect(summaries[1]!.at - summaries[0]!.at).toBeGreaterThanOrEqual(1000);
@@ -1523,7 +1529,9 @@ test("manual API cooldown is visible, guards activation without queuing, and app
     view.api.next(3);
     await view.refresh();
     await expect(view.apply).toHaveAttribute("aria-disabled", "true");
-    await expect(page.getByText("Another snapshot is available. Apply will be ready shortly;", { exact: false })).toBeVisible();
+    await expect(
+      page.getByText("Another snapshot is available. Apply will be ready shortly;", { exact: false }),
+    ).toBeVisible();
     await page.keyboard.press("Enter");
     expect(view.boardReads("api-3")).toBe(0);
     view.api.next(4);
@@ -1544,7 +1552,8 @@ test("manual API cooldown is visible, guards activation without queuing, and app
     await expect(view.provenance).toContainText("Snapshot api-4");
     await expect(page.getByRole("row", { name: /Synthetic API A/ }).locator("strong")).toHaveText("30");
     await expect.poll(async () => (await view.summaries()).map((entry) => entry.text)).toEqual([
-      snapshotSummary("api-2"), snapshotSummary("api-4"),
+      snapshotSummary("api-2"),
+      snapshotSummary("api-4"),
     ]);
     await expect(page.getByText("Update held: snapshot api-5 is available.")).toBeVisible();
     expect(view.boardReads("api-3")).toBe(0);
@@ -1639,52 +1648,56 @@ test("a failed API application remains an error until explicit recovery and neve
 });
 
 for (const cancel of ["navigation", "hidden"] as const)
-  test("an in-flight API application is discarded on " + cancel + " without replaying its target or summary", async ({
-    page,
-  }) => {
-    const view = await pacedUpdatePage(page);
-    const second = await holdSnapshotRead(page, "api-2");
-    try {
-      view.api.next();
-      await view.refresh();
-      await view.apply.focus();
-      await page.keyboard.press("Enter");
-      await second.requested;
-      if (cancel === "navigation") {
-        await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Methodology", exact: true }).click();
-        await expect(page).toHaveURL(/\/methodology(?:\?|$)/);
-      } else {
-        await page.evaluate(() => {
-          Object.defineProperty(document, "hidden", { value: true, configurable: true });
-          Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
-          document.dispatchEvent(new Event("visibilitychange"));
-        });
-        await expect(view.provenance).toHaveCount(0);
-      }
-      const oldReads = view.boardReads("api-1");
-      second.release();
-      await page.clock.runFor(1000);
-      expect(await view.summaries()).toEqual([]);
-      expect(second.count()).toBe(1);
-      if (cancel === "navigation") {
-        await expect(page).toHaveURL(/\/methodology(?:\?|$)/);
-        await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toHaveCount(0);
-      } else {
-        expect(view.boardReads("api-1")).toBe(oldReads);
-        view.api.next(3);
-        await page.evaluate(() => {
-          Reflect.deleteProperty(document, "hidden");
-          Reflect.deleteProperty(document, "visibilityState");
-          document.dispatchEvent(new Event("visibilitychange"));
-        });
-        await expect(view.provenance).toContainText("Snapshot api-1");
-        await expect(page.getByText("Update held: snapshot api-3 is available.")).toBeVisible();
-        await expect(view.follow).not.toBeChecked();
-        expect(second.count()).toBe(1);
+  test(
+    "an in-flight API application is discarded on " + cancel + " without replaying its target or summary",
+    async ({ page }) => {
+      const view = await pacedUpdatePage(page);
+      const second = await holdSnapshotRead(page, "api-2");
+      try {
+        view.api.next();
+        await view.refresh();
+        await view.apply.focus();
+        await page.keyboard.press("Enter");
+        await second.requested;
+        if (cancel === "navigation") {
+          await page
+            .getByRole("navigation", { name: "Primary" })
+            .getByRole("link", { name: "Methodology", exact: true })
+            .click();
+          await expect(page).toHaveURL(/\/methodology(?:\?|$)/);
+        } else {
+          await page.evaluate(() => {
+            Object.defineProperty(document, "hidden", { value: true, configurable: true });
+            Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+            document.dispatchEvent(new Event("visibilitychange"));
+          });
+          await expect(view.provenance).toHaveCount(0);
+        }
+        const oldReads = view.boardReads("api-1");
+        second.release();
+        await page.clock.runFor(1000);
         expect(await view.summaries()).toEqual([]);
+        expect(second.count()).toBe(1);
+        if (cancel === "navigation") {
+          await expect(page).toHaveURL(/\/methodology(?:\?|$)/);
+          await expect(page.getByRole("link", { name: "Synthetic API A", exact: true })).toHaveCount(0);
+        } else {
+          expect(view.boardReads("api-1")).toBe(oldReads);
+          view.api.next(3);
+          await page.evaluate(() => {
+            Reflect.deleteProperty(document, "hidden");
+            Reflect.deleteProperty(document, "visibilityState");
+            document.dispatchEvent(new Event("visibilitychange"));
+          });
+          await expect(view.provenance).toContainText("Snapshot api-1");
+          await expect(page.getByText("Update held: snapshot api-3 is available.")).toBeVisible();
+          await expect(view.follow).not.toBeChecked();
+          expect(second.count()).toBe(1);
+          expect(await view.summaries()).toEqual([]);
+        }
+      } finally {
+        second.release();
+        await view.api.close();
       }
-    } finally {
-      second.release();
-      await view.api.close();
-    }
-  });
+    },
+  );

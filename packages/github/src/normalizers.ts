@@ -27,6 +27,9 @@ import {
   type AcceptedFeedbackThread,
   discussionFeedbackFields,
   parseDiscussionFeedbackSource,
+  relationshipPairNormalizationVersion,
+  relationshipPairSchema,
+  type RelationshipPair,
   supportsPullRequestMergeTarget,
   validatePullRequestMergeTarget,
   type PrMergeTarget,
@@ -110,19 +113,24 @@ import {
 
 /** Cache generation for separately observed repository default-branch admission. */
 export const defaultDeliveryNormalizationVersion = "default-delivery-scope/v1";
+export { relationshipPairNormalizationVersion } from "@pick-your-ai/contracts";
 
 /** Cache generation for field changes compared as JSON values, not key order. */
 export const fieldChangeNormalizationVersion = "field-change-json-values/v1";
 
-function sameJsonValue(before: unknown, after: unknown): boolean {
-  // Keep the existing JSON projection (including serialization errors). Compare
-  // parsed values so object member order is irrelevant at every nesting level,
-  // while array order, member presence and JSON scalar types remain significant.
-  const beforeJson = JSON.stringify(before);
-  const afterJson = JSON.stringify(after);
+/** Cache generation for triage metadata compared as JSON values, not key order. */
+export const triageMetadataNormalizationVersion = "triage-metadata-json-values/v1";
+
+function sameJsonProjection(beforeJson: string | undefined, afterJson: string | undefined): boolean {
+  // Compare the existing JSON projection so object member order is irrelevant
+  // recursively, while array order, member presence and scalar types still matter.
   if (beforeJson === afterJson) return true;
   if (beforeJson === undefined || afterJson === undefined) return false;
   return isDeepStrictEqual(JSON.parse(beforeJson), JSON.parse(afterJson));
+}
+
+function sameJsonValue(before: unknown, after: unknown): boolean {
+  return sameJsonProjection(JSON.stringify(before), JSON.stringify(after));
 }
 
 /** Hash only explicit source fields; text contributes to revision identity but is never retained. */
@@ -267,6 +275,8 @@ export interface NormalizedGithubFact {
   recognitionSourceFactId?: string;
   /** Private accepted release membership and conserved work identity. */
   releaseInclusion?: GithubReleaseMembership;
+  /** Private typed relationship identity; raw event identity and clocks remain separate. */
+  relationshipPair?: RelationshipPair;
   /** Private projection bound to the separately retained native merge-event capture. */
   mergeTarget?: PrMergeTarget;
 }
@@ -740,7 +750,13 @@ export function normalizeGithubObservation(
                   ? payload.milestone
                   : payload;
   const kind: NormalizedPublicEvidence["artifact"]["kind"] =
-    envelope.family === "pull_request" || envelope.family === "review" || envelope.family === "revert"
+    envelope.family === "pull_request" ||
+    envelope.family === "review" ||
+    envelope.family === "revert" ||
+    (envelope.family === "relationship" &&
+      object(payload.relationship) &&
+      ["reference", "closing"].includes(String(payload.relationship.kind)) &&
+      object(payload.pull_request))
       ? "pull_request"
       : envelope.family === "commit"
         ? "commit"
@@ -1298,7 +1314,11 @@ export function normalizeGithubObservation(
     const target = targetField ? payload[targetField] : null;
     const targetId = object(target) ? resourceId(target, "metadata", repository.id) : text(payload.target_id);
     if (!metric || !proof.eventId) out.reasons.push("unsupported_or_unproven_triage_action");
-    else if (object(payload.change) && JSON.stringify(payload.change.before) === JSON.stringify(payload.change.after))
+    else if (
+      object(payload.change) &&
+      // Serialize before completely before reading after, including custom getters.
+      sameJsonProjection(JSON.stringify(payload.change.before), JSON.stringify(payload.change.after))
+    )
       out.reasons.push("no_op_metadata_change");
     else {
       const missingTarget = targetField !== null && !targetId;
@@ -1383,6 +1403,54 @@ export function normalizeGithubObservation(
         out.reasons.push("automatic_reference_or_relationship_actor_unverified");
       } else if (relationship.publicEndpointsVerified !== true) {
         out.reasons.push("relationship_endpoint_visibility_unverified");
+      } else if (metric === "reference_links" || metric === "closing_links") {
+        const parsed = relationshipPairSchema.safeParse(relationship.pair);
+        const pair = parsed.success ? parsed.data : undefined;
+        const sourceActionMatches =
+          pair?.action === "reference"
+            ? ["referenced", "cross_referenced"].includes(sourceAction)
+            : pair?.action === "connect"
+              ? sourceAction === "connected"
+              : pair?.action === "disconnect" && sourceAction === "disconnected";
+        const bound =
+          pair !== undefined &&
+          pair.kind === relationshipKind &&
+          pair.eventId === proof.eventId &&
+          pair.from.artifactId === relationship.from &&
+          pair.to.artifactId === relationship.to &&
+          [pair.from, pair.to].some(
+            (endpoint) =>
+              endpoint.artifactId === id && endpoint.repositoryId === String(repository.id) && endpoint.kind === kind,
+          ) &&
+          sourceActionMatches;
+        if (!bound) out.reasons.push("relationship_pair_source_unverified");
+        // The native action is retained in observations and pair.eventId. A
+        // view discriminator prevents two endpoint evidence views from being
+        // mistaken for conflicting revisions of one container artifact.
+        emit(
+          metric,
+          sender,
+          "triager",
+          at,
+          stable(
+            relationshipPairNormalizationVersion,
+            "event-view",
+            relationshipKind,
+            relationship.from,
+            relationship.to,
+            id,
+            String(repository.id),
+            sourceAction,
+            at,
+            sender?.id,
+            proof.eventId,
+          ),
+          {
+            rawState: String(relationshipKind),
+            ...(bound ? { relationshipPair: pair } : { state: "unknown" as const }),
+            ...(bound && pair.action === "disconnect" ? { state: "excluded" as const } : {}),
+          },
+        );
       } else {
         const endpoints = [String(relationship.from), String(relationship.to)];
         if (["related", "duplicate"].includes(String(relationshipKind))) endpoints.sort();
@@ -1887,6 +1955,9 @@ export function applyRecognitionReceipt(
         }
       : {}),
   };
+  // The native branch binding applies only to supported merge metrics.
+  // A derived recognition metric retains its source, not that projection.
+  if (!supportsPullRequestMergeTarget(fact.metricId)) delete fact.mergeTarget;
   out.facts.push(fact);
   const evidence = targetEvidence;
   if (evidence)
