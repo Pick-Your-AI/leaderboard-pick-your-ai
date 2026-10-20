@@ -293,8 +293,8 @@ function configuredServiceBase(raw: string): URL {
   if (
     url.username ||
     url.password ||
-    url.search ||
-    url.hash ||
+    url.href.includes("?") ||
+    url.href.includes("#") ||
     (url.protocol !== "https:" && url.origin !== window.location.origin) ||
     !/^\/(?!\/)[A-Za-z0-9/_-]+$/.test(url.pathname)
   )
