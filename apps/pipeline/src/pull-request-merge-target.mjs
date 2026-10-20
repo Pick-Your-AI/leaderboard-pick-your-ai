@@ -27,6 +27,7 @@ export function validateMergeTargetGeneration(
   digest,
   deliverySignature,
   fieldChange = null,
+  relationshipPair = null,
 ) {
   const marker = document.pullRequestMergeTargetNormalization;
   if (
@@ -49,6 +50,18 @@ export function validateMergeTargetGeneration(
     // A marker requires that exact outer wrapper; arbitrary unwrapping is forbidden.
     expected = fieldChange.signature(expected);
     expectedDelivery = fieldChange.signature(expectedDelivery);
+  }
+  if (Object.hasOwn(document, "relationshipPairNormalizationVersion")) {
+    if (
+      !relationshipPair ||
+      document.relationshipPairNormalizationVersion !== relationshipPair.version ||
+      typeof relationshipPair.signature !== "function"
+    )
+      fail();
+    // Pair conservation wraps the complete field/delivery/merge-target key.
+    // Its marker never authorizes dropping or inventing an inner generation.
+    expected = relationshipPair.signature(expected);
+    expectedDelivery = relationshipPair.signature(expectedDelivery);
   }
   if (signature !== expected && signature !== expectedDelivery) fail();
   return marker;
