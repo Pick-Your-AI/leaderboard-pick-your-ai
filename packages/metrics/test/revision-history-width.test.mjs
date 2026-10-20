@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { relationshipPairNormalizationVersion } from "../../contracts/dist/index.js";
 import { aggregateMetric, getMetricDefinition, participationView, selectPortfolioFacts } from "../dist/index.js";
 
 const width = 200_000;
@@ -220,4 +221,111 @@ test("invalid revisions still fail admission before revision selection", () => {
     );
     assert.throws(() => aggregateMetric(source, policy, scope), /Invalid fact revision/);
   }
+});
+
+test("wide conflicting highest-revision buckets remain unavailable", (t) => {
+  const original = fact();
+  const left = fact({ revision: 1, correctionReceipt: "synthetic-correction-1", quantity: 7 });
+  const right = fact({ ...left, quantity: 9 });
+  const result = compareAggregate(t, [original, ...repeated(left), right], [original, left, right]);
+  assert.deepEqual(result.rows, []);
+  assert.equal(result.coverage, "incomplete");
+  assert.deepEqual(result.audit, [
+    { factIds: [original.id], actorId: original.actorId, reason: "conflicting_revision" },
+  ]);
+});
+
+test("wide relationship-pair audits retain every unbound fact and conflicting pair", (t) => {
+  const pairMetricId = "closing_links";
+  const pairPolicy = frozen({
+    ...policy,
+    metricId: pairMetricId,
+    unit: getMetricDefinition(pairMetricId).definition.unit,
+    aggregation: "count",
+    dateBasis: "occurredAt",
+    rankedStates: ["observed"],
+    roles: ["triager"],
+    groupBy: "canonical",
+    groupingPolicyVersion: relationshipPairNormalizationVersion,
+    rank: false,
+  });
+  const pairFact = (id, patch = {}) =>
+    fact({
+      id,
+      canonicalKey: id,
+      metricId: pairMetricId,
+      repoId: "2",
+      role: "triager",
+      state: "observed",
+      acceptedAt: null,
+      acceptedBy: null,
+      acceptanceReceipt: null,
+      ...patch,
+    });
+  const pairInput = (facts, datasetId) => {
+    const source = input(facts, datasetId);
+    return frozen({
+      ...source,
+      repositoryIds: ["2"],
+      coverage: source.coverage.map((entry) => ({ ...entry, scopeId: "2" })),
+    });
+  };
+  const pair = (eventId) => ({
+    version: relationshipPairNormalizationVersion,
+    kind: "closing",
+    action: "connect",
+    eventId,
+    from: { repositoryId: "2", artifactId: "synthetic-artifact", kind: "pull_request" },
+    to: { repositoryId: "2", artifactId: "synthetic-target", kind: "issue" },
+  });
+  const left = pairFact("synthetic-bound-left", {
+    relationshipPair: pair("synthetic-bound-event-left"),
+    eventContext: { projects: [], workstreams: [] },
+  });
+  const right = pairFact("synthetic-bound-right", {
+    relationshipPair: pair("synthetic-bound-event-right"),
+    eventContext: { projects: ["synthetic-project"], workstreams: [] },
+  });
+  // Distinct identities reach conservation individually. Repeated observations
+  // of one ID would collapse before the audit append being exercised here.
+  const unbound = Array.from({ length: width }, (_, index) =>
+    pairFact("synthetic-unbound-" + String(index).padStart(6, "0")),
+  );
+  const compact = aggregateMetric(
+    pairInput([unbound[0], left, right], "synthetic-compact-pair-audit"),
+    pairPolicy,
+    scope,
+  );
+  assert.deepEqual(compact.rows, []);
+  assert.equal(compact.coverage, "incomplete");
+  assert.deepEqual(compact.audit, [
+    {
+      factIds: [left.id, right.id],
+      actorId: left.actorId,
+      reason: "ambiguous_relationship_pair",
+    },
+    {
+      factIds: [unbound[0].id],
+      actorId: unbound[0].actorId,
+      reason: "relationship_pair_unverified",
+    },
+  ]);
+  const source = pairInput([left, ...unbound, right], "synthetic-wide-pair-audit");
+  const before = source.facts.slice();
+  t.diagnostic("Synthetic immutable pair audit: " + (width + 1) + " expected entries");
+  const actual = aggregateMetric(source, pairPolicy, scope);
+  assert.deepEqual(actual, {
+    ...compact,
+    datasetId: source.datasetId,
+    audit: [compact.audit[0]].concat(
+      unbound.map((item) => ({
+        factIds: [item.id],
+        actorId: item.actorId,
+        reason: "relationship_pair_unverified",
+      })),
+    ),
+  });
+  assert.equal(actual.audit.length, width + 1);
+  assert.equal(actual.publicEnabled, false);
+  assert.deepEqual(source.facts, before);
 });

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aggregateMetric, metricDefinitionsV1, getMetricGroupingPolicy, stableJSON } from "../dist/index.js";
+import {
+  aggregateMetric,
+  metricDefinitionsV1,
+  getMetricGroupingPolicy,
+  relationshipPairNormalizationVersion,
+  stableJSON,
+} from "../dist/index.js";
 
 // Synthetic normalized facts only. These do not certify source qualification,
 // acceptance receipts, or an approved/public policy for any registry definition.
@@ -13,6 +19,7 @@ const aggregations = {
   ratio: "ratio",
   median_and_p75_of_elapsed_hours: "duration",
 };
+const relationshipMetric = (metricId) => ["reference_links", "closing_links"].includes(metricId);
 const scope = {
   timezone: "UTC",
   from,
@@ -76,6 +83,15 @@ function policy(metric) {
           groupingPolicyVersion: grouping.version,
         }
       : {}),
+    ...(relationshipMetric(metric.id)
+      ? {
+          dateBasis: "occurredAt",
+          rankedStates: ["observed"],
+          roles: ["triager"],
+          groupBy: "canonical",
+          groupingPolicyVersion: relationshipPairNormalizationVersion,
+        }
+      : {}),
   };
 }
 function fact(metric, id, patch = {}) {
@@ -126,18 +142,37 @@ function fact(metric, id, patch = {}) {
           },
         }
       : {}),
+    ...(relationshipMetric(metric.id)
+      ? {
+          repoId: "2",
+          role: "triager",
+          state: "observed",
+          acceptedAt: null,
+          acceptanceReceipt: null,
+          acceptedBy: null,
+          relationshipPair: {
+            version: relationshipPairNormalizationVersion,
+            kind: metric.id === "reference_links" ? "reference" : "closing",
+            action: metric.id === "reference_links" ? "reference" : "connect",
+            eventId: `synthetic-pair-event:${id}`,
+            from: { repositoryId: "2", artifactId: `synthetic:${id}`, kind: "pull_request" },
+            to: { repositoryId: "2", artifactId: `synthetic-target:${id}`, kind: "issue" },
+          },
+        }
+      : {}),
     ...patch,
   };
 }
 function input(facts, patch = {}) {
+  const pairs = facts.some((fact) => relationshipMetric(fact.metricId));
   return {
     datasetId: "synthetic-invariant-audit",
     cutoff: to,
     backfillRevision: "synthetic-backfill/v1",
-    repositoryIds: ["synthetic-repo"],
+    repositoryIds: [pairs ? "2" : "synthetic-repo"],
     actors: ["a", "b"].map((id) => ({ id, login: `synthetic-${id}`, kind: "user", publicState: "visible" })),
     facts,
-    coverage: [coverage],
+    coverage: [pairs ? { ...coverage, scopeId: "2" } : coverage],
     ...patch,
   };
 }
@@ -165,21 +200,25 @@ for (const metric of metricDefinitionsV1.filter((metric) => aggregations[metric.
     assert.deepEqual(board(metric, []).rows, [], "empty observations cannot invent a contributor");
     const included = fact(metric, "included");
     const grouping = getMetricGroupingPolicy(metric.id);
-    const invalidEligibility = grouping?.group_by === "actor_artifact_state_interval"
-      ? { rawState: undefined }
-      : grouping ? { occurredAt: null } : { acceptedBy: "a" };
-    const eligibilityReason = grouping?.group_by === "actor_artifact_state_interval"
-      ? "unknown_raw_state_or_time"
-      : grouping ? "unknown_effective_time" : "missing_independent_acceptance";
+    const invalidEligibility = relationshipMetric(metric.id)
+      ? { occurredAt: null }
+      : grouping?.group_by === "actor_artifact_state_interval"
+        ? { rawState: undefined }
+        : grouping
+          ? { occurredAt: null }
+          : { acceptedBy: "a" };
+    const eligibilityReason = relationshipMetric(metric.id)
+      ? "ambiguous_relationship_pair"
+      : grouping?.group_by === "actor_artifact_state_interval"
+        ? "unknown_raw_state_or_time"
+        : grouping
+          ? "unknown_effective_time"
+          : "missing_independent_acceptance";
     const facts = [
       included,
       { ...included, id: "duplicate-adapter" },
       fact(metric, "other-actor", { actorId: "b", subjectActorId: "b" }),
-      fact(
-        metric,
-        "invalid-eligibility",
-        invalidEligibility,
-      ),
+      fact(metric, "invalid-eligibility", invalidEligibility),
       fact(metric, "excluded", { state: "excluded" }),
       fact(metric, "outside", { occurredAt: to, acceptedAt: to, readyAt: to }),
       fact(metric, "future-observation", { observedAt: "2026-11-02T00:00:00Z" }),
@@ -201,13 +240,7 @@ for (const metric of metricDefinitionsV1.filter((metric) => aggregations[metric.
     assert.equal(evidence.length, 2);
     assert.ok(evidence.includes("other-actor"));
     assert.ok(evidence.includes("included") || evidence.includes("duplicate-adapter"));
-    assert.ok(
-      result.audit.some(
-        (entry) =>
-          entry.reason ===
-          eligibilityReason,
-      ),
-    );
+    assert.ok(result.audit.some((entry) => entry.reason === eligibilityReason));
     assert.equal(result.coverage, "incomplete", "unverified eligibility must prevent complete coverage");
     assert.equal(stableJSON(board(metric, [...facts].reverse())), stableJSON(result));
     assert.equal(stableJSON(frozen), original, "rebuild must not mutate frozen facts");

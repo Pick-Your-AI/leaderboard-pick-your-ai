@@ -344,22 +344,35 @@ export class PolicyComparisonStore {
     };
     // Bind only corrections actually effective in the captured engine baseline.
     // A correction arriving after the frozen cutoff must still redact old input.
-    document.authorization.corrections = input.facts
-      .filter(
-        (fact) =>
-          fact.revision > 0 &&
-          fact.correctionReceipt?.trim() &&
-          fact.state === "excluded" &&
-          Date.parse(fact.observedAt) <= Date.parse(input.cutoff) &&
-          document.baseline.some(
-            (aggregate) =>
-              aggregate.metricId === fact.metricId &&
-              aggregate.audit.some(
-                (entry) => entry.reason === "excluded_by_policy_or_correction" && entry.factIds.includes(fact.id),
-              ) &&
-              !aggregate.rows.some((row) => row.evidenceIds.includes(fact.id)),
-          ),
-      )
+    const corrections = input.facts.filter(
+      (fact) =>
+        fact.revision > 0 &&
+        fact.correctionReceipt?.trim() &&
+        fact.state === "excluded" &&
+        Date.parse(fact.observedAt) <= Date.parse(input.cutoff),
+    );
+    const correctionIds = new Map();
+    if (corrections.length)
+      document.baseline.forEach((aggregate) => {
+        const excluded = new Set();
+        aggregate.audit.forEach((entry) => {
+          if (entry.reason === "excluded_by_policy_or_correction")
+            for (let index = 0, length = entry.factIds.length; index < length; index++)
+              excluded.add(entry.factIds[index]);
+        });
+        if (!excluded.size) return;
+        // Row exclusion belongs to this aggregate. A different baseline for
+        // the same metric may independently exclude and authorize the fact.
+        aggregate.rows.forEach((row) => {
+          for (let index = 0, length = row.evidenceIds.length; index < length; index++)
+            excluded.delete(row.evidenceIds[index]);
+        });
+        const eligible = correctionIds.get(aggregate.metricId) ?? new Set();
+        for (const id of excluded) eligible.add(id);
+        correctionIds.set(aggregate.metricId, eligible);
+      });
+    document.authorization.corrections = corrections
+      .filter((fact) => correctionIds.get(fact.metricId)?.has(fact.id))
       .map((fact) => ({ artifactId: fact.artifactId, hash: comparisonHash(fact) }));
     if (bytes(document) > comparisonLimitsV1.inputBytes)
       return { state: "unavailable", reason: "frozen_input_budget_exceeded" };
