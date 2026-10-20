@@ -231,6 +231,9 @@ export async function restoreBackup({
   if (!expectedState || typeof expectedState !== "object") throw new Error("Expected restored state is required");
   // Authenticate the selected backup before caller state serializers can change its envelope or key.
   const decoded = decryptBackup(envelope, { key, now, expectedDumpSha256 });
+  // Keep authenticated plaintext outside caller-accessible pooled backing memory.
+  const selectedDump = Buffer.alloc(decoded.databaseDump.length);
+  selectedDump.set(decoded.databaseDump);
   // Validate the comparison target before any database mutation.
   const expectedCanonical = canonical(expectedState);
   const observed = Date.parse(timestamp(observedSourceCutoff));
@@ -238,7 +241,7 @@ export async function restoreBackup({
   if (observed > Date.parse(now)) throw new Error("Observed source cutoff is from the future");
   if (observed < cutoff) throw new Error("Observed source cutoff precedes backup cutoff");
   await assertEmptyTarget();
-  await restoreDatabase(decoded.databaseDump);
+  await restoreDatabase(selectedDump);
   // Current deletion/opt-out tombstones must be applied before any restored data is public.
   await reapplySuppressions();
   // Verify and identify the same serialization of the inspected restore state.
