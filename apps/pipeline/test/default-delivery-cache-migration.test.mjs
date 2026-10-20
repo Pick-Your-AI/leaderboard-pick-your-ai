@@ -3,6 +3,7 @@ import test from "node:test";
 import { comparisonHash } from "../../controls/src/policy-comparison.mjs";
 import { createPipeline } from "../src/index.mjs";
 import { ago, clock, components, harness, publicScope, fixtureId } from "./harness.mjs";
+import { assertRetainedSourceGeneration } from "./transfer-cache-generation-fixtures.mjs";
 import {
   deliveryHarness,
   assertDenied,
@@ -17,6 +18,17 @@ import {
   deliveryMetrics,
   after,
 } from "./default-delivery-fixtures.mjs";
+
+test("pre-transfer versioned default-delivery caches keep frozen public and private authority after restart", async (t) => {
+  const h = await deliveryHarness(t, "commit");
+  await assertRetainedSourceGeneration({
+    h,
+    priorSignature: comparisonHash([version, legacySignature(h.config)]),
+    request: previewRequest,
+    assertPublic: (runtime, snapshot) => assertMetric(runtime, h.metric, h.expected, snapshot),
+    restart,
+  });
+});
 
 for (const family of ["commit", "pull_request", "issue"])
   test(
@@ -523,17 +535,23 @@ test("delivery and review generations compose on the same enriched review source
   t.after(() => h.runtime.stop());
   const first = (await h.runtime.runOnce()).publications[0];
   await assertMetric(h.runtime, h.metric, h.expected);
-  const base = comparisonHash([components.github.reviewSourceNormalizationVersion, currentSignature(config)]);
-  const previousBase = comparisonHash([components.github.reviewSourceNormalizationVersion, legacySignature(config)]);
+  const legacyReviewSignature = comparisonHash([
+    components.github.reviewSourceNormalizationVersion,
+    legacySignature(config),
+  ]);
+  const currentReviewSignature = comparisonHash([
+    components.github.reviewSourceNormalizationVersion,
+    currentSignature(config),
+  ]);
   const originalRow = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows[0];
-  assert.equal(originalRow.policy_signature, comparisonHash([version, base]));
+  assert.equal(originalRow.policy_signature, comparisonHash([version, currentReviewSignature]));
   assert.equal(
     originalRow.document.reviewSourceNormalizationVersion,
     components.github.reviewSourceNormalizationVersion,
   );
   assert.ok(originalRow.document.facts.some((fact) => fact.metricId === "review_feedback"));
   const legacy = await retainLegacyDelivery(h, first, "exact");
-  assert.equal(legacy.signature, previousBase);
+  assert.equal(legacy.signature, legacyReviewSignature);
   h.state.defaultBranch = undefined;
   await restart(h, async (runtime) => {
     await assertDenied(runtime, h.metric, first.snapshotId);
@@ -541,14 +559,14 @@ test("delivery and review generations compose on the same enriched review source
     await assertMetric(runtime, h.metric, 0);
     const rows = (await h.db.query("SELECT * FROM leaderboard_pipeline.normalizations")).rows;
     assert.equal(rows.length, 2);
-    const fresh = rows.find((row) => row.policy_signature === comparisonHash([version, base]));
+    const fresh = rows.find((row) => row.policy_signature === comparisonHash([version, currentReviewSignature]));
     assert.ok(fresh.document.facts.some((fact) => fact.metricId === "review_feedback"));
     assert.equal(
       fresh.document.facts.some((fact) => deliveryMetrics.includes(fact.metricId)),
       false,
     );
     assert.equal(fresh.document.reviewSourceNormalizationVersion, components.github.reviewSourceNormalizationVersion);
-    assert.deepEqual(rows.find((row) => row.policy_signature === previousBase).document, legacy.document);
+    assert.deepEqual(rows.find((row) => row.policy_signature === legacyReviewSignature).document, legacy.document);
     await assertDenied(runtime, h.metric, first.snapshotId, false);
   });
 });

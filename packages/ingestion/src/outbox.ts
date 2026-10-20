@@ -232,6 +232,8 @@ export class OutboxStore {
     publications: DispatchPublication[],
     confirm: (tx: SqlSession) => Promise<void>,
     assertAuthorized: () => void = () => {},
+    /** Trusted host lock preparation; runs before the outbox lease row is locked. */
+    prepareTransaction?: (tx: SqlSession) => Promise<void>,
   ): Promise<boolean> {
     if (
       !publications.length ||
@@ -247,6 +249,7 @@ export class OutboxStore {
     )
       throw new Error("invalid_dispatch_publication");
     return this.db.transaction(async (tx) => {
+      await prepareTransaction?.(tx);
       try {
         await this.assertLease(tx, lease);
       } catch (error) {

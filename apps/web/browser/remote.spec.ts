@@ -270,6 +270,40 @@ async function service(
         { ...structuredClone(third!), activityState: "accepted" },
       );
     },
+    activityMetadataBurst() {
+      const [first, other] = current.selected.portfolioEvidence;
+      current.selected.rows = [];
+      current.selected.evidence = [];
+      current.selected.ranking.push({ metricId: "labels_applied", direction: "descending", rank: false });
+      current.selected.portfolioEvidence = Array.from({ length: 205 }, (_, index) => ({
+        ...structuredClone(first!),
+        artifact: {
+          ...first!.artifact,
+          kind: "issue",
+          stableId: `metadata-${index}`,
+          repositoryId: `repo-${index}`,
+          publicUrl: `https://github.com/synthetic-api/example/issues/${index + 1}`,
+        },
+        contribution: {
+          ...first!.contribution,
+          roles: ["triager"],
+          metricIds: ["labels_applied"],
+          canonicalEventId: `metadata-event-${index}`,
+          contributionId: `metadata-proof-${String(index).padStart(3, "0")}`,
+          artifactId: `metadata-${index}`,
+        },
+        occurredAt: "2026-10-17T08:00:00.0009-04:00",
+        observedAt: "2026-10-18T12:00:00.000Z",
+      }));
+      current.selected.portfolioEvidence.push({
+        ...structuredClone(other!),
+        activityState: "accepted",
+        occurredAt: "2026-10-17T12:00:00.0001Z",
+      });
+    },
+    async legacyActivityCursor() {
+      return (await app.inject("/api/v1/activity?snapshot=api-1&limit=100")).json().nextCursor as string;
+    },
     async close() {
       releaseUpdates();
       releaseBoard();
@@ -743,6 +777,121 @@ test("successful same-selection background recheck preserves keyboard DOM; suppr
   }
 });
 
+test("API follow releases a removed actor's obsolete focus hold after a privacy recheck", async ({
+  page,
+}, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.addInitScript(() =>
+    Object.defineProperty(window, "EventSource", { value: undefined, configurable: true }),
+  );
+  const api = await service(page);
+  try {
+    await page.goto("/leaderboards/pr_merged?ui=api");
+    const follow = page.getByRole("checkbox", { name: /Follow while/ });
+    const provenance = page.getByRole("region", { name: "Snapshot provenance" });
+    const actor = page.getByRole("link", { name: "Synthetic API A", exact: true });
+    await expect(actor).toBeVisible();
+    await expect(follow).not.toBeChecked();
+    await follow.check();
+    await page.mouse.move(0, 0);
+    await actor.focus();
+
+    api.next();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByText("Update held: snapshot api-2 is available.")).toBeVisible();
+    await expect(provenance).toContainText("Snapshot api-1");
+    await expect(actor).toBeFocused();
+    await expect(follow).toBeChecked();
+
+    api.suppress();
+    // A click would move focus before removal and conceal an obsolete hold.
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(actor).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Synthetic API B", exact: true })).toBeVisible();
+    await testInfo.attach("removed-focus-follow-observation.json", {
+      body: JSON.stringify({
+        activeElement: await page.evaluate(() => ({
+          tag: document.activeElement?.tagName,
+          text: document.activeElement === document.body ? null : document.activeElement?.textContent,
+        })),
+        followChecked: await follow.isChecked(),
+        provenance: await provenance.innerText(),
+        suppressedActorCount: await actor.count(),
+      }),
+      contentType: "application/json",
+    });
+    await expect(provenance).toContainText("Snapshot api-2");
+    await expect(provenance).toContainText("privacy-2");
+    await expect(follow).toBeChecked();
+    await expect(actor).toHaveCount(0);
+  } finally {
+    await api.close();
+  }
+});
+
+test("API follow keeps a removed actor's update held until the pointer leaves the board", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.addInitScript(() =>
+    Object.defineProperty(window, "EventSource", { value: undefined, configurable: true }),
+  );
+  const api = await service(page);
+  try {
+    await page.goto("/leaderboards/pr_merged?ui=api");
+    const follow = page.getByRole("checkbox", { name: /Follow while/ });
+    const provenance = page.getByRole("region", { name: "Snapshot provenance" });
+    const actor = page.getByRole("link", { name: "Synthetic API A", exact: true });
+    const survivor = page.getByRole("link", { name: "Synthetic API B", exact: true });
+    await expect(actor).toBeVisible();
+    await follow.check();
+    await page.mouse.move(0, 0);
+    await actor.focus();
+
+    api.next();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByText("Update held: snapshot api-2 is available.")).toBeVisible();
+    await expect(provenance).toContainText("Snapshot api-1");
+    await page.getByRole("columnheader", { name: "Rank", exact: true }).hover();
+    await expect(actor).toBeFocused();
+
+    api.suppress();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(actor).toHaveCount(0);
+    await expect(survivor).toBeVisible();
+    await expect(provenance).toContainText("privacy-2");
+    await expect(page.getByText("Rechecking…")).toHaveCount(0);
+    expect(await page.getByRole("table").evaluate((element) => element.matches(":hover"))).toBe(true);
+
+    // Observe the settled privacy response across five frame/task boundaries
+    // and at least 250 ms; an immediate assertion could precede the apply effect.
+    const held = await provenance.evaluate(async (element) => {
+      const observations = [];
+      for (let frame = 0; frame < 5; frame++) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve, 50)));
+        observations.push({ connected: element.isConnected, text: element.textContent });
+      }
+      return observations;
+    });
+    for (const observation of held) {
+      expect(observation.connected).toBe(true);
+      expect(observation.text).toContain("Snapshot api-1");
+      expect(observation.text).toContain("privacy-2");
+    }
+    expect(
+      api.calls.some((call) => call.pathname.endsWith("/boards") && call.searchParams.get("snapshot") === "api-2"),
+    ).toBe(false);
+    expect(await page.getByRole("table").evaluate((element) => element.matches(":hover"))).toBe(true);
+    await expect(follow).toBeChecked();
+
+    await page.mouse.move(0, 0);
+    await expect(provenance).toContainText("Snapshot api-2");
+    await expect(provenance).toContainText("privacy-2");
+    await expect(follow).toBeChecked();
+    await expect(actor).toHaveCount(0);
+  } finally {
+    await api.close();
+  }
+});
+
 test("new heads remain held until applied; unsupported query is rejected before any provider read", async ({
   page,
 }) => {
@@ -873,7 +1022,7 @@ test("activity uses its public feed API, compact bursts and all source proofs wi
     expect(api.calls.some((call) => call.pathname === "/api/v1/boards")).toBe(false);
     expect(
       api.calls
-        .filter((call) => call.pathname === "/api/v1/activity")
+        .filter((call) => call.pathname === "/api/v1/activity-bursts")
         .every((call) => call.searchParams.get("category") === "documentation" && !call.searchParams.has("metric")),
     ).toBe(true);
     await page.getByRole("link", { name: "Explore 205 source proofs" }).click();
@@ -954,6 +1103,98 @@ test("activity holds new publications and preserves focused proof links and scro
     expect(
       (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
     ).toEqual([]);
+  } finally {
+    await api.close();
+  }
+});
+
+test("cross-repository metadata compaction keeps other work visible and supports keyboard expansion, all subgroup pages and held returns", async ({
+  page,
+}, testInfo) => {
+  const api = await service(page);
+  api.activityMetadataBurst();
+  try {
+    await page.setViewportSize({ width: 360, height: 700 });
+    await page.goto("/activity?ui=api&limit=100");
+    const groups = page.getByRole("list", { name: "Public activity groups" }).locator(":scope > li");
+    await expect(groups).toHaveCount(2);
+    await expect(groups.nth(0)).toContainText("205 repository groups in one UTC hour");
+    await expect(groups.nth(0)).toContainText("Received public activity");
+    await expect(groups.nth(1)).toContainText("Synthetic API B · Independently accepted work");
+    await expect(groups.nth(0).getByRole("list", { name: "Artifact preview" }).getByRole("listitem")).toHaveCount(5);
+    await expect(groups.nth(0).locator('time[datetime="2026-10-17T08:00:00.0009-04:00"]')).toBeVisible();
+    await expect(groups.nth(0).locator('time[datetime="2026-10-18T12:00:00.000Z"]')).toBeVisible();
+    await expect(groups.nth(0)).toContainText("Collection occurred after the action");
+    expect(api.calls.some((call) => call.pathname === "/api/v1/activity-bursts")).toBe(true);
+    await testInfo.attach("compact-activity-feed", {
+      body: await page.getByRole("list", { name: "Public activity groups" }).screenshot(),
+      contentType: "image/png",
+    });
+
+    const expand = page.getByRole("link", { name: "Explore 205 repository groups" });
+    await expand.scrollIntoViewIfNeeded();
+    await expand.focus();
+    const position = (await expand.boundingBox())!.y;
+    const calls = api.calls.length;
+    api.next();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect.poll(() => api.calls.length).toBeGreaterThan(calls);
+    await expect(page.getByText("Rechecking…")).toHaveCount(0);
+    await expect(page.getByText("Update held: snapshot api-2 is available.")).toBeVisible();
+    await expect(expand).toBeFocused();
+    expect(Math.abs((await expand.boundingBox())!.y - position)).toBeLessThanOrEqual(1);
+    await expect(page.getByRole("checkbox", { name: /Follow while/ })).not.toBeChecked();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("heading", { name: "Public activity", exact: true })).toBeFocused();
+    expect(new URL(page.url()).pathname).toMatch(/^\/activity\/bursts\/[a-f0-9]{64}$/);
+    expect(new URL(page.url()).searchParams.get("snapshot")).toBe("api-1");
+    const members = page.getByRole("list", { name: "Burst repository groups" }).locator(":scope > li");
+    await expect(members).toHaveCount(100);
+    const source = members.first().getByRole("link", { name: "Explore 1 source proofs" });
+    const originalProofHref = await source.getAttribute("href");
+    expect(new URL(originalProofHref!, page.url()).pathname).toMatch(/^\/activity\/[a-f0-9]{64}$/);
+    await source.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("heading", { name: "Public activity", exact: true })).toBeFocused();
+    await expect(page.getByRole("list", { name: "Grouped source proofs" }).locator(":scope > li")).toHaveCount(1);
+    await expect(page.getByRole("link", { name: /^metadata-proof-/ })).toBeVisible();
+    await page.goBack();
+    await expect(members).toHaveCount(100);
+    await expect(page.getByRole("heading", { name: "Public activity", exact: true })).toBeFocused();
+    for (const count of [100, 5]) {
+      await page.getByRole("link", { name: "Next repository groups page" }).focus();
+      await page.keyboard.press("Enter");
+      await expect(members).toHaveCount(count);
+      expect(new URL(page.url()).searchParams.get("snapshot")).toBe("api-1");
+    }
+    await expect(page.getByRole("link", { name: "Next repository groups page" })).toHaveCount(0);
+    await page.getByRole("link", { name: "Return to this snapshot’s activity" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(expand).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Public activity", exact: true })).toBeFocused();
+    expect(new URL(page.url()).searchParams.get("snapshot")).toBe("api-1");
+
+    // A pre-existing bookmark uses its unchanged v1 group cursor, never the wrapper endpoint.
+    const cursor = await api.legacyActivityCursor();
+    const beforeLegacy = api.calls.length;
+    await page.goto(`/activity?ui=api&limit=100&snapshot=api-1&cursor=${encodeURIComponent(cursor)}`);
+    await expect(groups).toHaveCount(100);
+    expect(
+      api.calls
+        .slice(beforeLegacy)
+        .some((call) => call.pathname === "/api/v1/activity" && call.searchParams.get("cursor") === cursor),
+    ).toBe(true);
+    await page.goto("/activity?ui=api&limit=100&snapshot=api-1");
+    await expect(expand).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(
+      (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
+    ).toEqual([]);
+    api.suppress();
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(expand).toHaveCount(0);
+    await expect(groups).toHaveCount(1);
+    await expect(groups.first()).toContainText("Synthetic API B · Independently accepted work");
   } finally {
     await api.close();
   }

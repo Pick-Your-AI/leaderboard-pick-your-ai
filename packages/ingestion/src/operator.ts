@@ -173,6 +173,8 @@ export class OperatorInbox {
     readonly db: SqlDatabase,
     readonly options: OperatorReplayResultOptions & {
       readHealth?: ReadOperatorHealth;
+      /** Trusted host gates required by nested publication readers, before any source row lock. */
+      prepareSourceRead?: (tx: SqlSession) => Promise<void>;
       /** Trusted host opt-in. Capture one synchronous currentness fence for every retained result state. */
       replayReadGuard?: (scope: Readonly<OperatorReadScope>) => () => boolean;
     } = {},
@@ -190,6 +192,7 @@ export class OperatorInbox {
     let confirmReturn: (() => void) | undefined;
     const result = await this.db.transaction(async (tx) => {
       const a = await authority(authorize, repositoryId);
+      await this.options.prepareSourceRead?.(tx);
       const current = await access(tx, repositoryId);
       const readScope = { repositoryId, ...current };
       const confirmRead = captureReplayReadGuard(this.options.replayReadGuard, readScope);
@@ -230,6 +233,7 @@ export class OperatorInbox {
     let confirmReturn: (() => void) | undefined;
     const result = await this.db.transaction(async (tx) => {
       const a = await authority(authorize, repositoryId);
+      await this.options.prepareSourceRead?.(tx);
       const current = await access(tx, repositoryId);
       const read = await this.options.readHealth!(tx, { repositoryId, ...current });
       if (JSON.stringify(a) !== JSON.stringify(await authority(authorize, repositoryId)))

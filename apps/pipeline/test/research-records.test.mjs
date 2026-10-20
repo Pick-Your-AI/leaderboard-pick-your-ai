@@ -172,7 +172,22 @@ test("research records publish pending proof, require exact revision review, con
   board = response.json();
   assert.equal(board.rows[0].result.value, 1);
   assert.equal(board.rows[0].pending.count, null); // Incomplete coverage cannot establish measured zero.
-  assert.equal(board.rows[0].rank, 1);
+  assert.equal(board.rows[0].rank, null);
+  assert.equal(board.rankingPresentation.state, "small_cohort");
+  assert.equal(board.rankingPresentation.comparableContributors, 1);
+  const paired = await h.runtime.source.readComparison(
+    publicScope,
+    board.snapshotId,
+    { snapshotId: board.snapshotId, scope: publicScope },
+    new AbortController().signal,
+  );
+  assert.equal(
+    paired.currentHistory.metrics
+      .find((entry) => entry.metricId === "decision_records")
+      .rows.find((row) => row.actorId === "101").rank,
+    1,
+    "accepted research credit retains its private rank without ranking a one-person public cohort",
+  );
   const evidenceId = board.rows[0].evidenceIds[0];
   const proof = await h.runtime.app.inject(`/api/v1/evidence/${evidenceId}?snapshot=${board.snapshotId}`);
   assert.equal(proof.statusCode, 200, proof.body);

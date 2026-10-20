@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { SqlDatabase, SqlSession } from "./store.js";
+import { collectionContentEditMetadata, type ContentEditMetadata } from "./content-edit-metadata.js";
 
 export const sourceFamilies = [
   "issues",
@@ -12,6 +13,7 @@ export const sourceFamilies = [
   "timelines",
   "content_edits",
   "project_history",
+  "issue_field_history",
   "relationships",
   "project_current",
 ] as const;
@@ -26,10 +28,14 @@ export interface ScanRequest {
 }
 export interface SourceFact {
   subjectId: string;
-  /** Collected native issue/PR node ID for a Project-history event. */
+  /** Collected native issue/PR node ID for a typed history event. */
   historySubjectId?: string;
+  /** Native issue field identity; field content is never retained in collection facts. */
+  issueFieldId?: string;
   /** Native issue/PR identity for a complete current Project membership snapshot. */
   projectSubjectId?: string;
+  /** Private native-parent metadata, never transition or recognition evidence. */
+  contentEditMetadata?: ContentEditMetadata;
   sourceRevision: string;
   sourceUrl: string;
   /** Snapshot state never establishes a transition's actor or occurrence time. */
@@ -82,9 +88,15 @@ function validateScanRequest(request: ScanRequest): void {
   if (!sourceFamilies.includes(request.family) || !["backfill", "reconcile", "audit"].includes(request.mode))
     throw new Error("invalid_scan_scope");
 }
-function normalizeFact(value: SourceFact): SourceFact {
+function normalizeFact(value: SourceFact, family: SourceFamily): SourceFact {
+  const contentEditMetadata = collectionContentEditMetadata(value, family);
   id(value.subjectId);
   if (value.historySubjectId !== undefined) id(value.historySubjectId);
+  if (value.issueFieldId !== undefined) {
+    id(value.issueFieldId);
+    if (value.historySubjectId === undefined || value.evidence !== "observed_transition")
+      throw new Error("invalid_issue_field_subject");
+  }
   if (value.projectSubjectId !== undefined) {
     id(value.projectSubjectId);
     if (value.projectSubjectId !== value.subjectId || value.evidence !== "current_state")
@@ -114,9 +126,10 @@ function normalizeFact(value: SourceFact): SourceFact {
   if (value.evidence === "current_state" && (value.actorId !== null || value.occurredAt !== null))
     throw new Error("snapshot_attribution_forbidden");
   // Pick fields explicitly. Repository text and adapter extras are never retained or executed.
-  return {
+  const normalized: SourceFact = {
     subjectId: value.subjectId,
     ...(value.historySubjectId !== undefined ? { historySubjectId: value.historySubjectId } : {}),
+    ...(value.issueFieldId !== undefined ? { issueFieldId: value.issueFieldId } : {}),
     ...(value.projectSubjectId !== undefined ? { projectSubjectId: value.projectSubjectId } : {}),
     sourceRevision: value.sourceRevision,
     sourceUrl: url.href,
@@ -124,7 +137,16 @@ function normalizeFact(value: SourceFact): SourceFact {
     actorId: value.actorId,
     occurredAt: value.occurredAt,
     state: value.state,
+    ...(contentEditMetadata !== undefined ? { contentEditMetadata } : {}),
   };
+  // Check the captured value, including legacy inherited/accessor properties, without rereading the input.
+  if (
+    contentEditMetadata === undefined &&
+    typeof normalized.sourceRevision === "string" &&
+    normalized.sourceRevision.startsWith("gh-content-edit-")
+  )
+    throw new TypeError("invalid_content_edit_metadata");
+  return normalized;
 }
 
 export async function assertRepositoryAvailable(
@@ -311,7 +333,9 @@ export class CollectionStore {
         throw new Error("nonadvancing_source_page");
       if (page.expectedCount !== null && (!Number.isSafeInteger(page.expectedCount) || page.expectedCount < 0))
         throw new Error("invalid_source_count");
-      const facts = page.facts.map(normalizeFact);
+      const facts = page.facts.map((fact) => normalizeFact(fact, request.family));
+      if (page.expectedCount !== null && facts.some((fact) => fact.contentEditMetadata !== undefined))
+        throw new Error("content_edit_history_count_unknown");
       if (
         facts.some(
           (fact) =>
@@ -320,6 +344,19 @@ export class CollectionStore {
         )
       )
         throw new Error("source_event_outside_window");
+      if (
+        request.family === "issue_field_history" &&
+        facts.some(
+          (fact) =>
+            fact.evidence !== "observed_transition" ||
+            fact.historySubjectId === undefined ||
+            fact.issueFieldId === undefined ||
+            !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/issues\/[1-9]\d*$/.test(fact.sourceUrl),
+        )
+      )
+        throw new Error("invalid_issue_field_evidence");
+      if (request.family !== "issue_field_history" && facts.some((fact) => fact.issueFieldId !== undefined))
+        throw new Error("invalid_issue_field_subject");
       if (request.family === "project_current" && facts.some((fact) => fact.evidence !== "current_state"))
         throw new Error("invalid_current_project_evidence");
       if (request.family !== "project_current" && facts.some((fact) => fact.projectSubjectId !== undefined))

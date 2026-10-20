@@ -180,7 +180,11 @@ async function harness(t, extra = {}) {
   t.after(async () => {
     await runtime.stop();
     controlsStore.close();
-    await engine.close();
+    try {
+      await engine.close();
+    } finally {
+      engine = undefined;
+    }
     assert.equal(dirname(resolve(directory)), resolve(tmpdir()));
     assert.match(basename(directory), /^leaderboard-pipeline-/);
     await rm(directory, { recursive: true, force: true });
@@ -207,7 +211,6 @@ async function harness(t, extra = {}) {
     },
     controlsStore,
     options,
-    engine,
     directory,
     setPrivate(value) {
       privateRepository = value;

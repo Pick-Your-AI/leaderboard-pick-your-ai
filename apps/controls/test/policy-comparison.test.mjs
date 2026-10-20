@@ -763,7 +763,7 @@ async function runtimePreviewHarness(t, { verifyConfiguration, fence, correction
       work({
         query: async (sql, params) => {
           if (sql.includes("repository_access"))
-            return { rows: [{ repository_id: 2, state: "public", generation: 0 }] };
+            return { rows: [{ repository_id: 2, installation_id: 1, state: "public", generation: 0 }] };
           if (sql.includes("FROM leaderboard_pipeline.normalizations AS n")) {
             assert.deepEqual(params[0], [documentHash]);
             assert.deepEqual(params[2], ["2"]);

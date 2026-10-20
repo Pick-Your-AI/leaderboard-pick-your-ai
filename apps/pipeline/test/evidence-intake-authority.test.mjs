@@ -154,7 +154,7 @@ test("manual intake retires exact pre-intake authority for every metric, includi
     assert.notEqual(recognitionFingerprint(current, [binding]), previousAuthority(current, [binding]));
 });
 
-test("zero manual requests preserve the exact previous authority across all metric bindings and unrelated controls", () => {
+test("zero manual requests preserve unaffected prior authority and independently received category fences", () => {
   const states = [
     { requests: {}, profiles: {}, audit: [] },
     {
@@ -168,9 +168,19 @@ test("zero manual requests preserve the exact previous authority across all metr
     const all = metricRegistryV1.metrics.map((metric) => ({ ...binding, metricId: metric.id }));
     for (const bindings of [[], ...all.map((entry) => [entry]), all]) {
       const current = recognitionFingerprint(state, bindings);
-      assert.equal(current, beforeReceivedIntakeAuthority(state, bindings));
+      const receivedCategories = [
+        "governance",
+        "deployment_work",
+        "incidents",
+        "release_changes",
+        "issue_ordering",
+        "release_stewardship",
+      ];
+      if (bindings.some((entry) => receivedCategories.includes(entry.metricId)))
+        assert.notEqual(current, beforeReceivedIntakeAuthority(state, bindings));
+      else assert.equal(current, beforeReceivedIntakeAuthority(state, bindings));
       const earlier = beforeIntakeAuthority(state, bindings);
-      if (bindings.some((entry) => ["maintenance", "automation"].includes(entry.metricId)))
+      if (bindings.some((entry) => ["maintenance", "automation", ...receivedCategories].includes(entry.metricId)))
         assert.notEqual(current, earlier, "the received category fences retain their independent retirement");
       else assert.equal(current, earlier, "unaffected ac7 automatic-source authority stays exact");
     }
@@ -209,4 +219,17 @@ test("legacy owner-only intake is withheld without changing raw facts or inventi
   assert.deepEqual(legacy, original);
   assert.equal(apply(attachSyntheticEvidenceState(legacyState())).receipt.targetFactId, "synthetic-fact");
   assert.equal(receiptCalls, 1);
+});
+
+test("empty ordering destinations use the explicit reviewed-plan generation without changing other bindings", () => {
+  const state = { requests: {}, profiles: {}, audit: [] };
+  const ordering = { ...binding, metricId: "issue_ordering" };
+  for (const bindings of [[ordering], [binding, ordering], [ordering, binding]]) {
+    const expected = createHash("sha256")
+      .update(JSON.stringify(["localization-review-target/v1", [], [], [], bindings, "reviewed-ordering-plan/v1"]))
+      .digest("hex");
+    assert.equal(recognitionFingerprint(state, bindings), expected);
+    assert.notEqual(expected, beforeReceivedIntakeAuthority(state, bindings));
+  }
+  assert.equal(recognitionFingerprint(state, [binding]), beforeReceivedIntakeAuthority(state, [binding]));
 });

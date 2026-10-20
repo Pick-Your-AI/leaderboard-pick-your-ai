@@ -220,6 +220,40 @@ const details = {
     publicDisclosureApproved: true,
     contributorConsent: true,
   },
+  governance: {
+    decisionId: "decision:1",
+    decisionVersion: "v1",
+    kind: "governance_decision",
+    disposition: "accepted",
+    publicRecord: {
+      revision: after,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/blob/${after}/docs/governance.md`,
+      contentHash: hash,
+    },
+  },
+  deployment_work: {
+    workArtifactId: "deployment-work:1",
+    workVersion: "v1",
+    workKind: "deployment_improvement",
+    deploymentIds: ["deployment:1"],
+    sourceUse: "approved_public",
+    publicRecord: {
+      revision: after,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/blob/${after}/docs/deployment.md`,
+      contentHash: hash,
+    },
+  },
+  incidents: {
+    contributionId: "reliability-work:1",
+    contributionVersion: "v1",
+    workKind: "postmortem",
+    narrativeApproved: true,
+    publicRecord: {
+      revision: after,
+      sourceRevisionUrl: `https://github.com/synthetic-owner/repository/blob/${after}/docs/postmortem.md`,
+      contentHash: hash,
+    },
+  },
 };
 function scenario(metric = "catalog_proposals", requestOverrides = {}) {
   const input = source(),
@@ -606,8 +640,10 @@ test("reproductions: full 64-character source revisions bind all three reviewed 
     revision = "a".repeat(64);
   s.input = source((envelope) => {
     envelope.payload.pull_request.merge_commit_sha = revision;
+    envelope.integration.before = "b".repeat(64);
     envelope.integration.after = revision;
     envelope.integration.commitShas = [revision];
+    envelope.integration.diff.before = envelope.integration.before;
     envelope.integration.diff.after = revision;
   });
   s.candidate = s.input.facts.find((fact) => fact.metricId === "pr_merged");
@@ -971,7 +1007,8 @@ test("reproductions: its configuration fence preserves automatic-source authorit
     );
     const current = recognitionFingerprint(empty, [s.binding]),
       previous = emptyDomainAuthority([s.binding], true);
-    if (metric === "reproductions") assert.notEqual(current, previous);
+    if (["reproductions", "governance", "deployment_work", "incidents"].includes(metric))
+      assert.notEqual(current, previous);
     else assert.equal(current, previous, `${metric}: exact prior authority bytes survive`);
   }
   const s = scenario("documentation"),
@@ -994,7 +1031,8 @@ test("data_quality: qualifier authority preserves other automatic sources while 
     );
     const current = recognitionFingerprint(empty, [s.binding]),
       previous = emptyDomainAuthority([s.binding]);
-    if (["data_quality", "reproductions"].includes(metric)) assert.notEqual(current, previous);
+    if (["data_quality", "reproductions", "governance", "deployment_work", "incidents"].includes(metric))
+      assert.notEqual(current, previous);
     else assert.equal(current, previous, `${metric}: established automatic-source authority is retained`);
   }
   const mixed = scenario("documentation"),
@@ -1031,6 +1069,8 @@ const candidateDateBases = {
   usability: "acceptedAt",
   performance: "acceptedAt",
   security: "occurredAt",
+  governance: "acceptedAt",
+  deployment_work: "acceptedAt",
 };
 
 function aggregateDomain(s, normalized, scope = {}) {
@@ -1073,7 +1113,8 @@ function aggregateDomain(s, normalized, scope = {}) {
 
 for (const [metric, date_basis] of Object.entries(candidateDateBases)) {
   test(`${metric}: source-to-engine candidate counts one canonical unit through review and observation replay`, () => {
-    assert.deepEqual(Object.keys(candidateDateBases).sort(), [...domainMetricIds].sort());
+    // Reliability receipts remain spotlight-only, without a selectable board.
+    assert.deepEqual(Object.keys(candidateDateBases).sort(), domainMetricIds.filter((id) => id !== "incidents").sort());
     const s = scenario(metric);
     s.policies[0].policy.dateBasis = date_basis;
     const normalized = run(s),
@@ -1191,6 +1232,15 @@ const exclusions = {
   },
   security: (s) => {
     s.record.details.publicDisclosureApproved = false;
+  },
+  governance: (s) => {
+    s.record.details.disposition = "rejected";
+  },
+  deployment_work: (s) => {
+    s.record.details.workKind = "execution_only";
+  },
+  incidents: (s) => {
+    s.record.details.narrativeApproved = false;
   },
 };
 for (const metric of domainMetricIds) {
@@ -1609,6 +1659,15 @@ test("specialist policy preserves canonical units and separates reviewed credit 
   }
 });
 
+// These domain fixtures remap their PR proofs through the issue-collection
+// harness. They retain every original fact/proof and mode marker, but do not
+// claim the original collected PR binding needed by an optional physical receipt.
+function domainNormalization(input) {
+  const output = structuredClone(input);
+  delete output.physicalContext;
+  return output;
+}
+
 test("the pipeline retains per-source synthetic provenance when flattening recognition inputs", async (t) => {
   const { harness, components } = await import("./harness.mjs");
   const s = scenario();
@@ -1630,7 +1689,7 @@ test("the pipeline retains per-source synthetic provenance when flattening recog
     payloads: [structuredClone(fixture.pull_request)],
     // These retained fictional inputs were produced by the current branch-checked normalizer.
     defaultDeliveryNormalizationVersion,
-    normalizerFactory: () => async () => ({ ...structuredClone(s.input), isSynthetic: true }),
+    normalizerFactory: () => async () => ({ ...domainNormalization(s.input), isSynthetic: true }),
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {
@@ -1676,7 +1735,7 @@ test("accepted documentation retains bounded domain reasons through primary and 
     payloads: [payload],
     // These retained fictional inputs were produced by the current branch-checked normalizer.
     defaultDeliveryNormalizationVersion,
-    normalizerFactory: () => async () => structuredClone(s.input),
+    normalizerFactory: () => async () => domainNormalization(s.input),
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {
@@ -1756,7 +1815,7 @@ test("data_quality: correction provenance stays private and obsolete generic aut
     payloads: [payload],
     // These retained fictional inputs were produced by the current branch-checked normalizer.
     defaultDeliveryNormalizationVersion,
-    normalizerFactory: () => async () => structuredClone(s.input),
+    normalizerFactory: () => async () => domainNormalization(s.input),
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {
@@ -1867,7 +1926,7 @@ test("reproductions: persisted accepted outcomes keep private proof bounded and 
     payloads: [payload],
     // These retained fictional inputs were produced by the current branch-checked normalizer.
     defaultDeliveryNormalizationVersion,
-    normalizerFactory: () => async () => structuredClone(s.input),
+    normalizerFactory: () => async () => domainNormalization(s.input),
     configure(config) {
       config.recognitionBindings = [s.binding];
       const policy = {
@@ -2217,5 +2276,111 @@ test("performance qualification requires exact comparable real conditions and an
     const s = scenario("performance");
     mutate(s);
     assert.throws(() => run(s), /unverified/);
+  }
+});
+
+// These are fixtures of the trusted normalized-input boundary, not additional
+// capabilities of the stock GitHub collector. Its coauthor/review facts do not
+// receive the immutable domain pin required by this specialist adapter.
+function trustedDesignRoleScenario(role) {
+  const s = scenario("design");
+  s.input.facts = [s.candidate];
+  s.input.evidence = [s.evidence];
+  s.input.participation = s.input.participation
+    .filter((entry) => entry.actorId === s.request.owner)
+    .map((entry) => ({ ...entry, role }));
+  s.candidate.role = role;
+  s.evidence.contribution.roles = [role];
+  s.record.details.role = role;
+  return s;
+}
+
+test("domain role boundary: trusted design roles retain their exact attribution and canonical unit", async (t) => {
+  let canonicalKey;
+  for (const role of ["author", "coauthor", "reviewer"]) {
+    await t.test(role, () => {
+      const s = trustedDesignRoleScenario(role),
+        original = structuredClone(s),
+        out = run(s),
+        facts = out.facts.filter((fact) => fact.metricId === "design" && fact.state === "qualified");
+      assert.equal(facts.length, 1);
+      assert.equal(facts[0].role, role);
+      assert.equal(facts[0].actorId, s.request.owner);
+      assert.equal(facts[0].acceptedBy, s.decision.actor);
+      assert.notEqual(facts[0].acceptedBy, facts[0].actorId);
+      const proof = out.evidence.find((entry) => entry.contribution.contributionId === facts[0].id);
+      assert.deepEqual(proof.contribution.roles, [role]);
+      assert.equal(proof.sourceRevision, s.record.sourceRevision);
+      assert.equal(proof.sourceRevisionUrl, s.record.sourceRevisionUrl);
+      canonicalKey ??= facts[0].canonicalKey;
+      assert.equal(facts[0].canonicalKey, canonicalKey, "A different role label cannot mint another design unit");
+      assert.deepEqual(s, original, "Recognition must not rewrite the source role or its protected review");
+    });
+  }
+});
+
+test("domain role boundary: a design declaration cannot substitute for the source role", async (t) => {
+  for (const sourceRole of ["author", "coauthor", "reviewer"]) {
+    for (const declaredRole of ["author", "coauthor", "reviewer"].filter((role) => role !== sourceRole)) {
+      await t.test(`${sourceRole} is not ${declaredRole}`, () => {
+        const s = trustedDesignRoleScenario(sourceRole);
+        s.record.details.role = declaredRole;
+        const original = structuredClone(s);
+        assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
+        assert.deepEqual(s, original);
+      });
+    }
+  }
+  for (const role of ["co-designer", "remediator", "resolver", "merger", "reporter", "unknown", "automation"]) {
+    await t.test(`unsupported design role ${role}`, () => {
+      const s = trustedDesignRoleScenario(role);
+      assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
+    });
+  }
+});
+
+function securityRoleDeclarationScenario() {
+  const s = scenario("security");
+  attachSyntheticEvidenceIntake(s.request, {
+    intake: { roles: { submitter: "PRIVATE_REMEDIATION_ROLE_SENTINEL", collaborators: {} } },
+  });
+  return s;
+}
+
+test("domain role boundary: a private remediation declaration cannot grant a role or waive security consent", async (t) => {
+  await t.test("the accepted source author stays the author", () => {
+    const s = securityRoleDeclarationScenario(),
+      original = structuredClone(s),
+      out = run(s),
+      facts = out.facts.filter((fact) => fact.metricId === "security" && fact.state === "qualified");
+    assert.equal(facts.length, 1);
+    assert.equal(facts[0].role, "author");
+    const proof = out.evidence.find((entry) => entry.contribution.contributionId === facts[0].id);
+    assert.deepEqual(proof.contribution.roles, ["author"]);
+    assert.doesNotMatch(JSON.stringify(out), /PRIVATE_REMEDIATION_ROLE_SENTINEL/);
+    assert.deepEqual(s, original);
+  });
+  for (const field of ["publicDisclosureApproved", "contributorConsent"]) {
+    await t.test(`${field} is still required`, () => {
+      const s = securityRoleDeclarationScenario();
+      s.record.details[field] = false;
+      let receiptCalls = 0;
+      assert.throws(
+        () =>
+          materializeRecognition(
+            s.input,
+            s.state,
+            [s.binding],
+            s.policies,
+            (...args) => {
+              receiptCalls++;
+              return applyRecognitionReceipt(...args);
+            },
+            cutoff,
+          ),
+        { message: "domain_recognition_evidence_unverified" },
+      );
+      assert.equal(receiptCalls, 0, "The specialist gate must fail before invoking even a host receipt adapter");
+    });
   }
 });

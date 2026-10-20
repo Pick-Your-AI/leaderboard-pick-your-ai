@@ -2,10 +2,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createService } from "../dist/app.js";
+import { currentRankingPresentationPolicy } from "../../../packages/contracts/dist/index.js";
 import { readFixture, at } from "../../../tests/fixtures/pending-metric.mjs";
 
-function fixture() {
-  const input = readFixture();
+function fixture(actorCount = 2) {
+  const input = readFixture(actorCount);
   input.selected.portfolioEvidence = [
     ...input.selected.evidence.map((entry) => ({
       ...structuredClone(entry),
@@ -150,6 +151,24 @@ test("legacy and equivalent copies preserve canonical contribution identity and 
   assert.deepEqual(response.json().contribution.reasonCodes, ["public_accepted_work"]);
 });
 
+test("unapproved maintenance membership without a facet preserves equivalent public proof", async (t) => {
+  const input = fixture();
+  const proof = input.selected.evidence[0];
+  const app = harness(t, input);
+  const url = `/api/v1/evidence/${proof.contribution.contributionId}`;
+  assert.equal((await app.inject(url)).statusCode, 200);
+  input.selected.portfolioEvidence[0].contribution.metricIds.push("maintenance");
+  for (const suffix of ["", `?snapshot=${input.head.snapshotId}`]) {
+    const response = await app.inject(url + suffix);
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json().contribution.metricIds, proof.contribution.metricIds);
+    assert.ok(response.json().contribution.reasonCodes.every((reason) => !reason.startsWith("maintenance_")));
+  }
+  input.controls.suppressedArtifactIds.push(proof.artifact.stableId);
+  for (const suffix of ["", `?snapshot=${input.head.snapshotId}`])
+    assert.equal((await app.inject(url + suffix)).statusCode, 404);
+});
+
 test("distinct contribution IDs may attribute the same artifact and source event to collaborators", async (t) => {
   const input = fixture();
   const shared = structuredClone(input.selected.portfolioEvidence[0]);
@@ -231,8 +250,10 @@ test("discarding a suppressed counterpart cannot reattribute its proof to anothe
 });
 
 test("a conflicting comparison baseline withholds movement without discarding valid current totals", async (t) => {
-  const previous = fixture();
-  const current = fixture();
+  const previous = fixture(5);
+  const current = fixture(5);
+  for (const read of [previous, current])
+    read.selected.rankingPresentationPolicy = structuredClone(currentRankingPresentationPolicy);
   Object.assign(current.selected.snapshot, { snapshotId: "synthetic-pending-2", revision: 2 });
   Object.assign(current.head, { snapshotId: "synthetic-pending-2", revision: 2 });
   previous.head = structuredClone(current.head);
@@ -251,6 +272,7 @@ test("a conflicting comparison baseline withholds movement without discarding va
   const url = "/api/v1/boards?metric=pr_merged&snapshot=synthetic-pending-2&compare=synthetic-pending-1";
   const matched = await app.inject(url);
   assert.equal(matched.statusCode, 200);
+  assert.equal(matched.json().rankingPresentation.state, "ranked");
   assert.ok(matched.json().rows.every((row) => row.movement.reason === "insufficient_evidence_history"));
   previous.selected.portfolioEvidence[0].contribution.actorId = "102";
   const response = await app.inject(url);

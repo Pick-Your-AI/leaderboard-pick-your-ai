@@ -16,11 +16,14 @@ import {
 } from "@pick-your-ai/contracts";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { comparePublishedRanks, type ComparedRanks } from "./rank-comparison.js";
+import { rankingPresentation } from "./ranking-presentation.js";
 import { acceptedAchievements, ACHIEVEMENT_RULE_VERSION } from "./achievements.js";
 import { acceptedMilestones } from "./achievement-milestones.js";
+import { activityBurstIndex, activityCompactionVersion, activityGroupPreviewLimit } from "./activity-bursts.js";
 import { renderContributorCard, renderContributorCardImage } from "./cards.js";
 import { renderPublicExport } from "./exports.js";
 import { publicParticipation } from "./participation.js";
+import { profilePage } from "./profile-page.js";
 import { publicOrganizationHistory, validateParticipationHistoryRead } from "./participation-history.js";
 import {
   activityGroupingVersion,
@@ -80,6 +83,8 @@ const identifier = /^[A-Za-z0-9_.:-]{1,200}$/;
 const requestTargetByteLimit = 48 * 1024;
 const retainedHeaderByteLimit = 16 * 1024;
 const retainedHeaderCountLimit = 1000;
+// The browser bounds the complete UTF-8 board response, including its envelope.
+const boardResponseByteLimit = 2_000_000;
 function fail(status: number, code: string): never {
   throw new PublicReadError(status, code);
 }
@@ -427,6 +432,8 @@ export function createService(options: ServiceOptions = {}) {
   function ranked(read: PublicRead, metric: string) {
     const actors = new Map(read.selected.actors.map((actor) => [actor.actorId, actor.actor]));
     const policy = read.selected.ranking.find((entry) => entry.metricId === metric);
+    const presentation = rankingPresentation(read, metric);
+    const showRanks = presentation === null ? policy?.rank !== false : presentation.state === "ranked";
     const direction = policy?.direction;
     const ordered = read.selected.rows
       .filter((row) => row.result.metricId === metric)
@@ -443,17 +450,18 @@ export function createService(options: ServiceOptions = {}) {
               : direction === "ascending"
                 ? av - bv
                 : bv - av;
-        return (policy?.rank === false ? 0 : delta) || (a.actorId < b.actorId ? -1 : a.actorId > b.actorId ? 1 : 0);
+        return (showRanks ? delta : 0) || (a.actorId < b.actorId ? -1 : a.actorId > b.actorId ? 1 : 0);
       });
     let rank = 0;
     return ordered.map((row, index) => {
       if (index === 0 || row.result.value !== ordered[index - 1]?.result.value) rank++;
       return {
-        rank: policy?.rank === false || row.result.value === undefined ? null : rank,
+        rank: !showRanks || row.result.value === undefined ? null : rank,
         actorId: row.actorId,
         actor: actors.get(row.actorId),
         result: row.result,
         evidenceIds: row.evidenceIds,
+        ...(row.physicalContext === undefined ? {} : { physicalContext: row.physicalContext }),
         ...(row.pending === undefined ? {} : { pending: row.pending }),
       };
     });
@@ -482,18 +490,21 @@ export function createService(options: ServiceOptions = {}) {
     const nextOffset = offset + entries.length;
     let nextCursor: string | null = null;
     if (nextOffset < items.length) {
-      const value = Buffer.from(
-        JSON.stringify({
-          pin: read.selected.snapshot.snapshotId,
-          policy: read.controls.version,
-          offset: nextOffset,
-          binding,
-          expires: Math.floor(now() / 300000) * 300000 + 900000,
-        }),
-      ).toString("base64url");
-      nextCursor = `${value}.${sign(value)}`;
+      nextCursor = continuationCursor(read, binding, nextOffset, Math.floor(now() / 300000) * 300000 + 900000);
     }
     return { entries, nextCursor };
+  }
+  function continuationCursor(read: PublicRead, binding: string, offset: number, expires: number) {
+    const value = Buffer.from(
+      JSON.stringify({
+        pin: read.selected.snapshot.snapshotId,
+        policy: read.controls.version,
+        offset,
+        binding,
+        expires,
+      }),
+    ).toString("base64url");
+    return `${value}.${sign(value)}`;
   }
   function boundCursor(q: ReturnType<typeof query>, binding: string) {
     const cursor = q.cursor ? decodeCursor(q.cursor) : null;
@@ -546,21 +557,8 @@ export function createService(options: ServiceOptions = {}) {
       ...row,
       ...(compared ? { movement: movement.get(row.actorId)! } : {}),
     }));
-    const page = rows.slice(offset, offset + q.limit);
-    const nextOffset = offset + page.length;
-    let nextCursor: string | null = null;
-    if (nextOffset < rows.length) {
-      const value = Buffer.from(
-        JSON.stringify({
-          pin: read.selected.snapshot.snapshotId,
-          policy: read.controls.version,
-          offset: nextOffset,
-          binding,
-          expires: Math.floor(now() / 300000) * 300000 + 900000,
-        }),
-      ).toString("base64url");
-      nextCursor = `${value}.${sign(value)}`;
-    }
+    const candidates = rows.slice(offset, offset + q.limit);
+    const expires = Math.floor(now() / 300000) * 300000 + 900000;
     const share = new URLSearchParams({
       actors: q.actors,
       organization: q.scope.organization,
@@ -576,22 +574,52 @@ export function createService(options: ServiceOptions = {}) {
         share.set("compareEnd", q.comparison.scope.end);
       }
     }
-    const body = {
-      ...meta(read),
-      ...(compared ? { comparison: compared.comparison } : {}),
-      metric: definition(q.metric),
-      ranking: read.selected.ranking.find((entry) => entry.metricId === q.metric) ?? null,
-      diagnostics:
-        read.selected.diagnostics?.filter(
-          (entry) => entry.metricId === q.metric && page.some((row) => row.actorId === entry.actorId),
-        ) ?? [],
-      rows: page,
-      totalRows: rows.length,
-      nextCursor,
-      shareUrl: `/api/v1/boards?${share.toString()}`,
+    const candidate = (count: number) => {
+      const page = candidates.slice(0, count);
+      const nextOffset = offset + count;
+      const body = {
+        ...meta(read),
+        ...(compared ? { comparison: compared.comparison } : {}),
+        metric: definition(q.metric!),
+        ranking: read.selected.ranking.find((entry) => entry.metricId === q.metric) ?? null,
+        ...(read.selected.rankingPresentationPolicy === undefined
+          ? {}
+          : { rankingPresentation: rankingPresentation(read, q.metric!) }),
+        diagnostics:
+          read.selected.diagnostics?.filter(
+            (entry) => entry.metricId === q.metric && page.some((row) => row.actorId === entry.actorId),
+          ) ?? [],
+        rows: page,
+        totalRows: rows.length,
+        nextCursor: nextOffset < rows.length ? continuationCursor(read, binding, nextOffset, expires) : null,
+        shareUrl: `/api/v1/boards?${share.toString()}`,
+      };
+      // Measure the complete response, including fixed metadata, selected
+      // diagnostics and the actual signed cursor, without truncating a row.
+      return Buffer.byteLength(JSON.stringify(body)) <= boardResponseByteLimit ? body : null;
     };
+    // Check the complete requested page first: a final null cursor can fit even
+    // when a shorter continuation page does not. All remaining prefixes retain
+    // a cursor and their complete serialized size grows monotonically.
+    let selectedPage = candidate(candidates.length);
+    if (selectedPage === null) {
+      let low = 1;
+      let high = candidates.length - 1;
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        const current = candidate(middle);
+        if (current === null) high = middle - 1;
+        else {
+          selectedPage = current;
+          low = middle + 1;
+        }
+      }
+    }
+    if (selectedPage === null) fail(503, "board_response_too_large");
     if (exporting) {
-      const exported = renderPublicExport(read, body, q.format as "json" | "csv");
+      // Export formats keep their existing independent limits. An indivisible
+      // CSV cell must not make an otherwise bounded board or JSON row unavailable.
+      const exported = renderPublicExport(read, selectedPage, q.format as "json" | "csv");
       // Downloads cannot be cached past a current-source authorization decision.
       reply
         .header("Content-Disposition", `attachment; filename="leaderboard.${q.format}"`)
@@ -599,7 +627,7 @@ export function createService(options: ServiceOptions = {}) {
         .header("Content-Security-Policy", "sandbox; default-src 'none'");
       return send(request, reply, exported.body, exported.contentType, "no-store");
     }
-    return send(request, reply, body);
+    return send(request, reply, selectedPage);
   }
   app.get("/healthz", async () => ({ status: "ok" }));
   app.get("/api/v1", async (_request, reply) =>
@@ -620,6 +648,8 @@ export function createService(options: ServiceOptions = {}) {
         "contributors/:actorId/achievements",
         "activity",
         "activity/:groupId",
+        "activity-bursts",
+        "activity-bursts/:burstId",
         "evidence/:contributionId",
         "health",
         "updates",
@@ -703,6 +733,68 @@ export function createService(options: ServiceOptions = {}) {
   app.get<{ Params: { groupId: string } }>("/api/v1/activity/:groupId", (request, reply) =>
     activity(request, reply, request.params.groupId),
   );
+  async function activityBursts(request: FastifyRequest, reply: FastifyReply, burstId: string | null) {
+    const q = query(request);
+    if (q.metric) fail(400, "use_category_filter");
+    if (q.search || q.format !== "json") fail(400, "unsupported_filter");
+    if (burstId !== null && !/^[a-f0-9]{64}$/.test(burstId)) fail(400, "invalid_activity_burst");
+    const binding = JSON.stringify([
+      "activity-bursts",
+      activityGroupingVersion,
+      activityCompactionVersion,
+      burstId,
+      cursorScope(q.scope),
+      q.category,
+      q.limit,
+      q.actors,
+    ]);
+    const cursor = boundCursor(q, binding);
+    const read = await load(q.scope, cursor?.pin ?? q.snapshot, q.actors);
+    if (cursor && cursor.policy !== read.controls.version) fail(410, "cursor_policy_changed_refetch");
+    const disabled = read.selected.disabledMetrics?.find((entry) => entry.id === q.category);
+    if (disabled)
+      return reply
+        .code(503)
+        .header("Cache-Control", "no-store")
+        .send({ ...meta(read), error: "metric_disabled", metric: disabled });
+    const index = activityBurstIndex(activityIndex(read, q.category));
+    const common = {
+      ...meta(read),
+      category: q.category,
+      groupingVersion: activityGroupingVersion,
+      previewLimit: activityPreviewLimit,
+      correctionHistory: "per_proof",
+      compactionVersion: activityCompactionVersion,
+      groupPreviewLimit: activityGroupPreviewLimit,
+    };
+    let body: unknown;
+    if (burstId === null) {
+      const { entries: bursts, nextCursor } = page(index.bursts, q, read, cursor, binding, activityPageByteLimit);
+      body = { ...common, bursts, totalBursts: index.bursts.length, nextCursor };
+    } else {
+      const burst = index.bursts.find((entry) => entry.burstId === burstId);
+      if (!burst) fail(404, "activity_burst_unavailable");
+      // Every page repeats the wrapper's previews. Reserve its actual envelope,
+      // the admitted cursor ceiling and all possible array separators first.
+      const overhead =
+        Buffer.byteLength(JSON.stringify({ ...common, burst, groups: [], nextCursor: "x".repeat(2048) })) + q.limit - 1;
+      const { entries: groups, nextCursor } = page(
+        index.members.get(burstId)!,
+        q,
+        read,
+        cursor,
+        binding,
+        Math.min(activityPageByteLimit, 1_500_000 - overhead),
+      );
+      body = { ...common, burst, groups, nextCursor };
+    }
+    if (Buffer.byteLength(JSON.stringify(body)) > 1_500_000) fail(503, "activity_response_too_large");
+    return send(request, reply, body);
+  }
+  app.get("/api/v1/activity-bursts", (request, reply) => activityBursts(request, reply, null));
+  app.get<{ Params: { burstId: string } }>("/api/v1/activity-bursts/:burstId", (request, reply) =>
+    activityBursts(request, reply, request.params.burstId),
+  );
   app.get("/api/v1/contributors", async (request, reply) => {
     const q = query(request);
     if (q.metric) fail(400, "use_category_filter");
@@ -776,8 +868,9 @@ export function createService(options: ServiceOptions = {}) {
               ? 1
               : 0),
       );
-    const { entries: timeline, nextCursor } = page(evidence, q, read, cursor, binding);
-    return send(request, reply, {
+    if (cursor && cursor.policy !== read.controls.version) fail(410, "cursor_policy_changed_refetch");
+    const expires = Math.floor(now() / 300000) * 300000 + 900000;
+    const envelope = {
       ...meta(read),
       actor: actor.actor,
       actorId: actor.actorId,
@@ -793,12 +886,15 @@ export function createService(options: ServiceOptions = {}) {
         role,
         contributions: evidence.filter((entry) => entry.contribution.roles.includes(role)).length,
       })),
-      timeline,
-      nextCursor,
-      timelineTruncated: nextCursor !== null,
       evidenceCount: evidence.length,
-      evidenceIds: timeline.map((entry) => entry.contribution.contributionId),
-    });
+    };
+    return send(
+      request,
+      reply,
+      profilePage(evidence, cursor?.offset ?? 0, q.limit, envelope, (offset) =>
+        continuationCursor(read, binding, offset, expires),
+      ),
+    );
   });
   async function participationHistory(
     request: FastifyRequest,

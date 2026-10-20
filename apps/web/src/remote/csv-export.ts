@@ -1,6 +1,7 @@
 import { stableJSON } from "@pick-your-ai/metrics";
 import type { MetricDefinition } from "@pick-your-ai/contracts";
 import { parseExportJSON } from "./export-json.ts";
+import { maxExportResponseBytes } from "./export-limits.ts";
 
 // Every public-export renderer quotes every cell and terminates every record
 // with CRLF. Read that bounded contract; do not guess a spreadsheet dialect.
@@ -48,7 +49,12 @@ const legacyColumns = [
   "pending_evidence",
 ] as const;
 const membershipColumns = ["scope_schema_version", "context", "projects"] as const;
-type Column = (typeof legacyColumns)[number] | (typeof membershipColumns)[number] | "roles";
+type Column =
+  | (typeof legacyColumns)[number]
+  | (typeof membershipColumns)[number]
+  | "roles"
+  | "ranking_presentation"
+  | "physical_context";
 const scopedColumns = (roles: boolean): Column[] => {
   const split = legacyColumns.indexOf("start");
   return [
@@ -62,6 +68,18 @@ const variants: { version: string; columns: readonly Column[] }[] = [
   { version: "public-export/v1", columns: legacyColumns },
   { version: "public-export/v2", columns: scopedColumns(false) },
   { version: "public-export/v3", columns: scopedColumns(true) },
+  ...[legacyColumns, scopedColumns(false), scopedColumns(true)].map((columns) => {
+    const split = columns.indexOf("ranking") + 1;
+    return {
+      version: "public-export/v4",
+      columns: [
+        ...columns.slice(0, split),
+        "ranking_presentation" as const,
+        ...columns.slice(split),
+        "physical_context" as const,
+      ],
+    };
+  }),
 ];
 const formula = (value: string) => /^[\s\p{Cf}]*[=+@-]/u.test(value) || /^[\t\r\n]/u.test(value);
 const protectedText = (value: string) => (formula(value) ? `'${value}` : value);
@@ -74,7 +92,8 @@ function records(
   raw: string,
   rowLimit: number,
 ): { rows: string[][]; columns: readonly Column[]; version: string; withComparison: boolean } {
-  if (!Number.isSafeInteger(rowLimit) || rowLimit < 1 || rowLimit > 100 || raw.length > 2_000_000) invalid();
+  if (!Number.isSafeInteger(rowLimit) || rowLimit < 1 || rowLimit > 100 || raw.length > maxExportResponseBytes)
+    invalid();
   const result: string[][] = [];
   let index = 0;
   while (index < raw.length) {
@@ -98,7 +117,7 @@ function records(
       if (!closed || formula(cell) || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(cell)) invalid();
       if (new TextEncoder().encode(cell).byteLength > 256 * 1024) invalid();
       row.push(cell);
-      if (row.length > legacyColumns.length + 6) invalid();
+      if (row.length > legacyColumns.length + 8) invalid();
       if (raw[index] === ",") {
         index++;
         continue;
@@ -233,6 +252,7 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
       evidenceIds,
       ...(pending === undefined ? {} : { pending }),
       ...(withComparison ? { movement } : {}),
+      ...(version === "public-export/v4" ? { physicalContext: parseExportJSON(at(row, "physical_context")) } : {}),
     };
   });
   return {
@@ -251,18 +271,21 @@ export function parseCSVExport(raw: string, expectedMetric: MetricDefinition, ro
       workstream: nullableText(at(metadata, "workstream")),
       start: nullableText(at(metadata, "start")),
       end: nullableText(at(metadata, "end")),
-      ...(version === "public-export/v1"
+      ...(!columns.includes("scope_schema_version")
         ? {}
         : {
             schemaVersion: at(metadata, "scope_schema_version"),
             context: at(metadata, "context"),
             projects: parseExportJSON(at(metadata, "projects")),
           }),
-      ...(version === "public-export/v3" ? { roles: parseExportJSON(at(metadata, "roles")) } : {}),
+      ...(columns.includes("roles") ? { roles: parseExportJSON(at(metadata, "roles")) } : {}),
     },
     actorFilter: at(metadata, "actor_filter"),
     metric: parseExportJSON(at(metadata, "metric_definition")),
     ranking: parseExportJSON(at(metadata, "ranking")),
+    ...(version === "public-export/v4"
+      ? { rankingPresentation: parseExportJSON(at(metadata, "ranking_presentation")) }
+      : {}),
     coverage: parseExportJSON(at(metadata, "coverage")),
     methodology: parseExportJSON(at(metadata, "methodology")),
     totalRows: number(at(metadata, "total_rows")),

@@ -9,10 +9,17 @@ export * from "./rest-snapshot.js";
 export * from "./project-snapshots.js";
 export * from "./project-context.js";
 export * from "./timeline-history.js";
+export * from "./issue-field-history.js";
+export * from "./content-edit-history.js";
 export * from "./physical-diff.js";
+export * from "./repository-net-lines.js";
 export * from "./documentation.js";
 export * from "./research.js";
 export * from "./maintenance.js";
+export * from "./release-stewardship-source.js";
+export * from "./release-inclusion.js";
+export * from "./release-recognition.js";
+export * from "./ordering.js";
 
 export type EndpointOutcome =
   | { kind: "readable"; visibility: Visibility }
@@ -116,7 +123,13 @@ export function classifyGithubFailure(input: GithubFailureInput): EndpointOutcom
     // GitHub's guidance is to wait at least 60 seconds when a secondary-limit
     // response gives neither Retry-After nor a primary reset time.
     const fallback = new Date(now.getTime() + 60_000);
-    const retryAt = retryAfter ?? (remaining === "0" ? reset : undefined) ?? fallback;
+    // Both applicable limits must elapse; a shorter Retry-After cannot discard
+    // the independently exhausted primary budget's reset.
+    const exhaustedReset = remaining === "0" ? reset : undefined;
+    const retryAt =
+      retryAfter && exhaustedReset
+        ? new Date(Math.max(retryAfter.getTime(), exhaustedReset.getTime()))
+        : (retryAfter ?? exhaustedReset ?? fallback);
     return { kind: "rate_limited", visibility: "unknown", retryAt: retryAt.toISOString(), scope: "source" };
   }
   if (input.status === 401) return { kind: "authentication_required", visibility: "unknown", status: 401 };
@@ -251,3 +264,22 @@ export async function paginateGraphql<T>(
   }
   throw new Error("GraphQL pagination exceeded maxPages");
 }
+
+export {
+  readGithubCommentSource,
+  readGithubCommentIdentity,
+  type GithubCommentKind,
+  type GithubCommentSource,
+} from "./comment-identity.js";
+
+export {
+  validateDocumentationPurposeSource,
+  type VerifiedDocumentationPurposeSource,
+} from "./documentation-purpose.js";
+
+export {
+  parseMaintenanceClassification,
+  validateMaintenanceClassification,
+  type MaintenanceClassificationRecord,
+  type MaintenanceClassificationReference,
+} from "./maintenance-classification.js";

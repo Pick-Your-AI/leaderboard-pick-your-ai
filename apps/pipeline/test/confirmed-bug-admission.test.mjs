@@ -307,7 +307,19 @@ test("confirmed_bugs: configuration fences preserve automatic sources while manu
     const current = recognitionFingerprint(empty, bindings);
     // Keep the literal historical oracle above: the later answer-clock fence
     // independently retires that destination without changing the old format.
-    if (["confirmed_bugs", "issue_answers"].includes(metric.id)) assert.notEqual(current, prior);
+    if (
+      [
+        "confirmed_bugs",
+        "issue_answers",
+        "governance",
+        "deployment_work",
+        "incidents",
+        "release_changes",
+        "issue_ordering",
+        "release_stewardship",
+      ].includes(metric.id)
+    )
+      assert.notEqual(current, prior);
     else assert.equal(current, prior, `${metric.id}: exact established authority bytes remain`);
   }
   const other = { ...s.binding, metricId: "accepted_findings" };

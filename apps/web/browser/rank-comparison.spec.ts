@@ -1,7 +1,7 @@
 import { test, expect, type Page, type Request } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { readFile } from "node:fs/promises";
-import { type PublicScope } from "@pick-your-ai/contracts";
+import { currentRankingPresentationPolicy, type PublicScope } from "@pick-your-ai/contracts";
 import { metricRegistryV1 } from "@pick-your-ai/metrics";
 import { parseCSVExport } from "../src/remote/csv-export.ts";
 
@@ -112,6 +112,82 @@ function safe(body: string) {
   for (const field of privateFields) expect(body).not.toContain(field);
 }
 
+test("mobile cohort disclosure counts before pagination and privacy rechecks withhold ranks in both exports", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 740 });
+  const api = await rankService(page);
+  try {
+    await page.goto(api.href({ limit: "2" }));
+    const policy = page.getByRole("region", { name: "Ranking presentation policy" });
+    await expect(policy).toContainText("5 comparable contributors");
+    await expect(policy).toContainText("counted before pagination");
+    await expect(policy).toContainText("ranking-presentation/v1");
+    await expect(policy).toContainText("not a privacy or statistical assurance");
+    await movement(page, "b", "1", "Up 1 rank");
+    await expect(page.getByRole("region", { name: "Published contributions" }).getByRole("rowheader")).toHaveCount(2);
+    api.harness.suppressActor(api.harness.actorIds.a);
+    await page.getByRole("button", { name: "Recheck current publication controls" }).click();
+    await expect(policy).toContainText(
+      "Small cohort: values and evidence remain visible without ranks or rank movement.",
+    );
+    await expect(policy).toContainText("4 comparable contributors");
+    await movement(
+      page,
+      "b",
+      "Unranked",
+      "Unavailable: Both snapshots need at least five currently comparable contributors.",
+    );
+    await expect(row(page, "b").getByRole("cell").nth(2)).toContainText("4");
+    await expect(row(page, "a")).toHaveCount(0);
+    await expect(page.getByText(/^(Up|Down) \d+ ranks?$/)).toHaveCount(0);
+    expect(new URL(page.url()).searchParams.get("snapshot")).toBe(api.harness.afterId);
+    for (const format of ["json", "csv"] as const) {
+      const downloaded = page.waitForEvent("download");
+      await page.getByRole("button", { name: `Download current ${format.toUpperCase()} page` }).click();
+      const raw = await readFile((await (await downloaded).path())!, "utf8");
+      safe(raw);
+      const document = format === "json" ? JSON.parse(raw) : parseCSVExport(raw, metric, 2);
+      expect(document.exportSchemaVersion).toBe("public-export/v4");
+      expect(document.rankingPresentation.comparableContributors).toBe(4);
+      expect(document.rankingPresentation.totalContributors).toBe(4);
+      expect(document.rows).toHaveLength(2);
+      expect(
+        document.rows.every(
+          (entry: { rank: number | null; movement: { state: string } }) =>
+            entry.rank === null && entry.movement.state === "unavailable",
+        ),
+      ).toBe(true);
+      expect(raw).not.toContain(api.harness.actorIds.a);
+    }
+    const accessibility = await new AxeBuilder({ page }).include("main").analyze();
+    expect(accessibility.violations).toEqual([]);
+  } finally {
+    await api.close();
+  }
+});
+
+test("a retained baseline without cohort policy keeps current values and explicitly unavailable movement", async ({
+  page,
+}) => {
+  const api = await rankService(page);
+  try {
+    await page.goto(api.href());
+    await movement(page, "b", "1", "Up 1 rank");
+    delete api.harness.pair.previous.selected.rankingPresentationPolicy;
+    await page.getByRole("button", { name: "Recheck current publication controls" }).click();
+    await movement(page, "b", "1", "Unavailable: At least one snapshot has no recorded cohort display policy.");
+    await expect(row(page, "b").getByRole("cell").nth(2)).toContainText("4");
+    await expect(page.getByText(/^(Up|Down) \d+ ranks?$/)).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Ranking presentation policy" })).toContainText(
+      "5 comparable contributors",
+    );
+    safe(await page.locator("body").innerText());
+  } finally {
+    await api.close();
+  }
+});
+
 test("real engine movement, dense ties and cursor exports preserve the selected pair", async ({ page }) => {
   const api = await rankService(page);
   try {
@@ -159,6 +235,16 @@ test("real engine movement, dense ties and cursor exports preserve the selected 
         snapshotId: api.harness.beforeId,
         scope: api.harness.previousScope,
         generatedAt: api.harness.previousScope.end,
+        rankingPresentation: {
+          ...currentRankingPresentationPolicy,
+          snapshotId: api.harness.beforeId,
+          metricId: "pr_merged",
+          enumeration: "complete",
+          totalContributors: 6,
+          comparableContributors: 6,
+          unrankableContributors: 0,
+          state: "ranked",
+        },
       });
       expect(document.rows).toHaveLength(1);
       expect(document.rows[0]).toMatchObject({
@@ -385,8 +471,8 @@ test("current suppression, provider failure and current revocation revalidate pi
 });
 
 for (const scenario of [
-  { name: "Project membership", roles: undefined, version: "public-export/v2" },
-  { name: "Project membership and roles", roles: ["author", "reviewer"] as const, version: "public-export/v3" },
+  { name: "Project membership", roles: undefined, version: "public-export/v4" },
+  { name: "Project membership and roles", roles: ["author", "reviewer"] as const, version: "public-export/v4" },
 ]) {
   test(`${scenario.name} comparison preserves complete scopes through proof, pages, downloads and a filter change`, async ({
     page,

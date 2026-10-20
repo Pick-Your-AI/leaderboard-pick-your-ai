@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { activity, activityDetail, portfolioParameters, selection, uiHref } from "../src/remote/client.ts";
+import { activityBursts, activityBurstDetail } from "../src/remote/activity-bursts.ts";
 const at = "2026-10-17T12:00:00.000Z";
 const selected = selection("?ui=api&category=pr_opened&snapshot=public-1&limit=1");
 const group = {
@@ -179,4 +180,237 @@ test("activity validates fractional bounds and proof inclusion without rounding 
       occurredAt,
     );
   }
+});
+
+const compactBase = {
+  ...base,
+  compactionVersion: "actor-state-utc-hour-v1",
+  groupPreviewLimit: 5,
+};
+function burstFixture() {
+  const groups = Array.from({ length: 8 }, (_, index) => ({
+    ...structuredClone(group),
+    groupId: index.toString(16).padStart(64, "0"),
+    repositoryId: `repo-${index}`,
+    artifactPreview: [{ ...group.artifactPreview[0], artifactId: `artifact-${index}` }],
+  }));
+  const burst = {
+    burstId: "f".repeat(64),
+    actorId: "alice",
+    activityState: "observed",
+    latestOccurredAt: at,
+    earliestOccurredAt: at,
+    firstCollectedAt: at,
+    lastCollectedAt: at,
+    unknownCollectionCount: 0,
+    groupCount: groups.length,
+    categoryIds: ["pr_opened"],
+    previewGroups: groups.slice(0, 5),
+  };
+  return { groups, burst };
+}
+
+test("additive burst decoding preserves bounded original groups, opaque source IDs, clocks, scope and cursor navigation", () => {
+  const { burst, groups } = burstFixture();
+  groups[0].artifactPreview[0].artifactId = "opaque-source-" + "A".repeat(201);
+  const input = { ...compactBase, bursts: [burst], totalBursts: 1 };
+  const before = structuredClone(input);
+  const result = activityBursts(input, selected);
+  assert.deepEqual(result.bursts[0].previewGroups, groups.slice(0, 5));
+  assert.deepEqual(input, before);
+  const detailSelection = { ...selected, limit: "100" };
+  assert.deepEqual(activityBurstDetail({ ...compactBase, burst, groups }, detailSelection).groups, groups);
+  assert.deepEqual(
+    activityBurstDetail(
+      { ...compactBase, burst, groups: groups.slice(5) },
+      { ...detailSelection, cursor: "continuation.signature" },
+    ).groups,
+    groups.slice(5),
+  );
+  for (const path of ["/activity/bursts", `/activity/bursts/${burst.burstId}`, `/activity/${groups[0].groupId}`]) {
+    const href = new URL(uiHref(path, selected), "https://example.invalid");
+    assert.equal(href.searchParams.get("snapshot"), "public-1");
+    assert.equal(href.searchParams.get("category"), "pr_opened");
+    assert.equal(href.searchParams.get("cursor"), null);
+  }
+  assert.equal(
+    new URL(
+      uiHref("/activity/bursts", selected, { cursor: "new.signature" }),
+      "https://example.invalid",
+    ).searchParams.get("cursor"),
+    "new.signature",
+  );
+});
+
+test("burst decoding rejects unknown versions and contradictory wrapper, member, actor, state, repository and date identities", () => {
+  const { burst, groups } = burstFixture();
+  for (const patch of [
+    { compactionVersion: "unknown" },
+    { groupPreviewLimit: 6 },
+    { groupingVersion: "unknown" },
+    { totalBursts: 20001 },
+    { totalBursts: 0 },
+    { bursts: [burst, burst] },
+    { scope: { ...base.scope, repository: "elsewhere" } },
+    { snapshotId: "another" },
+    { bursts: [], totalBursts: 1 },
+    { totalBursts: 2 },
+    { nextCursor: "unnecessary.signature" },
+  ])
+    assert.throws(() => activityBursts({ ...compactBase, bursts: [burst], totalBursts: 1, ...patch }, selected));
+  for (const patch of [
+    { burstId: "unrecognized" },
+    { actorId: "bob" },
+    { activityState: "accepted" },
+    { groupCount: 0 },
+    { groupCount: 4 },
+    { groupCount: 20001 },
+    { previewGroups: groups.slice(0, 4) },
+    { categoryIds: [] },
+    { categoryIds: ["documentation"] },
+    { categoryIds: ["pr_opened", "pr_opened"] },
+    { earliestOccurredAt: "2026-10-17T11:59:59.9999Z" },
+    { latestOccurredAt: "2026-10-17T12:00:00.0001Z" },
+    { firstCollectedAt: "2026-10-17T12:00:00.0001Z" },
+    { lastCollectedAt: null },
+    { previewGroups: [groups[0], groups[0], ...groups.slice(2, 5)] },
+  ])
+    assert.throws(() => activityBursts({ ...compactBase, bursts: [{ ...burst, ...patch }], totalBursts: 1 }, selected));
+  const detailSelection = { ...selected, category: null, cursor: "continuation.signature" };
+  const detailBase = { ...compactBase, category: null, burst };
+  for (const index of [6, 0])
+    assert.deepEqual(
+      activityBurstDetail({ ...detailBase, groups: [groups[index]] }, detailSelection).groups,
+      [groups[index]],
+      `valid continuation group ${index}`,
+    );
+  for (const [label, patch, code = "invalid_activity_burst_response"] of [
+    ["different contributor", { actorId: "bob", actor: { ...group.actor, githubNodeId: "bob", login: "bob" } }],
+    ["changed actor profile", { actor: { ...group.actor, login: "different-person" } }],
+    ["different activity state", { activityState: "accepted" }],
+    ["preview group identity collision", { groupId: groups[0].groupId }],
+    ["preview repository collision", { repositoryId: groups[0].repositoryId }],
+    [
+      "member outside burst time range",
+      { latestOccurredAt: "2026-10-17T13:00:00.000Z", earliestOccurredAt: "2026-10-17T13:00:00.000Z" },
+    ],
+    ["category outside burst", { categoryIds: ["documentation"] }],
+    [
+      "upstream group URL rejection",
+      { artifactPreview: [{ ...groups[6].artifactPreview[0], publicUrl: "https://evil.invalid" }] },
+      "invalid_activity_response",
+    ],
+  ])
+    assert.throws(
+      () => activityBurstDetail({ ...detailBase, groups: [{ ...groups[6], ...patch }] }, detailSelection),
+      { code },
+      label,
+    );
+  // Reusing a preview's durable identity with changed content must also fail.
+  for (const [label, patch] of [
+    ["changed preview proof count", { proofCount: 2 }],
+    [
+      "changed preview artifact identity",
+      { artifactPreview: [{ ...groups[0].artifactPreview[0], artifactId: "other" }] },
+    ],
+  ])
+    assert.throws(
+      () => activityBurstDetail({ ...detailBase, groups: [{ ...groups[0], ...patch }] }, detailSelection),
+      { code: "invalid_activity_burst_response" },
+      label,
+    );
+});
+
+test("complete burst pages reconcile summaries and never infer a shared hour for unknown source dates", () => {
+  const { burst, groups } = burstFixture();
+  const detailSelection = { ...selected, limit: "100" };
+  for (const patch of [
+    { unknownCollectionCount: 1 },
+    { categoryIds: ["pr_opened", "documentation"] },
+    { firstCollectedAt: "2026-10-16T12:00:00.000Z" },
+    { lastCollectedAt: "2026-10-18T12:00:00.000Z" },
+    { earliestOccurredAt: "2026-10-17T12:00:00.0000Z", latestOccurredAt: "2026-10-17T12:00:00.0001Z" },
+  ])
+    assert.throws(() =>
+      activityBurstDetail({ ...compactBase, burst: { ...burst, ...patch }, groups }, detailSelection),
+    );
+  const unknownGroup = { ...groups[0], latestOccurredAt: null, earliestOccurredAt: null };
+  const unknown = {
+    ...burst,
+    latestOccurredAt: null,
+    earliestOccurredAt: null,
+    groupCount: 1,
+    previewGroups: [unknownGroup],
+  };
+  assert.equal(
+    activityBursts({ ...compactBase, bursts: [unknown], totalBursts: 1 }, selected).bursts[0].latestOccurredAt,
+    null,
+  );
+  assert.throws(() =>
+    activityBursts(
+      {
+        ...compactBase,
+        bursts: [
+          {
+            ...unknown,
+            groupCount: 2,
+            previewGroups: [
+              unknownGroup,
+              { ...unknownGroup, groupId: groups[1].groupId, repositoryId: groups[1].repositoryId },
+            ],
+          },
+        ],
+        totalBursts: 1,
+      },
+      selected,
+    ),
+  );
+  const preciseGroups = groups.slice(0, 2).map((item, index) => ({
+    ...item,
+    latestOccurredAt: index ? "2026-10-17T08:00:00.0001-04:00" : "2026-10-17T12:00:00.0009Z",
+    earliestOccurredAt: index ? "2026-10-17T08:00:00.0001-04:00" : "2026-10-17T12:00:00.0009Z",
+  }));
+  const precise = {
+    ...burst,
+    groupCount: 2,
+    latestOccurredAt: preciseGroups[0].latestOccurredAt,
+    earliestOccurredAt: preciseGroups[1].earliestOccurredAt,
+    previewGroups: preciseGroups,
+  };
+  assert.equal(
+    activityBursts({ ...compactBase, bursts: [precise], totalBursts: 1 }, selected).bursts[0].earliestOccurredAt,
+    "2026-10-17T08:00:00.0001-04:00",
+  );
+  assert.throws(() =>
+    activityBursts(
+      { ...compactBase, bursts: [{ ...precise, previewGroups: [...preciseGroups].reverse() }], totalBursts: 1 },
+      selected,
+    ),
+  );
+  assert.throws(() =>
+    activityBurstDetail(
+      { ...compactBase, burst, groups: groups.slice(5), nextCursor: "continued.signature" },
+      { ...selected, limit: "100" },
+    ),
+  );
+});
+
+test("separate burst states retain one consistent contributor identity on the same public page", () => {
+  const { burst, groups } = burstFixture();
+  const accepted = {
+    ...burst,
+    burstId: "e".repeat(64),
+    activityState: "accepted",
+    previewGroups: groups
+      .slice(0, 5)
+      .map((item) => ({ ...item, groupId: "1" + item.groupId.slice(1), activityState: "accepted" })),
+  };
+  const input = { ...compactBase, bursts: [accepted, burst], totalBursts: 2 };
+  const pageSelection = { ...selected, limit: "100" };
+  assert.equal(activityBursts(input, pageSelection).bursts.length, 2);
+  accepted.previewGroups = accepted.previewGroups.map((item) => ({
+    ...item,
+    actor: { ...item.actor, login: "someone-else" },
+  }));
+  assert.throws(() => activityBursts(input, pageSelection));
 });

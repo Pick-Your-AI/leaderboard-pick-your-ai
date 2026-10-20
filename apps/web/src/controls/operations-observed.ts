@@ -23,6 +23,7 @@ const sourceFamilies = [
   "timelines",
   "content_edits",
   "project_history",
+  "issue_field_history",
   "relationships",
   "project_current",
 ] as const;

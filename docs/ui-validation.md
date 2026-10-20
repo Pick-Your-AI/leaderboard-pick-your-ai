@@ -16,11 +16,11 @@ npm run test:browser
 
 On Linux, install browser system dependencies with `npx --no-install playwright install --with-deps chromium`. The pinned Playwright package in the lockfile selects its corresponding Chromium revision; `--no-install` prevents fetching an unrelated CLI version. The test runner starts a production Vite preview at loopback port 4187 and refuses to reuse another server. No separately running service, database, GitHub token, private data, external account, or public deployment is required. Tests use only the explicitly invented prototype fixture and synthetic inputs passed through the real in-process service handler.
 
-The [browser workflow](../.github/workflows/browser-ci.yml) defines `Browser accessibility and resource checks` for every pull request (including forks) and push to main on Ubuntu 24.04, with a 20-minute job limit, read-only repository permission, no stored checkout credentials and no deployment secrets. It clean-installs locked dependencies, installs the matching Chromium and system dependencies, builds production workspaces, checks formatting and types, and runs the browser suite. Actions are pinned to full commit SHAs verified against their official repositories. Failures fail the job without retries or `continue-on-error`. The artifact step runs even after failure, has a two-minute limit, and retains reports, screenshots and failure traces for seven days. These artifacts contain synthetic data only. The first successful hosted run and fork execution still need evidence after publication; local workflow validation is not a hosted-browser pass. Repository rules must select this check after publication before merge enforcement can be claimed.
+The [browser workflow](../.github/workflows/browser-ci.yml) defines `Browser accessibility and resource checks` for every pull request (including forks) and push to main on Ubuntu 24.04, with a 20-minute job limit, read-only repository permission, no stored checkout credentials and no deployment secrets. It clean-installs locked dependencies, installs the matching Chromium and system dependencies, builds production workspaces, checks formatting and types, and runs the browser suite. Actions are pinned to full commit SHAs verified against their official repositories. Failures fail the job without retries or `continue-on-error`. The artifact step runs even after failure, has a two-minute limit, and retains reports, screenshots and failure traces for seven days. These artifacts contain synthetic data only. The [2026-10-19 main-push browser run](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/actions/runs/39219257834) has [qualified hosted synthetic evidence](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/342#issuecomment-6262743025) bound to `d94468b5`; fork execution still needs separate evidence, and local workflow validation is not a hosted-browser pass. Repository rules must select this check after publication before merge enforcement can be claimed.
 
 ## Automated evidence
 
-- All 31 canonical public-route examples and required-state examples run at 320, 360, 768, 1024 and 1280 CSS pixels in light and dark media settings. Checks require rendered headings, the synthetic notice, no uncaught page errors, no horizontal page overflow, and no axe violations for WCAG 2.0/2.1/2.2 A/AA plus best practices. Scoped unknown, empty, partial, unsupported, pending, stale, rebuilding, failed, suppressed, deleted and corrected examples are included. Protected routes are not implemented and cannot be certified here.
+- All 31 canonical public-route examples and required-state examples run at 320, 360, 768, 1024 and 1280 CSS pixels in light and dark media settings. Checks require rendered headings, the synthetic notice, no uncaught page errors, no horizontal page overflow, and no axe violations for WCAG 2.0/2.1/2.2 A/AA plus best practices. Scoped unknown, empty, partial, unsupported, pending, stale, rebuilding, failed, suppressed, deleted and corrected examples are included. Protected `/account` and `/admin` routes are implemented in the [application entry point](../apps/web/src/main.tsx); this public-route matrix does not certify their manual accessibility acceptance.
 - Forced-colors and reduced-motion emulation repeat representative board, coverage and privacy checks at 320px. Font resource requests are blocked; the prototype currently uses system fonts. Wall screens are scanned at 1920×1080, 1080×1920 and 1024×768; pause/resume is exercised. Screenshots are observations for review, not approved visual baselines.
 - A focused 320px regression checks that the longest selected snapshot remains inside the scope-control region in light, dark and forced-colors modes, with its 44px target height preserved. The select's flex label can shrink to the available content width; page overflow is not hidden. Reflow failures report element bounds to help locate the cause.
 - The live-wall configuration also checks every fieldset, label and native control against its grid bounds at 320px in light, dark and forced-colors modes. Its single grid track has a zero minimum so a native select's intrinsic option width cannot expand the form beyond the page.
@@ -40,7 +40,7 @@ The suite exposed three prototype defects: closing proof could release a held up
 
 For #34, repository rules must require the actual planning/runtime/browser checks before merge, prevent bypass according to the accepted governance policy, and demonstrate that a representative failing change blocks merging. CI YAML alone cannot establish branch-rule enforcement. `npm run typecheck` invokes the tracked-source formatting check through `pretypecheck`; the runtime and browser workflows both run it. Dependency automation exists, but update-review ownership still needs acceptance. Repository administrators must verify these settings and permissions; this change does not alter them.
 
-For #128, two representative screen-reader walkthroughs, real-device touch testing, target-size/manual contrast and visual-baseline review, protected-route checks once implemented, and participant review remain required. The native 200%/400% browser-zoom journeys below provide repeatable synthetic reflow evidence; their receiving visual review and the broader journey coverage must be assessed separately. Emulated media and axe cannot prove screen-reader usability or WCAG conformance.
+For #128, two representative screen-reader walkthroughs, real-device touch testing, target-size/manual contrast and visual-baseline review, manual protected-route accessibility checks, and participant review remain required. The native 200%/400% browser-zoom journeys below provide repeatable synthetic reflow evidence; their receiving visual review and the broader journey coverage must be assessed separately. Emulated media and axe cannot prove screen-reader usability or WCAG conformance.
 
 For #129, owners must accept scale and budgets before pass/fail claims. Real API latency, ingest bursts, concurrent live clients, database/index/query cost, cold deployed starts, constrained mobile networking, sustained browser memory, source lag and safe overload behavior require the implemented production systems and documented test scale. One synthetic cold read does not prove any of those properties.
 
@@ -62,6 +62,47 @@ deduplication, explicit unknown clocks and acceptance, malformed/conflicting
 facts, exact filters, current controls on pinned pages, cursor tampering/replay/
 expiry and byte-limited continuation. These prove bounded synthetic behavior,
 not source completeness, production load or a correction-event history.
+
+The additive compact view addresses bursts that span repositories. The original
+`/api/v1/activity` and `/api/v1/activity/:groupId` responses, group identities and
+proof cursors remain unchanged. New `/api/v1/activity-bursts` wrappers combine
+those groups only when contributor, explicit work state and known UTC hour
+match. Unknown action dates remain singleton groups; observed metadata is never
+promoted to accepted work. Every wrapper contains at most five original group
+previews. `/api/v1/activity-bursts/:burstId` pages through all original groups,
+whose proof links continue to use the v1 endpoint. No source event is removed,
+new contribution total is inferred, or history outside the authorized bounded
+publication is scanned.
+
+The envelope carries `compactionVersion: actor-state-utc-hour-v1`, the original
+`groupingVersion: actor-repository-state-utc-hour-v1`, and `groupPreviewLimit: 5`.
+New cursors bind both versions, the exact route/member identity, complete scope,
+category, actor filter and page size, then retain the existing snapshot, current
+policy, expiry and byte bounds. The client rejects incompatible versions and
+contradictory wrapper/member actors, repositories, states, clocks or previews.
+Source and collection timestamp strings remain separate and unrounded.
+Member pages reserve the repeated wrapper, envelope, cursor and array separators
+before filling the existing byte budget. The large-name regression traverses all
+five original groups in pages of three and two below the 1.5 MB response ceiling,
+and both actual service responses pass the client decoder.
+
+New `/activity` reads use the compact endpoint. Compact continuation pages use
+`/activity/bursts?cursor=…` and expansion uses `/activity/bursts/:burstId`.
+Existing `/activity?cursor=…` bookmarks continue to use the original API cursor;
+original `/activity/:groupId` proof routes are unchanged. Deploy the additive
+API before or together with the new UI; the old UI remains compatible with the
+original API. An unavailable compact endpoint is reported as an unavailable
+read, without silently changing the selected feed or snapshot.
+
+The cross-repository regression supplies 205 synthetic label updates by one
+contributor and a slightly earlier independently accepted contribution by
+another. It requires two first-page entries, at most five previews, all 205
+original groups and proofs, and unchanged v1 responses. Its browser journey
+checks keyboard expansion, 100/100/5 subgroup pages, original proof navigation,
+Back and return focus, held snapshot/viewport position, legacy cursor bookmarks,
+current suppression, 360px overflow and axe. These bounded cases do not certify
+arbitrary multi-contributor or multi-hour floods, real-source completeness,
+screen-reader usability or physical-device interaction.
 
 ## Native browser zoom journeys (#56)
 
