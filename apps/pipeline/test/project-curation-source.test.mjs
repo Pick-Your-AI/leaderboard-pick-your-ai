@@ -377,10 +377,7 @@ test("curation output cursors bind exact sorted native semantics and reject shif
     await assert.rejects(reader.readPage({ ...request, limit: 1, cursor }), /source_project_curation_cursor_changed/);
     fixture.state.events = original;
   }
-  for (const change of [
-    { runId: request.runId + "-other" },
-    { until: "2026-10-03T00:00:00.001Z" },
-  ])
+  for (const change of [{ runId: request.runId + "-other" }, { until: "2026-10-03T00:00:00.001Z" }])
     await assert.rejects(
       reader.readPage({ ...request, ...change, limit: 1, cursor }),
       /source_project_curation_cursor_changed/,
@@ -503,8 +500,7 @@ test("real scan checkpoints refresh the curation subject inventory before every 
     checkpoints: syntheticCheckpointStore(),
     maxRetries: 0,
     fetch: async (url, init) => {
-      const respond = (body) =>
-        new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+      const respond = (body) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
       if (init.method !== "POST") {
         const path = new URL(url).pathname;
         if (path === "/repos/" + fixture.repository.slug)
@@ -515,9 +511,7 @@ test("real scan checkpoints refresh the curation subject inventory before every 
       }
       const { query, variables } = JSON.parse(init.body);
       return respond({
-        data: variables.id
-          ? { node: { id: variables.id, public: true } }
-          : fixture.data(variables.number, query),
+        data: variables.id ? { node: { id: variables.id, public: true } } : fixture.data(variables.number, query),
       });
     },
   });
