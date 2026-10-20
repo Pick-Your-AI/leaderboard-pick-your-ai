@@ -326,7 +326,7 @@ test("tutorial reviewer can inspect the declaration but cannot select ordinary e
   current.intakeEligibility = { state: "external_tutorial_qualification_unavailable" };
   const writes = await controls(page, { enabled: true, roles: ["reviewer"], requests: [current] });
   await page.goto("/admin");
-  await expect(page.getByRole("option", { name: "Accept evidence", exact: true })).toBeDisabled();
+  await expect(page.getByRole("option", { name: "Accept evidence", exact: true })).toHaveJSProperty("disabled", true);
   await expect(
     page.getByText(/Tutorial consent is recorded, but independent qualification is unavailable/),
   ).toBeVisible();
