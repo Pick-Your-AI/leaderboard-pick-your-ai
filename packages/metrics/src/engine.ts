@@ -534,7 +534,7 @@ function prepare(
   }
   const current: MetricFact[] = [];
   for (const bucket of versions.values()) {
-    const revision = Math.max(...bucket.map((fact) => fact.revision));
+    const revision = bucket.reduce((maximum, fact) => Math.max(maximum, fact.revision), -Infinity);
     const latest = bucket.filter((fact) => fact.revision === revision);
     // The same source fact can be observed again without changing its revision.
     // Observation time describes collection, not a competing semantic fact.
