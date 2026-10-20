@@ -2505,6 +2505,62 @@ test(
         assert.deepEqual(h.controlsStore.read(), controls);
         assert.deepEqual(h.calls, calls, "protected authority reads never recollect or rehydrate");
       });
+    const invalidShapes = [
+      [
+        "depth",
+        () => {
+          let value = null;
+          for (let depth = 0; depth < 33; depth++) value = { nested: value };
+          return value;
+        },
+      ],
+      ["array width", () => Array(20_001).fill(null)],
+      ["node count", () => Array.from({ length: 14 }, () => Array(18_000).fill(null))],
+    ];
+    for (const [shapeLabel, shape] of invalidShapes) {
+      // One document exceeds exactly a structural dimension while remaining well
+      // below the SQL byte limit. Keep its old hash: an early hash would report
+      // normalization_integrity_error instead of the required admission error.
+      const invalidDocument = { ...structuredClone(row.document), syntheticHistoryShape: shape() };
+      const invalid = {
+        factKey: row.fact_key,
+        signature: row.policy_signature,
+        json: JSON.stringify(invalidDocument),
+        hash: row.document_hash,
+      };
+      assert.ok(Buffer.byteLength(invalid.json) < 8_000_000);
+      for (const [label, target] of targets)
+        await t.test(shapeLabel + ": " + label, { timeout: 30_000 }, async () => {
+          const trace = { entered: 0, queries: [] };
+          await assert.rejects(observe(trace, target, invalid), {
+            message: "participation_history_admission_invalid",
+          });
+          assert.equal(trace.entered, 1, "the named real SQL boundary must be reached exactly once");
+          const admitted = trace.queries.find((entry) => sameTarget(entry, target));
+          assert.ok(admitted && admitted.rows.length > 0 && admitted.rows.length <= 10_000);
+          for (const value of admitted.rows) {
+            assert.equal(Number(value.history_records), admitted.rows.length);
+            assert.ok(Number(value.history_bytes) > 0 && Number(value.history_bytes) <= 8_000_000);
+            assert.notEqual(value.document, null, "SQL admits the byte-bounded payload for structural inspection");
+          }
+          const inspected = admitted.rows.find(
+            (value) => value.fact_key === invalid.factKey && value.policy_signature === invalid.signature,
+          );
+          assert.ok(inspected);
+          assert.equal(inspected.document_hash, row.document_hash, "the retained good hash remains unchanged");
+          assert.deepEqual(inspected.document.syntheticHistoryShape, invalidDocument.syntheticHistoryShape);
+          assert.deepEqual(await semanticNormalizationRows(h), original, "the failed transaction restores exact caches");
+          assert.deepEqual(await frozenInput(h, selected.snapshotId), input);
+          assert.deepEqual(h.controlsStore.read(), controls);
+          assert.deepEqual(h.calls, calls, "protected authority reads never recollect or rehydrate");
+          const recovered = await read();
+          assert.ok(recovered);
+          assert.equal(recovered.history, null);
+          assert.deepEqual(recovered.current.selected.actors, result.current.selected.actors);
+          assert.deepEqual(await semanticNormalizationRows(h), original);
+          assert.deepEqual(h.calls, calls);
+        });
+    }
     const restored = await read();
     assert.ok(restored);
     assert.deepEqual(restored.current.selected.actors, result.current.selected.actors);

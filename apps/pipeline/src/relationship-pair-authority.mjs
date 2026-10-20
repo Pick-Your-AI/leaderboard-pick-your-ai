@@ -8,6 +8,7 @@ import { issueTransferDigest as digest } from "./issue-transfer-store.mjs";
 import { issueTransferClosure, issueTransferLimits } from "./issue-transfer-privacy.mjs";
 import { selectIssueTransferSources } from "./issue-transfers.mjs";
 import { hasRelationshipPairMarker, isRelationshipPairMetric } from "./relationship-pair-generation.mjs";
+import { copyParticipationHistoryJSON } from "./participation-history.mjs";
 
 // v4 binds exact source-clock representations in displaced-history semantics.
 // Earlier captures may have lost bindings or discarded semantic contradictions.
@@ -256,6 +257,11 @@ function assertPairReadBudget(rows, historyBudget) {
       ),
     "participation_history_normalization_budget_exceeded",
   );
+  // Admit structure before any recursive hash, generation validation or copy.
+  for (const row of rows) {
+    row.document = copyParticipationHistoryJSON(row.document);
+    if (row.source_document !== null) row.source_document = copyParticipationHistoryJSON(row.source_document);
+  }
 }
 
 async function retainedEntries(tx, options) {
