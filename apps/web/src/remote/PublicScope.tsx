@@ -13,6 +13,42 @@ const roleLabels: Record<PublicContributionRole, string> = {
   automation: "Automation",
 };
 
+/** Show the validated request independently of any published response. */
+export function RequestedScope({ selected }: { selected: PublicScope }) {
+  return (
+    <section aria-label="Requested scope" className="notice notice-info">
+      <h2 className="notice-title">Requested scope</h2>
+      <p>
+        Date window (UTC):{" "}
+        {selected.start === null ? (
+          "All time requested"
+        ) : (
+          <span className="mono">
+            {selected.start} inclusive to {selected.end} exclusive
+          </span>
+        )}
+        .
+      </p>
+      <p>
+        Organization: <span className="mono">{selected.organization}</span>. Repository:{" "}
+        <span className="mono">{selected.repository ?? "no repository filter"}</span>. Workstream:{" "}
+        <span className="mono">{selected.workstream ?? "no workstream filter"}</span>.
+      </p>
+      <p>
+        GitHub Project IDs:{" "}
+        <span className="mono">{selected.projects?.length ? selected.projects.join(", ") : "no Project filter"}</span>.
+        Membership basis: {selected.context === "current" ? "current at snapshot cutoff" : "at event time"}.
+      </p>
+      <p>
+        Contribution roles:{" "}
+        {selected.roles?.length ? `${selected.roles.map((role) => roleLabels[role]).join(", ")} (any selected)` : "all"}
+        .
+      </p>
+      <p className="small">Requested filters only. Availability and published results are checked separately.</p>
+    </section>
+  );
+}
+
 export function PublicScopeControls({ selected }: { selected: PublicScope }) {
   return (
     <>
