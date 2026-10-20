@@ -1,6 +1,6 @@
 import { ContributorRecognition, EditorialSpotlights } from "./Recognition.tsx";
 import { FirstContributionsEntry } from "./OverviewDiscovery.tsx";
-import { PublicScopeControls, PublicScopeProvenance } from "./PublicScope.tsx";
+import { PublicScopeControls, PublicScopeProvenance, RequestedScope } from "./PublicScope.tsx";
 import { Programs } from "./Programs.tsx";
 import {
   programDirectoryAsset,
@@ -456,6 +456,7 @@ export function RemoteApp() {
     [pointerInside, setPointerInside] = useState(false),
     [focusInside, setFocusInside] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  const [manualApplyLocation, setManualApplyLocation] = useState<typeof url | null>(null);
   const [theme, setTheme] = useState<ThemePreference>(readThemePreference);
   const [reduced, setReduced] = useState(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
   const region = useRef<HTMLDivElement>(null),
@@ -806,6 +807,8 @@ export function RemoteApp() {
   const meta = data && "value" in data ? data.value : null;
   const previousSnapshot = lastVerified.current?.location === url ? lastVerified.current : null;
   const pending = meta && !selected.snapshot && meta.head.snapshotId !== meta.snapshotId ? meta.head.snapshotId : null;
+  // Retain only the manually used control for this navigation, never its old data.
+  const retainApplyControl = manualApplyLocation === url;
   const apply = useCallback(() => {
     if (pending) {
       active.current?.abort();
@@ -974,6 +977,7 @@ export function RemoteApp() {
           </h1>
           <p>Evidence-backed public reads. Unknown values and unavailable scopes remain explicit.</p>
         </header>
+        {!parsed.error && <RequestedScope selected={selected} />}
         <Filters key={`${url.pathname}${url.search}`} selected={selected} path={url.pathname} navigate={navigate} />
         {!parsed.error && (isCatalogPath(url.pathname) || rankComparisonPath(url.pathname)) && (
           <details className="method" open={windowsOpen} onToggle={(event) => setWindowsOpen(event.currentTarget.open)}>
@@ -1055,17 +1059,30 @@ export function RemoteApp() {
             correctionHref={uiHref("/corrections", pinned)}
           />
         )}
-        {meta && (
+        {(meta || retainApplyControl) && (
           <section aria-label="Publication updates" className="update-control">
             <p>
-              {selected.snapshot
-                ? `Pinned snapshot ${selected.snapshot}; current publication controls are still rechecked.`
-                : pending
-                  ? `Update held: snapshot ${pending} is available.`
-                  : "Showing the selected publication. Notices trigger a full read; publication controls are also rechecked every 20 seconds while visible."}
+              {state.status === "loading"
+                ? "Loading the selected publication."
+                : state.status === "error"
+                  ? "No current publication is available."
+                  : selected.snapshot
+                    ? `Pinned snapshot ${selected.snapshot}; current publication controls are still rechecked.`
+                    : pending
+                      ? `Update held: snapshot ${pending} is available.`
+                      : "Showing the selected publication. Notices trigger a full read; publication controls are also rechecked every 20 seconds while visible."}
             </p>
-            {pending && (
-              <button type="button" className="button" onClick={apply} disabled={Boolean(selected.proof)}>
+            {(pending || retainApplyControl) && (
+              <button
+                type="button"
+                className="button"
+                aria-disabled={!pending || Boolean(selected.proof)}
+                onClick={() => {
+                  if (!pending || selected.proof) return;
+                  setManualApplyLocation(url);
+                  apply();
+                }}
+              >
                 Apply new snapshot
               </button>
             )}
