@@ -12,8 +12,9 @@ An approved repository configuration must name this family and a nonempty
 `allowedProjectIds` list. Adding code to the family catalog does not grant an
 installation permission or enable collection. The reader uses the numeric
 repository-bound client and existing durable checkpoint authority. It probes
-every approved Project, binds each REST inventory subject to its native node ID
-and canonical issue/PR URL, and checks the repository and subject again after
+every approved Project, acquires repository identity/visibility and separate
+issue/PR inventories through metadata-only GraphQL queries, binds each subject to
+its native node ID and canonical issue/PR URL, and checks the repository and subject again after
 the timeline scan. Hidden, private, missing or identity-changed approved sources
 fail closed.
 
@@ -31,7 +32,11 @@ Only minimized identities, canonical source URLs, source clocks, actor
 classification inputs and the native action/automation flag enter the reader's
 private checkpoint. Collection facts retain the exact subject, Project, event,
 actor, source clock and revision binding. Titles, bodies, field values and
-arbitrary provider fields are not retained by this family.
+arbitrary provider fields are not retained by this family. The repository probe
+and both inventories avoid the shared REST ETag cache, whose response write
+otherwise precedes scan selection. Each inventory has a separate versioned key.
+Other explicitly configured source families retain their existing cache behavior;
+this capability does not erase historical cache records.
 
 ## Full observation windows and cursors
 
@@ -48,8 +53,8 @@ admission boundary enforces a null lower bound and
 unknown expected history count for this family too, including an empty page;
 a custom adapter cannot certify a finite total by bypassing the built-in reader.
 
-The issue/PR inventory has its own checkpoint namespace and refreshes before
-every output page. Each native subject scan
+The issue and PR inventories have separate checkpoint namespaces and both refresh
+before every output page. Each native subject scan
 also has an independent versioned namespace and bounded pagination. Native scans
 refresh before delivery, including after an earlier completed scan; they do not
 treat an old checkpoint as current privacy or event-availability authority.

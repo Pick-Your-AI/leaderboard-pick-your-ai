@@ -189,20 +189,55 @@ async function signedLifecycle(h, reason, deliveryNumber) {
   assert.equal(receipt.reason, reason);
 }
 
-async function withheld(h, pin, pinnedStatus = 410) {
+async function withheld(h, pin, pinnedStatus = 410, validators = []) {
   for (const url of [boardUrl, "/api/v1/exports?metric=issues_opened", "/api/v1/updates"])
     assert.equal((await h.runtime.app.inject(url)).statusCode, 503, url);
   if (pin !== null) assert.equal((await h.runtime.app.inject(`${boardUrl}&snapshot=${pin}`)).statusCode, pinnedStatus);
+  for (const cached of validators) {
+    const response = await h.runtime.app.inject({
+      method: "GET",
+      url: cached.url,
+      headers: { "if-none-match": cached.etag },
+    });
+    assert.equal(response.statusCode, cached.url === boardUrl ? 503 : pinnedStatus, cached.url);
+    assert.equal(response.headers["cache-control"], "no-store", cached.url);
+    assert.deepEqual(Object.keys(response.json()), ["error"], cached.url);
+    for (const value of cached.publicContent) assert.equal(response.body.includes(value), false, cached.url);
+  }
 }
 
-async function prepare(f, initial) {
+async function prepare(f, initial, captureValidators = false) {
   let pin = null;
+  const validators = [];
   if (initial !== "absent") {
     const result = await bounded(f.h.runtime.runOnce({ cutoff: f.cutoff() }), "initial publication");
     assert.equal(result.state, "published");
     const board = await getBoard(f.h.runtime);
     assert.equal(board.rows.length, 2);
     pin = board.snapshotId;
+    if (captureValidators) {
+      for (const url of [boardUrl, `${boardUrl}&snapshot=${pin}`]) {
+        const response = await f.h.runtime.app.inject(url);
+        assert.equal(response.statusCode, 200, response.body);
+        const value = response.json();
+        assert.equal(value.snapshotId, pin);
+        assert.equal(value.rows.length, 2);
+        assert.ok(value.rows.every((row) => row.evidenceIds.length > 0));
+        const etag = response.headers.etag;
+        assert.match(etag, /^"[a-f0-9]{64}"$/);
+        const unchanged = await f.h.runtime.app.inject({
+          method: "GET",
+          url,
+          headers: { "if-none-match": etag },
+        });
+        assert.equal(unchanged.statusCode, 304, unchanged.body);
+        assert.equal(unchanged.body, "");
+        assert.equal(unchanged.headers.etag, etag);
+        const publicContent = [value.snapshotId, ...value.rows.flatMap((row) => [row.actorId, ...row.evidenceIds])];
+        assert.ok(publicContent.every((entry) => typeof entry === "string" && entry.length > 0));
+        validators.push({ url, etag, publicContent });
+      }
+    }
     if (initial === "unavailable") await signedLifecycle(f.h, "private", 901);
   }
   const current = await access(f.h);
@@ -216,7 +251,7 @@ async function prepare(f, initial) {
     assert.equal(current.repositoryId, 2);
     assert.equal(current.installationId, 1);
   }
-  return { pin, current };
+  return { pin, current, validators };
 }
 
 function rejected(outcome, message) {
@@ -233,7 +268,7 @@ for (const initial of ["public", "unavailable", "absent"])
       async (t) => {
         const f = await fixture(t);
         const { h, barrier, calls } = f;
-        const { pin, current } = await prepare(f, initial);
+        const { pin, current, validators } = await prepare(f, initial, true);
         const before = await retained(h);
         const callsBefore = { ...calls };
         const transportBefore = { ...h.githubReads };
@@ -258,7 +293,7 @@ for (const initial of ["public", "unavailable", "absent"])
           assert.equal(denied.state, "unavailable");
           assert.equal(denied.generation, current ? String(BigInt(current.generation) + 1n) : "1");
           assert.deepEqual(await retained(h), before);
-          await withheld(h, pin);
+          await withheld(h, pin, 410, validators);
 
           barrier.release();
           rejected(
@@ -277,7 +312,7 @@ for (const initial of ["public", "unavailable", "absent"])
             "no page or hydration request follows the rejected probe",
           );
           assert.deepEqual(await retained(h), before);
-          await withheld(h, pin);
+          await withheld(h, pin, 410, validators);
         } finally {
           barrier.release();
           await barrier.settle();
