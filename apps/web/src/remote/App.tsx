@@ -797,6 +797,11 @@ export function RemoteApp() {
       focusOnLoad.current = false;
     }
   }, [state, selected.proof]);
+  useEffect(() => {
+    // Removing a focused contributor need not dispatch a bubbling blur event.
+    // Keep surviving focus intact, but release a hold whose node is gone.
+    if (focusInside && !region.current?.contains(document.activeElement)) setFocusInside(false);
+  }, [state, focusInside]);
   const data = state.status === "ready" ? state.data : null;
   const meta = data && "value" in data ? data.value : null;
   const previousSnapshot = lastVerified.current?.location === url ? lastVerified.current : null;
