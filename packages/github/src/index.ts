@@ -283,3 +283,11 @@ export {
   type MaintenanceClassificationRecord,
   type MaintenanceClassificationReference,
 } from "./maintenance-classification.js";
+export {
+  minimizeDiscussionFeedback,
+  discussionFeedbackFingerprint,
+  discussionFeedbackRevision,
+  verifyDiscussionFeedbackObservation,
+  discussionFeedbackPublicRevision,
+  validateHelpfulFeedbackSource,
+} from "./discussion-feedback.js";
