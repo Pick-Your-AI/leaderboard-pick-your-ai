@@ -185,6 +185,8 @@ test("zero manual requests preserve unaffected prior authority and independently
         "release_changes",
         "issue_ordering",
         "release_stewardship",
+        "performance",
+        "regressions_prevented",
       ];
       if (bindings.some((entry) => receivedCategories.includes(entry.metricId)))
         assert.notEqual(current, beforeReceivedIntakeAuthority(state, bindings));

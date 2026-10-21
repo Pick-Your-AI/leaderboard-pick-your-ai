@@ -293,6 +293,7 @@ test("documentation review: exact head selection preserves two versions without 
   const request = other.request;
   request.id = "second-version";
   request.history[0].id = "second-version-decision";
+  request.history[0].receipt = request.id;
   other.record.requestId = request.id;
   other.record.decisionId = request.history[0].id;
   s.binding.documentationReview.records.push(other.record);
@@ -347,6 +348,7 @@ test("documentation review: invocation snapshots keep later targets independent 
   appendSource(s, other.input);
   other.request.id = "later-version";
   other.decision.id = "later-version-decision";
+  other.decision.receipt = other.request.id;
   other.record.requestId = other.request.id;
   other.record.decisionId = other.decision.id;
   s.binding.documentationReview.records.push(other.record);
@@ -676,5 +678,8 @@ test("documentation review: current privacy and authority retire persisted proof
   });
   assert.equal((await read(restarted)).selected.rows[0].result.value, 1);
   h.setPrivate(true);
+  // The collector records visibility changes before retained reads can deny them.
+  await assert.rejects(restarted.runOnce({ cutoff }), /public_source_not_verified/);
   assert.equal(await read(restarted), null);
+  await assert.rejects(restarted.aggregateExplanations.read(snapshotId), /Frozen input source authorization changed/);
 });
