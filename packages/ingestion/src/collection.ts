@@ -25,6 +25,7 @@ export const sourceFamilies = [
   "timelines",
   "content_edits",
   "project_history",
+  "project_curation_history",
   "issue_field_history",
   "relationships",
   "project_current",
@@ -42,6 +43,8 @@ export interface SourceFact {
   subjectId: string;
   /** Collected native issue/PR node ID for a typed history event. */
   historySubjectId?: string;
+  /** Project of one native add/remove event; never a fabricated ProjectV2Item ID. */
+  projectCurationProjectId?: string;
   /** Native issue field identity; field content is never retained in collection facts. */
   issueFieldId?: string;
   /** Native issue/PR identity for a complete current Project membership snapshot. */
@@ -103,6 +106,8 @@ function validateScanRequest(request: ScanRequest): void {
   }
   if (!sourceFamilies.includes(request.family) || !["backfill", "reconcile", "audit"].includes(request.mode))
     throw new Error("invalid_scan_scope");
+  if (request.family === "project_curation_history" && request.since !== null)
+    throw new Error("project_curation_full_scan_required");
 }
 function normalizeFact(value: SourceFact, family: SourceFamily, repositoryId: number): SourceFact {
   // Reject proxy facts and prototype chains before the legacy optional readers.
@@ -111,6 +116,7 @@ function normalizeFact(value: SourceFact, family: SourceFamily, repositoryId: nu
   const discussionFeedback = collectionDiscussionFeedback(value, family);
   id(value.subjectId);
   if (value.historySubjectId !== undefined) id(value.historySubjectId);
+  if (value.projectCurationProjectId !== undefined) id(value.projectCurationProjectId);
   if (value.issueFieldId !== undefined) {
     id(value.issueFieldId);
     if (value.historySubjectId === undefined || value.evidence !== "observed_transition")
@@ -148,6 +154,9 @@ function normalizeFact(value: SourceFact, family: SourceFamily, repositoryId: nu
   const normalized: SourceFact = {
     subjectId: value.subjectId,
     ...(value.historySubjectId !== undefined ? { historySubjectId: value.historySubjectId } : {}),
+    ...(value.projectCurationProjectId === undefined
+      ? {}
+      : { projectCurationProjectId: value.projectCurationProjectId }),
     ...(value.issueFieldId !== undefined ? { issueFieldId: value.issueFieldId } : {}),
     ...(value.projectSubjectId !== undefined ? { projectSubjectId: value.projectSubjectId } : {}),
     sourceRevision: value.sourceRevision,
@@ -446,6 +455,8 @@ export class CollectionStore {
         throw new Error("nonadvancing_source_page");
       if (expectedCount !== null && (!Number.isSafeInteger(expectedCount) || expectedCount < 0))
         throw new Error("invalid_source_count");
+      if (request.family === "project_curation_history" && expectedCount !== null)
+        throw new Error("project_curation_history_count_unknown");
       let decisionBytes = 0;
       const facts = page.facts.map((fact) => {
         const normalized = normalizeFact(fact, request.family, request.repositoryId);
@@ -480,6 +491,26 @@ export class CollectionStore {
         throw new Error("invalid_issue_field_evidence");
       if (request.family !== "issue_field_history" && facts.some((fact) => fact.issueFieldId !== undefined))
         throw new Error("invalid_issue_field_subject");
+      if (
+        request.family === "project_curation_history" &&
+        facts.some(
+          (fact) =>
+            fact.evidence !== "observed_transition" ||
+            fact.historySubjectId === undefined ||
+            fact.projectCurationProjectId === undefined ||
+            fact.occurredAt === null ||
+            fact.state !== "present" ||
+            !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(?:issues|pull)\/[1-9]\d*$/.test(
+              fact.sourceUrl,
+            ),
+        )
+      )
+        throw new Error("invalid_project_curation_evidence");
+      if (
+        request.family !== "project_curation_history" &&
+        facts.some((fact) => fact.projectCurationProjectId !== undefined)
+      )
+        throw new Error("invalid_project_curation_subject");
       if (request.family === "project_current" && facts.some((fact) => fact.evidence !== "current_state"))
         throw new Error("invalid_current_project_evidence");
       if (request.family !== "project_current" && facts.some((fact) => fact.projectSubjectId !== undefined))

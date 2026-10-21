@@ -150,3 +150,17 @@ fixtures to the existing collector, enriching normalizer and confirmed atomic
 publisher. It remains disabled by default and rejects public-mode dispatch. The
 linked document records migration, recovery, validation and remaining acceptance
 limits for #54, #58, #62 and #84.
+
+## Native Project curation
+
+`project_curation_history` is a separate explicit source grant for native
+issue/PR Project add/remove events. It uses full null-lower-bound observations,
+a fixed upper cutoff, digest-bound output pages and fresh native rehydration even
+for a completed collection or cached normalization. The existing four recent
+source families and all status/field checkpoint keys remain unchanged.
+
+The [native curation contract](NATIVE_PROJECT_CURATION.md) defines the exact
+repository/subject/Project/event unit, automation and unknown-actor treatment,
+bounded source/test evidence and persistent privacy/reapproval behavior.
+This capability enables no collection or public policy by default and establishes
+no installed grant, complete history, manual-work claim or public activation.

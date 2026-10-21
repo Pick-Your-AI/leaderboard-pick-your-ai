@@ -60,6 +60,14 @@ function policy(metric) {
     sources: ["github_rest"],
     minimumSamples: 1,
     rank: false,
+    ...(metric.id === "project_items_curated"
+      ? {
+          dateBasis: "occurredAt",
+          rankedStates: ["observed"],
+          roles: ["triager"],
+          groupBy: "canonical",
+        }
+      : {}),
     ...(metric.id === "release_changes"
       ? {
           dateBasis: "occurredAt",
@@ -126,6 +134,16 @@ function fact(metric, id, patch = {}) {
           acceptanceReceipt: null,
           acceptedBy: null,
           rawState: "labeled:synthetic-bug",
+        }
+      : {}),
+    ...(metric.id === "project_items_curated"
+      ? {
+          role: "triager",
+          state: "observed",
+          acceptedAt: null,
+          acceptanceReceipt: null,
+          acceptedBy: null,
+          rawState: "added:PVT_synthetic",
         }
       : {}),
     ...(metric.id === "release_changes"
@@ -204,14 +222,14 @@ for (const metric of metricDefinitionsV1.filter((metric) => aggregations[metric.
       ? { occurredAt: null }
       : grouping?.group_by === "actor_artifact_state_interval"
         ? { rawState: undefined }
-        : grouping
+        : grouping || metric.id === "project_items_curated"
           ? { occurredAt: null }
           : { acceptedBy: "a" };
     const eligibilityReason = relationshipMetric(metric.id)
       ? "ambiguous_relationship_pair"
       : grouping?.group_by === "actor_artifact_state_interval"
         ? "unknown_raw_state_or_time"
-        : grouping
+        : grouping || metric.id === "project_items_curated"
           ? "unknown_effective_time"
           : "missing_independent_acceptance";
     const facts = [

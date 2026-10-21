@@ -1996,3 +1996,99 @@ test("a current Project subject marker is retained only for matching native snap
     assert.equal((await facts()).length, 1, "invalid identity is rejected before its transaction can retain any fact");
   }
 });
+
+test("native Project curation retains only its observed subject Project and event binding", async () => {
+  const collect = await collection();
+  const observed = fact("PVE_SYNTHETIC_CURATED", {
+    historySubjectId: "PR_SYNTHETIC_CURATED",
+    projectCurationProjectId: "PVT_SYNTHETIC_CURATED",
+    sourceUrl: "https://github.com/synthetic-org/synthetic-repo/pull/3",
+    evidence: "observed_transition",
+    actorId: "202",
+    occurredAt: "2026-01-02T00:00:00.000Z",
+    state: "present",
+    creator: { id: 999 },
+    rawPrivateText: "not retained",
+  });
+  await collect.start(scan("synthetic-curation-valid", { family: "project_curation_history" }));
+  assert.equal(
+    await collect.step("synthetic-curation-valid", { readPage: async () => page([observed], null, null) }),
+    "complete",
+  );
+  const saved = (await facts())[0].document;
+  assert.equal(saved.subjectId, observed.subjectId);
+  assert.equal(saved.historySubjectId, observed.historySubjectId);
+  assert.equal(saved.projectCurationProjectId, observed.projectCurationProjectId);
+  assert.equal(saved.occurredAt, observed.occurredAt);
+  assert.equal(saved.actorId, "202");
+  assert.equal(saved.creator, undefined);
+  assert.equal(saved.rawPrivateText, undefined);
+  for (const [suffix, family, patch] of [
+    ["missing-subject", "project_curation_history", { historySubjectId: undefined }],
+    ["missing-project", "project_curation_history", { projectCurationProjectId: undefined }],
+    ["invalid-project", "project_curation_history", { projectCurationProjectId: "invalid project" }],
+    ["no-clock", "project_curation_history", { occurredAt: null }],
+    ["snapshot", "project_curation_history", { evidence: "current_state", actorId: null, occurredAt: null }],
+    ["not-present", "project_curation_history", { state: "closed" }],
+    [
+      "wrong-route",
+      "project_curation_history",
+      { sourceUrl: "https://github.com/synthetic-org/synthetic-repo/commit/abc" },
+    ],
+    ["old-status-family", "project_history", {}],
+    ["current-family", "project_current", {}],
+    ["ordinary-family", "issues", {}],
+  ]) {
+    const runId = "synthetic-curation-" + suffix;
+    await collect.start(scan(runId, { family }));
+    assert.equal(
+      await collect.step(runId, { readPage: async () => page([{ ...observed, ...patch }], null, null) }),
+      "failed",
+      suffix,
+    );
+    assert.equal((await facts()).length, 1, "invalid native bindings do not enter the source-fact transaction");
+  }
+});
+
+test("curation admission requires full scans and unknown history counts even for empty pages", async () => {
+  const collect = await collection();
+  const finiteWindow = scan("synthetic-curation-finite-window", {
+    family: "project_curation_history",
+    since: "2026-01-01T00:00:00.000Z",
+  });
+  await assert.rejects(collect.start(finiteWindow), /project_curation_full_scan_required/);
+  await assert.rejects(
+    db.transaction((tx) => collect.startInTransaction(tx, finiteWindow)),
+    /project_curation_full_scan_required/,
+  );
+  assert.equal(
+    (await db.query("SELECT count(*)::int AS total FROM leaderboard_ingestion.collection_runs")).rows[0].total,
+    0,
+  );
+  const observed = fact("PVE_SYNTHETIC_COUNT", {
+    historySubjectId: "I_SYNTHETIC_COUNT",
+    projectCurationProjectId: "PVT_SYNTHETIC_COUNT",
+    evidence: "observed_transition",
+    occurredAt: "2026-01-02T00:00:00.000Z",
+    state: "present",
+  });
+  for (const [runId, items, count] of [
+    ["synthetic-curation-finite-zero", [], 0],
+    ["synthetic-curation-finite-count", [observed], 1],
+  ]) {
+    await collect.start(scan(runId, { family: "project_curation_history" }));
+    assert.equal(await collect.step(runId, { readPage: async () => page(items, null, count) }), "failed");
+    assert.deepEqual(await facts(), []);
+  }
+  await collect.start(scan("synthetic-curation-unknown-empty", { family: "project_curation_history" }));
+  assert.equal(
+    await collect.step("synthetic-curation-unknown-empty", { readPage: async () => page([], null, null) }),
+    "complete",
+  );
+  const stored = (
+    await db.query("SELECT expected_count FROM leaderboard_ingestion.collection_runs WHERE run_id=$1", [
+      "synthetic-curation-unknown-empty",
+    ])
+  ).rows[0];
+  assert.equal(stored.expected_count, null);
+});

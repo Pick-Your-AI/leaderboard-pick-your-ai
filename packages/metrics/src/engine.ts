@@ -309,6 +309,18 @@ export function validateMetricPolicy(policy: MetricPolicy): void {
   )
     throw new Error("Helpful feedback requires independent acceptance and versioned canonical author/thread units");
   if (
+    policy.metricId === "project_items_curated" &&
+    (policy.dateBasis !== "occurredAt" ||
+      policy.groupBy !== "canonical" ||
+      policy.rankedStates[0] !== "observed" ||
+      policy.roles.length !== 1 ||
+      policy.roles[0] !== "triager" ||
+      policy.groupingSeconds !== undefined)
+  )
+    throw new Error(
+      "Project curation requires the source clock, observed triager role and canonical native operations",
+    );
+  if (
     relationshipPairMetricIds.has(policy.metricId) &&
     (policy.dateBasis !== "occurredAt" ||
       policy.groupBy !== "canonical" ||

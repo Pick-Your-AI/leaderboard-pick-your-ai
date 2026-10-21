@@ -914,3 +914,25 @@ test("sparse arrays, prototype fields, accessors and symbol extras are rejected 
   Object.defineProperty(extra, Symbol("private"), { value: "hidden" });
   assert.throws(() => checkedOperatorHealth(extra, authority));
 });
+
+test("operator health admits the separately configured native Project curation family", () => {
+  const value = health();
+  value.collector.families[0]!.family = "project_curation_history";
+  value.collector.families[0]!.expectedItems = null;
+  value.collector.families[0]!.state = "unknown";
+  value.collector.families[0]!.reason = "source_count_unknown";
+  value.collector.state = "unknown";
+  const checked = checkedOperatorHealth(value, authority);
+  assert.equal(checked.collector.families[0]!.family, "project_curation_history");
+  assert.equal(checked.collector.families[0]!.items, 0);
+  assert.equal(checked.collector.families[0]!.expectedItems, null);
+  assert.equal(checked.collector.state, "unknown");
+  const falseQuiet = clone(value);
+  falseQuiet.collector.state = "quiet";
+  falseQuiet.collector.families[0]!.state = "quiet";
+  falseQuiet.collector.families[0]!.reason = "completed_empty_window";
+  assert.throws(() => checkedOperatorHealth(falseQuiet, authority));
+  const invalid = clone(value);
+  (invalid.collector.families[0] as { family: string }).family = "project_history_and_curation";
+  assert.throws(() => checkedOperatorHealth(invalid, authority));
+});

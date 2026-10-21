@@ -1,6 +1,11 @@
 import { GithubClientError } from "../../../packages/github/dist/client.js";
 import { isPromise } from "node:util/types";
+import { createHash } from "node:crypto";
 import { readTypedIssueHistory, typedHistoryRevision } from "../../../packages/github/dist/timeline-history.js";
+import {
+  readProjectCurationHistory,
+  projectCurationHistoryRevision,
+} from "../../../packages/github/dist/project-curation-history.js";
 import { readIssueFieldHistory, issueFieldHistoryRevision } from "../../../packages/github/dist/issue-field-history.js";
 import { assertPublicProjects } from "../../../packages/github/dist/project-snapshots.js";
 import { githubRestSnapshotRevision, isGithubRestSnapshotFamily } from "../../../packages/github/dist/rest-snapshot.js";
@@ -29,7 +34,7 @@ import { captureDecisionObservation, decisionHistoryRepositories } from "./pull-
 /** Conservative scope-loss codes emitted by the trusted Project adapters. */
 export function isProjectSourceScopeFailure(error, family) {
   if (
-    ["project_current", "project_history"].includes(family) &&
+    ["project_current", "project_history", "project_curation_history"].includes(family) &&
     error instanceof GithubClientError &&
     ["authentication_required", "permission_denied", "not_found_or_hidden"].includes(error.outcome.kind)
   )
@@ -42,6 +47,9 @@ export function isProjectSourceScopeFailure(error, family) {
       "project_public_subject_unverified",
       "project_history_scope_unverified",
       "project_subject_identity_unverified",
+      "project_curation_scope_unverified",
+      "project_curation_subject_identity_unverified",
+      "project_curation_event_unavailable",
     ].includes(error.message)
   );
 }
@@ -153,7 +161,24 @@ export function createGithubCollectionSource({
     if (!scope || scope.slug !== repository.slug || scope.installationId !== repository.installationId)
       throw new Error("repository_not_authorized");
     const client = readClient.forRepository(scope.id);
-    const value = await client.rest(sourceId, `/repos/${scope.slug}`, assertAuthorized);
+    let value;
+    if (scope.families.includes("project_curation_history")) {
+      const [owner, name] = scope.slug.split("/");
+      // REST probes can persist their full ETag response before a caller projects
+      // it. Curation needs only the repository identity and current visibility.
+      const data = await client.graphql(
+        sourceId,
+        "query ProjectCurationRepository($owner:String!, $name:String!) {" +
+          " repository(owner:$owner, name:$name) { databaseId nameWithOwner isPrivate } }",
+        { owner, name },
+        assertAuthorized,
+      );
+      value = {
+        id: data?.repository?.databaseId,
+        full_name: data?.repository?.nameWithOwner,
+        private: data?.repository?.isPrivate,
+      };
+    } else value = await client.rest(sourceId, `/repos/${scope.slug}`, assertAuthorized);
     if (
       value?.id !== repository.id ||
       typeof value.private !== "boolean" ||
@@ -184,6 +209,7 @@ export function createGithubCollectionSource({
             "discussions",
             "project_current",
             "project_history",
+            "project_curation_history",
             "relationships",
             "issue_field_history",
             "content_edits",
@@ -198,6 +224,14 @@ export function createGithubCollectionSource({
           at(request.until) !== request.until)
       )
         throw new Error("source_content_edit_window_unsupported");
+      if (
+        request.family === "project_curation_history" &&
+        (!["audit", "backfill", "reconcile"].includes(request.mode) ||
+          request.since !== null ||
+          at(request.until) === null ||
+          at(request.until) !== request.until)
+      )
+        throw new Error("source_project_curation_window_unsupported");
       const planned = parseReconciliationRunId(request.runId);
       const window = request.family === "issue_field_history" ? null : sourceWindow(request);
       if (
@@ -251,9 +285,18 @@ export function createGithubCollectionSource({
         await onUnavailable?.(repository, "visibility_or_scope_not_public");
         throw new Error("public_repository_required");
       }
-      if (request.cursor !== null && !/^(0|[1-9]\d{0,4})$/.test(request.cursor))
+      const curationCursor =
+        request.family === "project_curation_history" && request.cursor !== null
+          ? /^([a-f0-9]{64}):(0|[1-9]\d{0,4})$/.exec(request.cursor)
+          : null;
+      if (
+        request.cursor !== null &&
+        (request.family === "project_curation_history"
+          ? curationCursor === null
+          : !/^(0|[1-9]\d{0,4})$/.test(request.cursor))
+      )
         throw new Error("invalid_source_cursor");
-      const offset = request.cursor === null ? 0 : Number(request.cursor);
+      const offset = request.cursor === null ? 0 : Number(curationCursor ? curationCursor[2] : request.cursor);
       let restSnapshots = Boolean(planned) || expandedComments;
       if (!restSnapshots && isGithubRestSnapshotFamily(request.family)) {
         assertAuthorized();
@@ -261,7 +304,7 @@ export function createGithubCollectionSource({
         assertAuthorized();
         if (typeof restSnapshots !== "boolean") throw new Error("invalid_rest_snapshot_policy");
       }
-      if (["project_current", "project_history"].includes(request.family))
+      if (["project_current", "project_history", "project_curation_history"].includes(request.family))
         await assertPublicProjects({
           client,
           source: sourceId,
@@ -273,6 +316,7 @@ export function createGithubCollectionSource({
           source: sourceId,
           key: `pipeline:${repository.id}:${request.runId}:${key}`,
           url: `/repos/${repository.slug}/${path}`,
+          ...(request.family === "project_curation_history" ? { refresh: true } : {}),
           maxPages,
           assertAuthorized,
           select(body) {
@@ -458,6 +502,142 @@ export function createGithubCollectionSource({
             })),
           );
           if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
+        }
+      } else if (request.family === "project_curation_history") {
+        const [owner, name] = repository.slug.split("/");
+        const subjects = [];
+        // Select metadata at the transport boundary. A REST inventory would
+        // cache complete issue bodies before scanRest applies its selector.
+        for (const [field, kind, states] of [
+          ["issues", "issue", "OPEN,CLOSED"],
+          ["pullRequests", "pull_request", "OPEN,CLOSED,MERGED"],
+        ]) {
+          const inventory = await client.scanGraphql({
+            source: sourceId,
+            key: `pipeline:${repository.id}:${request.runId}:project-curation:${kind}-subjects-metadata-v1`,
+            query:
+              "query ProjectCurationInventory($owner:String!, $name:String!, $first:Int!, $after:String) {" +
+              " repository(owner:$owner, name:$name) { databaseId isPrivate " +
+              field +
+              "(first:$first, after:$after, states:[" +
+              states +
+              "], orderBy:{field:CREATED_AT,direction:ASC}) {" +
+              " nodes { id number url } pageInfo { hasNextPage endCursor } } } }",
+            variables: { owner, name },
+            first: 100,
+            maxPages,
+            refresh: true,
+            assertAuthorized,
+            select(data) {
+              assertAuthorized();
+              const nativeRepository = data?.repository;
+              if (
+                nativeRepository === null ||
+                typeof nativeRepository !== "object" ||
+                Array.isArray(nativeRepository) ||
+                nativeRepository.databaseId !== repository.id ||
+                nativeRepository.isPrivate !== false
+              )
+                throw new Error("project_curation_scope_unverified");
+              const connection = nativeRepository[field];
+              if (
+                connection === null ||
+                typeof connection !== "object" ||
+                Array.isArray(connection) ||
+                !Array.isArray(connection.nodes) ||
+                connection.nodes.length > 100
+              )
+                throw new Error("project_curation_subject_identity_unverified");
+              return {
+                nodes: connection.nodes.map((subject) => {
+                  if (
+                    subject === null ||
+                    typeof subject !== "object" ||
+                    Array.isArray(subject) ||
+                    typeof subject.id !== "string" ||
+                    !/^[A-Za-z0-9_=.:-]{1,128}$/.test(subject.id) ||
+                    !Number.isSafeInteger(subject.number) ||
+                    subject.number < 1 ||
+                    subject.url !==
+                      "https://github.com/" +
+                        repository.slug +
+                        "/" +
+                        (kind === "pull_request" ? "pull/" : "issues/") +
+                        subject.number
+                  )
+                    throw new Error("project_curation_subject_identity_unverified");
+                  return {
+                    node_id: subject.id,
+                    number: subject.number,
+                    html_url: subject.url,
+                    pull_request: kind === "pull_request",
+                  };
+                }),
+                pageInfo: connection.pageInfo,
+              };
+            },
+          });
+          if (!Array.isArray(inventory) || subjects.length + inventory.length > 10000)
+            throw new Error("source_dataset_budget_exceeded");
+          subjects.push(...inventory);
+        }
+        if (subjects.length > 10000) throw new Error("source_dataset_budget_exceeded");
+        const seenNumbers = new Set();
+        const seenSubjects = new Set();
+        const seenEvents = new Set();
+        values = [];
+        for (const subject of subjects) {
+          if (
+            subject === null ||
+            typeof subject !== "object" ||
+            Array.isArray(subject) ||
+            !Number.isSafeInteger(subject.number) ||
+            subject.number < 1 ||
+            typeof subject.node_id !== "string" ||
+            !/^[A-Za-z0-9_=.:\-]{1,128}$/.test(subject.node_id) ||
+            typeof subject.pull_request !== "boolean" ||
+            subject.html_url !==
+              "https://github.com/" +
+                repository.slug +
+                "/" +
+                (subject.pull_request ? "pull/" : "issues/") +
+                subject.number ||
+            seenNumbers.has(subject.number) ||
+            seenSubjects.has(subject.node_id)
+          )
+            throw new Error("project_curation_subject_identity_unverified");
+          seenNumbers.add(subject.number);
+          seenSubjects.add(subject.node_id);
+          const records = await readProjectCurationHistory({
+            client,
+            source: sourceId,
+            repository,
+            number: subject.number,
+            subjectType: subject.pull_request ? "pull_request" : "issue",
+            subjectId: subject.node_id,
+            scanId: request.runId,
+            maxPages,
+            assertAuthorized,
+          });
+          for (const record of records) {
+            if (seenEvents.has(record.event.id)) throw new Error("project_curation_event_identity_ambiguous");
+            seenEvents.add(record.event.id);
+            if (seenEvents.size > 10000) throw new Error("source_dataset_budget_exceeded");
+            // A full audit is an observation, not proof of complete history.
+            // Its retained events still obey the fixed source-time cutoff.
+            if (record.event.createdAt > request.until) continue;
+            values.push({
+              node_id: record.event.id,
+              history_subject_id: record.subject.id,
+              project_curation_project_id: record.event.project.id,
+              curation_action: record.event.__typename,
+              curation_automated: record.event.wasAutomated,
+              html_url: record.subject.url,
+              source_revision: projectCurationHistoryRevision(record),
+              created_at: record.event.createdAt,
+              actor: record.event.actor,
+            });
+          }
         }
       } else if (request.family === "project_current") {
         const allowedProjectIds = repository.allowedProjectIds ?? [];
@@ -668,6 +848,35 @@ export function createGithubCollectionSource({
       }
       assertAuthorized();
       if (values.length > 10000) throw new Error("source_dataset_budget_exceeded");
+      let curationDigest = null;
+      if (request.family === "project_curation_history") {
+        // Native pages are refreshed, so an output offset must also bind the
+        // complete minimized observation. A new/removed/changed operation
+        // requires a fresh full run rather than shifting the saved page.
+        values.sort((left, right) => (left.node_id < right.node_id ? -1 : left.node_id > right.node_id ? 1 : 0));
+        curationDigest = createHash("sha256")
+          .update(
+            JSON.stringify([
+              "project-curation-output/v1",
+              repository.id,
+              request.runId,
+              request.until,
+              values.map((value) => [
+                value.history_subject_id,
+                value.project_curation_project_id,
+                value.node_id,
+                value.curation_action,
+                value.source_revision,
+                value.actor,
+                value.created_at,
+                value.curation_automated,
+              ]),
+            ]),
+          )
+          .digest("hex");
+        if (curationCursor && curationCursor[1] !== curationDigest)
+          throw new Error("source_project_curation_cursor_changed");
+      }
       const expectedCount = projectSubjectCount ?? values.length;
       if (offset > expectedCount) throw new Error("invalid_source_cursor");
       const selected = projectSubjectCount === null ? values.slice(offset, offset + request.limit) : values;
@@ -700,7 +909,12 @@ export function createGithubCollectionSource({
         const subjectId = sourceSubjectId(value);
         const nativeRevision =
           value.sha ?? at(value.updated_at) ?? at(value.submitted_at) ?? at(value.published_at) ?? at(value.created_at);
-        const revision = ["project_history", "relationships", "issue_field_history"].includes(request.family)
+        const revision = [
+          "project_history",
+          "project_curation_history",
+          "relationships",
+          "issue_field_history",
+        ].includes(request.family)
           ? value.source_revision
           : request.family === "timelines"
             ? githubTimelineRevision(value)
@@ -720,23 +934,44 @@ export function createGithubCollectionSource({
           throw new Error("source_identity_or_revision_unverified");
         return {
           subjectId,
-          ...(["project_history", "issue_field_history"].includes(request.family)
+          ...(["project_history", "project_curation_history", "issue_field_history"].includes(request.family)
             ? { historySubjectId: value.history_subject_id }
+            : {}),
+          ...(request.family === "project_curation_history"
+            ? { projectCurationProjectId: value.project_curation_project_id }
             : {}),
           ...(request.family === "issue_field_history" ? { issueFieldId: value.issue_field_id } : {}),
           ...(request.family === "project_current" ? { projectSubjectId: value.project_subject_id } : {}),
           sourceRevision: revision,
           sourceUrl: value.html_url,
-          evidence: ["timelines", "project_history", "relationships", "issue_field_history"].includes(request.family)
+          evidence: [
+            "timelines",
+            "project_history",
+            "project_curation_history",
+            "relationships",
+            "issue_field_history",
+          ].includes(request.family)
             ? "observed_transition"
             : "current_state",
           actorId:
-            ["timelines", "project_history", "relationships", "issue_field_history"].includes(request.family) &&
+            [
+              "timelines",
+              "project_history",
+              "project_curation_history",
+              "relationships",
+              "issue_field_history",
+            ].includes(request.family) &&
             Number.isSafeInteger(value.actor?.databaseId ?? value.actor?.id) &&
             (value.actor?.databaseId ?? value.actor?.id) > 0
               ? String(value.actor.databaseId ?? value.actor.id)
               : null,
-          occurredAt: ["timelines", "project_history", "relationships", "issue_field_history"].includes(request.family)
+          occurredAt: [
+            "timelines",
+            "project_history",
+            "project_curation_history",
+            "relationships",
+            "issue_field_history",
+          ].includes(request.family)
             ? at(value.created_at)
             : null,
           state: value.merged_at
@@ -775,10 +1010,13 @@ export function createGithubCollectionSource({
         visibility: "public",
         isSynthetic,
         facts,
-        nextCursor: next < expectedCount ? String(next) : null,
+        nextCursor:
+          next < expectedCount ? (curationDigest === null ? String(next) : curationDigest + ":" + next) : null,
         // Native field visibility can omit events. Content parent counts do not
         // establish how many historical edits GitHub has retained or redacted.
-        expectedCount: ["issue_field_history", "content_edits"].includes(request.family) ? null : expectedCount,
+        expectedCount: ["issue_field_history", "project_curation_history", "content_edits"].includes(request.family)
+          ? null
+          : expectedCount,
       };
     },
   };

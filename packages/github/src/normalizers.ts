@@ -81,6 +81,7 @@ import {
   type OrderingSourceAuthority,
 } from "./ordering.js";
 import { readTypedIssueHistory, typedHistoryRevision } from "./timeline-history.js";
+import { readProjectCurationHistory, projectCurationHistoryRevision } from "./project-curation-history.js";
 import { readIssueFieldEvent, issueFieldHistoryRevision } from "./issue-field-history.js";
 import {
   parseGithubContentEditMetadata,
@@ -426,6 +427,7 @@ export interface GithubEvidenceEnvelope {
     | "field_change"
     | "body_edit"
     | "project_snapshot"
+    | "project_curation"
     | "thread_resolution"
     | "comment"
     | "pull_request_conversation_comment"
@@ -671,6 +673,7 @@ function creditedAction(fact: NormalizedGithubFact, family: string, envelopeActi
     review_threads_resolved: "review_thread_resolved",
     title_scope_edits: "title_or_body_edited",
     issue_transfers: "issue_transferred",
+    project_items_curated: "relationship_changed",
     reverted_delivery: "revert_observed",
     documentation: "pull_request_merged",
     localization: "pull_request_merged",
@@ -753,6 +756,7 @@ export function normalizeGithubObservation(
     envelope.family === "pull_request" ||
     envelope.family === "review" ||
     envelope.family === "revert" ||
+    (envelope.family === "project_curation" && object(payload.pull_request)) ||
     (envelope.family === "relationship" &&
       object(payload.relationship) &&
       ["reference", "closing"].includes(String(payload.relationship.kind)) &&
@@ -881,8 +885,17 @@ export function normalizeGithubObservation(
     }
     return parsed;
   };
-  const author = register(resource.user ?? resource.author);
-  const sender = prComment ? null : register(sourceActor(payload), payload.execution_mode === "automated");
+  const author = envelope.family === "project_curation" ? null : register(resource.user ?? resource.author);
+  const curationEvent =
+    envelope.family === "project_curation" && object(payload.project_curation) ? payload.project_curation : null;
+  const sender = prComment
+    ? null
+    : register(
+        envelope.family === "project_curation" ? curationEvent?.actor : sourceActor(payload),
+        envelope.family === "project_curation"
+          ? curationEvent?.wasAutomated === true
+          : payload.execution_mode === "automated",
+      );
   out.observations.push({
     id: observationId,
     source: proof.source,
@@ -904,7 +917,8 @@ export function normalizeGithubObservation(
     extra: Partial<NormalizedGithubFact> = {},
   ) => {
     const evidenceClass = extra.state ?? (who && occurredAt ? "observed" : "unknown");
-    const canonicalKey = stable("metric-unit", metricId, unit, who?.id ?? "unknown", evidenceClass);
+    const canonicalKey =
+      extra.canonicalKey ?? stable("metric-unit", metricId, unit, who?.id ?? "unknown", evidenceClass);
     const fact: NormalizedGithubFact = {
       id: stable("fact", canonicalKey),
       canonicalKey,
@@ -976,6 +990,54 @@ export function normalizeGithubObservation(
   const transitionUnit = nativeEventId ? stable(id, nativeEventId) : stable(id, sourceAction, at, sender?.id ?? null);
   if (envelope.family === "project_snapshot") {
     out.reasons.push("current_project_context_does_not_prove_editor_or_time");
+  } else if (envelope.family === "project_curation") {
+    const project = curationEvent && object(curationEvent.project) ? curationEvent.project : null;
+    const expectedType =
+      sourceAction === "added"
+        ? "AddedToProjectV2Event"
+        : sourceAction === "removed"
+          ? "RemovedFromProjectV2Event"
+          : null;
+    if (
+      proof.source !== "github_graphql" ||
+      !nativeEventId ||
+      !/^[A-Za-z0-9_=.:\-]{1,128}$/.test(nativeEventId) ||
+      !curationEvent ||
+      curationEvent.id !== nativeEventId ||
+      expectedType === null ||
+      curationEvent.__typename !== expectedType ||
+      typeof curationEvent.wasAutomated !== "boolean" ||
+      !project ||
+      typeof project.id !== "string" ||
+      !/^[A-Za-z0-9_=.:\-]{1,128}$/.test(project.id) ||
+      project.public !== true ||
+      !at ||
+      time(curationEvent.createdAt) !== at ||
+      Date.parse(at) > Date.parse(observedAt) ||
+      !/^[A-Za-z0-9_=.:\-]{1,128}$/.test(id) ||
+      object(payload.issue) === object(payload.pull_request) ||
+      publicUrl !==
+        "https://github.com/" +
+          repository.slug +
+          "/" +
+          (kind === "pull_request" ? "pull/" : "issues/") +
+          resource.number ||
+      !positive(resource.number)
+    ) {
+      out.reasons.push("native_project_curation_unverified");
+      return out;
+    }
+    // One native item/Project operation, independent of arrival order or actor
+    // display labels. Contradictory versions share an identity and fail the
+    // engine's semantic-conflict gate; they cannot create two observed credits.
+    const canonicalKey = stable("project-curation/v1", String(repository.id), id, project.id, nativeEventId);
+    emit("project_items_curated", sender, curationEvent.wasAutomated ? "automation" : "triager", at, canonicalKey, {
+      canonicalKey,
+      rawState: sourceAction + ":" + project.id,
+      subjectActorId: null,
+      eventContext: { projects: [project.id], projectScope: [project.id], workstreams: [], workstreamsKnown: false },
+      currentContext: null,
+    });
   } else if (envelope.family === "pull_request") {
     const created = time(resource.created_at ?? resource.createdAt);
     emit("pr_opened", author, "author", created, `${id}:opened`);
@@ -2044,6 +2106,8 @@ export interface CollectionNormalizerInput {
     subjectId: string;
     /** Native issue/PR identity retained by the trusted typed-history collector. */
     historySubjectId?: string;
+    /** Exact approved Project for native add/remove curation; not an item node. */
+    projectCurationProjectId?: string;
     issueFieldId?: string;
     projectSubjectId?: string;
     contentEditMetadata?: ContentEditMetadata | GithubCommentEditMetadata;
@@ -2163,7 +2227,8 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
   return async (input: CollectionNormalizerInput): Promise<NormalizedGithubResult> => {
     const reviewers = [...(options.authorizedReviewerIds ?? [])];
     const acceptance = options.acceptance;
-    const detachSource = Boolean(acceptance) || mergeTargetRepositoryIds.length > 0;
+    const detachSource =
+      Boolean(acceptance) || mergeTargetRepositoryIds.length > 0 || input.family === "project_curation_history";
     if (detachSource) input = detachedCollectionInput(input);
     const collectMergeTarget =
       input.family === "pull_requests" && mergeTargetRepositoryIds.includes(input.repository.id);
@@ -2410,6 +2475,78 @@ export function createGithubEvidenceNormalizer(options: GithubEvidenceNormalizer
           issue: { id: record.subject.id, url: record.subject.url },
           sender: record.event.actor,
           change: record.change,
+        },
+      });
+    }
+    if (input.family === "project_curation_history") {
+      const captured = detachedCollectionInput(input);
+      const match = captured.fact.sourceUrl.match(
+        new RegExp(
+          "^https://github\\.com/" + captured.repository.slug.replaceAll(".", "\\.") + "/(issues|pull)/([1-9]\\d*)$",
+        ),
+      );
+      const projectId = captured.fact.projectCurationProjectId;
+      if (
+        !match ||
+        captured.fact.evidence !== "observed_transition" ||
+        captured.fact.state !== "present" ||
+        typeof captured.fact.historySubjectId !== "string" ||
+        !/^[A-Za-z0-9_=.:\-]{1,128}$/.test(captured.fact.historySubjectId) ||
+        typeof projectId !== "string" ||
+        !/^[A-Za-z0-9_=.:\-]{1,128}$/.test(projectId)
+      )
+        return none("project_curation_collected_identity_unverified");
+      // A newly approved narrower Project scope may omit old observations.
+      // Loss of a still-approved native event instead reaches the durable denial.
+      if (!captured.repository.allowedProjectIds?.includes(projectId))
+        return none("project_curation_outside_approved_project_scope");
+      const records = await readProjectCurationHistory({
+        client: client(),
+        source: options.source,
+        repository: captured.repository,
+        number: Number(match[2]),
+        subjectType: match[1] === "pull" ? "pull_request" : "issue",
+        subjectId: captured.fact.historySubjectId,
+        scanId: captured.factKey,
+        ...(options.assertAuthorized ? { assertAuthorized: options.assertAuthorized } : {}),
+      });
+      const record = records.find((entry) => entry.event.id === captured.fact.subjectId);
+      if (!record) throw new Error("project_curation_event_unavailable");
+      const nativeActor = record.event.actor?.databaseId;
+      if (
+        record.event.project.id !== projectId ||
+        projectCurationHistoryRevision(record) !== captured.fact.sourceRevision ||
+        time(captured.fact.occurredAt) !== record.event.createdAt ||
+        captured.fact.actorId !== (positive(nativeActor) ? String(nativeActor) : null) ||
+        Date.parse(record.event.createdAt) > Date.parse(captured.observedAt)
+      )
+        return none("project_curation_revision_or_clock_unverified");
+      return normalizeGithubObservation({
+        repository: { ...captured.repository, visibility: "public" },
+        proof: {
+          verified: true,
+          source: "github_graphql",
+          revision: captured.fact.sourceRevision,
+          eventId: record.event.id,
+          isSynthetic: options.isSynthetic === true,
+        },
+        family: "project_curation",
+        action: record.event.__typename === "AddedToProjectV2Event" ? "added" : "removed",
+        observedAt: captured.observedAt,
+        occurredAt: record.event.createdAt,
+        ...(options.reviewedServiceAccounts === undefined
+          ? {}
+          : { reviewedServiceAccounts: options.reviewedServiceAccounts }),
+        ...(options.authorizedClassifierIds === undefined
+          ? {}
+          : { authorizedClassifierIds: options.authorizedClassifierIds }),
+        payload: {
+          [record.subject.kind === "pull_request" ? "pull_request" : "issue"]: {
+            id: record.subject.id,
+            url: record.subject.url,
+            number: Number(match[2]),
+          },
+          project_curation: record.event,
         },
       });
     }

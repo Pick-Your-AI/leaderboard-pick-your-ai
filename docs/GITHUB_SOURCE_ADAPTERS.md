@@ -134,3 +134,11 @@ Project denial. Recovery requires a newly approved configuration version and a
 successful rebuilt publication; old-version snapshots remain unavailable.
 Transient transport failures retain ordinary retry behavior and are not asserted
 to prove a Project became private.
+
+The separate opt-in [native Project curation family](NATIVE_PROJECT_CURATION.md)
+reads issue/PR add/remove events under explicit repository and Project grants.
+It binds actual subject, Project and native event identities without inventing a
+ProjectV2Item ID, keeps automation separate, and refreshes source admission before
+publication. Full-scan output cursors bind minimized native semantics; incomplete
+history and the existing persistent Project denial/reapproval boundary remain
+explicit. Existing status, field and current-membership adapters are unchanged.
