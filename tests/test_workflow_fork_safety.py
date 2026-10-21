@@ -76,7 +76,9 @@ JOB_KEYS = {
 LOCAL_WORKFLOW = re.compile(r"\./\.github/workflows/([\w.-]+\.ya?ml)")
 # One shared key pattern; every key match in this file goes through it.
 KEY = r"[A-Za-z_][\w-]*"
-QUOTED_KEY = re.compile(r"^((?:-\s+)*)([\"'])(" + KEY + r")\2:")
+QUOTED_KEY = re.compile(r"^((?:-\s+)*)([\"'])(" + KEY + r")\2\s*:(?=\s|$)")
+SPACED_KEY = re.compile(r"^((?:-\s+)*)(" + KEY + r")\s+:(?=\s|$)")
+QUOTED_ITEM = re.compile(r"^((?:-\s+)+)([\"'])([^\"']*)\2$")
 KEY_VALUE = re.compile(r"^(" + KEY + r"):(?:\s+(.*))?$")
 KNOWN_EVENTS = {
     "branch_protection_rule", "check_run", "check_suite", "create", "delete",
@@ -138,6 +140,8 @@ def unsupported(text):
     """Report constructs outside the supported YAML subset (fail closed)."""
     problems = []
     entries = structure(text)
+    for line in _trigger_scan(text)[1]:
+        problems.append(f"unsupported workflow syntax: {line} (unrecognized trigger entry)")
     for position, (_, line) in enumerate(entries):
         if line == "---" and position == 0:
             continue
@@ -191,6 +195,8 @@ def scan(text):
         if not stripped:
             continue
         stripped = QUOTED_KEY.sub(lambda m: f"{m.group(1)}{m.group(3)}:", stripped)
+        stripped = SPACED_KEY.sub(lambda m: f"{m.group(1)}{m.group(2)}:", stripped)
+        stripped = QUOTED_ITEM.sub(lambda m: f"{m.group(1)}{m.group(3)}", stripped)
         result.append((indent, stripped, False))
         block = BLOCK_SCALAR.match(stripped)
         if block:
@@ -212,24 +218,34 @@ def _block(entries, index):
     return body
 
 
-def trigger_blocks(text):
-    """Map each event in the top-level `on:` to its child entries."""
+def _trigger_scan(text):
+    """Return (events -> child entries, lines of `on:` that were not understood)."""
     entries = structure(text)
     for index, (indent, line) in enumerate(entries):
         match = re.fullmatch(r"on:\s*(.*)", line)
         if indent != 0 or not match:
             continue
         if match.group(1):
-            return {event: [] for event in re.findall(r"[A-Za-z_][\w-]*", match.group(1))}
+            return {event: [] for event in re.findall(r"[A-Za-z_][\w-]*", match.group(1))}, []
         children = _block(entries, index)
-        found = {}
+        found, bad = {}, []
         key_indent = children[0][0] if children else 0
         for position, (child_indent, child) in enumerate(children):
-            key = re.match("(?:- )?(" + KEY + r"):?(?:\s|$)", child)
-            if child_indent == key_indent and key:
-                found[key.group(1)] = _block(children, position)
-        return found
-    return {}
+            if child_indent < key_indent:
+                bad.append(child)
+            elif child_indent == key_indent:
+                key = re.fullmatch("(?:- )?(" + KEY + r")(?::(?:\s.*)?)?", child)
+                if key:
+                    found[key.group(1)] = _block(children, position)
+                else:
+                    bad.append(child)
+        return found, bad
+    return {}, []
+
+
+def trigger_blocks(text):
+    """Map each event in the top-level `on:` to its child entries."""
+    return _trigger_scan(text)[0]
 
 
 def triggers(text):
@@ -432,12 +448,13 @@ def audit(text, reachable=None):
     # Universal: immutable actions (local reusable workflows are reviewed in repo).
     for _, line in structural:
         match = re.match(r"(?:-\s+)*uses:\s*(\S+)", line)
-        if match and not match.group(1).startswith("./") and not PINNED_ACTION.fullmatch(match.group(1)):
-            problems.append(f"action not pinned to a full commit SHA: {match.group(1)}")
+        action = match.group(1).strip("'\"") if match else ""
+        if match and not action.startswith("./") and not PINNED_ACTION.fullmatch(action):
+            problems.append(f"action not pinned to a full commit SHA: {action}")
 
     # Universal: checkout never persists the token or fetches a PR head.
     for index, (_, line) in enumerate(structural):
-        if not re.search(r"\buses:\s*actions/checkout@", line, re.I):
+        if not re.search(r"\buses:\s*['\"]?actions/checkout@", line, re.I):
             continue
         start = index
         while start > 0 and not structural[start][1].startswith("- "):
@@ -454,7 +471,7 @@ def audit(text, reachable=None):
         for ref in re.findall(r"^ref:\s*(.+)$", step_text, re.M):
             if UNTRUSTED_REF.search(ref):
                 problems.append(f"checkout of untrusted pull-request ref: {ref}")
-            elif "github.event.workflow_run" in ref.lower() and ref.strip("${} ").lower() != "github.event.workflow_run.head_sha":
+            elif "github.event.workflow_run" in ref.lower() and ref.strip("${}'\" ").lower() != "github.event.workflow_run.head_sha":
                 problems.append(f"checkout of unreviewed workflow_run ref: {ref}")
             elif "workflow_run" in ref.lower() and "workflow_run" not in events:
                 problems.append(f"workflow_run ref without workflow_run trigger: {ref}")
@@ -973,6 +990,90 @@ class WorkflowForkSafetyTests(unittest.TestCase):
         self.rejected(lambda t: t.replace("contents: read", "contents: 'write'"), "permissions")
         self.rejected(lambda t: t.replace("contents: read", "contents:  write"), "permissions")
         self.rejected(lambda t: t.replace("permissions:\n  contents: read", "permissions: 'write-all'"), "permissions")
+
+    def test_quoted_and_spaced_trigger_spellings_are_read_or_rejected(self):
+        trigger = "on:\n  pull_request:\n  push:\n    branches: [main]"
+        for spelling in (
+            'on:\n  - push\n  - "pull_request_target"',
+            "on:\n  - push\n  - 'pull_request_target'",
+            'on:\n  "pull_request_target" :\n  push:',
+            "on:\n  'pull_request_target':\n  push:",
+            "on:\n  pull_request_target :\n  push:",
+            '"on":\n  - "pull_request_target"',
+        ):
+            self.rejected(lambda t, x=spelling: t.replace(trigger, x), "pull_request_target")
+        # Quoted spellings still make a deploy-style workflow PR-reachable.
+        for spelling in (
+            'on:\n  - push\n  - "pull_request"',
+            "on:\n  - 'pull_request'",
+            'on:\n  - "workflow_call"',
+            'on:\n  "pull_request" :',
+            "on:\n  pull_request :",
+        ):
+            deploy = DEPLOY.replace("on:\n  push:\n    branches: [main]", spelling)
+            self.assertNotEqual(deploy, DEPLOY)
+            for label, problems in (("audit", audit(deploy)), ("audit_all", audit_all({"d.yml": deploy})["d.yml"])):
+                for expected in ("permissions", "secret other than GITHUB_TOKEN", "deployment environment"):
+                    self.assertTrue(any(expected in problem for problem in problems), (spelling, label, problems))
+            self.assertTrue(triggers(deploy) & {"pull_request", "workflow_call"}, spelling)
+        self.assertEqual(triggers(GOOD.replace(trigger, 'on:\n  - "push"\n  - \'pull_request\'')), {"push", "pull_request"})
+        self.assertEqual(audit(GOOD.replace(trigger, 'on:\n  - "push"\n  - \'pull_request\'')), [])
+
+    def test_unreadable_trigger_entries_fail_closed(self):
+        for entry in (
+            "  not a trigger entry",
+            "  push: [main]\n  weird thing: here",
+            "  - push\n  - !!str pull_request_target",
+            "  push:\n pull_request_target:",
+        ):
+            text = GOOD.replace("  pull_request:\n  push:\n    branches: [main]", entry)
+            self.assertNotEqual(text, GOOD)
+            self.assertTrue(
+                any("unsupported workflow syntax" in problem for problem in audit(text)), (entry, audit(text)))
+
+    def test_quoted_uses_values_are_normalized(self):
+        sha = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+        for quote in ("'", '"'):
+            quoted = GOOD.replace(f"actions/checkout@{sha}", f"{quote}actions/checkout@{sha}{quote}")
+            self.assertEqual(audit(quoted), [], quote)
+            self.rejected(lambda t, q=quoted: q.replace("persist-credentials: false", "persist-credentials: true"), "persist-credentials")
+            self.rejected(lambda t, q=quoted: q.replace(
+                "          persist-credentials: false\n",
+                "          persist-credentials: false\n          ref: ${{ github.event.pull_request.head.sha }}\n"),
+                "untrusted pull-request ref")
+            self.rejected(lambda t, q=quoted: q.replace("@" + sha, "@v4"), "not pinned")
+            self.rejected(lambda t, q=quoted: q.replace("        with:\n          persist-credentials: false\n", ""), "persist-credentials")
+        self.assertEqual(audit(GOOD.replace(f"@{sha}", f"@{sha} # v7")), [])
+        self.assertEqual(audit(GOOD.replace("jobs:\n", "jobs:\n  local:\n    uses: './.github/workflows/x.yml'\n")), [])
+        self.rejected(lambda t: t.replace("jobs:\n", "jobs:\n  remote:\n    uses: 'org/repo/.github/workflows/x.yml@main'\n"), "not pinned")
+        caller = GOOD.replace("jobs:\n", "jobs:\n  call:\n    uses: './.github/workflows/callee.yml'\n")
+        callee = DEPLOY.replace("  push:\n    branches: [main]", "  workflow_call:")
+        self.assertTrue(audit_all({"caller.yml": caller, "callee.yml": callee})["callee.yml"])
+
+    def test_scalar_reads_handle_quoted_forms_or_fail_closed(self):
+        """Every place a scalar or key is read accepts quoted spellings."""
+        self.assertEqual(audit(GOOD.replace("runs-on: ubuntu-latest", "runs-on: 'ubuntu-latest'")), [])
+        self.assertEqual(audit(GOOD.replace("runs-on: ubuntu-latest", 'runs-on:\n      - "ubuntu-latest"')), [])
+        self.rejected(lambda t: t.replace("runs-on: ubuntu-latest", "runs-on:\n      - 'self-hosted'"), "allowlisted GitHub-hosted")
+        self.rejected(lambda t: t.replace("runs-on: ubuntu-latest", '"runs-on" : "self-hosted"'), "allowlisted GitHub-hosted")
+        self.rejected(lambda t: t.replace("    steps:", '    "environment" : \'prod\'\n    steps:'), "environment")
+        self.rejected(lambda t: t.replace("jobs:\n", "jobs:\n  call:\n    uses: ./.github/workflows/x.yml\n    \"secrets\": inherit\n"), "passes secrets")
+        self.rejected(lambda t: t.replace("    steps:", '    "permissions":\n      "id-token": write\n    steps:'), "permissions")
+        self.rejected(lambda t: t + '      - run: x\n        "env":\n          K: ${{ secrets.K }}\n', "secret other than GITHUB_TOKEN")
+        self.rejected(lambda t: t.replace("persist-credentials: false", '"persist-credentials": "true"'), "persist-credentials")
+        self.assertEqual(audit(GOOD.replace("persist-credentials: false", '"persist-credentials": "false"')), [])
+        follower = RUN_GOOD.replace("    branches: [main]\n", "    branches:\n      - 'main'\n").replace(
+            "workflows: [Fixture]", "workflows:\n      - 'Fixture'")
+        self.assertEqual(audit_all({"good.yml": GOOD, "follow.yml": follower}), {"good.yml": [], "follow.yml": []})
+        self.assertEqual(run_sources(follower), ["Fixture"])
+        self.rejected(lambda t: follower.replace("'main'", "'main'\n      - 'dev'"), "not limited to branches", RUN_GOOD)
+        self.assertEqual(audit(RUN_GOOD.replace(
+            "ref: ${{ github.event.workflow_run.head_sha }}", "ref: '${{ github.event.workflow_run.head_sha }}'")), [])
+        self.rejected(lambda t: RUN_GOOD.replace(
+            "ref: ${{ github.event.workflow_run.head_sha }}", "ref: '${{ github.event.workflow_run.head_ref }}'"),
+            "workflow_run ref", RUN_GOOD)
+        self.assertEqual(audit(GOOD.replace("  checks:", '  "checks" :')), [])
+        self.rejected(lambda t: t.replace("  checks:", '  "checks" :').replace("ubuntu-latest", "self-hosted"), "allowlisted GitHub-hosted")
 
     def test_real_workflows_fail_when_deliberately_broken_in_memory(self):
         """Mutate the real files in memory only; nothing on disk changes."""
