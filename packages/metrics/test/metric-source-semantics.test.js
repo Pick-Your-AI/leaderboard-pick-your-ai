@@ -885,6 +885,16 @@ semanticCase("PROJECT-UPDATE-PUBLICATION", () => {
     );
     assert.deepEqual(values(aggregate("project_updates", [neighbor])), []);
   }
+  const issueField = normalize({
+    family: "field_change",
+    action: "issue_field_changed",
+    payload: { issue: issueItem(), sender: fixture.merger, change: { before: null, after: { type: "Bug" } } },
+  });
+  assert.deepEqual(
+    issueField.facts.map((fact) => fact.metricId),
+    ["issue_field_updates"],
+  );
+  assert.deepEqual(values(aggregate("project_updates", [issueField])), []);
   const unsupported = projectPublication({ action: "project_progress_drafted" });
   assert.deepEqual(unsupported.facts, []);
   const unknownAuthor = projectPublication({}, undefined, null);
