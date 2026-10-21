@@ -11,7 +11,7 @@ pull-request-adjacent privileged trigger, actions pinned to full commit SHAs,
 checkout without persisted credentials, and no checkout of a pull-request head.
 Strict rules (workflows reachable from a pull request, directly or through a
 workflow_run chain): read-only permissions, no secret other than GITHUB_TOKEN,
-no deployment environment, no self-hosted runner, and guarded workflow_run jobs.
+no deployment environment, only allowlisted GitHub-hosted runners, and guarded workflow_run jobs.
 A push-only deploy workflow may therefore hold deployment secrets.
 """
 from pathlib import Path
@@ -38,6 +38,13 @@ WORKFLOW_RUN_GUARDS = (
 )
 PINNED_ACTION = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_./-]+)?@[0-9a-f]{40}$")
 UNTRUSTED_REF = re.compile(r"github\.(?:head_ref|event\.pull_request\.head)")
+# GitHub-hosted runner labels; anything else (self-hosted, groups, custom or
+# larger-runner labels, expressions) is unreviewed and rejected for PR code.
+HOSTED_RUNNER = re.compile(
+    r"ubuntu-(?:latest|\d{2}\.\d{2}(?:-arm)?)|windows-(?:latest|\d{4}|11-arm)"
+    r"|macos-(?:latest|\d+(?:-(?:intel|large|xlarge))?)"
+)
+LOCAL_WORKFLOW = re.compile(r"\./\.github/workflows/([\w.-]+\.ya?ml)")
 BLOCK_SCALAR = re.compile(r"^(-\s+)?(?:run|script):\s*[|>][+-]?\d*\s*$")
 
 
@@ -118,7 +125,7 @@ def jobs(text):
                 return
             job_indent = children[0][0]
             for position, (child_indent, child) in enumerate(children):
-                name = re.fullmatch(r"([\w-]+):", child)
+                name = re.fullmatch(r"""["']?([\w-]+)["']?:""", child)
                 if child_indent == job_indent and name:
                     body = _block(children, position)
                     yield name.group(1), (body[0][0] if body else job_indent + 2), body
@@ -145,20 +152,49 @@ def run_sources(text):
     return [item.strip().strip("'\"") for item in items if item.strip()]
 
 
+def local_calls(text):
+    """Basenames of local reusable workflows called by this workflow's jobs."""
+    called = []
+    for _, indent, body in jobs(text):
+        target = _property(body, indent, "uses") or ""
+        match = LOCAL_WORKFLOW.fullmatch(target.strip("'\""))
+        if target.strip("'\"").startswith("./"):
+            called.append(match.group(1) if match else target)
+    return called
+
+
 def pr_reachable(texts):
-    """Return the set of workflow keys reachable from a pull request."""
+    """Return the set of workflow keys reachable from a pull request.
+
+    Reachability follows workflow_run chains and local reusable-workflow calls.
+    Anything that cannot be traced to a push-only origin counts as reachable.
+    """
     events = {key: triggers(text) for key, text in texts.items()}
     names = {workflow_name(text, key): key for key, text in texts.items()}
+    by_file = {Path(key).name: key for key in texts}
+    callers = {key: [] for key in texts}
+    for key, text in texts.items():
+        for target in local_calls(text):
+            if target in by_file:
+                callers[by_file[target]].append(key)
     reach = {key for key, found in events.items() if "pull_request" in found}
     changed = True
     while changed:
         changed = False
         for key, text in texts.items():
-            if key in reach or "workflow_run" not in events[key]:
+            if key in reach:
                 continue
-            sources = run_sources(text)
-            # An unresolvable source cannot be proven PR-free, so it counts.
-            if not sources or any(names.get(name) in reach or name not in names for name in sources):
+            found = events[key]
+            reachable = False
+            if "workflow_run" in found:
+                sources = run_sources(text)
+                # An unresolvable source cannot be proven PR-free, so it counts.
+                reachable |= not sources or any(
+                    names.get(name) in reach or name not in names for name in sources)
+            if "workflow_call" in found:
+                # No resolvable caller means it can be called from anywhere.
+                reachable |= not callers[key] or any(caller in reach for caller in callers[key])
+            if reachable:
                 reach.add(key)
                 changed = True
     return reach
@@ -189,6 +225,34 @@ def _property(body, indent, key):
     return None
 
 
+def _runner_problem(body, indent):
+    """Return a description if runs-on is not purely allowlisted hosted labels."""
+    for position, (child_indent, line) in enumerate(body):
+        match = re.fullmatch(r"runs-on:\s*(.*)", line)
+        if child_indent != indent or not match:
+            continue
+        inline = match.group(1)
+        nested = []
+        for deeper_indent, deeper in body[position + 1:]:
+            if deeper_indent <= indent:
+                break
+            nested.append(deeper)
+        labels = []
+        if inline.startswith("["):
+            labels = [item.strip().strip("'\"") for item in inline.strip("[]").split(",")]
+        elif inline:
+            labels = [inline.strip("'\"")]
+        for item in nested:
+            if not item.startswith("- "):
+                return f"mapping form ({item})"  # group:, labels: and the like
+            labels.append(item[2:].strip().strip("'\""))
+        if not labels or not all(HOSTED_RUNNER.fullmatch(label) for label in labels):
+            return ", ".join(labels) or "empty"
+        return None
+    # A job calling a reusable workflow has no runner of its own.
+    return None if _property(body, indent, "uses") is not None else "missing runs-on"
+
+
 def _permission_problems(text):
     problems = []
     entries = structure(text)
@@ -216,13 +280,13 @@ def audit(text, reachable=None):
     """Return fork-PR safety violations for one workflow's text.
 
     `reachable` says whether a pull request can run the workflow; by default it
-    is inferred from this file alone (pull_request or workflow_run triggers).
+    is inferred from this file alone (pull_request, workflow_run or workflow_call).
     """
     problems = []
     blocks = trigger_blocks(text)
     events = set(blocks)
     if reachable is None:
-        reachable = bool(events & {"pull_request", "workflow_run"})
+        reachable = bool(events & {"pull_request", "workflow_run", "workflow_call"})
     entries = scan(text)
     structural = structure(text)
     if not events:
@@ -260,6 +324,9 @@ def audit(text, reachable=None):
             elif "workflow_run" in ref and "workflow_run" not in events:
                 problems.append(f"workflow_run ref without workflow_run trigger: {ref}")
 
+    if not any(True for _ in jobs(text)):
+        problems.append("no jobs could be parsed (job-level checks would be skipped)")
+
     if not reachable:
         return problems
 
@@ -277,9 +344,9 @@ def audit(text, reachable=None):
             problems.append(f"job {name} passes secrets")
         if _property(body, indent, "environment") is not None:
             problems.append(f"job {name} uses a deployment environment")
-        runner = _property(body, indent, "runs-on")
-        if runner and "self-hosted" in runner:
-            problems.append(f"job {name} uses a self-hosted runner")
+        runner = _runner_problem(body, indent)
+        if runner:
+            problems.append(f"job {name} runner is not an allowlisted GitHub-hosted label: {runner}")
         if "workflow_run" in events:
             condition = _property(body, indent, "if") or ""
             for guard in WORKFLOW_RUN_GUARDS:
@@ -293,7 +360,15 @@ def audit(text, reachable=None):
 def audit_all(texts):
     """Audit {key: text}, inferring pull-request reachability across files."""
     reach = pr_reachable(texts)
-    return {key: audit(text, key in reach) for key, text in texts.items()}
+    known = {Path(key).name for key in texts}
+    result = {}
+    for key, text in texts.items():
+        result[key] = audit(text, key in reach)
+        if key in reach:
+            for target in local_calls(text):
+                if target not in known:
+                    result[key].append(f"calls unresolvable local workflow {target}")
+    return result
 
 
 GOOD = """name: Fixture
@@ -457,11 +532,70 @@ class WorkflowForkSafetyTests(unittest.TestCase):
             "untrusted pull-request ref",
         )
 
-    def test_rejects_environments_and_self_hosted_runners(self):
+    def test_rejects_environments(self):
         self.rejected(lambda t: t.replace("    runs-on: ubuntu-latest\n", "    runs-on: ubuntu-latest\n    environment: production\n"), "environment")
-        self.rejected(lambda t: t.replace("ubuntu-latest", "self-hosted"), "self-hosted")
-        self.rejected(lambda t: t.replace("ubuntu-latest", "[self-hosted, linux]"), "self-hosted")
-        self.rejected(lambda t: t.replace("runs-on: ubuntu-latest", "runs-on:\n      labels: self-hosted"), "self-hosted")
+
+    def test_runner_labels_are_allowlisted(self):
+        for runner in (
+            "self-hosted", "[self-hosted, linux]", "[ubuntu-latest, gpu]", "my-gpu-runner",
+            "ubuntu-latest-4-cores", "${{ matrix.os }}", "''",
+        ):
+            self.rejected(lambda t, r=runner: t.replace("runs-on: ubuntu-latest", f"runs-on: {r}"), "allowlisted GitHub-hosted")
+        for nested in (
+            "runs-on:\n      labels: self-hosted",
+            "runs-on:\n      group: large-runners",
+            "runs-on:\n      group: large-runners\n      labels: ubuntu-latest",
+            "runs-on:\n      - self-hosted",
+        ):
+            self.rejected(lambda t, n=nested: t.replace("runs-on: ubuntu-latest", n), "allowlisted GitHub-hosted")
+        self.rejected(lambda t: t.replace("    runs-on: ubuntu-latest\n", ""), "allowlisted GitHub-hosted")
+        for runner in (
+            "ubuntu-24.04", "ubuntu-22.04-arm", "windows-2022", "windows-latest", "macos-14",
+            "macos-latest", "[ubuntu-24.04]", "'ubuntu-latest'", "runs-on:\n      - ubuntu-latest",
+        ):
+            text = GOOD.replace("runs-on: ubuntu-latest", runner if runner.startswith("runs-on:") else f"runs-on: {runner}")
+            self.assertEqual(audit(text), [], runner)
+        # Strict rules apply only to PR-reachable workflows.
+        self.assertEqual(audit(DEPLOY.replace("ubuntu-latest", "self-hosted"), reachable=False), [])
+        self.assertTrue(audit(DEPLOY.replace("ubuntu-latest", "self-hosted"), reachable=True))
+
+    def test_quoted_job_ids_are_parsed_and_unparsed_jobs_fail_safe(self):
+        self.assertEqual(audit(GOOD.replace("  checks:", '  "checks":')), [])
+        self.rejected(lambda t: t.replace("  checks:", '  "checks":').replace(
+            "ubuntu-latest", "self-hosted"), "allowlisted GitHub-hosted")
+        self.rejected(lambda t: t.replace("  checks:", "  'checks':").replace(
+            "runs-on: ubuntu-latest", "runs-on: ubuntu-latest\n    environment: prod"), "environment")
+        # Job-level checks cannot silently vanish when the jobs block is not understood.
+        self.rejected(lambda t: t.replace("  checks:", "  ? checks"), "no jobs could be parsed")
+        self.rejected(lambda t: t.replace("jobs:\n", "jobs: {}\n"), "no jobs could be parsed")
+
+    def test_reusable_workflow_callees_inherit_pull_request_reachability(self):
+        caller = GOOD.replace("jobs:\n", "jobs:\n  call:\n    uses: ./.github/workflows/callee.yml\n")
+        callee = DEPLOY.replace("  push:\n    branches: [main]", "  workflow_call:").replace("name: Deploy", "name: Callee")
+        results = audit_all({"caller.yml": caller, "callee.yml": callee})
+        self.assertEqual(results["caller.yml"], [])
+        for expected in ("permissions", "secret other than GITHUB_TOKEN", "deployment environment"):
+            self.assertTrue(any(expected in problem for problem in results["callee.yml"]), (expected, results))
+        self.assertTrue(any("allowlisted" in problem for problem in audit_all(
+            {"caller.yml": caller, "callee.yml": callee.replace("ubuntu-latest", "self-hosted")})["callee.yml"]))
+        # Quoted job ids and two hops still propagate.
+        hop = callee.replace("name: Callee", "name: Hop").replace(
+            "jobs:\n", "jobs:\n  \"next\":\n    uses: ./.github/workflows/last.yml\n")
+        last = callee.replace("name: Callee", "name: Last")
+        chained = audit_all({"caller.yml": caller.replace("callee.yml", "hop.yml"), "hop.yml": hop, "last.yml": last})
+        self.assertTrue(chained["last.yml"])
+        # A callee with no resolvable caller could be called from anywhere.
+        self.assertTrue(audit_all({"callee.yml": callee})["callee.yml"])
+        # An unresolvable local target from a PR-reachable caller is a violation.
+        self.assertTrue(any("unresolvable" in problem for problem in audit_all(
+            {"caller.yml": caller})["caller.yml"]))
+        # Called only from a push-only workflow, deployment privilege is acceptable.
+        push_caller = DEPLOY.replace("jobs:\n", "jobs:\n  call:\n    uses: ./.github/workflows/callee.yml\n")
+        self.assertEqual(audit_all({"deploy.yml": push_caller, "callee.yml": callee}),
+                         {"deploy.yml": [], "callee.yml": []})
+        # ...but one PR-reachable caller among several is enough.
+        both = audit_all({"deploy.yml": push_caller, "caller.yml": caller, "callee.yml": callee})
+        self.assertTrue(both["callee.yml"])
 
     def test_push_only_deploy_passes_but_same_content_is_rejected_when_pr_reachable(self):
         self.assertEqual(audit(DEPLOY), [])
@@ -474,8 +608,6 @@ class WorkflowForkSafetyTests(unittest.TestCase):
         problems = audit(reachable)
         for expected in ("permissions", "secret other than GITHUB_TOKEN", "deployment environment"):
             self.assertTrue(any(expected in problem for problem in problems), (expected, problems))
-        self.assertTrue(audit(DEPLOY.replace("ubuntu-latest", "self-hosted").replace(
-            "  push:\n    branches: [main]", "  pull_request:")))
 
     def test_workflow_run_chain_makes_followers_pr_reachable(self):
         follower = DEPLOY.replace(
