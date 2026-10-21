@@ -741,6 +741,392 @@ semanticCase("FIRST-REVIEW-SEQUENCE", async () => {
   );
 });
 
+const privateRepository = { id: 2, slug: "synthetic-owner/repository", visibility: "private", defaultBranch: "main" };
+const withoutEventId = () => {
+  const { eventId, ...proof } = envelope().proof;
+  return proof;
+};
+const issueItem = (patch = {}) => ({ ...fixture.issue, user: fixture.author, ...patch });
+const strict = { from: "2026-10-07T10:00:00.001Z" };
+
+function titleEdit(
+  patch = {},
+  issuePatch = {},
+  changes = { title: { from: "Synthetic old title" } },
+  sender = fixture.merger,
+) {
+  return normalize({
+    family: "body_edit",
+    action: "edited",
+    payload: { issue: issueItem({ title: "Synthetic new title", ...issuePatch }), sender, changes },
+    ...patch,
+  });
+}
+semanticCase("TITLE-SCOPE-EDIT", () => {
+  const edit = titleEdit();
+  const [unit] = metricFacts(edit, "title_scope_edits");
+  assert.equal(metricFacts(edit, "title_scope_edits").length, 1);
+  assert.deepEqual(
+    [unit.actorId, unit.subjectActorId, unit.role, unit.state, unit.rawState, unit.occurredAt],
+    ["202", "101", "triager", "observed", "evidenced_edit", "2026-10-07T10:00:00.000Z"],
+  );
+  assert.deepEqual(values(aggregate("title_scope_edits", [edit, edit])), [["202", 1]], "Replay is one unit");
+  // The body is also scope text; one event that changes both fields is still one unit.
+  const body = titleEdit({}, { body: "Synthetic new body" }, { body: { from: "Synthetic old body" } });
+  assert.deepEqual(values(aggregate("title_scope_edits", [body])), [["202", 1]]);
+  const both = titleEdit(
+    {},
+    { body: "Synthetic new body" },
+    {
+      title: { from: "Synthetic old title" },
+      body: { from: "Synthetic old body" },
+    },
+  );
+  assert.equal(metricFacts(both, "title_scope_edits").length, 1);
+  // The reporter, not the editor, owns the item; the editor role is the only credited role.
+  assert.deepEqual(aggregate("title_scope_edits", [edit], {}, { roles: ["author"] }).rows, []);
+  assert.deepEqual(aggregate("title_scope_edits", [edit], {}, strict).rows, [], "Out-of-window edit");
+  assert.ok(!edit.facts.some((fact) => fact.actorId === "101"), "The item author receives no editor credit");
+
+  for (const changes of [
+    null,
+    {},
+    { title: {} },
+    { title: { from: "Synthetic new title" } },
+    { title: { from: 5 } },
+    { labels: { from: "Synthetic old title" } },
+    { state: { from: "open" } },
+  ]) {
+    const unchanged = titleEdit({}, {}, changes);
+    assert.deepEqual(unchanged.facts, [], `No proven text difference: ${JSON.stringify(changes)}`);
+    assert.ok(unchanged.reasons.includes("edit_history_actor_or_diff_unverified"));
+    assert.deepEqual(values(aggregate("title_scope_edits", [unchanged])), []);
+  }
+  const noEventProof = titleEdit({ proof: withoutEventId() });
+  const noClock = titleEdit({ occurredAt: null });
+  for (const unproven of [noEventProof, noClock]) {
+    assert.deepEqual(unproven.facts, []);
+    assert.deepEqual(values(aggregate("title_scope_edits", [unproven])), []);
+  }
+  const unknownEditor = titleEdit({}, {}, undefined, null);
+  assert.deepEqual(
+    unknownEditor.facts.map((fact) => [fact.metricId, fact.actorId, fact.state]),
+    [["title_scope_edits", null, "unknown"]],
+  );
+  assert.deepEqual(values(aggregate("title_scope_edits", [unknownEditor])), []);
+  const automated = titleEdit({}, {}, undefined, fixture.bot);
+  assert.deepEqual(aggregate("title_scope_edits", [automated]).rows, [], "A bot editor is outside the user lens");
+  assert.deepEqual(values(aggregate("title_scope_edits", [automated], {}, { actors: "automation" })), [["404", 1]]);
+  const hidden = titleEdit({ repository: privateRepository });
+  assert.deepEqual(hidden.facts, []);
+  assert.ok(hidden.reasons.includes("public_visibility_unverified_or_revoked"));
+  const created = normalize({
+    family: "issue",
+    action: "opened",
+    payload: { issue: issueItem(), sender: fixture.author },
+  });
+  assert.deepEqual(metricFacts(created, "title_scope_edits"), [], "The initial representation is not an edit");
+});
+
+function projectPublication(
+  patch = {},
+  change = { before: null, after: { status: "ON_TRACK" } },
+  sender = fixture.merger,
+) {
+  return normalize({
+    family: "field_change",
+    action: "project_progress_published",
+    payload: {
+      id: "P_synthetic_6",
+      html_url: "https://github.com/orgs/synthetic-owner/projects/6",
+      user: fixture.author,
+      sender,
+      change,
+    },
+    ...patch,
+  });
+}
+semanticCase("PROJECT-UPDATE-PUBLICATION", () => {
+  const published = projectPublication();
+  const [unit] = metricFacts(published, "project_updates");
+  assert.equal(published.facts.length, 1);
+  assert.deepEqual(
+    [unit.actorId, unit.subjectActorId, unit.role, unit.state, unit.rawState, unit.occurredAt],
+    ["202", "101", "triager", "observed", "project_progress_published", "2026-10-07T10:00:00.000Z"],
+  );
+  assert.deepEqual(values(aggregate("project_updates", [published, published])), [["202", 1]], "Replay is one unit");
+  const later = projectPublication({
+    occurredAt: "2026-10-07T11:00:00Z",
+    proof: { ...envelope().proof, eventId: "synthetic-event-2" },
+  });
+  assert.deepEqual(values(aggregate("project_updates", [published, later])), [["202", 2]], "Two publications");
+  assert.deepEqual(aggregate("project_updates", [published], {}, { roles: ["author"] }).rows, []);
+  assert.deepEqual(aggregate("project_updates", [published], {}, strict).rows, [], "Out-of-window publication");
+
+  const unchanged = projectPublication({}, { before: { status: "ON_TRACK" }, after: { status: "ON_TRACK" } });
+  assert.deepEqual(unchanged.facts, []);
+  assert.ok(unchanged.reasons.includes("no_op_field_change"));
+  assert.deepEqual(values(aggregate("project_updates", [unchanged])), []);
+  for (const change of [null, { after: { status: "ON_TRACK" } }, { before: null }]) {
+    const unproven = projectPublication({}, change);
+    assert.deepEqual(unproven.facts, []);
+    assert.ok(unproven.reasons.includes("unsupported_or_unproven_field_subtype"));
+  }
+  const noEventProof = projectPublication({ proof: withoutEventId() });
+  assert.deepEqual(noEventProof.facts, []);
+  // Neighbouring field subtypes keep their own metrics and cannot count as a published update.
+  for (const [action, metricId] of [
+    ["project_status_changed", "project_status_updates"],
+    ["project_item_field_changed", "project_field_updates"],
+  ]) {
+    const neighbor = projectPublication({ action });
+    assert.deepEqual(
+      neighbor.facts.map((fact) => fact.metricId),
+      [metricId],
+    );
+    assert.deepEqual(values(aggregate("project_updates", [neighbor])), []);
+  }
+  const issueField = normalize({
+    family: "field_change",
+    action: "issue_field_changed",
+    payload: { issue: issueItem(), sender: fixture.merger, change: { before: null, after: { type: "Bug" } } },
+  });
+  assert.deepEqual(
+    issueField.facts.map((fact) => fact.metricId),
+    ["issue_field_updates"],
+  );
+  assert.deepEqual(values(aggregate("project_updates", [issueField])), []);
+  const unsupported = projectPublication({ action: "project_progress_drafted" });
+  assert.deepEqual(unsupported.facts, []);
+  const unknownAuthor = projectPublication({}, undefined, null);
+  assert.deepEqual(
+    unknownAuthor.facts.map((fact) => [fact.actorId, fact.state]),
+    [[null, "unknown"]],
+  );
+  assert.deepEqual(values(aggregate("project_updates", [unknownAuthor])), []);
+  const automated = projectPublication({}, undefined, fixture.bot);
+  assert.deepEqual(aggregate("project_updates", [automated]).rows, [], "A bot publisher is outside the user lens");
+  assert.deepEqual(values(aggregate("project_updates", [automated], {}, { actors: "automation" })), [["404", 1]]);
+  assert.deepEqual(projectPublication({ repository: privateRepository }).facts, []);
+});
+
+function duplicateMark(patch = {}, relationship = {}, sender = fixture.merger) {
+  return normalize({
+    family: "relationship",
+    action: "added",
+    payload: {
+      issue: issueItem(),
+      sender,
+      relationship: {
+        kind: "duplicate",
+        from: "I_synthetic_20",
+        to: "I_synthetic_21",
+        intentional: true,
+        publicEndpointsVerified: true,
+        ...relationship,
+      },
+    },
+    ...patch,
+  });
+}
+semanticCase("DUPLICATE-CANONICALIZATION", () => {
+  const marked = duplicateMark();
+  const [unit] = metricFacts(marked, "duplicate_resolution");
+  assert.equal(marked.facts.length, 1);
+  assert.deepEqual(
+    [unit.actorId, unit.subjectActorId, unit.role, unit.state, unit.rawState, unit.occurredAt],
+    ["202", "101", "triager", "observed", "duplicate", "2026-10-07T10:00:00.000Z"],
+  );
+  // A duplicate relation is unordered: swapping endpoints for the same action is one canonical unit.
+  const swapped = duplicateMark({}, { from: "I_synthetic_21", to: "I_synthetic_20" });
+  assert.deepEqual(values(aggregate("duplicate_resolution", [marked, marked, swapped])), [["202", 1]]);
+  const another = duplicateMark({}, { to: "I_synthetic_22" });
+  assert.deepEqual(values(aggregate("duplicate_resolution", [marked, another])), [["202", 2]]);
+  // Current behavior, recorded as remaining scope rather than endorsed: the normalizer does not gate on the
+  // relationship action, so an un-mark of the same pair is another observed unit. Pair uniqueness holds per
+  // mark event only. If the normalizer starts treating removals as reversals, this assertion must change.
+  for (const action of ["removed", "unmarked_as_duplicate"]) {
+    const reversed = duplicateMark({ action });
+    assert.equal(metricFacts(reversed, "duplicate_resolution").length, 1, action);
+    assert.deepEqual(
+      values(aggregate("duplicate_resolution", [marked, reversed])),
+      [["202", 2]],
+      `A mark followed by ${action} of the same pair is two raw units today`,
+    );
+  }
+  assert.deepEqual(aggregate("duplicate_resolution", [marked], {}, { roles: ["author"] }).rows, []);
+  assert.deepEqual(aggregate("duplicate_resolution", [marked], {}, strict).rows, [], "Out-of-window mark");
+
+  const automatic = duplicateMark({}, { intentional: false });
+  assert.deepEqual(automatic.facts, []);
+  assert.ok(automatic.reasons.includes("automatic_reference_or_relationship_actor_unverified"));
+  for (const publicEndpointsVerified of [false, undefined]) {
+    const restricted = duplicateMark({}, { publicEndpointsVerified });
+    assert.deepEqual(restricted.facts, []);
+    assert.ok(restricted.reasons.includes("relationship_endpoint_visibility_unverified"));
+  }
+  for (const relationship of [{ kind: "duplicates" }, { kind: "mentions" }, { from: "" }, { to: undefined }]) {
+    const unsupported = duplicateMark({}, relationship);
+    assert.deepEqual(unsupported.facts, [], JSON.stringify(relationship));
+    assert.deepEqual(values(aggregate("duplicate_resolution", [unsupported])), []);
+  }
+  assert.deepEqual(duplicateMark({ proof: withoutEventId() }).facts, [], "No event proof");
+  const unknownActor = duplicateMark({}, {}, null);
+  assert.deepEqual(
+    unknownActor.facts.map((fact) => [fact.actorId, fact.state]),
+    [[null, "unknown"]],
+  );
+  assert.deepEqual(values(aggregate("duplicate_resolution", [unknownActor])), []);
+  const automated = duplicateMark({}, {}, fixture.bot);
+  assert.deepEqual(aggregate("duplicate_resolution", [automated]).rows, []);
+  assert.deepEqual(values(aggregate("duplicate_resolution", [automated], {}, { actors: "automation" })), [["404", 1]]);
+  assert.deepEqual(duplicateMark({ repository: privateRepository }).facts, []);
+  // Closing an issue is not a duplicate decision, and neither is another relationship kind.
+  const closed = normalize({
+    family: "issue",
+    action: "closed",
+    payload: { issue: issueItem(), sender: fixture.merger },
+  });
+  assert.deepEqual(metricFacts(closed, "duplicate_resolution"), []);
+  const related = duplicateMark({}, { kind: "related" });
+  assert.deepEqual(metricFacts(related, "duplicate_resolution"), []);
+  assert.equal(metricFacts(related, "related_links").length, 1);
+});
+
+/**
+ * Receipt-gated metrics: raw source activity never counts; one independently reviewed acceptance does.
+ * The gate checks reviewer independence, target actor identity and the receipt lens. It does not assess
+ * the substance of the finding, handoff, clarification or deliverable, which the reviewer supplies.
+ */
+function receiptSemantics({ metricId, source, targetMetricId, actorId, otherActorId, reviewerId }) {
+  const lens = { rankedStates: ["qualified"], dateBasis: "acceptedAt" };
+  const target = metricFacts(source, targetMetricId)[0];
+  assert.equal(target.actorId, actorId);
+  const receipt = {
+    verified: true,
+    id: `synthetic-${metricId}-receipt`,
+    metricId,
+    actorId,
+    reviewerId,
+    acceptedAt: "2026-10-07T15:00:00Z",
+    decision: "accepted",
+    targetFactId: target.id,
+    evidenceIds: [`synthetic-${metricId}-evidence`],
+  };
+  assert.deepEqual(metricFacts(source, metricId), [], "Raw source activity carries no accepted unit");
+  assert.deepEqual(values(aggregate(metricId, [source], lens)), []);
+
+  const accepted = applyRecognitionReceipt(structuredClone(source), receipt, [reviewerId]);
+  assert.deepEqual(values(aggregate(metricId, [accepted], lens)), [[actorId, 1]]);
+  const [unit] = metricFacts(accepted, metricId);
+  assert.deepEqual(
+    [unit.state, unit.acceptedBy, unit.acceptanceReceipt, unit.actorId],
+    ["qualified", reviewerId, receipt.id, actorId],
+  );
+  const replay = applyRecognitionReceipt(structuredClone(source), receipt, [reviewerId]);
+  assert.deepEqual(values(aggregate(metricId, [accepted, replay], lens)), [[actorId, 1]], "Replay is one unit");
+  assert.deepEqual(values(aggregate(targetMetricId, [accepted])), [[actorId, 1]], "The raw metric is not consumed");
+  assert.deepEqual(
+    values(aggregate(metricId, [accepted], { rankedStates: ["observed"], dateBasis: "occurredAt" })),
+    [],
+    "An observed lens cannot see the reviewed unit",
+  );
+  assert.deepEqual(values(aggregate(metricId, [accepted], lens, { from: "2026-10-07T16:00:00Z" })), []);
+  assert.deepEqual(values(aggregate(metricId, [accepted], lens, { to: "2026-10-07T14:00:00Z" })), []);
+
+  const rejected = applyRecognitionReceipt(structuredClone(source), { ...receipt, decision: "rejected" }, [reviewerId]);
+  assert.deepEqual(values(aggregate(metricId, [rejected], lens)), []);
+  assert.equal(metricFacts(rejected, metricId)[0].state, "excluded");
+
+  const invalid = [
+    [{ reviewerId: actorId }, [actorId]],
+    [{}, ["999"]],
+    [{ actorId: otherActorId }, [reviewerId, otherActorId]],
+    [{ targetFactId: "synthetic-missing-fact" }, [reviewerId]],
+    [{ evidenceIds: [] }, [reviewerId]],
+    [{ verified: false }, [reviewerId]],
+    [{ metricId: "repositories" }, [reviewerId]],
+  ];
+  for (const [patch, reviewers] of invalid)
+    assert.throws(
+      () => applyRecognitionReceipt(structuredClone(source), { ...receipt, ...patch }, reviewers),
+      /Independent verified/,
+      JSON.stringify(patch),
+    );
+}
+semanticCase("FINDING-ACCEPTANCE", () => {
+  const closedIssue = normalize({
+    family: "issue",
+    action: "closed",
+    payload: { issue: issueItem(), sender: fixture.merger },
+  });
+  // Closure alone, even by the reporter's reviewer, is not human acceptance of a finding.
+  assert.deepEqual(metricFacts(closedIssue, "accepted_findings"), []);
+  receiptSemantics({
+    metricId: "accepted_findings",
+    source: closedIssue,
+    targetMetricId: "issues_opened",
+    actorId: "101",
+    otherActorId: "202",
+    reviewerId: "303",
+  });
+});
+semanticCase("RESOLUTION-ACCEPTANCE", () => {
+  // The closer and assignee are not assumed to be the solver; only the reviewed deliverable author is credited.
+  const closedIssue = normalize({
+    family: "issue",
+    action: "closed",
+    payload: { issue: issueItem({ assignees: [fixture.reviewer] }), sender: fixture.merger },
+  });
+  assert.deepEqual(metricFacts(closedIssue, "issue_resolution"), []);
+  assert.deepEqual(
+    values(aggregate("issue_resolution", [closedIssue], { rankedStates: ["qualified"], dateBasis: "acceptedAt" })),
+    [],
+  );
+  receiptSemantics({
+    metricId: "issue_resolution",
+    source: normalize(),
+    targetMetricId: "pr_merged",
+    actorId: "101",
+    otherActorId: "202",
+    reviewerId: "303",
+  });
+});
+semanticCase("CLARIFICATION-ACCEPTANCE", () => {
+  // A proven edit is raw activity; it becomes a clarification only through an independent reviewer.
+  receiptSemantics({
+    metricId: "issue_clarifications",
+    source: titleEdit(),
+    targetMetricId: "title_scope_edits",
+    actorId: "202",
+    otherActorId: "101",
+    reviewerId: "303",
+  });
+  const unchanged = titleEdit({}, {}, { title: { from: "Synthetic new title" } });
+  assert.deepEqual(unchanged.facts, [], "Unchanged text has no target for a clarification receipt");
+});
+semanticCase("HANDOFF-ACCEPTANCE", () => {
+  // Assignment or notification is routing activity, not an accepted owner handoff.
+  const assigned = normalize({
+    family: "triage",
+    action: "assigned",
+    payload: {
+      issue: issueItem({ assignees: [fixture.reviewer] }),
+      sender: fixture.merger,
+      assignee: { id: 303, node_id: "U_synthetic_reviewer" },
+    },
+  });
+  assert.deepEqual(metricFacts(assigned, "routing_handoffs"), []);
+  receiptSemantics({
+    metricId: "routing_handoffs",
+    source: assigned,
+    targetMetricId: "assignments_coordinated",
+    actorId: "202",
+    otherActorId: "303",
+    reviewerId: "101",
+  });
+});
+
 test("the semantic inventory accounts for all 98 definitions and preserves exact existing semantic test references", async () => {
   assert.equal(inventory.synthetic, true);
   assert.equal(metricDefinitionsV1.length, 98);
@@ -750,6 +1136,18 @@ test("the semantic inventory accounts for all 98 definitions and preserves exact
   const all = [...covered, ...existing, ...deferred];
   assert.equal(new Set(all).size, all.length, "Every metric must appear in exactly one disposition");
   assert.deepEqual(all.sort(), metricDefinitionsV1.map((metric) => metric.id).sort());
+  // The uncovered remainder is explicit and cannot grow. The fixture field must equal the deferred count,
+  // and the literal below is the reviewed ceiling: lower it in the same reviewed change that lowers the
+  // fixture field when a deferred metric gains semantic coverage. Raising either needs explicit review.
+  assert.ok(
+    inventory.remaining_gap.maximum_deferred_metrics <= 9,
+    "The reviewed ceiling on deferred metrics may only be lowered",
+  );
+  assert.equal(
+    deferred.length,
+    inventory.remaining_gap.maximum_deferred_metrics,
+    "Lower remaining_gap.maximum_deferred_metrics when a deferred metric gains semantic coverage",
+  );
   assert.equal(new Set(inventory.cases.map((entry) => entry.id)).size, inventory.cases.length);
   assert.deepEqual([...registered].sort(), inventory.cases.map((entry) => entry.id).sort());
   for (const entry of inventory.metrics) {

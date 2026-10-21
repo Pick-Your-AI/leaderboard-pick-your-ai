@@ -3,8 +3,8 @@
 This is a partial implementation of [LB-19.01 / issue #72](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/72).
 The new suite feeds synthetic GitHub source payloads through the actual normalizer
 and metric engine. It adds explicit actor, clock, source-proof and grouping
-checks for 18 metric IDs. The inventory separately maps 64 other IDs to existing
-meaningful source cases, with exact test names and their limits. Sixteen IDs
+checks for 25 metric IDs. The inventory separately maps 64 other IDs to existing
+meaningful source cases, with exact test names and their limits. Nine IDs
 remain explicitly deferred in the inventory. The accepted eleven-reference update,
 two pair mappings, two accepted-source mappings and the bounded Project item-day
 mapping below do not certify all 98 public definitions.
@@ -59,6 +59,13 @@ coverage remains incomplete in every result.
 | `milestones_curated` | Membership events retain their own actor, milestone and clock; replay is stable | Current membership and milestone-definition changes are not membership events; a reversal remains raw activity, not qualified curation |
 | `public_moderation` | Public pin/unpin/lock/unlock facets share one actor/item/UTC-day group | Private moderation, organization blocks, missing source history, wrong interval/policy and ranking are rejected |
 | `first_reviews` | The complete default REST sequence identifies the earliest eligible nonself review and shared timestamp ties | Self/Bot/service-account/pending participation, unknown/conflicting identities, incomplete cohorts and invalid clocks cannot manufacture first credit |
+| `title_scope_edits` | One webhook edit whose prior title or body text differs from the current text gives its editor one observed triager unit, once across replay and once for a combined title and body edit | Missing, empty, equal, non-text or unrelated-field history, no event proof or clock, unknown or Bot editors in the user lens, private repositories, out-of-window edits and initial issue creation count nothing. The item author is never the editor. Whether the edit is meaningful or one item-day group is not decided |
+| `project_updates` | A proven published-update transition gives its publisher one triager unit, once across replay; two publications at different source times give two | No-op or incomplete transitions, missing event proof, unsupported subtypes, Project status, Project item-field and issue-field changes, unknown or Bot publishers in the user lens, private repositories and out-of-window publications do not count. The enriched envelope is synthetic; the optional Project status-update feature, substantive content and native collection are not established |
+| `duplicate_resolution` | An intentional, publicly verified, event-proven duplicate relation event is one unit for its triage actor; swapped endpoints and replay of that event stay one. A later removal or un-mark of the same pair is not handled as a reversal and yields a second raw unit | Automatic relations, unverified endpoints, other or malformed relation kinds, missing proof, unknown or Bot actors in the user lens, private repositories, out-of-window marks, a plain issue closure and a `related` link do not count. Preserved unique evidence on the duplicate is not verified, and reversal or un-mark handling remains out of scope (a reversal remains raw activity) |
+| `accepted_findings` | An independent receipt on the reporter's issue fact gives one qualified unit on the acceptance clock, once across replay, while the raw issue unit remains | Issue closure alone, rejected receipts, self or unauthorized reviewers, a different actor, missing target or evidence, unverified or ineligible receipts, the observed lens and out-of-window acceptance do not count. Finding substance, versioning and collaborators rest on the reviewer |
+| `issue_resolution` | The same receipt contract on the merged deliverable fact credits its author | A closed assigned issue and the closer as a substituted actor do not count, nor do the receipt failures above. The issue-to-deliverable closing link and solution quality are not verified by the gate |
+| `issue_clarifications` | The same receipt contract on a proven edit fact credits the editor, while the raw edit unit remains | A raw edit, unchanged text and the item author as a substituted actor do not count, nor do the receipt failures above. Whether the edit improved scope or reproduction is the reviewer's judgment |
+| `routing_handoffs` | The same receipt contract on an assignment fact credits the coordinator, while the raw assignment unit remains | A raw assignment notification and the assignee as a substituted actor do not count, nor do the receipt failures above. The handoff note and the receiving owner's acceptance are not verified |
 
 These are bounded source/engine behaviors. For example, the thread case tests a
 host-proven transition boundary, not complete reconstruction of actual thread
@@ -70,8 +77,8 @@ the corresponding metric rather than marking its entire public definition done.
 
 ## Remaining acceptance and ownership
 
-The inventory now has 18 direct-suite entries, 64 existing-source mappings and
-16 explicit remaining dispositions. The references include specialized domain
+The inventory now has 25 direct-suite entries, 64 existing-source mappings and
+nine explicit remaining dispositions. The references include specialized domain
 receipt admission, localization, bug/answer recognition, typed history,
 participation history, physical diff eligibility, maintenance, automation,
 editorial consent and observed Project item days. Each maps a literal positive
@@ -147,20 +154,31 @@ as evidence for unknown in-scope active-week exclusion. Its calendar denominator
 is context, not a certified fully covered participation share or month projection.
 
 The remaining dispositions retain six derivation/admission prerequisites and
-ten IDs needing additional semantic cases. The accepted eleven-reference review
+three IDs needing additional semantic cases (`accepted_suggestions`,
+`mentorship` and `onboarding`). The accepted eleven-reference review
 left 21 entries; the prior composition mapped two pairs plus direct changes and
 helpful feedback, leaving 17. The [Project field item-day cases](../packages/metrics/test/project-field-days.test.js)
-now add one bounded mapping for explicitly enriched synthetic item transitions
+added one bounded mapping for explicitly enriched synthetic item transitions
 under `project-field-day/v1`, leaving 16. The [grouping guide](project-field-day-grouping.md)
 preserves the limits: no native `projects_v2_item` collection, installed grants,
 complete history, live sender identity, manual-effort classification, independent
-correction authorization or public activation is established. `project_updates`
-remains deferred because scalar field transitions do not prove substantive
-published Project progress-update artifacts.
+correction authorization or public activation is established. A later bounded
+batch of issue and triage cases moved seven further IDs into the direct suite
+(`title_scope_edits`, `project_updates`, `duplicate_resolution`,
+`accepted_findings`, `issue_resolution`, `issue_clarifications` and
+`routing_handoffs`), leaving nine. `project_updates` is now covered by the
+published-update case above, but only for an enriched synthetic transition; the
+optional Project status-update feature, substantive progress content and native
+collection remain unproven. The inventory's `remaining_gap.maximum_deferred_metrics`
+must equal the deferred count, and the guard also pins a reviewed literal ceiling
+(currently nine) that the fixture value may not exceed. The deferred set therefore
+cannot grow without editing that literal, and both values are lowered in the same
+reviewed change that closes a gap.
 The optional retained-line and commit-attributed
-lenses are not silently assigned to the adjacent physical-context PRs. A raw
-relationship cannot establish preserved duplicate evidence; a generic accepted
-author fact cannot prove an exact suggestion link or a consented mentorship.
+lenses are not silently assigned to the adjacent physical-context PRs. A generic
+accepted author fact cannot prove an exact suggestion link or a consented
+mentorship. The duplicate case verifies an intentional, publicly verified
+relation, not preserved unique evidence on the duplicate.
 
 At the original source lane's ownership check, [#382](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/382)
 owned COV15 transfer lineage, alias conservation and privacy suppression;
