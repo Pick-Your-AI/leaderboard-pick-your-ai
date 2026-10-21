@@ -391,7 +391,7 @@
   ],
   "remaining_gap": {
     "maximum_deferred_metrics": 9,
-    "rule": "The deferred list may only shrink. Lower this ceiling in the same reviewed change that moves a metric into a semantic case or existing evidence; never raise it to admit a new gap."
+    "rule": "This value must equal the deferred metric count, and the guard test pins a reviewed literal ceiling it may not exceed. Lower both in the same reviewed change that moves a metric into a semantic case or existing evidence; never raise either to admit a new gap."
   },
   "deferred": [
     {

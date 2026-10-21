@@ -795,6 +795,7 @@ semanticCase("TITLE-SCOPE-EDIT", () => {
     { title: { from: "Synthetic new title" } },
     { title: { from: 5 } },
     { labels: { from: "Synthetic old title" } },
+    { state: { from: "open" } },
   ]) {
     const unchanged = titleEdit({}, {}, changes);
     assert.deepEqual(unchanged.facts, [], `No proven text difference: ${JSON.stringify(changes)}`);
@@ -1123,14 +1124,18 @@ test("the semantic inventory accounts for all 98 definitions and preserves exact
   const all = [...covered, ...existing, ...deferred];
   assert.equal(new Set(all).size, all.length, "Every metric must appear in exactly one disposition");
   assert.deepEqual(all.sort(), metricDefinitionsV1.map((metric) => metric.id).sort());
-  // The uncovered remainder is explicit and monotonic: the ceiling must equal the deferred count, so
-  // closing a gap forces it down and a regression cannot silently re-defer a covered metric.
+  // The uncovered remainder is explicit and cannot grow. The fixture field must equal the deferred count,
+  // and the literal below is the reviewed ceiling: lower it in the same reviewed change that lowers the
+  // fixture field when a deferred metric gains semantic coverage. Raising either needs explicit review.
+  assert.ok(
+    inventory.remaining_gap.maximum_deferred_metrics <= 9,
+    "The reviewed ceiling on deferred metrics may only be lowered",
+  );
   assert.equal(
     deferred.length,
     inventory.remaining_gap.maximum_deferred_metrics,
     "Lower remaining_gap.maximum_deferred_metrics when a deferred metric gains semantic coverage",
   );
-  assert.ok(deferred.length <= 9, "The deferred set may not grow beyond the reviewed gap");
   assert.equal(new Set(inventory.cases.map((entry) => entry.id)).size, inventory.cases.length);
   assert.deepEqual([...registered].sort(), inventory.cases.map((entry) => entry.id).sort());
   for (const entry of inventory.metrics) {

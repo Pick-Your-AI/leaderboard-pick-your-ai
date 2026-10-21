@@ -169,8 +169,11 @@ batch of issue and triage cases moved seven further IDs into the direct suite
 `routing_handoffs`), leaving nine. `project_updates` is now covered by the
 published-update case above, but only for an enriched synthetic transition; the
 optional Project status-update feature, substantive progress content and native
-collection remain unproven. The inventory's `remaining_gap` ceiling must equal
-the deferred count, so the gap can shrink only through a reviewed edit.
+collection remain unproven. The inventory's `remaining_gap.maximum_deferred_metrics`
+must equal the deferred count, and the guard also pins a reviewed literal ceiling
+(currently nine) that the fixture value may not exceed. The deferred set therefore
+cannot grow without editing that literal, and both values are lowered in the same
+reviewed change that closes a gap.
 The optional retained-line and commit-attributed
 lenses are not silently assigned to the adjacent physical-context PRs. A generic
 accepted author fact cannot prove an exact suggestion link or a consented
