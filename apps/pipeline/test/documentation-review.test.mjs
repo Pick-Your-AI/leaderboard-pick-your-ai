@@ -678,6 +678,8 @@ test("documentation review: current privacy and authority retire persisted proof
   });
   assert.equal((await read(restarted)).selected.rows[0].result.value, 1);
   h.setPrivate(true);
+  // The collector records visibility changes before retained reads can deny them.
   await assert.rejects(restarted.runOnce({ cutoff }), /public_source_not_verified/);
   assert.equal(await read(restarted), null);
+  await assert.rejects(restarted.aggregateExplanations.read(snapshotId), /Frozen input source authorization changed/);
 });
