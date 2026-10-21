@@ -747,3 +747,215 @@ test("named UTC publication windows keep DST boundary events half-open", () => {
   assert.equal(result.coverage, "complete");
   assert.deepEqual(result.rows[0].evidenceIds, ["inside", "start"]);
 });
+
+test("native pending selection includes pre-window backlog without changing ordinary pending rules", () => {
+  const configured = policy({
+    metricId: "pr_accepted_rate",
+    aggregation: "ratio",
+    rank: false,
+    rankedStates: ["observed"],
+    minimumSamples: 2,
+  });
+  const selected = (id, patch) =>
+    fact(id, {
+      metricId: "pr_accepted_rate",
+      state: "observed",
+      acceptanceReceipt: null,
+      acceptedBy: null,
+      decisionAsOf: to,
+      ...patch,
+    });
+  const decidedAt = "2026-10-10T00:00:00Z";
+  const retained = [
+    selected("merged", { outcome: "merged", occurredAt: decidedAt, acceptedAt: decidedAt }),
+    selected("closed", { outcome: "closed_unmerged", occurredAt: decidedAt, acceptedAt: decidedAt }),
+    selected("older", {
+      outcome: "pending",
+      state: "pending",
+      occurredAt: "2026-09-01T00:00:00Z",
+      acceptedAt: null,
+    }),
+  ];
+  const result = aggregateMetric(input(retained), configured, scope());
+  assert.equal(result.rows[0].value, 0.5);
+  assert.equal(result.rows[0].numerator, 1);
+  assert.equal(result.rows[0].denominator, 2);
+  assert.equal(result.rows[0].pending, 1);
+  assert.equal(result.rows[0].rank, null);
+  assert.deepEqual(
+    result.rows[0].pendingEvidence.map((value) => value.id),
+    ["older"],
+  );
+  assert.ok(selectPortfolioFacts(input(retained), configured, scope()).some((value) => value.id === "older"));
+  const ordinary = retained.map(({ decisionAsOf: _asOf, ...value }) => value);
+  assert.equal(aggregateMetric(input(ordinary), configured, scope()).rows[0].pending, 0);
+  const excluded = {
+    ...retained[2],
+    revision: 1,
+    state: "excluded",
+    correctionReceipt: "synthetic-reviewed-pending-exclusion",
+  };
+  assert.equal(aggregateMetric(input([...retained, excluded]), configured, scope()).rows[0].pending, 0);
+  assert.equal(
+    board([fact("older", { state: "pending", occurredAt: "2026-09-01T00:00:00Z", acceptedAt: null })]).rows.length,
+    0,
+  );
+});
+
+test("native decisions preserve exact half-open clocks and reject another window's selection", () => {
+  const configured = policy({
+    metricId: "pr_accepted_rate",
+    aggregation: "ratio",
+    rank: false,
+    rankedStates: ["observed"],
+  });
+  const selected = (id, at, patch = {}) =>
+    fact(id, {
+      metricId: "pr_accepted_rate",
+      state: "observed",
+      outcome: "merged",
+      occurredAt: at,
+      acceptedAt: at,
+      observedAt: to,
+      acceptanceReceipt: null,
+      acceptedBy: null,
+      decisionAsOf: to,
+      ...patch,
+    });
+  const retained = [
+    selected("before", "2026-09-30T23:59:59.999999999Z"),
+    selected("start", from),
+    selected("last", "2026-10-31T23:59:59.999999999Z"),
+    selected("end", to),
+  ];
+  const result = aggregateMetric(input(retained), configured, scope());
+  assert.deepEqual(result.rows[0].evidenceIds.sort(), ["last", "start"]);
+  assert.equal(result.rows[0].denominator, 2);
+  assert.throws(
+    () => aggregateMetric(input(retained), configured, scope({ to: "2026-10-31T00:00:00Z" })),
+    /Decision selection must match the reporting window/,
+  );
+  assert.throws(
+    () =>
+      aggregateMetric(input([selected("future", from, { decisionAsOf: "2026-11-02T00:00:00Z" })]), configured, scope()),
+    /Decision selection must match the reporting window/,
+  );
+  assert.throws(
+    () => aggregateMetric(input([selected("bad", from, { outcome: "pending" })]), configured, scope()),
+    /Invalid decision selection state/,
+  );
+});
+
+test("only known native pending units survive incomplete coverage and never become decided zero", () => {
+  const configured = policy({
+    metricId: "pr_accepted_rate",
+    aggregation: "ratio",
+    rank: false,
+    rankedStates: ["observed"],
+  });
+  const retained = fact("pending", {
+    metricId: "pr_accepted_rate",
+    state: "pending",
+    outcome: "pending",
+    occurredAt: "2026-09-01T00:00:00Z",
+    acceptedAt: null,
+    decisionAsOf: to,
+    acceptanceReceipt: null,
+    acceptedBy: null,
+  });
+  const partial = input([retained], {
+    coverage: [coverage({ state: "partial", sourceErrors: ["synthetic_incomplete_inventory"] })],
+  });
+  const row = aggregateMetric(partial, configured, scope()).rows[0];
+  assert.equal(row.value, null);
+  assert.equal(row.denominator, 0);
+  assert.equal(row.pending, 1);
+  assert.equal(row.rank, null);
+  assert.equal(aggregateMetric({ ...partial, facts: [] }, configured, scope()).rows.length, 0);
+});
+
+const nativePolicy = () => policy({ metricId: "pr_accepted_rate", aggregation: "ratio", rank: false, rankedStates: ["observed"] });
+const nativeFact = (id, patch = {}) => fact(id, {
+  metricId: "pr_accepted_rate", state: "observed", outcome: "merged", decisionAsOf: to,
+  occurredAt: "2026-10-04T10:00:00.123456Z", acceptedAt: "2026-10-04T10:00:00.123456Z",
+  observedAt: "2026-10-06T10:00:00.123456Z", acceptanceReceipt: null, acceptedBy: null, ...patch,
+});
+
+test("native microsecond and nanosecond decisions preserve both half-open boundaries", () => {
+  for (const digits of [6, 9]) {
+    const selected = (id, at) => nativeFact(id, { occurredAt: at, acceptedAt: at });
+    const first = from.replace("Z", `.${"0".repeat(digits)}Z`);
+    const last = `2026-10-31T23:59:59.${"9".repeat(digits)}Z`;
+    const facts = [
+      selected("before", `2026-09-30T23:59:59.${"9".repeat(digits)}Z`),
+      selected("start", first), selected("last", last), selected("end", to),
+    ];
+    const frozen = input(facts), original = structuredClone(frozen);
+    const result = aggregateMetric(frozen, nativePolicy(), scope());
+    assert.deepEqual(result.rows[0].evidenceIds, ["last", "start"]);
+    assert.deepEqual(result.rows[0].evidence.map((entry) => entry.effectiveAt), [last, first]);
+    assert.equal(result.rows[0].denominator, 2);
+    assert.deepEqual(frozen, original);
+  }
+});
+
+test("native observation cutoffs and duplicate ordering retain submillisecond precision", () => {
+  for (const digits of [6, 9]) {
+    const atCutoff = nativeFact("at-cutoff", { observedAt: to.replace("Z", `.${"0".repeat(digits)}Z`) });
+    const afterCutoff = nativeFact("after-cutoff", { observedAt: to.replace("Z", `.${"0".repeat(digits - 1)}1Z`) });
+    const bounded = aggregateMetric(input([atCutoff, afterCutoff]), nativePolicy(), scope());
+    assert.deepEqual(bounded.rows[0].evidenceIds, ["at-cutoff"]);
+    assert.ok(bounded.audit.some((entry) => entry.reason === "observation_after_cutoff" && entry.factIds.includes("after-cutoff")));
+
+    const earlier = nativeFact("z-earlier", { observedAt: `2026-10-06T10:00:00.${"0".repeat(digits - 1)}1Z` });
+    const later = { ...earlier, id: "a-later", observedAt: `2026-10-06T10:00:00.${"0".repeat(digits - 1)}2Z` };
+    for (const facts of [[later, earlier], [earlier, later]]) {
+      const result = aggregateMetric(input(facts), nativePolicy(), scope());
+      assert.deepEqual(result.rows[0].evidenceIds, ["z-earlier"]);
+      assert.equal(result.rows[0].evidence[0].observedAt, earlier.observedAt);
+    }
+  }
+});
+
+test("native policy units choose the exact earliest decision instead of the first ID", () => {
+  const earlier = nativeFact("z-earlier", {
+    artifactId: "same-native-pr", occurredAt: "2026-10-04T10:00:00.000000001Z", acceptedAt: "2026-10-04T10:00:00.000000001Z",
+  });
+  const later = nativeFact("a-later", {
+    artifactId: "same-native-pr", occurredAt: "2026-10-04T10:00:00.000000002Z", acceptedAt: "2026-10-04T10:00:00.000000002Z",
+  });
+  for (const facts of [[later, earlier], [earlier, later]])
+    assert.deepEqual(aggregateMetric(input(facts), nativePolicy(), scope()).rows[0].evidenceIds, ["z-earlier"]);
+});
+
+test("native comparison signatures preserve precise changes and equivalent UTC spellings", () => {
+  const signature = (at) => aggregateMetric(input([nativeFact("same", { occurredAt: at, acceptedAt: at })]), nativePolicy(), scope()).rows[0].evidence[0].comparisonSignature;
+  assert.equal(signature("2026-10-04T10:00:00.123456Z"), signature("2026-10-04T10:00:00.123456000Z"));
+  assert.notEqual(signature("2026-10-04T10:00:00.123456001Z"), signature("2026-10-04T10:00:00.123456002Z"));
+});
+
+test("native timestamp admission stays UTC, calendar-valid and bounded without changing legacy facts", () => {
+  for (const field of ["decisionAsOf", "observedAt", "occurredAt", "acceptedAt"]) {
+    for (const value of ["2026-10-04T10:00:00.1234567890Z", "2026-10-04T10:00:00+00:00", "2026-02-30T10:00:00Z", "invalid"])
+      assert.throws(() => aggregateMetric(input([nativeFact("invalid", { [field]: value })]), nativePolicy(), scope()));
+  }
+  assert.throws(() => board([fact("legacy", { observedAt: "2026-10-06T10:00:00.123456Z" })]), /Expected an explicit UTC instant/);
+  assert.throws(() => aggregateMetric(input([nativeFact("wrong-metric", { metricId: "pr_merged" })]), policy(), scope()), /Decision selection must match/);
+});
+
+test("native participation and private snapshot comparisons retain precise evidence", () => {
+  const earlier = nativeFact("earlier", { occurredAt: "2026-10-04T10:00:00.000000001Z", acceptedAt: "2026-10-04T10:00:00.000000001Z" });
+  const later = nativeFact("later", { occurredAt: "2026-10-04T10:00:00.000000002Z", acceptedAt: "2026-10-04T10:00:00.000000002Z" });
+  const history = { originAt: "2026-01-01T00:00:00Z", reviewReceipt: "synthetic-history-review" };
+  const participation = participationView(input([later, earlier]), nativePolicy(), scope(), history);
+  assert.equal(participation[0].firstContributionAt, earlier.acceptedAt);
+  assert.equal(participation[0].firstContributionId, "earlier");
+  assert.equal(participation[0].newcomer, true);
+  assert.deepEqual(participation[0].activeWeeks, ["2026-09-28T00:00:00.000Z"]);
+  const before = aggregateMetric(input([earlier]), nativePolicy(), scope());
+  const after = aggregateMetric(input([earlier, later]), nativePolicy(), scope());
+  assert.equal(compareRankMovement(before, after)[0].state, "unavailable");
+  assert.equal(compareRankMovement(after, before)[0].state, "unavailable");
+  assert.equal(before.rows[0].rank, null);
+  assert.equal(after.rows[0].rank, null);
+});

@@ -5,6 +5,7 @@ import {
   coverageSchema,
   executionModeSchema,
   isPullRequestMergeTargetBranch,
+  pullRequestDecisionInstantSchema,
   serviceAccountClassificationSchema,
   supportsPullRequestMergeTarget,
   validatePullRequestMergeTarget,
@@ -64,6 +65,8 @@ export interface MetricFact {
   /** Literal source state, never an inferred classification. */
   rawState?: string;
   outcome?: "merged" | "closed_unmerged" | "pending";
+  /** Private native-decision selection bound to this exact exclusive reporting end. */
+  decisionAsOf?: string;
   readyAt?: string | null;
   firstReviewAt?: string | null;
   /** Exact observed locale fact whose accepted representation replaces current portfolio display. */
@@ -211,7 +214,19 @@ function instant(value: string): number {
 }
 function compareInstants(a: string | null, b: string | null): number {
   if (a === null || b === null) return a === b ? 0 : a === null ? -1 : 1;
-  return instant(a) - instant(b);
+  // prepare validates the applicable clock profile before these ordering steps.
+  return compareSourceInstants(a, b);
+}
+function validateFactInstant(fact: MetricFact, value: string): void {
+  if (fact.decisionAsOf === undefined) instant(value);
+  else pullRequestDecisionInstantSchema.parse(value);
+}
+function comparisonInstant(fact: MetricFact, value: string | null | undefined): number | string | null {
+  if (value == null) return null;
+  if (fact.decisionAsOf === undefined) return instant(value);
+  // Canonicalize equivalent UTC spellings without discarding native precision.
+  const fraction = value.match(/\.(\d+)/)?.[1] ?? "";
+  return `${value.slice(0, 19)}.${fraction.padEnd(9, "0")}Z`;
 }
 function number(value: number, name: string): number {
   if (!Number.isFinite(value) || value < 0) throw new Error(`${name} must be finite and nonnegative`);
@@ -613,8 +628,9 @@ function prepare(
       !knownRoles.includes(fact.role)
     )
       throw new Error("Unknown fact semantics");
-    instant(fact.observedAt);
-    if (instant(fact.observedAt) > cutoff) {
+    if (fact.decisionAsOf !== undefined) pullRequestDecisionInstantSchema.parse(fact.decisionAsOf);
+    validateFactInstant(fact, fact.observedAt);
+    if (compareSourceInstants(fact.observedAt, input.cutoff) > 0) {
       reject([fact], "observation_after_cutoff");
       continue;
     }
@@ -623,7 +639,27 @@ function prepare(
       reject([fact], "unreviewed_revision");
       continue;
     }
-    for (const at of [fact.occurredAt, fact.acceptedAt, fact.readyAt, fact.firstReviewAt]) if (at != null) instant(at);
+    for (const at of [fact.occurredAt, fact.acceptedAt, fact.readyAt, fact.firstReviewAt])
+      if (at != null) validateFactInstant(fact, at);
+    if (fact.decisionAsOf !== undefined) {
+      if (
+        fact.metricId !== "pr_accepted_rate" ||
+        fact.role !== "author" ||
+        !["merged", "closed_unmerged", "pending"].includes(fact.outcome ?? "") ||
+        compareSourceInstants(fact.decisionAsOf, scope.to) !== 0 ||
+        compareSourceInstants(fact.decisionAsOf, input.cutoff) > 0
+      )
+        throw new Error("Decision selection must match the reporting window");
+      if (
+        (fact.outcome === "pending" &&
+          ((fact.revision === 0 && fact.state !== "pending") || fact.acceptedAt !== null)) ||
+        (fact.outcome !== "pending" &&
+          (fact.acceptedAt === null ||
+            fact.occurredAt === null ||
+            compareSourceInstants(fact.acceptedAt, fact.occurredAt) !== 0))
+      )
+        throw new Error("Invalid decision selection state");
+    }
     if (fact.quantity !== undefined) number(fact.quantity, "Quantity");
     if (policy.aggregation === "sum" && fact.quantity !== undefined && !Number.isSafeInteger(fact.quantity))
       throw new Error("Line quantities require exact safe integers");
@@ -816,16 +852,19 @@ function prepare(
           ? fact.occurredAt
           : fact[policy.dateBasis];
     if (!reason && at == null && policy.aggregation !== "duration") reason = "unknown_effective_time";
-    if (
-      !reason &&
-      at != null &&
-      ((scope.from !== null && instant(at) < instant(scope.from)) || instant(at) >= instant(scope.to))
-    )
-      reason = "outside_window";
+    if (!reason && at != null) {
+      const selectedDecision = fact.decisionAsOf !== undefined;
+      const pendingAtEnd = selectedDecision && fact.outcome === "pending";
+      const beforeStart =
+        scope.from !== null &&
+        (selectedDecision ? compareSourceInstants(at, scope.from) < 0 : instant(at) < instant(scope.from));
+      const afterEnd = selectedDecision ? compareSourceInstants(at, scope.to) >= 0 : instant(at) >= instant(scope.to);
+      if ((!pendingAtEnd && beforeStart) || afterEnd) reason = "outside_window";
+    }
     if (
       !reason &&
       fact.acceptedAt !== null &&
-      instant(fact.acceptedAt) > cutoff &&
+      compareSourceInstants(fact.acceptedAt, input.cutoff) > 0 &&
       ["qualified", "reviewed"].includes(fact.state)
     )
       reason = "acceptance_after_cutoff";
@@ -874,7 +913,9 @@ function prepare(
           fact.actorId,
           fact.artifactId,
           fact.rawState,
-          Math.floor(instant(fact.occurredAt) / (policy.groupingSeconds! * 1000)),
+          // Integer-second buckets intentionally discard subsecond position,
+          // after precise admission and window selection have completed.
+          Math.floor(Date.parse(fact.occurredAt) / (policy.groupingSeconds! * 1000)),
         );
       } else if (policy.groupBy === "actor_artifact_interval") {
         // A versioned daily unit shares its facets, not repositories, actors
@@ -890,7 +931,7 @@ function prepare(
           fact.repoId,
           fact.actorId,
           fact.artifactId,
-          Math.floor(instant(at) / (policy.groupingSeconds! * 1000)),
+          Math.floor(Date.parse(at) / (policy.groupingSeconds! * 1000)),
         );
       }
     }
@@ -1166,11 +1207,11 @@ export function aggregateMetric(
         fact.revision,
         fact.role,
         fact.state,
-        fact[policy.dateBasis] == null ? null : instant(fact[policy.dateBasis]!),
+        comparisonInstant(fact, fact[policy.dateBasis]),
         fact.quantity ?? null,
         fact.outcome ?? null,
-        fact.readyAt == null ? null : instant(fact.readyAt),
-        fact.firstReviewAt == null ? null : instant(fact.firstReviewAt),
+        comparisonInstant(fact, fact.readyAt),
+        comparisonInstant(fact, fact.firstReviewAt),
       ]),
     }));
     if (policy.aggregation === "count" || policy.aggregation === "sum") {
@@ -1351,9 +1392,19 @@ export function compareRankMovement(
                   : null;
   const beforeEvidence = new Map(before.rows.flatMap((row) => row.evidence.map((item) => [item.id, item] as const)));
   const afterEvidence = new Map(after.rows.flatMap((row) => row.evidence.map((item) => [item.id, item] as const)));
+  const compareEvidenceTime = (at: string, boundary: string, metric: RankComparisonInput) => {
+    if (metric.metricId === "pr_accepted_rate" && metric.aggregation === "ratio") {
+      pullRequestDecisionInstantSchema.parse(at);
+      instant(boundary);
+      return compareSourceInstants(at, boundary);
+    }
+    return instant(at) - instant(boundary);
+  };
   const lateHistory = [...afterEvidence.values()].some(
     (item) =>
-      !beforeEvidence.has(item.id) && item.effectiveAt !== null && instant(item.effectiveAt) < instant(before.scope.to),
+      !beforeEvidence.has(item.id) &&
+      item.effectiveAt !== null &&
+      compareEvidenceTime(item.effectiveAt, before.scope.to, after) < 0,
   );
   const missingComparisonHistory = [...beforeEvidence.values(), ...afterEvidence.values()].some(
     (item) => !item.comparisonSignature,
@@ -1362,7 +1413,9 @@ export function compareRankMovement(
     const next = afterEvidence.get(item.id);
     if (next) return item.comparisonSignature !== next.comparisonSignature;
     return (
-      after.scope.from === null || item.effectiveAt === null || instant(item.effectiveAt) >= instant(after.scope.from)
+      after.scope.from === null ||
+      item.effectiveAt === null ||
+      compareEvidenceTime(item.effectiveAt, after.scope.from, before) >= 0
     );
   });
   const beforeRows = new Map<string, RankComparisonInput["rows"][number]>();
@@ -1501,7 +1554,8 @@ export function participationView(
     hasCompleteSourceCoverage(input, policy, historyScope) &&
     !hasUncertainty(historical);
   const monday = (at: string) => {
-    const date = new Date(instant(at));
+    // Already-validated timestamps are reduced only to a calendar-week bucket.
+    const date = new Date(at);
     date.setUTCHours(0, 0, 0, 0);
     date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
     return date.toISOString();
@@ -1540,8 +1594,8 @@ export function participationView(
       newcomer:
         !complete || !first || scope.from === null
           ? null
-          : instant(first[policy.dateBasis]!) >= instant(scope.from) &&
-            instant(first[policy.dateBasis]!) < instant(scope.to),
+          : compareSourceInstants(first[policy.dateBasis]!, scope.from) >= 0 &&
+            compareSourceInstants(first[policy.dateBasis]!, scope.to) < 0,
       historyCoverage: complete ? "complete_known_history" : "incomplete",
       caveat:
         "First observed qualifying contribution in reviewed known history; not employment start or proof of no earlier work.",

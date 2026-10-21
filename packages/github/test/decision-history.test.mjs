@@ -763,3 +763,30 @@ test("proxy-backed expected decision bindings are rejected before inspection", a
         assert.equal(validate(receipt, expected(receipt)).status, "validated");
       });
 });
+
+test("one captured generation selects earlier exclusive ends without rewriting its receipt", async () => {
+  const h = decisionFixture(
+    [event("closed", t2, "EARLY_CLOSE"), event("reopened", t3), event("closed", t4, "FINAL_CLOSE")],
+    closedAnchor(t4),
+  );
+  const receipt = await captured(h);
+  const original = structuredClone(receipt);
+  const reads = h.state.calls.length;
+  assert.equal(select(receipt, t2).outcome, "pending");
+  assert.equal(select(receipt, t3).outcome, "closed_unmerged");
+  assert.equal(select(receipt, t4).outcome, "pending");
+  assert.equal(select(receipt, t5).outcome, "closed_unmerged");
+  assert.equal(select(receipt, t5).decisionAt, t4);
+  assert.equal(select(receipt, receipt.binding.subject.createdAt).status, "not_yet_created");
+  assert.deepEqual(select(receipt), select(receipt, receipt.generation.asOf));
+  assert.deepEqual(receipt, original);
+  assert.equal(h.state.calls.length, reads, "window selection never recollects or re-signs history");
+});
+
+test("a reporting end cannot extend a capture or supply a malformed time", async () => {
+  const receipt = await captured(decisionFixture([event("merged", t4)], mergedAnchor(t4)));
+  for (const target of [t6, "", "2026-02-30T00:00:00Z", t4 + "\n", null, 0])
+    assert.equal(select(receipt, target).status, "unavailable");
+  assert.equal(select(receipt, "2026-01-04T00:00:00.000000000Z").outcome, "pending");
+  assert.equal(select(receipt, "2026-01-04T00:00:00.000000001Z").outcome, "merged");
+});

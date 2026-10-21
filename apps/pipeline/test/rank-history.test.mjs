@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { retainedRankHistory } from "../src/rank-history.mjs";
+import { decisionProjectionBinding } from "../src/pull-request-decided-projection.mjs";
 
 const receipt = (size) => ({
   snapshot: { snapshotId: "synthetic-indexed-snapshot", revision: 1 },
@@ -85,5 +86,66 @@ test("retained cohort and evidence duplicates remain integrity failures", () => 
     const document = receipt(2);
     patch(document.rankEvidence.metrics[0].rows);
     assert.throws(() => retainedRankHistory(document), /rank_history_integrity_error/);
+  }
+});
+
+test("retained native ratio evidence preserves microseconds and nanoseconds without changing legacy clocks", () => {
+  const document = receipt(1);
+  const capture = {
+    schemaVersion: "pipeline-pr-decision-generations/v1",
+    source: "synthetic-native-rank-source",
+    asOf: document.cutoff,
+    observationCutoff: document.cutoff,
+    runs: [
+      {
+        repositoryId: 2,
+        runId: "synthetic-native-rank-run",
+        accessGeneration: "1",
+        completedAt: document.cutoff,
+        observations: [],
+      },
+    ],
+  };
+  document.authorization = {
+    pullRequestDecisionEvidence: capture,
+    pullRequestDecisionProjection: decisionProjectionBinding(capture, document.scope.to, []),
+  };
+  document.metrics[0].metricId = "pr_accepted_rate";
+  document.metrics[0].aggregation = "ratio";
+  document.metrics[0].rows[0].rank = null;
+  document.rankEvidence.metrics[0].metricId = "pr_accepted_rate";
+  const evidence = document.rankEvidence.metrics[0].rows[0].evidence[0];
+  evidence.effectiveAt = "2026-10-10T00:00:00.123456789Z";
+  evidence.observedAt = "2026-10-10T00:00:01.123456Z";
+  const original = structuredClone(document);
+  assert.deepEqual(retainedRankHistory(document).metrics[0].rows[0].evidence, [evidence]);
+  assert.deepEqual(document, original);
+  for (const field of ["effectiveAt", "observedAt"]) {
+    for (const invalid of ["2026-10-10T00:00:00.1234567890Z", "2026-10-10T00:00:00+00:00", "2026-02-30T00:00:00Z"]) {
+      const changed = structuredClone(document);
+      changed.rankEvidence.metrics[0].rows[0].evidence[0][field] = invalid;
+      assert.throws(() => retainedRankHistory(changed), /rank_history_integrity_error/);
+    }
+  }
+  for (const mutate of [
+    (value) => {
+      delete value.authorization;
+    },
+    (value) => {
+      value.authorization.pullRequestDecisionProjection.captureHash = "0".repeat(64);
+    },
+    (value) => {
+      value.authorization.pullRequestDecisionProjection.asOf = "2026-10-17T00:00:00.000Z";
+    },
+    (value) => {
+      value.metrics[0].aggregation = "count";
+    },
+    (value) => {
+      value.metrics[0].metricId = value.rankEvidence.metrics[0].metricId = "issues_opened";
+    },
+  ]) {
+    const changed = structuredClone(document);
+    mutate(changed);
+    assert.throws(() => retainedRankHistory(changed), /rank_history_integrity_error/);
   }
 });

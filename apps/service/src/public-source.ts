@@ -62,6 +62,8 @@ export interface PublicEvidence {
 export interface PortfolioEvidence extends PublicEvidence {
   activityState: "observed" | "pending" | "accepted" | "unknown";
   observedAt: string | null;
+  /** Provider-private native pending selection; the public projection always removes it. */
+  decisionAsOf?: string;
 }
 export interface PublicActor {
   actorId: string;
@@ -531,7 +533,42 @@ export function projectRead(
   >();
   const metadataByContribution = new Map<string, string>();
   const documentationClassificationByContribution = new Map<string, string>();
-  const projectEvidence = (entries: PublicEvidence[], acceptedReproductions = false, privateMergeProvenance = false) =>
+  const decisionPendingIds = (entries: PortfolioEvidence[]) => {
+    const selected = new Set<string>();
+    for (const entry of entries) {
+      if (entry.decisionAsOf === undefined) continue;
+      const contribution = contributionSchema.parse(entry.contribution);
+      const coverage = snapshot.coverage.filter(
+        (value) => value.scopeId === entry.artifact.repositoryId && value.source === "github_rest",
+      );
+      if (
+        !date(entry.decisionAsOf) ||
+        entry.activityState !== "pending" ||
+        contribution.metricIds.length !== 1 ||
+        contribution.metricIds[0] !== "pr_accepted_rate" ||
+        contribution.roles.length !== 1 ||
+        contribution.roles[0] !== "author" ||
+        entry.occurredAt === null ||
+        !date(entry.occurredAt) ||
+        compareSourceInstants(entry.occurredAt, entry.decisionAsOf) >= 0 ||
+        compareSourceInstants(entry.decisionAsOf, snapshot.generatedAt) > 0 ||
+        (scope.end !== null && compareSourceInstants(entry.decisionAsOf, scope.end) !== 0) ||
+        coverage.length === 0 ||
+        coverage.some(
+          (value) => value.windowEnd === null || compareSourceInstants(value.windowEnd, entry.decisionAsOf!) !== 0,
+        )
+      )
+        return reject();
+      selected.add(contribution.contributionId);
+    }
+    return selected;
+  };
+  const projectEvidence = (
+    entries: PublicEvidence[],
+    acceptedReproductions = false,
+    privateMergeProvenance = false,
+    pendingAtEnd: ReadonlySet<string> = new Set(),
+  ) =>
     entries
       .map((entry) => {
         const artifact = artifactSchema.parse(entry.artifact);
@@ -730,6 +767,7 @@ export function projectRead(
           (!scope.roles?.length || scope.roles.some((role) => entry.contribution.roles.includes(role))) &&
           (scope.repository === null || entry.artifact.repositoryId === scope.repository) &&
           (scope.start === null ||
+            pendingAtEnd.has(entry.contribution.contributionId) ||
             (entry.occurredAt !== null && compareSourceInstants(entry.occurredAt, scope.start) >= 0)) &&
           (scope.end === null || (entry.occurredAt !== null && compareSourceInstants(entry.occurredAt, scope.end) < 0)),
       );
@@ -754,7 +792,7 @@ export function projectRead(
     }),
   );
   if (portfolioMetadata.size !== portfolioInput.length) return reject();
-  const portfolioEvidence = projectEvidence(portfolioInput)
+  const portfolioEvidence = projectEvidence(portfolioInput, false, false, decisionPendingIds(portfolioInput))
     .map((entry) => ({
       ...entry,
       ...portfolioMetadata.get(entry.contribution.contributionId)!,
@@ -794,15 +832,17 @@ export function projectRead(
     ]),
   );
   if (pendingMetadata.size !== pendingInput.length) return reject();
-  const pendingEvidence = projectEvidence(pendingInput).map((entry) => ({
-    ...entry,
-    activityState: "pending" as const,
-    observedAt: pendingMetadata.get(entry.contribution.contributionId)!,
-    contribution: {
-      ...entry.contribution,
-      reasonCodes: ["public_pending_work", ...publicDocumentationReasons(entry.contribution)],
-    },
-  }));
+  const pendingEvidence = projectEvidence(pendingInput, false, false, decisionPendingIds(pendingInput)).map(
+    (entry) => ({
+      ...entry,
+      activityState: "pending" as const,
+      observedAt: pendingMetadata.get(entry.contribution.contributionId)!,
+      contribution: {
+        ...entry.contribution,
+        reasonCodes: ["public_pending_work", ...publicDocumentationReasons(entry.contribution)],
+      },
+    }),
+  );
   const physicalInput = selected.physicalEvidence ?? [];
   const physicalIds = physicalInput.map((entry) => {
     const contribution = contributionSchema.parse(entry.contribution);

@@ -1,5 +1,6 @@
-import { sourceAdapterSchema } from "@pick-your-ai/contracts";
+import { compareSourceInstants, pullRequestDecisionInstantSchema, sourceAdapterSchema } from "@pick-your-ai/contracts";
 import { createHash } from "node:crypto";
+import { parseDecisionProjection } from "./pull-request-decision-history.mjs";
 const fail = () => {
   throw new Error("rank_history_integrity_error");
 };
@@ -47,11 +48,28 @@ export function retainedRankHistory(document) {
     )
   )
     fail();
+  let nativeDecisionProjection = false;
+  if (document.authorization?.pullRequestDecisionProjection !== undefined) {
+    try {
+      const projection = parseDecisionProjection(
+        document.authorization.pullRequestDecisionProjection,
+        document.authorization.pullRequestDecisionEvidence,
+      );
+      if (compareSourceInstants(projection.asOf, document.scope.to) !== 0) fail();
+      nativeDecisionProjection = true;
+    } catch {
+      fail();
+    }
+  }
   return {
     snapshotId: document.snapshot.snapshotId,
     revision: document.snapshot.revision,
     metrics: document.metrics.map((metric) => {
       const history = saved.metrics.find((entry) => entry.metricId === metric.metricId);
+      const evidenceInstant =
+        nativeDecisionProjection && metric.metricId === "pr_accepted_rate" && metric.aggregation === "ratio"
+          ? (value) => pullRequestDecisionInstantSchema.safeParse(value).success
+          : instant;
       if (
         !Array.isArray(history.sources) ||
         !history.sources.length ||
@@ -91,8 +109,8 @@ export function retainedRankHistory(document) {
             ) ||
             source.evidence.some(
               (item) =>
-                (item.effectiveAt !== null && !instant(item.effectiveAt)) ||
-                !instant(item.observedAt) ||
+                (item.effectiveAt !== null && !evidenceInstant(item.effectiveAt)) ||
+                !evidenceInstant(item.observedAt) ||
                 !/^[a-f0-9]{64}$/.test(item.comparisonSignature),
             )
           )

@@ -28,10 +28,16 @@ import {
   decisionHistoryRepositories,
   pullRequestDecisionGenerationVersion,
   parseDecisionGenerationCapture,
+  parseDecisionProjection,
   readDecisionGenerations,
   readDecisionFrozenInput,
   migrateDecisionHistoryRuns,
 } from "./pull-request-decision-history.mjs";
+import {
+  projectDecidedPullRequests,
+  decisionProjectionBinding,
+  assertDecisionProjection,
+} from "./pull-request-decided-projection.mjs";
 import { readImportedHistory } from "./reconciliation-history.mjs";
 import {
   copyParticipationHistoryJSON,
@@ -1125,8 +1131,15 @@ export async function createPipeline(options) {
   }
 
   async function retainedDecisionEvidence(tx, authorization, cutoff = null) {
-    if (authorization.pullRequestDecisionEvidence === undefined) return null;
+    if (authorization.pullRequestDecisionEvidence === undefined) {
+      if (authorization.pullRequestDecisionProjection !== undefined) fail("decision_history_projection_invalid");
+      return null;
+    }
     const capture = parseDecisionGenerationCapture(authorization.pullRequestDecisionEvidence);
+    const projection =
+      authorization.pullRequestDecisionProjection === undefined
+        ? null
+        : parseDecisionProjection(authorization.pullRequestDecisionProjection, capture);
     if (
       (cutoff !== null && capture.observationCutoff !== cutoff) ||
       capture.runs.some(
@@ -1147,9 +1160,10 @@ export async function createPipeline(options) {
       dataMode,
       assertAuthorized: assertCurrent,
       expected: capture,
+      selectionAsOf: projection?.asOf ?? capture.asOf,
     });
     assertCurrent();
-    return { ...restored, assertCurrent };
+    return { ...restored, projection, assertCurrent };
   }
 
   async function publicationNormalizationBinding(
@@ -1359,6 +1373,8 @@ export async function createPipeline(options) {
         canonical(authorization.relationshipPairEvidence) ||
       canonical(retained.document.identityAuthorization?.pullRequestDecisionEvidence) !==
         canonical(authorization.pullRequestDecisionEvidence) ||
+      canonical(retained.document.identityAuthorization?.pullRequestDecisionProjection) !==
+        canonical(authorization.pullRequestDecisionProjection) ||
       canonical(captureMergeTargetAuthorization(retained.document.identityAuthorization ?? {})) !==
         canonical(mergeTargetAuthorization(scope, explanation.cutoff)) ||
       (needsMergeTarget && retained.document.engineScope?.branch !== scope.branch) ||
@@ -1368,6 +1384,13 @@ export async function createPipeline(options) {
           canonical([...retained.document.engineScope.repos].sort()) !== canonical([...selectedIds].sort())))
     )
       fail(`public_${kind}_frozen_input_integrity_error`);
+    if (!decision?.projection && retained.document.frozen.facts.some((fact) => fact.decisionAsOf !== undefined))
+      fail("decision_history_projection_binding_changed");
+    if (decision?.projection) {
+      if (retained.document.engineScope?.to !== decision.projection.asOf)
+        fail("decision_history_projection_binding_changed");
+      assertDecisionProjection(retained.document.frozen, decision, rows, decision.projection);
+    }
     decision?.assertCurrent();
     return {
       review,
@@ -1468,6 +1491,7 @@ export async function createPipeline(options) {
       );
       const restoredActors = new Map();
       const restoredMergeTargets = new Map();
+      const restoredDecisions = new Map();
       for (const authorization of authorizations) {
         const decision = await retainedDecisionEvidence(tx, authorization);
         if (decision !== null) decisionFences.push(decision.assertCurrent);
@@ -1532,6 +1556,7 @@ export async function createPipeline(options) {
           }
         }
         restoredActors.set(digest(authorization), identity.actors);
+        if (decision?.projection) restoredDecisions.set(digest(authorization), { decision, rows });
       }
       const removed = [...new Set(transferAuthorities.flatMap((authority) => authority.removed))];
       const corrections = await readCorrectionState(tx, [
@@ -1582,6 +1607,16 @@ export async function createPipeline(options) {
             )
               fail("decision_history_capture_binding_changed");
             decisionFences.forEach((assertCurrent) => assertCurrent());
+            const retainedDecision = restoredDecisions.get(digest(authorization));
+            if (!retainedDecision && input.facts.some((fact) => fact.decisionAsOf !== undefined))
+              fail("decision_history_projection_binding_changed");
+            if (retainedDecision)
+              assertDecisionProjection(
+                input,
+                retainedDecision.decision,
+                retainedDecision.rows,
+                retainedDecision.decision.projection,
+              );
             if (authorization.identityEvidence === undefined) return input;
             if (authorization.mergeTargetEvidence !== undefined) {
               const captures = restoredMergeTargets.get(digest(authorization));
@@ -3321,6 +3356,52 @@ export async function createPipeline(options) {
         context: scope.context ?? "event",
       },
     ).outputs;
+    let decidedProjection = null;
+    if (
+      scopedDecisionCapture !== null &&
+      selectedPolicies.some((item) => item.policy.metricId === "pr_accepted_rate")
+    ) {
+      const assertCurrent = decisionReadFence(scopedDecisionCapture);
+      const decision = await db.transaction((tx) =>
+        readDecisionGenerations(tx, {
+          selectedRuns: scopedDecisionCapture.runs.map((run) => ({
+            repositoryId: run.repositoryId,
+            runId: run.runId,
+          })),
+          repositories: config.repositories,
+          source: decisionSourceId,
+          asOf: scopedDecisionCapture.asOf,
+          selectionAsOf: window.to,
+          observationCutoff,
+          dataMode,
+          assertAuthorized: assertCurrent,
+          expected: scopedDecisionCapture,
+        }),
+      );
+      assertCurrent();
+      decidedProjection = projectDecidedPullRequests(decision, normalized, window.to);
+      const enrolled = new Set(scopedDecisionCapture.runs.map((run) => String(run.repositoryId)));
+      outputs = outputs.map((output) => {
+        const replaced = new Set(
+          output.facts
+            .filter((fact) => fact.metricId === "pr_accepted_rate" && enrolled.has(fact.repoId))
+            .map((fact) => fact.id),
+        );
+        return {
+          ...output,
+          facts: output.facts.filter((fact) => !replaced.has(fact.id)),
+          evidence: output.evidence.filter((entry) => !replaced.has(entry.contribution.contributionId)),
+        };
+      });
+      outputs.push({
+        actors: [],
+        facts: decidedProjection.facts,
+        evidence: decidedProjection.evidence,
+        reasons: [],
+        isSynthetic: dataMode === "synthetic",
+      });
+      ready();
+    }
     let reviewedWorkstreamHelp = recognitionBindings.some((binding) => Object.hasOwn(binding, "workstreamHelp"))
       ? []
       : null;
@@ -3485,6 +3566,7 @@ export async function createPipeline(options) {
             : null
           : cutoff;
         const sourceErrors = ["historical_capability_not_certified"];
+        if (decidedProjection?.unavailable) sourceErrors.push("decision_history_unavailable");
         if (reconciliation && github) {
           if (sourceWatermark === null) sourceErrors.push("reconciliation_baseline_unavailable");
           else if (sourceWatermark < cutoff) sourceErrors.push("reconciliation_gap");
@@ -3520,7 +3602,7 @@ export async function createPipeline(options) {
           // Keep the complete captured corrections in frozen.facts for the existing
           // dispatch input fence; only effective observations belong to this epoch.
           corrections
-            .filter((fact) => Date.parse(fact.observedAt) <= Date.parse(observationCutoff))
+            .filter((fact) => c.contracts.compareSourceInstants(fact.observedAt, observationCutoff) <= 0)
             .map(digest)
             .sort(),
         ]),
@@ -3605,6 +3687,7 @@ export async function createPipeline(options) {
               occurredAt: fact.occurredAt,
               observedAt: fact.observedAt,
               activityState: "pending",
+              ...(fact.decisionAsOf === undefined ? {} : { decisionAsOf: fact.decisionAsOf }),
               sourceRevision: original.sourceRevision,
               sourceRevisionUrl: original.sourceRevisionUrl,
               ...materializeEvidenceMetadata(original, fact),
@@ -3647,6 +3730,9 @@ export async function createPipeline(options) {
           occurredAt: fact.occurredAt,
           observedAt: fact.observedAt,
           activityState,
+          ...(activityState === "pending" && fact.decisionAsOf !== undefined
+            ? { decisionAsOf: fact.decisionAsOf }
+            : {}),
           sourceRevision: original.sourceRevision,
           sourceRevisionUrl: original.sourceRevisionUrl,
           ...materializeEvidenceMetadata(original, fact),
@@ -3755,6 +3841,11 @@ export async function createPipeline(options) {
         ...mergeTargetAuthorization(scope, observationCutoff),
         issueTransferEvidence: transferAuthority.capture,
         ...(scopedDecisionCapture === null ? {} : { pullRequestDecisionEvidence: scopedDecisionCapture }),
+        ...(decidedProjection === null
+          ? {}
+          : {
+              pullRequestDecisionProjection: decisionProjectionBinding(scopedDecisionCapture, window.to, facts),
+            }),
         ...(feedbackCapture.length ? { discussionFeedbackEvidence: feedbackCapture } : {}),
         ...(transferAuthority.relationshipPairEvidence === undefined
           ? {}
@@ -4126,6 +4217,7 @@ export async function createPipeline(options) {
         "issueTransferEvidence",
         "relationshipPairEvidence",
         "pullRequestDecisionEvidence",
+        "pullRequestDecisionProjection",
         "discussionFeedbackEvidence",
         "reversionAuthority",
         "reversionRecordsHash",
