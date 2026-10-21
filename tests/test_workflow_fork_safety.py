@@ -4,15 +4,28 @@ Pull-request checks must run fork-controlled code without privileged
 credentials. This is source/configuration evidence only: it does not prove a
 fork-origin run was observed. It uses only the standard library because CI runs
 these tests without installing dependencies, so the audit reads the repository's
-plain block-style workflow layout instead of parsing arbitrary YAML.
+plain block-style workflow layout instead of parsing arbitrary YAML. Because a
+hand-rolled reader can misread what it does not understand, it FAILS CLOSED:
+quoted keys are normalized in one place, and any construct outside the supported
+subset (flow mappings, flow sequences outside a few simple keys, anchors, aliases,
+merge keys, tags, multi-document files, multi-line quoted scalars, unknown `on:`
+events) is reported as "unsupported workflow syntax" rather than skipped.
 
 Universal rules (every workflow): no pull_request_target or other
 pull-request-adjacent privileged trigger, actions pinned to full commit SHAs,
 checkout without persisted credentials, and no checkout of a pull-request head.
 Strict rules (workflows reachable from a pull request, directly or through a
 workflow_run chain): read-only permissions, no secret other than GITHUB_TOKEN,
-no deployment environment, only allowlisted GitHub-hosted runners, and guarded workflow_run jobs.
-A push-only deploy workflow may therefore hold deployment secrets.
+no deployment environment, only allowlisted GitHub-hosted runners, and guarded
+workflow_run jobs.
+
+Deployment rule: a workflow that needs secrets, an environment or write
+permissions must be triggered only by push to main (or another trigger no pull
+request can start) and must NOT be a workflow_run follower of a PR-triggered
+workflow or a callee of one. A workflow_run follower of a PR workflow stays
+PR-reachable, and therefore strict, even when its job guards look correct: the
+guards are textual, and the followed run may carry fork code. Split deployment
+into its own push-triggered workflow instead of relaxing this audit.
 """
 from pathlib import Path
 import re
@@ -45,7 +58,93 @@ HOSTED_RUNNER = re.compile(
     r"|macos-(?:latest|\d+(?:-(?:intel|large|xlarge))?)"
 )
 LOCAL_WORKFLOW = re.compile(r"\./\.github/workflows/([\w.-]+\.ya?ml)")
+# One shared key pattern; every key match in this file goes through it.
+KEY = r"[A-Za-z_][\w-]*"
+QUOTED_KEY = re.compile(r"^((?:-\s+)*)([\"'])(" + KEY + r")\2:")
+KEY_VALUE = re.compile(r"^(" + KEY + r"):(?:\s+(.*))?$")
+KNOWN_EVENTS = {
+    "branch_protection_rule", "check_run", "check_suite", "create", "delete",
+    "deployment", "deployment_status", "discussion", "discussion_comment", "fork",
+    "gollum", "issue_comment", "issues", "label", "merge_group", "milestone",
+    "page_build", "project", "project_card", "project_column", "public",
+    "pull_request", "pull_request_review", "pull_request_review_comment",
+    "pull_request_target", "push", "registry_package", "release",
+    "repository_dispatch", "schedule", "status", "watch", "workflow_call",
+    "workflow_dispatch", "workflow_run",
+}
+# Keys whose simple one-line `[a, b]` value is understood; any other flow
+# sequence (notably steps, jobs, permissions, uses) is unsupported.
+FLOW_SEQUENCE_KEYS = {"on", "runs-on", "branches", "workflows", "types", "paths", "ports", "needs"}
 BLOCK_SCALAR = re.compile(r"^(-\s+)?(?:run|script):\s*[|>][+-]?\d*\s*$")
+
+
+def _quoted(line):
+    """Return (per-character in-quote flags, whether a quote is left open).
+
+    A quote opens only where a scalar can start, so an apostrophe inside a plain
+    word ("don't") is ordinary text.
+    """
+    flags, quote, prev = [], None, " "
+    for char in line:
+        if quote:
+            flags.append(True)
+            if char == quote and not (quote == '"' and prev == "\\"):
+                quote = None
+        elif char in "\"'" and not (prev.isalnum() or prev == "_"):
+            quote = char
+            flags.append(True)
+        else:
+            flags.append(False)
+        prev = char
+    return flags, quote is not None
+
+
+def _strip_comment(line):
+    flags, _ = _quoted(line)
+    for index, char in enumerate(line):
+        if char == "#" and not flags[index] and (index == 0 or line[index - 1].isspace()):
+            return line[:index].strip()
+    return line
+
+
+def _mask(line):
+    """Line with quoted spans and ${{ }} expressions removed."""
+    flags, _ = _quoted(line)
+    plain = "".join(char for char, inside in zip(line, flags) if not inside)
+    return re.sub(r"\$\{\{.*?\}\}", "", plain)
+
+
+def unsupported(text):
+    """Report constructs outside the supported YAML subset (fail closed)."""
+    problems = []
+    entries = structure(text)
+    for position, (_, line) in enumerate(entries):
+        if line == "---" and position == 0:
+            continue
+        if line in ("---", "...") or line.startswith(("--- ", "... ")):
+            problems.append("unsupported workflow syntax: multiple documents")
+            continue
+        body = re.sub(r"^(?:-\s+)+", "", line)
+        match = KEY_VALUE.match(body)
+        key, value = (match.group(1), (match.group(2) or "").strip()) if match else (None, body)
+        if key in ("run", "script"):
+            continue  # shell/script text, not workflow structure
+        context = f"unsupported workflow syntax: {line}"
+        if _quoted(line)[1]:
+            problems.append(context + " (multi-line quoted scalar)")
+        masked = _mask(line)
+        if body.startswith("? ") or re.match(r"(?:-\s+)*<<:", line):
+            problems.append(context + " (complex or merge key)")
+        elif re.search(r"(?:^|\s)[&*][\w-]", masked) or value.startswith("!"):
+            problems.append(context + " (anchor, alias or tag)")
+        elif value.startswith("{"):
+            if not (key == "permissions" and value == "{}"):
+                problems.append(context + " (flow mapping)")
+        elif value.startswith("["):
+            flat = masked.count("[") == 1 and masked.count("]") == 1 and "{" not in masked
+            if key not in FLOW_SEQUENCE_KEYS or not value.endswith("]") or not flat:
+                problems.append(context + " (flow sequence)")
+    return problems
 
 
 def scan(text):
@@ -68,8 +167,10 @@ def scan(text):
             body_indent = None
         if not stripped or stripped.startswith("#"):
             continue
-        if not re.search(r"""["']""", stripped):
-            stripped = re.sub(r"\s+#.*$", "", stripped)
+        stripped = _strip_comment(stripped)
+        if not stripped:
+            continue
+        stripped = QUOTED_KEY.sub(lambda m: f"{m.group(1)}{m.group(3)}:", stripped)
         result.append((indent, stripped, False))
         block = BLOCK_SCALAR.match(stripped)
         if block:
@@ -95,16 +196,16 @@ def trigger_blocks(text):
     """Map each event in the top-level `on:` to its child entries."""
     entries = structure(text)
     for index, (indent, line) in enumerate(entries):
-        match = re.fullmatch(r"""["']?on["']?:\s*(.*)""", line)
+        match = re.fullmatch(r"on:\s*(.*)", line)
         if indent != 0 or not match:
             continue
         if match.group(1):
-            return {event: [] for event in re.findall(r"[a-z_]+", match.group(1))}
+            return {event: [] for event in re.findall(r"[A-Za-z_][\w-]*", match.group(1))}
         children = _block(entries, index)
         found = {}
         key_indent = children[0][0] if children else 0
         for position, (child_indent, child) in enumerate(children):
-            key = re.match(r"([a-z_]+):", child)
+            key = re.match("(?:- )?(" + KEY + r"):?(?:\s|$)", child)
             if child_indent == key_indent and key:
                 found[key.group(1)] = _block(children, position)
         return found
@@ -125,7 +226,7 @@ def jobs(text):
                 return
             job_indent = children[0][0]
             for position, (child_indent, child) in enumerate(children):
-                name = re.fullmatch(r"""["']?([\w-]+)["']?:""", child)
+                name = re.fullmatch("(" + KEY + "):", child)
                 if child_indent == job_indent and name:
                     body = _block(children, position)
                     yield name.group(1), (body[0][0] if body else job_indent + 2), body
@@ -268,9 +369,8 @@ def _permission_problems(text):
                 problems.append(f"permissions grant more than read: {value}")
             continue
         for _, child in _block(entries, index):
-            allowed = r"[a-z-]+: (?:read|none)" if indent else r"contents: read|[a-z-]+: none"
-            if not re.fullmatch(allowed, child):
-                problems.append(f"permissions grant more than contents: read: {child}")
+            if not re.fullmatch(r"[a-z-]+: (?:read|none)", child):
+                problems.append(f"permissions grant more than read: {child}")
     if top != 1:
         problems.append("missing top-level permissions (use contents: read)")
     return problems
@@ -291,18 +391,21 @@ def audit(text, reachable=None):
     structural = structure(text)
     if not events:
         problems.append("no recognizable trigger block")
+    problems += unsupported(text)
+    for event in sorted(events - KNOWN_EVENTS):
+        problems.append(f"unsupported workflow syntax: unknown event {event}")
     for event in sorted(events & PRIVILEGED_PR_TRIGGERS):
         problems.append(f"uses privileged pull-request trigger {event}")
 
     # Universal: immutable actions (local reusable workflows are reviewed in repo).
     for _, line in structural:
-        match = re.match(r"(?:-\s+)?uses:\s*(\S+)", line)
+        match = re.match(r"(?:-\s+)*uses:\s*(\S+)", line)
         if match and not match.group(1).startswith("./") and not PINNED_ACTION.fullmatch(match.group(1)):
             problems.append(f"action not pinned to a full commit SHA: {match.group(1)}")
 
     # Universal: checkout never persists the token or fetches a PR head.
     for index, (_, line) in enumerate(structural):
-        if not re.search(r"\buses:\s*actions/checkout@", line):
+        if not re.search(r"\buses:\s*actions/checkout@", line, re.I):
             continue
         start = index
         while start > 0 and not structural[start][1].startswith("- "):
@@ -657,6 +760,80 @@ class WorkflowForkSafetyTests(unittest.TestCase):
         )
         self.assertNotEqual(noisy, GOOD)
         self.assertEqual(audit(noisy), [])
+
+    def test_quoted_keys_are_read_like_unquoted_keys(self):
+        self.rejected(lambda t: t.replace("  pull_request:\n", '  "pull_request_target":\n'), "pull_request_target")
+        self.rejected(lambda t: t.replace("on:\n", '"on":\n').replace("  pull_request:\n", "  'issue_comment':\n"), "issue_comment")
+        # A quoted PR trigger still makes a deploy-style workflow PR-reachable.
+        quoted = DEPLOY.replace("  push:\n    branches: [main]", '  "pull_request":')
+        problems = audit(quoted)
+        for expected in ("permissions", "secret other than GITHUB_TOKEN", "deployment environment"):
+            self.assertTrue(any(expected in problem for problem in problems), (expected, problems))
+        self.rejected(lambda t: t.replace("permissions:\n  contents: read", '"permissions":\n  contents: write'), "permissions")
+        self.rejected(lambda t: t.replace("    steps:", '    "environment": prod\n    steps:'), "environment")
+        self.rejected(lambda t: t.replace("persist-credentials", '"persist-credentials"').replace(
+            ": false", ": true"), "persist-credentials")
+        self.assertEqual(audit(GOOD.replace("permissions:", '"permissions":').replace("  checks:", '  "checks":')), [])
+
+    def test_comments_are_stripped_outside_quotes_only(self):
+        self.assertEqual(audit(GOOD.replace("on:\n", "on:  # don't edit\n")), [])
+        self.assertEqual(triggers(GOOD.replace("on:\n", "on:  # don't edit\n")), {"pull_request", "push"})
+        self.rejected(lambda t: t.replace("on:\n  pull_request:", "on:  # don't edit\n  pull_request_target:"), "pull_request_target")
+        self.assertEqual(audit(GOOD.replace("runs-on: ubuntu-latest", "runs-on: ubuntu-latest # don't change")), [])
+        self.assertEqual(audit(GOOD.replace("runs-on: ubuntu-latest", "runs-on: ubuntu-latest # it's fine")), [])
+        # A hash inside quotes is data, not a comment, so the runner stays disallowed.
+        self.rejected(lambda t: t.replace("runs-on: ubuntu-latest", "runs-on: 'ubuntu-latest # self-hosted'"), "allowlisted GitHub-hosted")
+        self.rejected(lambda t: t.replace("contents: read", "contents: read # ok\n  contents2: write"), "permissions")
+        self.assertEqual(scan("a: 'x # y'  # z\n")[0][1], "a: 'x # y'")
+
+    def test_checkout_and_action_names_are_case_insensitive(self):
+        mixed = GOOD.replace("actions/checkout", "Actions/Checkout")
+        self.assertEqual(audit(mixed), [])
+        self.rejected(lambda t: mixed.replace("persist-credentials: false", "persist-credentials: true"), "persist-credentials", GOOD)
+        self.rejected(lambda t: mixed.replace("        with:\n          persist-credentials: false\n", ""), "persist-credentials", GOOD)
+        self.rejected(lambda t: t.replace("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "ACTIONS/CHECKOUT@v4"), "not pinned")
+
+    def test_top_level_read_only_permission_scopes_are_accepted(self):
+        self.assertEqual(audit(GOOD.replace("  contents: read\n", "  contents: read\n  packages: read\n")), [])
+        self.rejected(lambda t: t.replace("  contents: read\n", "  contents: read\n  packages: write\n"), "permissions")
+
+    def test_unsupported_syntax_fails_closed(self):
+        cases = {
+            "flow-style step": lambda t: t.replace(
+                "      - run:", "      - {uses: actions/setup-node@v4}\n      - run:"),
+            "flow-style step list": lambda t: t.replace("    steps:\n", "    steps: [{run: echo}]\n"),
+            "flow-style jobs": lambda t: t.replace("jobs:\n", "jobs: {checks: {runs-on: ubuntu-latest}}\n#"),
+            "flow-style permissions": lambda t: t.replace("permissions:\n  contents: read", "permissions: {contents: write}"),
+            "flow-style on": lambda t: t.replace("on:\n  pull_request:\n  push:\n    branches: [main]", "on: {pull_request_target: {}}"),
+            "flow-style uses": lambda t: t.replace("      - run:", "      - uses: [actions/setup-node]\n      - run:"),
+            "nested flow sequence": lambda t: t.replace("branches: [main]", "branches: [[main]]"),
+            "flow sequence item": lambda t: t.replace("      - run:", "      - [a, b]\n      - run:"),
+            "multi-line flow sequence": lambda t: t.replace("branches: [main]", "branches: [main,\n      dev]"),
+            "anchor": lambda t: t.replace("  contents: read", "  contents: &perm read"),
+            "alias": lambda t: t.replace("  checks:", "  checks: *shared\n  other:"),
+            "merge key": lambda t: t.replace("    runs-on: ubuntu-latest", "    <<: *base\n    runs-on: ubuntu-latest"),
+            "tag": lambda t: t.replace("  contents: read", "  contents: !!str read"),
+            "complex key": lambda t: t.replace("  pull_request:", "  ? pull_request"),
+            "multi-document": lambda t: t + "---\non: pull_request_target\n",
+            "multi-line quoted scalar": lambda t: t.replace("      - run:", "      - name: 'start\n      - run:"),
+            "unknown event": lambda t: t.replace("  pull_request:\n", "  pull_requests:\n"),
+            "event case": lambda t: t.replace("  pull_request:\n", "  Pull_Request_Target:\n"),
+        }
+        for label, mutate in cases.items():
+            with self.subTest(label):
+                self.rejected(mutate, "unsupported workflow syntax")
+
+    def test_supported_simple_syntax_is_not_flagged(self):
+        self.assertEqual(unsupported("---\n" + GOOD), [])
+        for text in (
+            GOOD.replace("branches: [main]", "branches: [main, 'release/*']"),
+            GOOD.replace("on:\n  pull_request:\n  push:\n    branches: [main]", "on: [pull_request, push]"),
+            GOOD.replace("permissions:\n  contents: read", "permissions: {}"),
+            GOOD.replace("      - run:", "      - run: echo {a} && ls *.txt\n      - run:"),
+            GOOD.replace("      - run:", "      - run: |\n          echo {x: [1]} *glob &bg\n      - run:"),
+            GOOD.replace("      - run:", "      - name: Don't {panic} [yet]\n        run: true\n      - run:"),
+        ):
+            self.assertEqual(audit(text), [], text)
 
     def test_real_workflows_fail_when_deliberately_broken_in_memory(self):
         """Mutate the real files in memory only; nothing on disk changes."""
