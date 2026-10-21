@@ -5,6 +5,14 @@ credentials. This is source/configuration evidence only: it does not prove a
 fork-origin run was observed. It uses only the standard library because CI runs
 these tests without installing dependencies, so the audit reads the repository's
 plain block-style workflow layout instead of parsing arbitrary YAML.
+
+Universal rules (every workflow): no pull_request_target or other
+pull-request-adjacent privileged trigger, actions pinned to full commit SHAs,
+checkout without persisted credentials, and no checkout of a pull-request head.
+Strict rules (workflows reachable from a pull request, directly or through a
+workflow_run chain): read-only permissions, no secret other than GITHUB_TOKEN,
+no deployment environment, no self-hosted runner, and guarded workflow_run jobs.
+A push-only deploy workflow may therefore hold deployment secrets.
 """
 from pathlib import Path
 import re
@@ -14,12 +22,15 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github/workflows"
 
-# Triggers whose runs execute proposed (possibly fork) code with fork-safe
-# credentials. Anything else, such as pull_request_target, issue_comment or
-# schedule, needs a reviewed addition here with its own safety argument.
-SAFE_TRIGGERS = {"pull_request", "push"}
-# workflow_run runs with the base repository's context, so it is accepted only
-# when its job is limited to trusted same-repository pushes on main.
+# Triggers that run with the base repository's credentials on pull-request
+# input, so they are never acceptable without a separately reviewed design.
+PRIVILEGED_PR_TRIGGERS = {
+    "pull_request_target", "pull_request_review", "pull_request_review_comment",
+    "issue_comment",
+}
+# workflow_run runs with the base repository's context. When reachable from a
+# pull request it is accepted only if every job is limited to trusted
+# same-repository pushes on main.
 WORKFLOW_RUN_GUARDS = (
     "github.event.workflow_run.event == 'push'",
     "github.event.workflow_run.head_branch == 'main'",
@@ -27,108 +38,214 @@ WORKFLOW_RUN_GUARDS = (
 )
 PINNED_ACTION = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_./-]+)?@[0-9a-f]{40}$")
 UNTRUSTED_REF = re.compile(r"github\.(?:head_ref|event\.pull_request\.head)")
+BLOCK_SCALAR = re.compile(r"^(-\s+)?(?:run|script):\s*[|>][+-]?\d*\s*$")
 
 
-def _lines(text):
-    """Yield (indent, stripped) for non-blank, non-comment lines."""
+def scan(text):
+    """Return (indent, line, in_body) for each meaningful line.
+
+    Structural lines have comments removed. Bodies of `run:`/`script:` block
+    scalars are kept (flagged in_body) because `${{ }}` expressions there are
+    evaluated, but they are never read as workflow keys.
+    """
+    result = []
+    body_indent = None
     for raw in text.splitlines():
         stripped = raw.strip()
-        if stripped and not stripped.startswith("#"):
-            yield len(raw) - len(raw.lstrip(" ")), stripped
+        indent = len(raw) - len(raw.lstrip(" "))
+        if body_indent is not None:
+            if not stripped or indent > body_indent:
+                if stripped:
+                    result.append((indent, stripped, True))
+                continue
+            body_indent = None
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not re.search(r"""["']""", stripped):
+            stripped = re.sub(r"\s+#.*$", "", stripped)
+        result.append((indent, stripped, False))
+        block = BLOCK_SCALAR.match(stripped)
+        if block:
+            body_indent = indent + (len(block.group(1)) if block.group(1) else 0)
+    return result
 
 
-def _children(text, header):
-    """Yield (header_indent, [(indent, line), ...]) for each `header` block."""
-    entries = list(_lines(text))
-    for index, (indent, line) in enumerate(entries):
-        if re.fullmatch(header, line):
-            body = []
-            for child_indent, child in entries[index + 1:]:
-                if child_indent <= indent:
-                    break
-                body.append((child_indent, child))
-            yield indent, body
+def structure(text):
+    return [(indent, line) for indent, line, body in scan(text) if not body]
 
 
-def triggers(text):
-    found = set()
-    entries = list(_lines(text))
+def _block(entries, index):
+    indent = entries[index][0]
+    body = []
+    for child in entries[index + 1:]:
+        if child[0] <= indent:
+            break
+        body.append(child)
+    return body
+
+
+def trigger_blocks(text):
+    """Map each event in the top-level `on:` to its child entries."""
+    entries = structure(text)
     for index, (indent, line) in enumerate(entries):
         match = re.fullmatch(r"""["']?on["']?:\s*(.*)""", line)
         if indent != 0 or not match:
             continue
-        inline = match.group(1)
-        if inline:
-            found.update(re.findall(r"[a-z_]+", inline))
-            continue
-        for child_indent, child in entries[index + 1:]:
-            if child_indent == 0:
-                break
-            if child_indent == 2 and (key := re.match(r"([a-z_]+):", child)):
-                found.add(key.group(1))
-        break
-    return found
+        if match.group(1):
+            return {event: [] for event in re.findall(r"[a-z_]+", match.group(1))}
+        children = _block(entries, index)
+        found = {}
+        key_indent = children[0][0] if children else 0
+        for position, (child_indent, child) in enumerate(children):
+            key = re.match(r"([a-z_]+):", child)
+            if child_indent == key_indent and key:
+                found[key.group(1)] = _block(children, position)
+        return found
+    return {}
 
 
-def audit(text):
-    """Return a list of fork-PR safety violations in one workflow's text."""
+def triggers(text):
+    return set(trigger_blocks(text))
+
+
+def jobs(text):
+    """Yield (job_name, property_indent, entries) for each job."""
+    entries = structure(text)
+    for index, (indent, line) in enumerate(entries):
+        if indent == 0 and line == "jobs:":
+            children = _block(entries, index)
+            if not children:
+                return
+            job_indent = children[0][0]
+            for position, (child_indent, child) in enumerate(children):
+                name = re.fullmatch(r"([\w-]+):", child)
+                if child_indent == job_indent and name:
+                    body = _block(children, position)
+                    yield name.group(1), (body[0][0] if body else job_indent + 2), body
+            return
+
+
+def workflow_name(text, fallback):
+    for indent, line in structure(text):
+        match = re.fullmatch(r"name:\s*(.+)", line)
+        if indent == 0 and match:
+            return match.group(1).strip("'\"")
+    return fallback
+
+
+def run_sources(text):
+    """Names listed under workflow_run.workflows."""
+    block = trigger_blocks(text).get("workflow_run", [])
+    joined = "\n".join(line for _, line in block)
+    inline = re.search(r"workflows:\s*\[(.*?)\]", joined)
+    if inline:
+        items = inline.group(1).split(",")
+    else:
+        items = re.findall(r"^-\s*(.+)$", joined, re.M)
+    return [item.strip().strip("'\"") for item in items if item.strip()]
+
+
+def pr_reachable(texts):
+    """Return the set of workflow keys reachable from a pull request."""
+    events = {key: triggers(text) for key, text in texts.items()}
+    names = {workflow_name(text, key): key for key, text in texts.items()}
+    reach = {key for key, found in events.items() if "pull_request" in found}
+    changed = True
+    while changed:
+        changed = False
+        for key, text in texts.items():
+            if key in reach or "workflow_run" not in events[key]:
+                continue
+            sources = run_sources(text)
+            # An unresolvable source cannot be proven PR-free, so it counts.
+            if not sources or any(names.get(name) in reach or name not in names for name in sources):
+                reach.add(key)
+                changed = True
+    return reach
+
+
+def _branches(block):
+    joined = "\n".join(line for _, line in block)
+    inline = re.search(r"^branches:\s*\[(.*?)\]", joined, re.M)
+    if inline:
+        return [item.strip().strip("'\"") for item in inline.group(1).split(",")]
+    listed = re.search(r"^branches:\s*\n((?:-\s*\S+\n?)+)", joined + "\n", re.M)
+    if listed:
+        return [item.strip().strip("'\"") for item in re.findall(r"^-\s*(\S+)", listed.group(1), re.M)]
+    return None
+
+
+def _property(body, indent, key):
+    """Return (inline value + nested lines) for a job-level property, or None."""
+    for position, (child_indent, line) in enumerate(body):
+        match = re.fullmatch(key + r":\s*(.*)", line)
+        if child_indent == indent and match:
+            parts = [match.group(1)]
+            for deeper_indent, deeper in body[position + 1:]:
+                if deeper_indent <= indent:
+                    break
+                parts.append(deeper)
+            return re.sub(r"\s+", " ", " ".join(parts))
+    return None
+
+
+def _permission_problems(text):
     problems = []
-    live = [line for _, line in _lines(text)]
-    live_text = "\n".join(live)
-    events = triggers(text)
+    entries = structure(text)
+    top = 0
+    for index, (indent, line) in enumerate(entries):
+        match = re.fullmatch(r"permissions:\s*(.*)", line)
+        if not match:
+            continue
+        top += indent == 0
+        value = match.group(1)
+        if value:
+            if value not in ("{}", "read-all", "none"):
+                problems.append(f"permissions grant more than read: {value}")
+            continue
+        for _, child in _block(entries, index):
+            allowed = r"[a-z-]+: (?:read|none)" if indent else r"contents: read|[a-z-]+: none"
+            if not re.fullmatch(allowed, child):
+                problems.append(f"permissions grant more than contents: read: {child}")
+    if top != 1:
+        problems.append("missing top-level permissions (use contents: read)")
+    return problems
+
+
+def audit(text, reachable=None):
+    """Return fork-PR safety violations for one workflow's text.
+
+    `reachable` says whether a pull request can run the workflow; by default it
+    is inferred from this file alone (pull_request or workflow_run triggers).
+    """
+    problems = []
+    blocks = trigger_blocks(text)
+    events = set(blocks)
+    if reachable is None:
+        reachable = bool(events & {"pull_request", "workflow_run"})
+    entries = scan(text)
+    structural = structure(text)
     if not events:
         problems.append("no recognizable trigger block")
-    if "pull_request_target" in live_text:
-        problems.append("uses pull_request_target")
-    for event in sorted(events - SAFE_TRIGGERS - {"pull_request_target"}):
-        if event != "workflow_run":
-            problems.append(f"unreviewed trigger {event}")
-    if "workflow_run" in events:
-        for guard in WORKFLOW_RUN_GUARDS:
-            if guard not in live_text:
-                problems.append(f"workflow_run lacks guard: {guard}")
-        if "branches: [main]" not in live_text:
-            problems.append("workflow_run is not limited to branches: [main]")
+    for event in sorted(events & PRIVILEGED_PR_TRIGGERS):
+        problems.append(f"uses privileged pull-request trigger {event}")
 
-    # Only the automatic, repository-scoped GITHUB_TOKEN is allowed. This also
-    # rejects `secrets: inherit`, `secrets[...]`, `toJSON(secrets)` and
-    # environment-scoped credentials.
-    if re.search(r"\bsecrets\b(?!\.GITHUB_TOKEN\b)", live_text):
-        problems.append("references a secret other than GITHUB_TOKEN")
-    if re.search(r"^environment:|\benvironment:", live_text, re.M):
-        problems.append("uses a deployment environment")
-    if "self-hosted" in live_text:
-        problems.append("uses a self-hosted runner")
+    # Universal: immutable actions (local reusable workflows are reviewed in repo).
+    for _, line in structural:
+        match = re.match(r"(?:-\s+)?uses:\s*(\S+)", line)
+        if match and not match.group(1).startswith("./") and not PINNED_ACTION.fullmatch(match.group(1)):
+            problems.append(f"action not pinned to a full commit SHA: {match.group(1)}")
 
-    # Top-level permissions must be present and exactly contents: read.
-    top = [body for indent, body in _children(text, r"permissions:") if indent == 0]
-    if len(top) != 1 or [line for _, line in top[0]] != ["contents: read"]:
-        problems.append("top-level permissions must be exactly 'contents: read'")
-    for indent, body in _children(text, r"permissions:"):
-        if indent and any(not re.fullmatch(r"[a-z-]+: (?:read|none)", line) for _, line in body):
-            problems.append("job-level permissions grant more than read")
-    if re.search(r"^permissions:[ \t]*\S", live_text, re.M):
-        problems.append("inline permissions value (use an explicit contents: read block)")
-    if re.search(r"\bwrite-all\b|:\s*write\b", live_text):
-        problems.append("grants write permission")
-
-    # Every action is an immutable full-length commit SHA.
-    for action in re.findall(r"\buses:\s*(\S+)", live_text):
-        if not PINNED_ACTION.fullmatch(action):
-            problems.append(f"action not pinned to a full commit SHA: {action}")
-
-    # Checkout must not persist the token and must not fetch fork code with a
-    # privileged context. Only the guarded workflow_run source SHA is allowed.
-    entries = list(_lines(text))
-    for index, (indent, line) in enumerate(entries):
+    # Universal: checkout never persists the token or fetches a PR head.
+    for index, (_, line) in enumerate(structural):
         if not re.search(r"\buses:\s*actions/checkout@", line):
             continue
         start = index
-        while start > 0 and not entries[start][1].startswith("- "):
+        while start > 0 and not structural[start][1].startswith("- "):
             start -= 1
-        step_indent = entries[start][0]
-        step = [entries[start][1]]
-        for child_indent, child in entries[start + 1:]:
+        step_indent = structural[start][0]
+        step = [structural[start][1]]
+        for child_indent, child in structural[start + 1:]:
             if child_indent <= step_indent:
                 break
             step.append(child)
@@ -142,7 +259,41 @@ def audit(text):
                 problems.append(f"checkout of unreviewed workflow_run ref: {ref}")
             elif "workflow_run" in ref and "workflow_run" not in events:
                 problems.append(f"workflow_run ref without workflow_run trigger: {ref}")
+
+    if not reachable:
+        return problems
+
+    # Strict: nothing a pull request can run may hold privilege.
+    problems += _permission_problems(text)
+    # Only `${{ }}` expressions reference secrets; step names and quoted literals
+    # that merely mention the word do not. Run bodies are included because their
+    # expressions are evaluated before the shell sees them.
+    for expression in re.findall(r"\$\{\{(.*?)\}\}", "\n".join(line for _, line, _ in entries), re.S):
+        if re.search(r"\bsecrets\b(?!\.GITHUB_TOKEN\b)", re.sub(r"'[^']*'", "''", expression)):
+            problems.append("references a secret other than GITHUB_TOKEN")
+            break
+    for name, indent, body in jobs(text):
+        if _property(body, indent, "secrets") is not None:
+            problems.append(f"job {name} passes secrets")
+        if _property(body, indent, "environment") is not None:
+            problems.append(f"job {name} uses a deployment environment")
+        runner = _property(body, indent, "runs-on")
+        if runner and "self-hosted" in runner:
+            problems.append(f"job {name} uses a self-hosted runner")
+        if "workflow_run" in events:
+            condition = _property(body, indent, "if") or ""
+            for guard in WORKFLOW_RUN_GUARDS:
+                if guard not in condition:
+                    problems.append(f"job {name} lacks workflow_run guard: {guard}")
+    if "workflow_run" in events and _branches(blocks["workflow_run"]) != ["main"]:
+        problems.append("workflow_run trigger is not limited to branches: [main]")
     return problems
+
+
+def audit_all(texts):
+    """Audit {key: text}, inferring pull-request reachability across files."""
+    reach = pr_reachable(texts)
+    return {key: audit(text, key in reach) for key, text in texts.items()}
 
 
 GOOD = """name: Fixture
@@ -165,79 +316,137 @@ jobs:
       - run: echo "${{ secrets.GITHUB_TOKEN != '' }}"
 """
 
+# Deployment-style content that is acceptable only when no pull request can run it.
+DEPLOY = """name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: github-pages
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - run: ./deploy.sh
+        env:
+          TOKEN: ${{ secrets.DEPLOY_KEY }}
+"""
+
+# workflow_run workflow whose guards are all present in the job and trigger.
+RUN_GOOD = """name: Follow
+
+on:
+  workflow_run:
+    workflows: [Fixture]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  follow:
+    if: >-
+      ${{ github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.head_repository.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+"""
+
 
 class WorkflowForkSafetyTests(unittest.TestCase):
     """Source evidence for 'fork PR tests run without privileged credentials'."""
 
-    def workflows(self):
+    def texts(self):
         paths = sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml"))
         self.assertGreaterEqual(len(paths), 6)
-        return paths
+        return {path.name: path.read_text(encoding="utf-8") for path in paths}
 
     def test_every_workflow_passes_the_audit(self):
-        for path in self.workflows():
-            with self.subTest(workflow=path.name):
-                self.assertEqual(audit(path.read_text(encoding="utf-8")), [])
+        for name, problems in audit_all(self.texts()).items():
+            with self.subTest(workflow=name):
+                self.assertEqual(problems, [])
 
     def test_known_pull_request_checks_are_covered(self):
-        covered = {
-            path.name for path in self.workflows()
-            if "pull_request" in triggers(path.read_text(encoding="utf-8"))
-        }
+        texts = self.texts()
+        reach = pr_reachable(texts)
         self.assertTrue({
             "browser-ci.yml", "recovery-ci.yml", "runtime-ci.yml",
             "validate-ingestion.yml", "validate-plan.yml",
-        } <= covered)
-        # Post-merge preparation must never be reachable from a pull request.
-        prepare = (WORKFLOWS / "prepare-site.yml").read_text(encoding="utf-8")
-        self.assertEqual(triggers(prepare), {"workflow_run"})
+        } <= {name for name, text in texts.items() if "pull_request" in triggers(text)})
+        # The post-checks site preparation follows a PR-triggered workflow, so it
+        # is held to the strict rules even though its guards limit it to main.
+        self.assertEqual(triggers(texts["prepare-site.yml"]), {"workflow_run"})
+        self.assertIn("prepare-site.yml", reach)
 
-    def test_audit_accepts_the_fixture_baseline(self):
+    def test_audit_accepts_the_fixture_baselines(self):
         self.assertEqual(audit(GOOD), [])
         self.assertEqual(triggers(GOOD), {"pull_request", "push"})
+        self.assertEqual(audit(RUN_GOOD), [])
+        self.assertEqual(audit_all({"good.yml": GOOD, "run.yml": RUN_GOOD}),
+                         {"good.yml": [], "run.yml": []})
 
-    def rejected(self, mutate, expected):
-        text = mutate(GOOD)
-        self.assertNotEqual(text, GOOD, "mutation did not change the fixture")
+    def rejected(self, mutate, expected, base=GOOD):
+        text = mutate(base)
+        self.assertNotEqual(text, base, "mutation did not change the fixture")
         problems = audit(text)
         self.assertTrue(
             any(expected in problem for problem in problems),
             f"expected {expected!r} in {problems!r}",
         )
 
-    def test_rejects_pull_request_target(self):
+    def test_rejects_pull_request_target_and_privileged_pr_triggers(self):
         self.rejected(lambda t: t.replace("  pull_request:\n", "  pull_request_target:\n"), "pull_request_target")
         self.rejected(lambda t: t.replace("on:\n  pull_request:\n  push:\n    branches: [main]", "on: [pull_request_target]"), "pull_request_target")
-
-    def test_rejects_unreviewed_and_unguarded_triggers(self):
-        self.rejected(lambda t: t.replace("  pull_request:\n", "  issue_comment:\n"), "unreviewed trigger")
-        self.rejected(
-            lambda t: t.replace("  pull_request:\n", "  workflow_run:\n    workflows: [X]\n    types: [completed]\n"),
-            "workflow_run lacks guard",
-        )
+        self.rejected(lambda t: t.replace("  pull_request:\n", "  issue_comment:\n"), "issue_comment")
+        # Universal: also rejected where the strict rules do not apply.
+        self.assertTrue(audit(DEPLOY.replace("  push:\n    branches: [main]", "  pull_request_target:"), reachable=False))
 
     def test_rejects_non_github_token_secrets(self):
         for snippet in (
             "      - run: deploy\n        env:\n          TOKEN: ${{ secrets.DEPLOY_KEY }}\n",
             "      - run: deploy\n        env:\n          ALL: ${{ toJSON(secrets) }}\n",
             "      - run: deploy\n        env:\n          X: ${{ secrets['DEPLOY_KEY'] }}\n",
+            "      - run: |\n          echo ${{ secrets.DEPLOY_KEY }}\n",
         ):
             self.rejected(lambda t, s=snippet: t + s, "secret other than GITHUB_TOKEN")
-        self.rejected(lambda t: t.replace("jobs:\n", "jobs:\n  call:\n    uses: ./.github/workflows/x.yml\n    secrets: inherit\n"), "secret other than GITHUB_TOKEN")
+        self.rejected(lambda t: t.replace("jobs:\n", "jobs:\n  call:\n    uses: ./.github/workflows/x.yml\n    secrets: inherit\n"), "passes secrets")
 
     def test_rejects_write_or_missing_or_broadened_permissions(self):
-        self.rejected(lambda t: t.replace("contents: read", "contents: write"), "write")
-        self.rejected(lambda t: t.replace("permissions:\n  contents: read\n\n", ""), "top-level permissions")
-        self.rejected(lambda t: t.replace("contents: read", "contents: read\n  pull-requests: read"), "top-level permissions")
-        self.rejected(lambda t: t.replace("permissions:\n  contents: read", "permissions: write-all"), "write")
+        self.rejected(lambda t: t.replace("contents: read", "contents: write"), "permissions")
+        self.rejected(lambda t: t.replace("permissions:\n  contents: read\n\n", ""), "missing top-level permissions")
+        self.rejected(lambda t: t.replace("contents: read", "contents: read\n  pull-requests: write"), "permissions")
+        self.rejected(lambda t: t.replace("permissions:\n  contents: read", "permissions: write-all"), "permissions")
         self.rejected(
             lambda t: t.replace("    runs-on:", "    permissions:\n      id-token: write\n    runs-on:"),
-            "job-level permissions",
+            "permissions",
         )
 
-    def test_rejects_unpinned_actions(self):
+    def test_accepts_stricter_permission_forms(self):
+        for replacement in ("permissions: {}", "permissions: read-all", "permissions: none"):
+            self.assertEqual(audit(GOOD.replace("permissions:\n  contents: read", replacement)), [])
+        self.assertEqual(audit(GOOD.replace("    runs-on:", "    permissions: {}\n    runs-on:")), [])
+        self.assertEqual(audit(GOOD.replace("    runs-on:", "    permissions:\n      contents: read\n    runs-on:")), [])
+
+    def test_unpinned_actions_rejected_but_local_reusable_workflows_skipped(self):
         self.rejected(lambda t: t.replace("@3d3c42e5aac5ba805825da76410c181273ba90b1", "@v4"), "not pinned")
         self.rejected(lambda t: t.replace("@3d3c42e5aac5ba805825da76410c181273ba90b1", "@3d3c42e"), "not pinned")
+        self.assertEqual(audit(GOOD.replace("jobs:\n", "jobs:\n  local:\n    uses: ./.github/workflows/x.yml\n")), [])
+        self.rejected(lambda t: t.replace("jobs:\n", "jobs:\n  remote:\n    uses: org/repo/.github/workflows/x.yml@main\n"), "not pinned")
 
     def test_rejects_persisted_checkout_credentials_and_untrusted_refs(self):
         self.rejected(lambda t: t.replace("persist-credentials: false", "persist-credentials: true"), "persist-credentials")
@@ -251,17 +460,87 @@ class WorkflowForkSafetyTests(unittest.TestCase):
     def test_rejects_environments_and_self_hosted_runners(self):
         self.rejected(lambda t: t.replace("    runs-on: ubuntu-latest\n", "    runs-on: ubuntu-latest\n    environment: production\n"), "environment")
         self.rejected(lambda t: t.replace("ubuntu-latest", "self-hosted"), "self-hosted")
+        self.rejected(lambda t: t.replace("ubuntu-latest", "[self-hosted, linux]"), "self-hosted")
+        self.rejected(lambda t: t.replace("runs-on: ubuntu-latest", "runs-on:\n      labels: self-hosted"), "self-hosted")
+
+    def test_push_only_deploy_passes_but_same_content_is_rejected_when_pr_reachable(self):
+        self.assertEqual(audit(DEPLOY), [])
+        self.assertEqual(audit_all({"deploy.yml": DEPLOY}), {"deploy.yml": []})
+        self.assertEqual(audit(DEPLOY, reachable=False), [])
+        # Universal rules still apply to it.
+        self.assertTrue(audit(DEPLOY.replace("3d3c42e5aac5ba805825da76410c181273ba90b1", "v4")))
+        self.assertTrue(audit(DEPLOY.replace("persist-credentials: false", "persist-credentials: true")))
+        reachable = DEPLOY.replace("  push:\n    branches: [main]", "  pull_request:")
+        problems = audit(reachable)
+        for expected in ("permissions", "secret other than GITHUB_TOKEN", "deployment environment"):
+            self.assertTrue(any(expected in problem for problem in problems), (expected, problems))
+        self.assertTrue(audit(DEPLOY.replace("ubuntu-latest", "self-hosted").replace(
+            "  push:\n    branches: [main]", "  pull_request:")))
+
+    def test_workflow_run_chain_makes_followers_pr_reachable(self):
+        follower = DEPLOY.replace(
+            "  push:\n    branches: [main]",
+            "  workflow_run:\n    workflows: [Fixture]\n    types: [completed]\n    branches: [main]",
+        ).replace("name: Deploy", "name: Follow")
+        self.assertTrue(audit_all({"good.yml": GOOD, "follow.yml": follower})["follow.yml"])
+        # Chained off a push-only workflow, no pull request can start it.
+        self.assertEqual(audit_all({"deploy.yml": DEPLOY, "follow.yml": follower.replace("[Fixture]", "[Deploy]")})["follow.yml"], [])
+        # Two hops, and an unresolvable source, are both treated as reachable.
+        second = follower.replace("name: Follow", "name: Second").replace("[Fixture]", "[Follow]")
+        self.assertTrue(audit_all({"good.yml": GOOD, "follow.yml": follower, "second.yml": second})["second.yml"])
+        self.assertTrue(audit_all({"follow.yml": follower.replace("[Fixture]", "[Elsewhere]")})["follow.yml"])
+
+    def test_workflow_run_guards_are_checked_per_job_and_in_the_trigger_block(self):
+        second_job = RUN_GOOD + (
+            "  other:\n    runs-on: ubuntu-latest\n    steps:\n"
+            "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n"
+            "        with:\n          persist-credentials: false\n"
+        )
+        self.rejected(lambda t: second_job, "job other lacks workflow_run guard", RUN_GOOD)
+        # One guard living only in another job's condition does not count.
+        partial = RUN_GOOD.replace("github.event.workflow_run.event == 'push' &&\n          ", "")
+        self.rejected(lambda t: partial, "lacks workflow_run guard: github.event.workflow_run.event", RUN_GOOD)
+        # An unrelated push branches filter must not satisfy the workflow_run filter.
+        no_filter = RUN_GOOD.replace("    branches: [main]\n", "").replace(
+            "on:\n", "on:\n  push:\n    branches: [main]\n")
+        self.rejected(lambda t: no_filter, "not limited to branches", RUN_GOOD)
+        wider = RUN_GOOD.replace("branches: [main]", "branches: [main, dev]")
+        self.rejected(lambda t: wider, "not limited to branches", RUN_GOOD)
+        listed = RUN_GOOD.replace("    branches: [main]\n", "    branches:\n      - main\n")
+        self.assertEqual(audit(listed), [])
+
+    def test_mentions_of_privileged_words_outside_real_keys_are_not_violations(self):
+        noisy = GOOD.replace(
+            "      - run: echo",
+            "      - name: Scan for secrets and self-hosted environment leaks\n"
+            "        run: |\n"
+            "          echo \"mode: write\"\n"
+            "          echo \"secrets are not used; runs-on: self-hosted; environment: prod\"\n"
+            "      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1\n"
+            "        with:\n"
+            "          node-environment: production\n"
+            "          note: ${{ contains(github.event.head_commit.message, 'secrets') }}\n"
+            "      # secrets.COMMENTED_OUT and permissions: write-all in a YAML comment\n"
+            "      - run: echo",
+        )
+        self.assertNotEqual(noisy, GOOD)
+        self.assertEqual(audit(noisy), [])
 
     def test_real_workflows_fail_when_deliberately_broken_in_memory(self):
         """Mutate the real files in memory only; nothing on disk changes."""
-        runtime = (WORKFLOWS / "runtime-ci.yml").read_text(encoding="utf-8")
-        prepare = (WORKFLOWS / "prepare-site.yml").read_text(encoding="utf-8")
-        self.assertEqual(audit(runtime), [])
-        self.assertTrue(audit(runtime.replace("  pull_request:\n", "  pull_request_target:\n")))
-        self.assertTrue(audit(runtime.replace("contents: read", "contents: write")))
-        self.assertTrue(audit(runtime + "      - run: x\n        env:\n          K: ${{ secrets.NPM_TOKEN }}\n"))
-        self.assertTrue(audit(prepare.replace("github.event.workflow_run.event == 'push' &&", "")))
-        self.assertTrue(audit(prepare.replace(
+        texts = self.texts()
+        self.assertEqual(audit_all(texts), {name: [] for name in texts})
+        runtime, prepare = texts["runtime-ci.yml"], texts["prepare-site.yml"]
+
+        def broken(name, text):
+            return audit_all({**texts, name: text})[name]
+
+        self.assertTrue(broken("runtime-ci.yml", runtime.replace("  pull_request:\n", "  pull_request_target:\n")))
+        self.assertTrue(broken("runtime-ci.yml", runtime.replace("contents: read", "contents: write")))
+        self.assertTrue(broken("runtime-ci.yml", runtime + "      - run: x\n        env:\n          K: ${{ secrets.NPM_TOKEN }}\n"))
+        self.assertTrue(broken("prepare-site.yml", prepare.replace("github.event.workflow_run.event == 'push' &&", "")))
+        self.assertTrue(broken("prepare-site.yml", prepare.replace("    branches: [main]\n", "", 1)))
+        self.assertTrue(broken("prepare-site.yml", prepare.replace(
             "ref: ${{ github.event.workflow_run.head_sha }}",
             "ref: ${{ github.event.pull_request.head.sha }}", 1)))
 
