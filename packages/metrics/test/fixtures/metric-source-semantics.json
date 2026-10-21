@@ -131,8 +131,8 @@
     },
     {
       "id": "DUPLICATE-CANONICALIZATION",
-      "name": "an intentional, publicly verified duplicate mark credits the triage actor once per unordered pair",
-      "inclusion": "One duplicate relation event gives its actor one unit; replay and swapped endpoints stay one canonical unit and a different canonical issue is a second unit.",
+      "name": "an intentional, publicly verified duplicate mark credits the triage actor once per mark event",
+      "inclusion": "One duplicate relation event gives its actor one unit; replay and swapped endpoints of that same event stay one canonical unit and a different canonical issue is a second unit. A later removal or un-mark of the same pair is not a reversal today and is recorded as a second raw unit.",
       "exclusion": "Automatic relations, unverified public endpoints, other or malformed relation kinds, a missing event proof, an unknown or bot actor in the user lens, a private repository, an out-of-window mark, a plain issue closure and a related-issue link are not duplicate resolution."
     },
     {
@@ -350,7 +350,7 @@
       "date_basis": "occurredAt",
       "group_by": "canonical",
       "case_ids": ["DUPLICATE-CANONICALIZATION"],
-      "remaining_scope": "Preserved unique evidence on the duplicate and an accompanying closure are not verified by the normalizer; only the intentional, publicly verified, event-proven relation and its canonical pair are."
+      "remaining_scope": "Preserved unique evidence on the duplicate and an accompanying closure are not verified by the normalizer; only the intentional, publicly verified, event-proven relation and its canonical pair are. The normalizer does not gate on the relationship action: a mark followed by a removal or un-mark of the same pair yields two raw units, so pair uniqueness holds per mark event only and reversal handling is remaining scope."
     },
     {
       "id": "accepted_findings",

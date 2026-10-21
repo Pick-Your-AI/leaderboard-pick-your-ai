@@ -942,6 +942,18 @@ semanticCase("DUPLICATE-CANONICALIZATION", () => {
   assert.deepEqual(values(aggregate("duplicate_resolution", [marked, marked, swapped])), [["202", 1]]);
   const another = duplicateMark({}, { to: "I_synthetic_22" });
   assert.deepEqual(values(aggregate("duplicate_resolution", [marked, another])), [["202", 2]]);
+  // Current behavior, recorded as remaining scope rather than endorsed: the normalizer does not gate on the
+  // relationship action, so an un-mark of the same pair is another observed unit. Pair uniqueness holds per
+  // mark event only. If the normalizer starts treating removals as reversals, this assertion must change.
+  for (const action of ["removed", "unmarked_as_duplicate"]) {
+    const reversed = duplicateMark({ action });
+    assert.equal(metricFacts(reversed, "duplicate_resolution").length, 1, action);
+    assert.deepEqual(
+      values(aggregate("duplicate_resolution", [marked, reversed])),
+      [["202", 2]],
+      `A mark followed by ${action} of the same pair is two raw units today`,
+    );
+  }
   assert.deepEqual(aggregate("duplicate_resolution", [marked], {}, { roles: ["author"] }).rows, []);
   assert.deepEqual(aggregate("duplicate_resolution", [marked], {}, strict).rows, [], "Out-of-window mark");
 
