@@ -9,7 +9,15 @@ hand-rolled reader can misread what it does not understand, it FAILS CLOSED:
 quoted keys are normalized in one place, and any construct outside the supported
 subset (flow mappings, flow sequences outside a few simple keys, anchors, aliases,
 merge keys, tags, multi-document files, multi-line quoted scalars, unknown `on:`
-events) is reported as "unsupported workflow syntax" rather than skipped.
+events, unknown top-level or job-level keys) is reported as "unsupported workflow
+syntax" rather than skipped.
+
+Case rules follow GitHub: expression contexts and property names (`secrets`,
+`github.head_ref`, the workflow_run guards, `GITHUB_TOKEN`), runner labels,
+workflow names in `workflow_run.workflows` and boolean values are matched
+case-insensitively; YAML keys, event names, permission scope names and branch
+names are case-sensitive, and a miscased one is never silently skipped (it
+fails the unknown-key, unknown-event or permission checks instead).
 
 Universal rules (every workflow): no pull_request_target or other
 pull-request-adjacent privileged trigger, actions pinned to full commit SHAs,
@@ -50,13 +58,21 @@ WORKFLOW_RUN_GUARDS = (
     "github.event.workflow_run.head_repository.full_name == github.repository",
 )
 PINNED_ACTION = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_./-]+)?@[0-9a-f]{40}$")
-UNTRUSTED_REF = re.compile(r"github\.(?:head_ref|event\.pull_request\.head)")
+UNTRUSTED_REF = re.compile(r"github\.(?:head_ref|event\.pull_request\.head)", re.I)
+SECRET_REFERENCE = re.compile(r"\bsecrets\b(?!\.GITHUB_TOKEN\b)", re.I)
 # GitHub-hosted runner labels; anything else (self-hosted, groups, custom or
 # larger-runner labels, expressions) is unreviewed and rejected for PR code.
 HOSTED_RUNNER = re.compile(
     r"ubuntu-(?:latest|\d{2}\.\d{2}(?:-arm)?)|windows-(?:latest|\d{4}|11-arm)"
-    r"|macos-(?:latest|\d+(?:-(?:intel|large|xlarge))?)"
+    r"|macos-(?:latest|\d+(?:-(?:intel|large|xlarge))?)",
+    re.I,
 )
+TOP_KEYS = {"name", "run-name", "on", "permissions", "env", "defaults", "concurrency", "jobs"}
+JOB_KEYS = {
+    "name", "permissions", "needs", "if", "runs-on", "snapshot", "environment",
+    "concurrency", "outputs", "env", "defaults", "steps", "timeout-minutes",
+    "strategy", "continue-on-error", "container", "services", "uses", "with", "secrets",
+}
 LOCAL_WORKFLOW = re.compile(r"\./\.github/workflows/([\w.-]+\.ya?ml)")
 # One shared key pattern; every key match in this file goes through it.
 KEY = r"[A-Za-z_][\w-]*"
@@ -72,9 +88,13 @@ KNOWN_EVENTS = {
     "repository_dispatch", "schedule", "status", "watch", "workflow_call",
     "workflow_dispatch", "workflow_run",
 }
-# Keys whose simple one-line `[a, b]` value is understood; any other flow
-# sequence (notably steps, jobs, permissions, uses) is unsupported.
-FLOW_SEQUENCE_KEYS = {"on", "runs-on", "branches", "workflows", "types", "paths", "ports", "needs"}
+# A simple one-line `[a, b]` value is understood for ordinary keys (filters,
+# matrix values, inputs). Keys that carry workflow structure must be block style.
+FLOW_SEQUENCE_FORBIDDEN_KEYS = {
+    "steps", "jobs", "permissions", "uses", "environment", "secrets", "strategy",
+    "matrix", "with", "env", "defaults", "concurrency", "container", "services",
+    "outputs",
+}
 BLOCK_SCALAR = re.compile(r"^(-\s+)?(?:run|script):\s*[|>][+-]?\d*\s*$")
 
 
@@ -142,7 +162,7 @@ def unsupported(text):
                 problems.append(context + " (flow mapping)")
         elif value.startswith("["):
             flat = masked.count("[") == 1 and masked.count("]") == 1 and "{" not in masked
-            if key not in FLOW_SEQUENCE_KEYS or not value.endswith("]") or not flat:
+            if key is None or key in FLOW_SEQUENCE_FORBIDDEN_KEYS or not value.endswith("]") or not flat:
                 problems.append(context + " (flow sequence)")
     return problems
 
@@ -242,15 +262,27 @@ def workflow_name(text, fallback):
 
 
 def run_sources(text):
-    """Names listed under workflow_run.workflows."""
+    """Names listed under workflow_run.workflows (and only there)."""
     block = trigger_blocks(text).get("workflow_run", [])
-    joined = "\n".join(line for _, line in block)
-    inline = re.search(r"workflows:\s*\[(.*?)\]", joined)
-    if inline:
-        items = inline.group(1).split(",")
-    else:
-        items = re.findall(r"^-\s*(.+)$", joined, re.M)
-    return [item.strip().strip("'\"") for item in items if item.strip()]
+    for position, (indent, line) in enumerate(block):
+        match = re.fullmatch(r"workflows:\s*(.*)", line)
+        if not match:
+            continue
+        inline = re.fullmatch(r"\[(.*)\]", match.group(1).strip())
+        if inline:
+            items = inline.group(1).split(",")
+        elif match.group(1).strip():
+            items = [match.group(1)]
+        else:
+            items = []
+            for child_indent, child in block[position + 1:]:
+                # A block list may sit at the key's own indent.
+                if child_indent < indent or (child_indent == indent and not child.startswith("- ")):
+                    break
+                if child.startswith("- "):
+                    items.append(child[2:])
+        return [item.strip().strip("'\"") for item in items if item.strip()]
+    return []
 
 
 def local_calls(text):
@@ -271,7 +303,7 @@ def pr_reachable(texts):
     Anything that cannot be traced to a push-only origin counts as reachable.
     """
     events = {key: triggers(text) for key, text in texts.items()}
-    names = {workflow_name(text, key): key for key, text in texts.items()}
+    names = {workflow_name(text, key).lower(): key for key, text in texts.items()}
     by_file = {Path(key).name: key for key in texts}
     callers = {key: [] for key in texts}
     for key, text in texts.items():
@@ -291,7 +323,7 @@ def pr_reachable(texts):
                 sources = run_sources(text)
                 # An unresolvable source cannot be proven PR-free, so it counts.
                 reachable |= not sources or any(
-                    names.get(name) in reach or name not in names for name in sources)
+                    names.get(name.lower()) in reach or name.lower() not in names for name in sources)
             if "workflow_call" in found:
                 # No resolvable caller means it can be called from anywhere.
                 reachable |= not callers[key] or any(caller in reach for caller in callers[key])
@@ -365,11 +397,11 @@ def _permission_problems(text):
         top += indent == 0
         value = match.group(1)
         if value:
-            if value not in ("{}", "read-all", "none"):
+            if value.strip("'\"") not in ("{}", "read-all", "none"):
                 problems.append(f"permissions grant more than read: {value}")
             continue
         for _, child in _block(entries, index):
-            if not re.fullmatch(r"[a-z-]+: (?:read|none)", child):
+            if not re.fullmatch(r"[a-z-]+:\s*['\"]?(?:read|none)['\"]?", child):
                 problems.append(f"permissions grant more than read: {child}")
     if top != 1:
         problems.append("missing top-level permissions (use contents: read)")
@@ -417,16 +449,25 @@ def audit(text, reachable=None):
                 break
             step.append(child)
         step_text = "\n".join(step)
-        if "persist-credentials: false" not in step_text:
+        if not re.search(r"^persist-credentials:\s*['\"]?false['\"]?$", step_text, re.M | re.I):
             problems.append("checkout does not disable persist-credentials")
         for ref in re.findall(r"^ref:\s*(.+)$", step_text, re.M):
             if UNTRUSTED_REF.search(ref):
                 problems.append(f"checkout of untrusted pull-request ref: {ref}")
-            elif "github.event.workflow_run" in ref and ref.strip("${} ") != "github.event.workflow_run.head_sha":
+            elif "github.event.workflow_run" in ref.lower() and ref.strip("${} ").lower() != "github.event.workflow_run.head_sha":
                 problems.append(f"checkout of unreviewed workflow_run ref: {ref}")
-            elif "workflow_run" in ref and "workflow_run" not in events:
+            elif "workflow_run" in ref.lower() and "workflow_run" not in events:
                 problems.append(f"workflow_run ref without workflow_run trigger: {ref}")
 
+    for indent, line in structural:
+        match = KEY_VALUE.match(line)
+        if indent == 0 and match and match.group(1) not in TOP_KEYS:
+            problems.append(f"unsupported workflow syntax: unknown top-level key {match.group(1)}")
+    for name, indent, body in jobs(text):
+        for child_indent, line in body:
+            match = KEY_VALUE.match(line)
+            if child_indent == indent and match and match.group(1) not in JOB_KEYS:
+                problems.append(f"unsupported workflow syntax: unknown key {match.group(1)} in job {name}")
     if not any(True for _ in jobs(text)):
         problems.append("no jobs could be parsed (job-level checks would be skipped)")
 
@@ -438,8 +479,15 @@ def audit(text, reachable=None):
     # Only `${{ }}` expressions reference secrets; step names and quoted literals
     # that merely mention the word do not. Run bodies are included because their
     # expressions are evaluated before the shell sees them.
-    for expression in re.findall(r"\$\{\{(.*?)\}\}", "\n".join(line for _, line, _ in entries), re.S):
-        if re.search(r"\bsecrets\b(?!\.GITHUB_TOKEN\b)", re.sub(r"'[^']*'", "''", expression)):
+    expressions = re.findall(r"\$\{\{(.*?)\}\}", "\n".join(line for _, line, _ in entries), re.S)
+    # `if:` values are expressions even without ${{ }}.
+    for position, (_, line) in enumerate(structural):
+        match = re.match(r"(?:-\s+)*if:\s*(.*)", line)
+        if match:
+            expressions.append(match.group(1))
+            expressions += [child for _, child in _block(structural, position)]
+    for expression in expressions:
+        if SECRET_REFERENCE.search(re.sub(r"'[^']*'", "''", expression)):
             problems.append("references a secret other than GITHUB_TOKEN")
             break
     for name, indent, body in jobs(text):
@@ -453,7 +501,7 @@ def audit(text, reachable=None):
         if "workflow_run" in events:
             condition = _property(body, indent, "if") or ""
             for guard in WORKFLOW_RUN_GUARDS:
-                if guard not in condition:
+                if guard.lower() not in condition.lower():
                     problems.append(f"job {name} lacks workflow_run guard: {guard}")
     if "workflow_run" in events and _branches(blocks["workflow_run"]) != ["main"]:
         problems.append("workflow_run trigger is not limited to branches: [main]")
@@ -834,6 +882,97 @@ class WorkflowForkSafetyTests(unittest.TestCase):
             GOOD.replace("      - run:", "      - name: Don't {panic} [yet]\n        run: true\n      - run:"),
         ):
             self.assertEqual(audit(text), [], text)
+
+    def test_github_resolved_names_are_matched_case_insensitively(self):
+        env = "      - run: deploy\n        env:\n          X: %s\n"
+        for expression in (
+            "${{ SECRETS.X }}", "${{ Secrets.X }}", "${{ toJSON(SECRETS) }}",
+            "${{ SECRETS['X'] }}", "${{ secrets.GITHUB_TOKEN_EXTRA }}",
+        ):
+            self.rejected(lambda t, e=expression: t + env % e, "secret other than GITHUB_TOKEN")
+        self.rejected(lambda t: t + "      - if: secrets.DEPLOY_KEY != ''\n        run: deploy\n", "secret other than GITHUB_TOKEN")
+        self.rejected(lambda t: t + "      - if: >-\n          SECRETS.DEPLOY_KEY != ''\n        run: deploy\n", "secret other than GITHUB_TOKEN")
+        for expression in ("${{ secrets.github_token }}", "${{ SECRETS.GITHUB_TOKEN }}", "${{ Secrets.Github_Token }}"):
+            self.assertEqual(audit(GOOD + env % expression), [], expression)
+        for ref in ("${{ GITHUB.HEAD_REF }}", "${{ Github.Event.Pull_Request.Head.Sha }}"):
+            self.rejected(lambda t, r=ref: t.replace(
+                "          persist-credentials: false\n", f"          persist-credentials: false\n          ref: {r}\n"),
+                "untrusted pull-request ref")
+        self.rejected(lambda t: t.replace("          persist-credentials: false\n",
+                                          "          persist-credentials: false\n          ref: ${{ GitHub.Event.Workflow_Run.Head_Repository.Ref }}\n"),
+                      "workflow_run ref")
+        # Guards compare case-insensitively, as Actions expressions do.
+        shouting = RUN_GOOD.replace("github.event.workflow_run.event == 'push'", "GITHUB.EVENT.WORKFLOW_RUN.EVENT == 'push'")
+        self.assertEqual(audit(shouting), [])
+        self.rejected(lambda t: RUN_GOOD.replace("github.event.workflow_run.event == 'push'", "GITHUB.EVENT.WORKFLOW_RUN.EVENT == 'pull_request'"),
+                      "lacks workflow_run guard", RUN_GOOD)
+        self.assertEqual(audit(RUN_GOOD.replace("ref: ${{ github.event.workflow_run.head_sha }}", "ref: ${{ GITHUB.EVENT.WORKFLOW_RUN.HEAD_SHA }}")), [])
+        # Booleans, runner labels and workflow names are case-insensitive too.
+        for value in ("False", "FALSE", "'false'"):
+            self.assertEqual(audit(GOOD.replace("persist-credentials: false", f"persist-credentials: {value}")), [], value)
+        self.rejected(lambda t: t.replace("persist-credentials: false", "persist-credentials: TRUE"), "persist-credentials")
+        self.assertEqual(audit(GOOD.replace("ubuntu-latest", "Ubuntu-Latest")), [])
+        self.rejected(lambda t: t.replace("ubuntu-latest", "SELF-HOSTED"), "allowlisted GitHub-hosted")
+        chained = audit_all({"good.yml": GOOD, "run.yml": RUN_GOOD.replace("[Fixture]", "[FIXTURE]").replace("name: Follow", "name: FOLLOW")})
+        self.assertEqual(chained["run.yml"], [])
+        deploy_follower = DEPLOY.replace("  push:\n    branches: [main]",
+                                         "  workflow_run:\n    workflows: [fixture]\n    types: [completed]\n    branches: [main]")
+        self.assertTrue(audit_all({"good.yml": GOOD, "deploy.yml": deploy_follower})["deploy.yml"])
+        # Miscased structural keys are never silently skipped.
+        self.rejected(lambda t: t.replace("    runs-on: ubuntu-latest\n", "    runs-on: ubuntu-latest\n    Environment: prod\n"), "unknown key Environment")
+        self.rejected(lambda t: t + "Permissions:\n  contents: write\n", "unknown top-level key Permissions")
+        self.rejected(lambda t: t.replace("permissions:\n  contents: read", "permissions:\n  Contents: write"), "permissions")
+        self.rejected(lambda t: t.replace("permissions:\n  contents: read", "permissions:\n  contents: Write"), "permissions")
+        self.rejected(lambda t: t.replace("permissions:\n  contents: read", "PERMISSIONS:\n  contents: read"), "unknown top-level key")
+
+    def test_workflow_run_sources_come_only_from_the_workflows_list(self):
+        follower = (
+            "name: Follow\n\non:\n  workflow_run:\n    workflows:\n      - Deploy\n"
+            "    types:\n      - completed\n    branches:\n      - main\n\n"
+            "permissions:\n  contents: read\n\njobs:\n  follow:\n    runs-on: ubuntu-latest\n"
+            "    if: >-\n      ${{ github.event.workflow_run.event == 'push' &&\n"
+            "          github.event.workflow_run.head_branch == 'main' &&\n"
+            "          github.event.workflow_run.head_repository.full_name == github.repository }}\n"
+            "    steps:\n      - run: echo ok\n"
+        )
+        self.assertEqual(run_sources(follower), ["Deploy"])
+        self.assertEqual(run_sources(follower.replace("      - Deploy\n", "      - Deploy\n      - Other\n")), ["Deploy", "Other"])
+        flush = follower.replace("      - Deploy", "    - Deploy")
+        self.assertEqual(run_sources(flush), ["Deploy"])
+        results = audit_all({"deploy.yml": DEPLOY, "follow.yml": follower})
+        self.assertEqual(results, {"deploy.yml": [], "follow.yml": []})
+        # The same follower after a PR-triggered workflow is PR-reachable.
+        pr_deploy = DEPLOY.replace("  push:\n    branches: [main]", "  pull_request:")
+        self.assertTrue(audit_all({"deploy.yml": pr_deploy, "follow.yml": follower.replace(
+            "    steps:\n      - run: echo ok\n", "    environment: prod\n    steps:\n      - run: echo ok\n")})["follow.yml"])
+
+    def test_ordinary_simple_flow_sequences_are_supported(self):
+        for text in (
+            GOOD.replace("branches: [main]", "branches: [main]\n    paths-ignore: ['docs/**']"),
+            GOOD.replace("branches: [main]", "branches-ignore: [dev]"),
+            GOOD.replace("branches: [main]", "tags: ['v*']\n    tags-ignore: [old]"),
+            GOOD.replace("    steps:", "    strategy:\n      matrix:\n        python: ['3.12', '3.13']\n    steps:"),
+            GOOD.replace("        with:\n", "        with:\n          sparse-checkout: [scripts, tests]\n"),
+            GOOD.replace("    steps:", "    needs: [a, b]\n    steps:"),
+        ):
+            self.assertEqual(audit(text), [], text)
+        # Structure-bearing keys must stay block style.
+        for text in (
+            GOOD.replace("    steps:\n", "    steps: [a]\n"),
+            GOOD.replace("permissions:\n  contents: read", "permissions: [contents]"),
+            GOOD.replace("    steps:", "    strategy: [a]\n    steps:"),
+            GOOD.replace("        with:\n", "        with: [a]\n"),
+            GOOD.replace("      - run:", "      - uses: [a]\n      - run:"),
+        ):
+            self.assertTrue(any("unsupported workflow syntax" in problem for problem in audit(text)), text)
+
+    def test_permission_values_ignore_quoting_and_spacing(self):
+        for line in ("contents: 'read'", 'contents: "read"', "contents:  read", "contents:   none"):
+            self.assertEqual(audit(GOOD.replace("contents: read", line)), [], line)
+        self.assertEqual(audit(GOOD.replace("permissions:\n  contents: read", "permissions: 'read-all'")), [])
+        self.rejected(lambda t: t.replace("contents: read", "contents: 'write'"), "permissions")
+        self.rejected(lambda t: t.replace("contents: read", "contents:  write"), "permissions")
+        self.rejected(lambda t: t.replace("permissions:\n  contents: read", "permissions: 'write-all'"), "permissions")
 
     def test_real_workflows_fail_when_deliberately_broken_in_memory(self):
         """Mutate the real files in memory only; nothing on disk changes."""
