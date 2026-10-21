@@ -3,11 +3,11 @@
 This is a partial implementation of [LB-19.01 / issue #72](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/issues/72).
 The new suite feeds synthetic GitHub source payloads through the actual normalizer
 and metric engine. It adds explicit actor, clock, source-proof and grouping
-checks for 18 metric IDs. The inventory separately maps 64 other IDs to existing
-meaningful source cases, with exact test names and their limits. Sixteen IDs
+checks for 18 metric IDs. The inventory separately maps 65 other IDs to existing
+meaningful source cases, with exact test names and their limits. Fifteen IDs
 remain explicitly deferred in the inventory. The accepted eleven-reference update,
-two pair mappings, two accepted-source mappings and the bounded Project item-day
-mapping below do not certify all 98 public definitions.
+two pair mappings, two accepted-source mappings, bounded Project item-day mapping
+and native curation mapping below do not certify all 98 public definitions.
 
 The [machine-readable inventory](../packages/metrics/test/fixtures/metric-source-semantics.json)
 accounts for every registry ID exactly once. A metric with new cases has an
@@ -70,13 +70,13 @@ the corresponding metric rather than marking its entire public definition done.
 
 ## Remaining acceptance and ownership
 
-The inventory now has 18 direct-suite entries, 64 existing-source mappings and
-16 explicit remaining dispositions. The references include specialized domain
+The inventory now has 18 direct-suite entries, 65 existing-source mappings and
+15 explicit remaining dispositions. The references include specialized domain
 receipt admission, localization, bug/answer recognition, typed history,
 participation history, physical diff eligibility, maintenance, automation,
-editorial consent and observed Project item days. Each maps a literal positive
-and exclusion test; parameterized domain cases also name their metric input.
-These are bounded source-review references, not 64 new executions or a claim
+editorial consent, observed Project item days and native Project curation. Each
+maps a literal positive and exclusion test; parameterized domain cases also name their metric input.
+These are bounded source-review references, not 65 new executions or a claim
 that every remaining facet is done.
 The original 18/47/33 inventory and its semantic/cache executions remain attributed
 to the earlier source. The separately reviewed repository-net helper adds one
@@ -146,17 +146,30 @@ week. It does not borrow an out-of-window, other-role newcomer uncertainty case
 as evidence for unknown in-scope active-week exclusion. Its calendar denominator
 is context, not a certified fully covered participation share or month projection.
 
-The remaining dispositions retain six derivation/admission prerequisites and
+The remaining dispositions retain five derivation/admission prerequisites and
 ten IDs needing additional semantic cases. The accepted eleven-reference review
 left 21 entries; the prior composition mapped two pairs plus direct changes and
 helpful feedback, leaving 17. The [Project field item-day cases](../packages/metrics/test/project-field-days.test.js)
-now add one bounded mapping for explicitly enriched synthetic item transitions
-under `project-field-day/v1`, leaving 16. The [grouping guide](project-field-day-grouping.md)
+added one bounded mapping for explicitly enriched synthetic item transitions
+under `project-field-day/v1`, leaving the historical 18/64/16 inventory. The [grouping guide](project-field-day-grouping.md)
 preserves the limits: no native `projects_v2_item` collection, installed grants,
 complete history, live sender identity, manual-effort classification, independent
 correction authorization or public activation is established. `project_updates`
 remains deferred because scalar field transitions do not prove substantive
 published Project progress-update artifacts.
+
+The [native curation cases](../packages/metrics/test/project-curation-source.test.js)
+add one further bounded mapping, producing 18/65/15. Real normalizer/engine
+assertions conserve native add/remove/re-add operations, reject missing proof
+or actor substitution, and preserve automation and unknowns. Companion native
+reader and on-disk pipeline cases cover the separately configured family,
+digest-bound output pages, exact hydration, privacy denial and reapproval.
+The [curation contract](NATIVE_PROJECT_CURATION.md) keeps the limits explicit:
+the transport and host grants are synthetic, no ProjectV2Item ID is invented,
+and no live installation, complete history, manual-work classification,
+independent acceptance or public activation is established. Existing status
+and field semantics, definition-only maturity and all other mappings remain
+unchanged.
 The optional retained-line and commit-attributed
 lenses are not silently assigned to the adjacent physical-context PRs. A raw
 relationship cannot establish preserved duplicate evidence; a generic accepted

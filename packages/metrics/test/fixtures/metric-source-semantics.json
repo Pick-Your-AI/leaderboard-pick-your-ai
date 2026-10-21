@@ -290,7 +290,6 @@
       "metric_ids": [
         "cross_workstream_reviews",
         "evidence_reviews",
-        "project_items_curated",
         "outreach",
         "commit_attributed_lines",
         "retained_lines"
@@ -788,6 +787,13 @@
       "positive_test": "different field facets and reversals retain raw events but share one observed editor item day",
       "negative_test": "missing editor, item identity, source time or event proof cannot create an observed item day",
       "limitation": "Explicitly enriched synthetic Project item transitions exercise the real normalizer and engine under project-field-day/v1. The cases cover observed editor/item/source-day grouping and bounded authority, deduplication, no-op, snapshot and subtype exclusions. They do not establish native projects_v2_item parsing, installed grants, complete field history, live sender identity, manual work, independent correction authority or public activation. Coverage remains incomplete, ranks null and publicEnabled false; the UI stays definition_only with no selectable/default combination. Scalar field edits are separate from Project progress-update publication."
+    },
+    {
+      "metric_id": "project_items_curated",
+      "path": "packages/metrics/test/project-curation-source.test.js",
+      "positive_test": "native add remove and re-add remain distinct while replay and arrival order cannot multiply credit",
+      "negative_test": "missing native proof actor identity or source scope never borrows author creator or snapshot credit",
+      "limitation": "Native-schema-backed synthetic issue/PR Project add/remove observations exercise the real normalizer and engine; companion reader and on-disk pipeline cases cover explicit source grants, exact subject/Project/event binding, digest-bound output pages, fresh rehydration, privacy denial and reapproval. Native events supply no ProjectV2Item ID; none is invented. Automation remains raw and cannot receive human triager credit, while false automation flags remain execution-unknown. These cases do not establish live installed grants, full history, manual effort, independent acceptance/correction authority or public activation. Coverage remains incomplete, ranks null and publicEnabled false; the UI stays definition_only with no selectable/default combination. Status/field transitions and published Project progress updates remain separate."
     }
   ]
 }

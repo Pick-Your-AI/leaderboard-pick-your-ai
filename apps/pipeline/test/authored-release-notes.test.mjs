@@ -345,7 +345,8 @@ test("authored notes authority: all98 fingerprints preserve historical defaults 
       const actual = recognitionFingerprint(state, [binding]);
       const historical = previousPurposeAuthority(state, [binding]);
       const expected = previousPurposeAuthority(state, [binding], true);
-      if (["issue_ordering", "release_stewardship"].includes(metric.id)) assert.notEqual(actual, expected, metric.id);
+      if (["issue_ordering", "release_stewardship", "performance", "regressions_prevented"].includes(metric.id))
+        assert.notEqual(actual, expected, metric.id);
       else assert.equal(actual, expected, metric.id);
       if (metric.id === "project_configuration" && state === s.state) assert.notEqual(expected, historical, metric.id);
       else assert.equal(expected, historical, metric.id);

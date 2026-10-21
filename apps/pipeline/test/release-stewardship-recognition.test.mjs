@@ -217,10 +217,11 @@ test("release stewardship pipeline: literal accepted-f80 authority preserves ind
         continue;
       }
       const actual = recognitionFingerprint(historicalAuthority.states[key], bindings);
-      // These literal hashes predate the independently reviewed Project and
-      // ordering boundaries. Preserve every unaffected historical comparison.
+      // These literal hashes predate the independently reviewed Project,
+      // ordering and comparison boundaries. Preserve every unaffected comparison.
       const independentlyRetired =
-        entry.metricId === "issue_ordering" || (entry.metricId === "project_configuration" && key === "currentIntake");
+        ["issue_ordering", "performance", "regressions_prevented"].includes(entry.metricId) ||
+        (entry.metricId === "project_configuration" && key === "currentIntake");
       if (entry.metricId === "release_stewardship" || independentlyRetired)
         assert.notEqual(actual, entry[key], `${entry.metricId}:${key}`);
       else assert.equal(actual, entry[key], `${entry.metricId}:${key}`);

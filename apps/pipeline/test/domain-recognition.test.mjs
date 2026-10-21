@@ -18,6 +18,7 @@ import {
 } from "@pick-your-ai/metrics";
 import { materializeRecognition, recognitionFingerprint } from "../src/recognition-adapter.mjs";
 import { domainMetricIds, domainDateBasis } from "../src/domain-recognition.mjs";
+import { evidenceIntakeAuthority } from "../../controls/src/evidence-intake.mjs";
 import {
   attachSyntheticEvidenceIntake,
   attachSyntheticEvidenceState,
@@ -1007,7 +1008,10 @@ test("reproductions: its configuration fence preserves automatic-source authorit
     );
     const current = recognitionFingerprint(empty, [s.binding]),
       previous = emptyDomainAuthority([s.binding], true);
-    if (["reproductions", "governance", "deployment_work", "incidents"].includes(metric))
+    if (
+      ["reproductions", "governance", "deployment_work", "incidents"].includes(metric) ||
+      ["performance", "regressions_prevented"].includes(metric)
+    )
       assert.notEqual(current, previous);
     else assert.equal(current, previous, `${metric}: exact prior authority bytes survive`);
   }
@@ -1031,7 +1035,10 @@ test("data_quality: qualifier authority preserves other automatic sources while 
     );
     const current = recognitionFingerprint(empty, [s.binding]),
       previous = emptyDomainAuthority([s.binding]);
-    if (["data_quality", "reproductions", "governance", "deployment_work", "incidents"].includes(metric))
+    if (
+      ["data_quality", "reproductions", "governance", "deployment_work", "incidents"].includes(metric) ||
+      ["performance", "regressions_prevented"].includes(metric)
+    )
       assert.notEqual(current, previous);
     else assert.equal(current, previous, `${metric}: established automatic-source authority is retained`);
   }
@@ -2384,3 +2391,290 @@ test("domain role boundary: a private remediation declaration cannot grant a rol
     });
   }
 });
+
+function comparisonRevisionScenario(metric, width = 40) {
+  const s = scenario(metric);
+  const prior = "b".repeat(width),
+    current = "c".repeat(width);
+  s.input = source((envelope) => {
+    envelope.payload.pull_request.merge_commit_sha = current;
+    envelope.integration.before = envelope.integration.diff.before = prior;
+    envelope.integration.after = envelope.integration.diff.after = current;
+    envelope.integration.commitShas = [current];
+  });
+  s.candidate = s.input.facts.find((fact) => fact.metricId === "pr_merged");
+  s.evidence = s.input.evidence.find((entry) => entry.contribution.contributionId === s.candidate.id);
+  assert.equal(s.evidence.sourceRevision, current);
+  s.record.factId = s.candidate.id;
+  s.record.sourceRevision = s.evidence.sourceRevision;
+  s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl;
+  s.request.locator = s.evidence.artifact.publicUrl;
+  comparisonRevisions(s, prior, current);
+  return s;
+}
+
+function comparisonRevisions(s, prior, current) {
+  if (s.binding.metricId === "performance") {
+    s.record.details.before.revision = prior;
+    s.record.details.after.revision = current;
+  } else {
+    assert.equal(s.binding.metricId, "regressions_prevented");
+    s.record.details.beforeRevision = prior;
+    s.record.details.afterRevision = current;
+  }
+}
+
+// Exact immediately preceding authority for these fixtures, including current
+// manual intake. Unrelated markers are deliberately excluded by the fixture guard.
+function beforeComparisonRevisionFingerprint(state, bindings) {
+  assert.ok(
+    bindings.every((binding) =>
+      ["documentation", "tests", "performance", "regressions_prevented"].includes(binding.metricId),
+    ),
+  );
+  const requests = Object.values(state.requests ?? {})
+    .filter((request) => request.kind === "evidence")
+    .sort((a, b) => a.id.localeCompare(b.id));
+  assert.ok(requests.every((request) => Object.keys(request.collaborators).length === 0));
+  const suppressed = Object.entries(state.profiles ?? {})
+    .filter(([, profile]) => profile.suppressed)
+    .map(([actorId]) => actorId)
+    .sort();
+  const decisions = new Set(
+    requests.flatMap((request) =>
+      (request.history ?? []).filter((entry) => entry.action === "accepted").map((entry) => entry.id),
+    ),
+  );
+  const audit = (state.audit ?? [])
+    .filter((entry) => decisions.has(entry.id))
+    .map((entry) => JSON.stringify(entry))
+    .sort();
+  const authority = ["localization-review-target/v1", requests, suppressed, audit, bindings];
+  if (requests.length) authority.push(evidenceIntakeAuthority());
+  return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
+}
+
+for (const metric of ["performance", "regressions_prevented"]) {
+  for (const width of [40, 64]) {
+    test(`${metric}: distinct complete ${width}-digit Git revisions qualify`, () => {
+      const s = comparisonRevisionScenario(metric, width);
+      const original = structuredClone({ input: s.input, state: s.state, binding: s.binding });
+      const result = qualified(s);
+      assert.equal(result.length, 1);
+      assert.equal(result[0].actorId, "101");
+      assert.equal(result[0].acceptedAt, acceptedAt);
+      assert.deepEqual({ input: s.input, state: s.state, binding: s.binding }, original);
+    });
+
+    test(`${metric}: identical ${width}-digit objects cannot differ only by case`, () => {
+      for (const prior of ["c".repeat(width), "C".repeat(width)]) {
+        const s = comparisonRevisionScenario(metric, width);
+        comparisonRevisions(s, prior, s.record.sourceRevision);
+        assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
+      }
+    });
+  }
+
+  test(`${metric}: mutable refs, malformed widths and whitespace are not immutable revisions`, () => {
+    for (const prior of [
+      undefined,
+      null,
+      123,
+      "",
+      " ",
+      "main",
+      "refs/heads/main",
+      "v1.0.0",
+      "b".repeat(39),
+      "b".repeat(41),
+      "b".repeat(63),
+      "b".repeat(65),
+      "g".repeat(40),
+      "g".repeat(64),
+      "B".repeat(40),
+      "B".repeat(64),
+      "b".repeat(40) + "\n",
+      "b".repeat(64) + "\r",
+      " " + "b".repeat(40),
+      "b".repeat(40) + " ",
+    ]) {
+      const s = comparisonRevisionScenario(metric);
+      comparisonRevisions(s, prior, s.record.sourceRevision);
+      assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
+    }
+  });
+
+  test(`${metric}: before and after use the same repository object format`, () => {
+    for (const [priorWidth, currentWidth] of [
+      [40, 64],
+      [64, 40],
+    ]) {
+      const s = comparisonRevisionScenario(metric, currentWidth);
+      comparisonRevisions(s, "b".repeat(priorWidth), s.record.sourceRevision);
+      assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
+    }
+  });
+
+  test(`${metric}: a complete after revision must still equal the collected record`, () => {
+    for (const width of [40, 64]) {
+      const s = comparisonRevisionScenario(metric, width);
+      comparisonRevisions(s, "b".repeat(width), "d".repeat(width));
+      assert.throws(() => run(s), { message: "domain_recognition_evidence_unverified" });
+    }
+  });
+}
+
+test("comparison revision authority retires only affected destination configurations", () => {
+  const empty = { requests: {}, profiles: {}, audit: [] };
+  for (const metric of ["documentation", "tests", "performance", "regressions_prevented"]) {
+    const s = scenario(metric);
+    for (const state of [empty, s.state]) {
+      const current = recognitionFingerprint(state, [s.binding]);
+      const previous = beforeComparisonRevisionFingerprint(state, [s.binding]);
+      if (["performance", "regressions_prevented"].includes(metric)) assert.notEqual(current, previous);
+      else assert.equal(current, previous, "unrelated authority retains its exact preceding fingerprint");
+    }
+  }
+  const s = scenario("documentation");
+  for (const metric of ["performance", "regressions_prevented"]) {
+    const bindings = [s.binding, scenario(metric).binding];
+    for (const state of [empty, s.state])
+      assert.notEqual(recognitionFingerprint(state, bindings), beforeComparisonRevisionFingerprint(state, bindings));
+  }
+});
+
+for (const metric of ["performance", "regressions_prevented"]) {
+  test(`${metric}: preceding authority stays retired through reopen and authorized recomputation`, async (t) => {
+    const { harness, components, publicScope } = await import("./harness.mjs");
+    const { createPipeline } = await import("../src/runtime.mjs");
+    const s = comparisonRevisionScenario(metric);
+    // Marker-free fictional records exercise retained public-mode authority.
+    // They are not actual measurements, executed regression scenarios or reviews.
+    s.input = JSON.parse(JSON.stringify(s.input).replace(/synthetic/gi, "fixture"));
+    s.candidate = s.input.facts.find((fact) => fact.id === s.candidate.id);
+    s.evidence = s.input.evidence.find((entry) => entry.contribution.contributionId === s.candidate.id);
+    for (const entry of s.input.evidence) {
+      entry.artifact.publicUrl = entry.artifact.publicUrl.replace(
+        "fixture-owner/repository",
+        "example-org/example-repo",
+      );
+      if (entry.sourceRevisionUrl)
+        entry.sourceRevisionUrl = entry.sourceRevisionUrl.replace(
+          "fixture-owner/repository",
+          "example-org/example-repo",
+        );
+    }
+    s.request.locator = s.evidence.artifact.publicUrl;
+    attachSyntheticEvidenceState(s.state);
+    s.record.sourceRevisionUrl = s.evidence.sourceRevisionUrl;
+    const payload = JSON.parse(JSON.stringify(fixture.pull_request).replace(/synthetic/gi, "fixture"));
+    payload.html_url = s.request.locator;
+    const h = await harness(t, {
+      markerFreeConfig: true,
+      dataMode: "public",
+      payloads: [payload],
+      defaultDeliveryNormalizationVersion,
+      normalizerFactory: () => async () => domainNormalization(s.input),
+      configure(config) {
+        config.recognitionBindings = [s.binding];
+        const policy = {
+          ...config.policies[0].policy,
+          ...s.policies[0].policy,
+          roles: ["author"],
+          unit: components.metrics.getMetricDefinition(metric).definition.unit,
+        };
+        config.policies = [
+          { policy, signature: components.metrics.stableJSON(policy), approvalReceipt: "fixture-test-approval" },
+        ];
+      },
+    });
+    h.controlsStore.transaction((state) => {
+      state.requests = s.state.requests;
+      state.audit = s.state.audit;
+    });
+    const publication = await h.runtime.runOnce({ cutoff });
+    assert.equal(publication.state, "published");
+    const snapshotId = publication.publications[0].snapshotId;
+    const read = await h.runtime.source.read(publicScope, snapshotId, new AbortController().signal);
+    assert.ok(read);
+    assert.equal(read.selected.rows[0].result.value, 1);
+    const accepted = read.selected.portfolioEvidence.filter((entry) => entry.activityState === "accepted");
+    assert.equal(accepted.length, 1);
+    const proofId = accepted[0].contribution.contributionId;
+    const proofPath = (pin) => `/api/v1/evidence/${proofId}?snapshot=${pin}`;
+    assert.equal((await h.runtime.app.inject(proofPath(snapshotId))).statusCode, 200);
+    assert.ok(await h.runtime.aggregateExplanations.read(snapshotId));
+    const state = h.controlsStore.read();
+    const previous = beforeComparisonRevisionFingerprint(state, [s.binding]);
+    const current = recognitionFingerprint(state, [s.binding]);
+    assert.equal(state.pipelinePublications[snapshotId].recognitionFingerprint, current);
+    assert.notEqual(current, previous);
+    const retained = async () => ({
+      frozen: (
+        await h.db.query(
+          "SELECT snapshot_id,document,document_hash FROM leaderboard_pipeline.frozen_inputs ORDER BY snapshot_id",
+        )
+      ).rows,
+      normalizations: (
+        await h.db.query(
+          "SELECT fact_key,policy_signature,document,document_hash " +
+            "FROM leaderboard_pipeline.normalizations ORDER BY fact_key,policy_signature",
+        )
+      ).rows,
+    });
+    const original = await retained();
+    assert.ok(original.frozen.some((row) => row.snapshot_id === snapshotId));
+    assert.ok(original.normalizations.length > 0);
+    h.controlsStore.transaction((stored) => {
+      // Restore exactly the preceding valid authority receipt. Source, frozen
+      // documents and their hashes remain unchanged; no old runtime is executed.
+      stored.pipelinePublications[snapshotId].recognitionFingerprint = previous;
+    });
+    const assertRetired = async (runtime) => {
+      for (const pin of [null, snapshotId])
+        assert.equal(await runtime.source.read(publicScope, pin, new AbortController().signal), null);
+      const proof = await runtime.app.inject(proofPath(snapshotId));
+      assert.equal(proof.statusCode, 410);
+      assert.equal(proof.json().error, "snapshot_expired_refetch");
+      await assert.rejects(runtime.aggregateExplanations.read(snapshotId), /authorization_changed/);
+      assert.deepEqual(await retained(), original);
+    };
+    await assertRetired(h.runtime);
+    await h.runtime.stop();
+    await h.reopenDatabase();
+    const restarted = await createPipeline(h.options);
+    t.after(() => restarted.stop());
+    await assertRetired(restarted);
+    const recomputed = await restarted.runOnce({ cutoff });
+    assert.equal(recomputed.state, "published");
+    const currentId = recomputed.publications[0].snapshotId;
+    const restored = await restarted.source.read(publicScope, currentId, new AbortController().signal);
+    assert.ok(restored);
+    assert.equal(restored.selected.rows[0].result.value, 1);
+    assert.equal((await restarted.app.inject(proofPath(currentId))).statusCode, 200);
+    assert.ok(await restarted.aggregateExplanations.read(currentId));
+    assert.equal(
+      h.controlsStore.read().pipelinePublications[currentId].recognitionFingerprint,
+      recognitionFingerprint(h.controlsStore.read(), [s.binding]),
+    );
+    const after = await retained();
+    for (const row of original.frozen)
+      assert.deepEqual(
+        after.frozen.find((entry) => entry.snapshot_id === row.snapshot_id),
+        row,
+      );
+    for (const row of original.normalizations)
+      assert.deepEqual(
+        after.normalizations.find(
+          (entry) => entry.fact_key === row.fact_key && entry.policy_signature === row.policy_signature,
+        ),
+        row,
+      );
+    h.controlsStore.transaction((stored) => {
+      stored.requests[s.request.id].status = "withdrawn";
+    });
+    assert.equal(await restarted.source.read(publicScope, currentId, new AbortController().signal), null);
+    assert.equal((await restarted.app.inject(proofPath(currentId))).statusCode, 410);
+    await assert.rejects(restarted.aggregateExplanations.read(currentId), /authorization_changed/);
+  });
+}

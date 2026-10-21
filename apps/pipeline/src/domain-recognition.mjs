@@ -99,6 +99,12 @@ const choice = (value, values) => {
   require(values.includes(value));
   return value;
 };
+const gitRevision = (value) => {
+  require(
+    typeof value === "string" && [40, 64].includes(value.length) && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value),
+  );
+  return value;
+};
 const pinnedGithubUrl = (value, revision) => {
   require(typeof value === "string" && value.length <= 2048);
   let url;
@@ -658,11 +664,12 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
       object(detail, ["scenarioId", "fixtureHash", "beforeRevision", "afterRevision", "failsBefore", "passesAfter"]);
       digest(detail.fixtureHash);
       require(
-        detail.failsBefore === true && detail.passesAfter === true && detail.beforeRevision !== detail.afterRevision,
+        detail.failsBefore === true &&
+          detail.passesAfter === true &&
+          gitRevision(detail.beforeRevision) !== gitRevision(detail.afterRevision) &&
+          detail.beforeRevision.length === detail.afterRevision.length,
       );
       unit = [id(detail.scenarioId)];
-      id(detail.beforeRevision);
-      id(detail.afterRevision);
       require(detail.afterRevision === record.sourceRevision);
       break;
     case "accessibility":
@@ -687,7 +694,11 @@ export function qualifyDomainRecognition({ input, request, decision, binding, ca
       object(detail.after, keys);
       const before = detail.before,
         after = detail.after;
-      require(id(before.revision) !== id(after.revision) && after.revision === record.sourceRevision);
+      require(
+        gitRevision(before.revision) !== gitRevision(after.revision) &&
+          before.revision.length === after.revision.length &&
+          after.revision === record.sourceRevision,
+      );
       require(
         digest(before.conditionsHash) === digest(after.conditionsHash) &&
           id(before.metric) === id(after.metric) &&
