@@ -116,6 +116,48 @@
       "name": "the default hydrated sequence credits earliest eligible nonself reviewers and exact-time ties",
       "inclusion": "COMMENTED and CHANGES_REQUESTED reviews at the same earliest eligible time each give their actual author one PR unit; source order and replay cannot break the tie.",
       "exclusion": "Earlier self/bot and pending reviews do not win; later, missing or conflicting cohorts and an unproved special action cannot mint first-review participation."
+    },
+    {
+      "id": "TITLE-SCOPE-EDIT",
+      "name": "a proven title or body text difference credits the edit actor, not the item author",
+      "inclusion": "One webhook edit whose prior title or body text differs from the current text gives its editor one observed triager unit, once across replays and once when title and body change together.",
+      "exclusion": "Missing, empty, equal, non-text or unrelated-field edit history, a missing event proof or clock, an unknown or bot editor in the user lens, a private repository, an out-of-window edit and the initial issue representation contribute nothing."
+    },
+    {
+      "id": "PROJECT-UPDATE-PUBLICATION",
+      "name": "a published Project status update credits its publisher and stays separate from neighbouring field subtypes",
+      "inclusion": "A proven published-update transition with an observed publisher gives one triager unit, once across replays; two publications at different source times give two.",
+      "exclusion": "No-op or incomplete transitions, a missing event proof, unsupported subtypes, project status, item-field and issue-field changes, an unknown or bot publisher in the user lens, a private repository and an out-of-window publication do not count as project updates."
+    },
+    {
+      "id": "DUPLICATE-CANONICALIZATION",
+      "name": "an intentional, publicly verified duplicate mark credits the triage actor once per mark event",
+      "inclusion": "One duplicate relation event gives its actor one unit; replay and swapped endpoints of that same event stay one canonical unit and a different canonical issue is a second unit. A later removal or un-mark of the same pair is not a reversal today and is recorded as a second raw unit.",
+      "exclusion": "Automatic relations, unverified public endpoints, other or malformed relation kinds, a missing event proof, an unknown or bot actor in the user lens, a private repository, an out-of-window mark, a plain issue closure and a related-issue link are not duplicate resolution."
+    },
+    {
+      "id": "FINDING-ACCEPTANCE",
+      "name": "an accepted finding requires an independent receipt, not issue closure",
+      "inclusion": "An independently reviewed receipt on the reporter's issue fact gives the reporter one qualified unit on the acceptance clock, once across replays, while the raw issue unit remains.",
+      "exclusion": "A closed issue, a rejected receipt, a self or unauthorized reviewer, a different actor, a missing target or evidence, an unverified or ineligible receipt, the observed lens and out-of-window acceptance do not count."
+    },
+    {
+      "id": "RESOLUTION-ACCEPTANCE",
+      "name": "an accepted issue resolution credits the reviewed deliverable author, not the closer or assignee",
+      "inclusion": "An independently reviewed receipt on the merged deliverable fact gives its author one qualified unit on the acceptance clock, once across replays.",
+      "exclusion": "A closed assigned issue, a rejected receipt, a self or unauthorized reviewer, the closer as a substituted actor, a missing target or evidence, an unverified or ineligible receipt, the observed lens and out-of-window acceptance do not count."
+    },
+    {
+      "id": "CLARIFICATION-ACCEPTANCE",
+      "name": "an accepted clarification requires an independent receipt on a proven edit",
+      "inclusion": "An independently reviewed receipt on the editor's proven edit fact gives the editor one qualified unit on the acceptance clock, once across replays, while the raw edit unit remains.",
+      "exclusion": "A raw edit, unchanged text, a rejected receipt, a self or unauthorized reviewer, the item author as a substituted actor, a missing target or evidence, an unverified or ineligible receipt, the observed lens and out-of-window acceptance do not count."
+    },
+    {
+      "id": "HANDOFF-ACCEPTANCE",
+      "name": "an accepted owner handoff requires an independent receipt, not an assignment notification",
+      "inclusion": "An independently reviewed receipt on the coordinator's assignment fact gives the coordinator one qualified unit on the acceptance clock, once across replays, while the raw assignment unit remains.",
+      "exclusion": "A raw assignment, a rejected receipt, a self or unauthorized reviewer, the assignee as a substituted actor, a missing target or evidence, an unverified or ineligible receipt, the observed lens and out-of-window acceptance do not count."
     }
   ],
   "metrics": [
@@ -282,8 +324,75 @@
       "group_by": "canonical",
       "case_ids": ["FIRST-REVIEW-SEQUENCE"],
       "remaining_scope": "The transport is synthetic and complete only within the fixture. It certifies no review substance, reviewer expertise, source authorization or real history completeness."
+    },
+    {
+      "id": "title_scope_edits",
+      "role": "triager",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["TITLE-SCOPE-EDIT"],
+      "remaining_scope": "The normalizer proves a text difference only; it does not assess whether the edit is meaningful, formatting-only or one item-day group. Native edit-history acquisition and live source approval remain separate."
+    },
+    {
+      "id": "project_updates",
+      "role": "triager",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["PROJECT-UPDATE-PUBLICATION"],
+      "remaining_scope": "The transition shape is supplied by an enriched synthetic envelope; the optional Project status-update feature, substantive content and native webhook collection are not established."
+    },
+    {
+      "id": "duplicate_resolution",
+      "role": "triager",
+      "aggregation": "count",
+      "date_basis": "occurredAt",
+      "group_by": "canonical",
+      "case_ids": ["DUPLICATE-CANONICALIZATION"],
+      "remaining_scope": "Preserved unique evidence on the duplicate and an accompanying closure are not verified by the normalizer; only the intentional, publicly verified, event-proven relation and its canonical pair are. The normalizer does not gate on the relationship action: a mark followed by a removal or un-mark of the same pair yields two raw units, so pair uniqueness holds per mark event only and reversal handling is remaining scope."
+    },
+    {
+      "id": "accepted_findings",
+      "role": "reporter",
+      "aggregation": "count",
+      "date_basis": "acceptedAt",
+      "group_by": "canonical",
+      "case_ids": ["FINDING-ACCEPTANCE"],
+      "remaining_scope": "The receipt gate checks independence and target actor identity only. The substance of the finding, its version selection and collaborator attribution rest on the reviewer and separate source work."
+    },
+    {
+      "id": "issue_resolution",
+      "role": "author",
+      "aggregation": "count",
+      "date_basis": "acceptedAt",
+      "group_by": "canonical",
+      "case_ids": ["RESOLUTION-ACCEPTANCE"],
+      "remaining_scope": "The closing link between the issue and the deliverable and the quality of the solution are not verified by the receipt gate; only the reviewed target actor is credited."
+    },
+    {
+      "id": "issue_clarifications",
+      "role": "triager",
+      "aggregation": "count",
+      "date_basis": "acceptedAt",
+      "group_by": "canonical",
+      "case_ids": ["CLARIFICATION-ACCEPTANCE"],
+      "remaining_scope": "Whether an edit improved scope, reproduction or acceptance criteria is the reviewer's judgment; the gate does not group edits into clarification groups."
+    },
+    {
+      "id": "routing_handoffs",
+      "role": "triager",
+      "aggregation": "count",
+      "date_basis": "acceptedAt",
+      "group_by": "canonical",
+      "case_ids": ["HANDOFF-ACCEPTANCE"],
+      "remaining_scope": "The gate does not verify the handoff note, the receiving owner's acceptance or documentation; it credits the reviewed target actor on an independent receipt."
     }
   ],
+  "remaining_gap": {
+    "maximum_deferred_metrics": 9,
+    "rule": "This value must equal the deferred metric count, and the guard test pins a reviewed literal ceiling it may not exceed. Lower both in the same reviewed change that moves a metric into a semantic case or existing evidence; never raise either to admit a new gap."
+  },
   "deferred": [
     {
       "id": "source-implementation-prerequisites",
@@ -299,19 +408,8 @@
     },
     {
       "id": "additional-semantic-cases",
-      "metric_ids": [
-        "accepted_suggestions",
-        "accepted_findings",
-        "issue_resolution",
-        "issue_clarifications",
-        "duplicate_resolution",
-        "title_scope_edits",
-        "project_updates",
-        "routing_handoffs",
-        "mentorship",
-        "onboarding"
-      ],
-      "reason": "These definitions require further actual source/receipt inclusion and exclusion cases. A raw activity or generic approved author fact does not prove exact suggestion links, preserved duplicate evidence, meaningful edits, accepted handoffs or consented mentorship/onboarding."
+      "metric_ids": ["accepted_suggestions", "mentorship", "onboarding"],
+      "reason": "These definitions require further actual source/receipt inclusion and exclusion cases. A raw activity or generic approved author fact does not prove exact suggestion links or consented mentorship/onboarding."
     }
   ],
   "existing_evidence": [
