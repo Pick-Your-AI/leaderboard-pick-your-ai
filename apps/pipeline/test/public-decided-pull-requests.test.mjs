@@ -18,7 +18,7 @@ const iso = (value) => new Date(value).toISOString();
 async function setup(t, { memoryDatabase = true, enabled = true, empty = false, incomplete = false } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "synthetic-decided-client-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const base = Date.now() - 8 * 86400_000;
+  const base = Math.floor(Date.now() / 1000) * 1000 - 8 * 86400_000;
   const at = (day) => iso(base + day * 86400_000);
   const windows = {
     early: { ...publicScope, start: at(3.5), end: at(4) },
@@ -188,7 +188,7 @@ async function setup(t, { memoryDatabase = true, enabled = true, empty = false, 
       config.repositories[0].families = ["pull_requests"];
       const policy = {
         metricId: metric,
-        version: "synthetic-native-decided/v1",
+        version: "synthetic-native-decided-v1",
         definitionVersion: components.metrics.metricRegistryV1.policy_version,
         unit: components.metrics.getMetricDefinition(metric).definition.unit,
         aggregation: "ratio",
@@ -235,10 +235,9 @@ const reads = (state) => ({
 });
 async function frozen(h, pin) {
   const saved = (
-    await h.db.query(
-      "SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1",
-      [pin],
-    )
+    await h.db.query("SELECT document,document_hash FROM leaderboard_pipeline.frozen_inputs WHERE snapshot_id=$1", [
+      pin,
+    ])
   ).rows[0];
   assert.ok(saved);
   assert.equal(comparisonHash(saved.document), saved.document_hash);
@@ -318,6 +317,15 @@ test("one native collection yields exact earlier pending and later decided publi
   }
   const a = await frozen(h, early.snapshotId);
   const b = await frozen(h, late.snapshotId);
+  const retainedClocks = b.document.identityAuthorization.pullRequestDecisionEvidence.runs.flatMap((run) =>
+    run.observations.map((observation) => observation.observedAt),
+  );
+  const nativeFacts = b.document.frozen.facts.filter((fact) => fact.metricId === metric);
+  assert.ok(nativeFacts.length > 0);
+  for (const fact of nativeFacts) {
+    assert.match(fact.observedAt, /\.\d{6}Z$/);
+    assert.ok(retainedClocks.includes(fact.observedAt), "frozen metrics preserve exact SQL observation clocks");
+  }
   assert.deepEqual(
     a.document.identityAuthorization.pullRequestDecisionEvidence,
     b.document.identityAuthorization.pullRequestDecisionEvidence,
@@ -434,6 +442,7 @@ test("native A and B survive reopen with current privacy", options, async (t) =>
   state.forbidNormalization = true;
   await h.reopenDatabase();
   const pinned = await publicBoard(h, windows.late, a.snapshotId);
+  assert.deepEqual(await frozen(h, a.snapshotId), savedA);
   assert.equal(row(pinned).result.value, 0.5);
   assert.equal(row(pinned).pending.count, 1);
   await publicExports(h, windows.late, pinned);

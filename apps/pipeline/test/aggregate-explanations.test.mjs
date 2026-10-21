@@ -484,6 +484,50 @@ test("required explanation uses canonical multi-repository scopes and fails clos
   }
 });
 
+test("native explanations preserve the selected revision when a correction is fractionally after cutoff", () => {
+  for (const observedAt of ["2026-10-10T00:00:00.000001Z", "2026-10-10T00:00:00.000000001Z"]) {
+    for (const state of ["observed", "excluded"]) {
+      const { capture, binding } = pureCapture();
+      const policy = metricPolicy("pr_accepted_rate", "ratio", { rankedStates: ["observed"] });
+      const original = {
+        ...capture.input.facts[0],
+        metricId: policy.metricId,
+        state: "observed",
+        outcome: "merged",
+        decisionAsOf: capture.input.cutoff,
+      };
+      capture.policies = [policy];
+      capture.input.facts = [
+        original,
+        { ...original, revision: 1, state, observedAt, correctionReceipt: "synthetic-future-native-correction" },
+      ];
+      capture.aggregates = [components.metrics.aggregateMetric(capture.input, policy, capture.scope)];
+      const explanation = buildAggregateExplanation(capture, binding);
+      assert.deepEqual(explanation.metrics[0].rows[0].eligible, [
+        { factId: original.id, revision: 0, factHash: aggregateExplanationHash(original), outcome: "merged" },
+      ]);
+      assert.deepEqual(explanation.authorization.corrections, []);
+      assert.ok(explanation.metrics[0].audit.some((entry) => entry.reason === "observation_after_cutoff"));
+      const effectiveExclusion = {
+        ...original,
+        revision: 1,
+        state: "excluded",
+        observedAt: capture.input.cutoff,
+        correctionReceipt: "synthetic-effective-native-correction",
+      };
+      capture.input.facts = [
+        original,
+        effectiveExclusion,
+        { ...effectiveExclusion, revision: 2, observedAt, correctionReceipt: "synthetic-future-native-correction" },
+      ];
+      capture.aggregates = [components.metrics.aggregateMetric(capture.input, policy, capture.scope)];
+      assert.deepEqual(buildAggregateExplanation(capture, binding).authorization.corrections, [
+        { artifactId: original.artifactId, hash: aggregateExplanationHash(effectiveExclusion) },
+      ]);
+    }
+  }
+});
+
 test("required explanation has explicit fail-closed fact and byte bounds without preview TTL", () => {
   const { capture, binding } = pureCapture();
   const crowded = structuredClone(capture);

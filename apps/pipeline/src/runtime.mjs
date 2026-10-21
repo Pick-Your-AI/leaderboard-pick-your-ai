@@ -3602,7 +3602,7 @@ export async function createPipeline(options) {
           // Keep the complete captured corrections in frozen.facts for the existing
           // dispatch input fence; only effective observations belong to this epoch.
           corrections
-            .filter((fact) => Date.parse(fact.observedAt) <= Date.parse(observationCutoff))
+            .filter((fact) => c.contracts.compareSourceInstants(fact.observedAt, observationCutoff) <= 0)
             .map(digest)
             .sort(),
         ]),

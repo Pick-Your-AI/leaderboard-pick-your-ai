@@ -269,7 +269,7 @@ function nativeDecidedFixture(t) {
   selected.methodology = [
     {
       metricId: "pr_accepted_rate",
-      policyVersion: "synthetic-native-decided/v1",
+      policyVersion: "synthetic-native-decided-v1",
       policySignature: "b".repeat(64),
       policyLink: null,
     },

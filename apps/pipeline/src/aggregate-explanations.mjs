@@ -1,6 +1,6 @@
 import { captureRankEvidence, retainedRankHistory } from "./rank-history.mjs";
 import { createHash } from "node:crypto";
-import { parseDiscussionFeedbackCapture } from "@pick-your-ai/contracts";
+import { compareSourceInstants, parseDiscussionFeedbackCapture } from "@pick-your-ai/contracts";
 import { reversionAuthorityVersion } from "./reversion-effectiveness.mjs";
 import { captureIssueTransferAuthorization } from "./issue-transfer-authority.mjs";
 import { validateRelationshipPairCapture } from "./relationship-pair-authority.mjs";
@@ -323,7 +323,7 @@ export function buildAggregateExplanation(capture, binding) {
     const facts = new Map();
     for (const fact of allFacts) {
       if (
-        Date.parse(fact.observedAt) > Date.parse(input.cutoff) ||
+        compareSourceInstants(fact.observedAt, input.cutoff) > 0 ||
         (fact.revision > 0 && !fact.correctionReceipt?.trim())
       )
         continue;
@@ -422,7 +422,7 @@ export function buildAggregateExplanation(capture, binding) {
             fact.revision > 0 &&
             fact.correctionReceipt?.trim() &&
             fact.state === "excluded" &&
-            Date.parse(fact.observedAt) <= Date.parse(input.cutoff) &&
+            compareSourceInstants(fact.observedAt, input.cutoff) <= 0 &&
             metrics.some(
               (metric) =>
                 metric.metricId === fact.metricId &&
