@@ -458,7 +458,26 @@ def condition_terms(condition):
     parentheses return an error, so a guard cannot sit in one alternative branch.
     """
     text = re.sub(r"\s+", " ", condition).strip()
-    text = re.sub(r"^[|>][+-]?\d*\s*", "", text)
+    block = re.match(r"^[|>][+-]?\d*\s*", text)
+    text = text[block.end():] if block else text
+    if text[:1] in ("'", '"'):
+        # A YAML scalar starting with a quote is a whole quoted scalar (a bare
+        # expression cannot start with one). Unwrap it like the YAML loader would.
+        quote = text[0]
+        if block:
+            return [], "quote characters inside a block scalar are literal text"
+        inner = text[1:-1]
+        if len(text) < 2 or text[-1] != quote:
+            return [], "unterminated or partly quoted scalar"
+        if quote == '"':
+            if re.search(r'(?<!\\)"', inner):
+                return [], "unterminated or partly quoted scalar"
+            inner = re.sub(r'\\(["\\])', r"\1", inner)
+        else:
+            if "'" in inner.replace("''", ""):
+                return [], "unterminated or partly quoted scalar"
+            inner = inner.replace("''", "'")
+        text = inner.strip()
     wrapper = re.fullmatch(r"\$\{\{(.*)\}\}", text)
     expression = wrapper.group(1) if wrapper else text
     if "${{" in expression or "}}" in expression:
@@ -1691,6 +1710,67 @@ class WorkflowForkSafetyTests(unittest.TestCase):
             results.append(audit_all(chain))
         self.assertEqual(results[0], results[1])
         self.assertEqual(results[0]["follow.yml"], [])
+
+    def test_quoted_whole_scalar_conditions_are_unwrapped_like_yaml_does(self):
+        a = "github.event.workflow_run.event == 'push'"
+        b = "github.event.workflow_run.head_branch == 'main'"
+        c = "github.event.workflow_run.head_repository.full_name == github.repository"
+        good = f"{a} && {b} && {c}"
+
+        def quoted(expression, quote):
+            start = RUN_GOOD.index("    if: >-")
+            end = RUN_GOOD.index("    runs-on:")
+            if quote == '"':
+                value = '"' + expression.replace('"', '\\"') + '"'
+            else:
+                value = "'" + expression.replace("'", "''") + "'"
+            return RUN_GOOD[:start] + f"    if: {value}\n" + RUN_GOOD[end:]
+
+        for quote in ('"', "'"):
+            self.assertEqual(audit(quoted(f"${{{{ {good} }}}}", quote)), [], quote)
+            self.assertEqual(audit(quoted(f"${{{{ {c} && {a} && !cancelled() && {b} }}}}", quote)), [], quote)
+            # Trailing or inner alternatives are still rejected inside the quotes.
+            for bad in (
+                f"${{{{ {good} }}}} || true",
+                f"${{{{ {good} || true }}}}",
+                f"${{{{ {good} || {a} }}}}",
+                f"${{{{ {good} }}}} && ${{{{ true }}}}",
+                f"${{{{ !({good}) }}}}",
+                f"${{{{ {a} && {b} }}}}",
+            ):
+                problems = audit(quoted(bad, quote))
+                self.assertTrue(any("workflow_run" in p and ("guard" in p or "conjunction" in p) for p in problems), (quote, bad, problems))
+        # The unquoted-in-a-quoted-scalar spelling of the real prepare-site guard.
+        texts = self.texts()
+        prepare = texts["prepare-site.yml"]
+        start, end = prepare.index("    if: >-"), prepare.index("    runs-on:")
+        real = ("github.event.workflow_run.conclusion == 'success' && " + good)
+        for value in (f'"${{{{ {real} }}}}"', "'" + f"${{{{ {real} }}}}".replace("'", "''") + "'"):
+            mutated = prepare[:start] + f"    if: {value}\n" + prepare[end:]
+            self.assertEqual(audit_all({**texts, "prepare-site.yml": mutated})["prepare-site.yml"], [], value)
+            self.assertTrue(audit_all({**texts, "prepare-site.yml": mutated.replace(" }}", " || true }}", 1)})["prepare-site.yml"], value)
+        # Quotes that cover only part of the value, or never close, are not unwrapped.
+        for value in (
+            f'"${{{{ {good} }}}}" && true',
+            f'"${{{{ {good} }}}}',
+            f"'${{{{ {good.replace(chr(39), chr(39) * 2)} }}}}",
+            f"'${{{{ {good} }}}}'",
+        ):
+            problems = audit(RUN_GOOD[:RUN_GOOD.index("    if: >-")] + f"    if: {value}\n" + RUN_GOOD[RUN_GOOD.index("    runs-on:"):])
+            self.assertTrue(problems, value)
+        for text in ('"${{ a }}" && true', '"${{ a }}', "'${{ a }}", '"${{ a }} "x""'):
+            terms, error = condition_terms(text)
+            self.assertIn("quoted scalar", error or "", text)
+        self.assertNotIn("wrappers", condition_terms('"${{ a }}')[1])
+        # Quote characters inside a block scalar are literal text, not YAML quoting.
+        terms, error = condition_terms('>- "${{ a && b }}"')
+        self.assertIn("block scalar", error)
+        self.assertEqual(condition_terms("\"${{ a && 'x' == b }}\""), (["a", "'x' == b"], None))
+        self.assertEqual(condition_terms("'${{ a && ''x'' == b }}'"), (["a", "'x' == b"], None))
+        # The secret sweep still reads a quoted condition.
+        for value in ('"${{ secrets.X }}"', "'${{ secrets.X }}'", '"${{ SECRETS.X != \'\' }}"'):
+            self.rejected(lambda t, v=value: t + f"      - if: {v}\n        run: x\n", "secret other than GITHUB_TOKEN")
+        self.assertEqual(audit(GOOD + '      - if: "${{ github.event_name == \'push\' }}"\n        run: x\n'), [])
 
     def test_real_workflows_fail_when_deliberately_broken_in_memory(self):
         """Mutate the real files in memory only; nothing on disk changes."""
