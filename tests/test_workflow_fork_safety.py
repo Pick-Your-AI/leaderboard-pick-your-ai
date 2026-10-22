@@ -98,7 +98,7 @@ FLOW_SEQUENCE_FORBIDDEN_KEYS = {
     "matrix", "with", "env", "defaults", "concurrency", "container", "services",
     "outputs",
 }
-BLOCK_SCALAR = re.compile(r"^(-\s+)?(?:run|script):\s*[|>][+-]?\d*\s*$")
+BLOCK_SCALAR = re.compile(r"^(-\s+)?(?!if:)" + KEY + r":\s*[|>][+-]?\d*\s*$")
 
 
 def _quoted(line):
@@ -160,7 +160,12 @@ def unsupported(text):
         masked = _mask(line)
         if body.startswith("? ") or re.match(r"(?:-\s+)*<<:", line):
             problems.append(context + " (complex or merge key)")
-        elif re.search(r"(?:^|\s)[&*][\w-]", masked) or value.startswith("!"):
+        elif value.startswith(("&", "*", "!")) or (
+            value.startswith("[")
+            and any(item.strip().startswith(("&", "*", "!")) for item in value[1:].rstrip("]").split(","))
+        ):
+            # Indicators only mean anchor/alias/tag where a value starts; `a *b`
+            # inside a plain scalar (a step name, a glob) is ordinary text.
             problems.append(context + " (anchor, alias or tag)")
         elif value.startswith("{"):
             if not (key == "permissions" and value == "{}"):
@@ -175,9 +180,10 @@ def unsupported(text):
 def scan(text):
     """Return (indent, line, in_body) for each meaningful line.
 
-    Structural lines have comments removed. Bodies of `run:`/`script:` block
-    scalars are kept (flagged in_body) because `${{ }}` expressions there are
-    evaluated, but they are never read as workflow keys.
+    Structural lines have comments removed. Bodies of every `|`/`>` block
+    scalar except `if:` (run, script, path, body, JSON inputs, ...) are kept
+    (flagged in_body) because `${{ }}` expressions there are evaluated, but they
+    are never read as workflow keys.
     """
     result = []
     body_indent = None
@@ -463,7 +469,11 @@ def audit(text, reachable=None):
             while start > 0 and not (structural[start][0] < uses_indent and structural[start][1].startswith("- ")):
                 start -= 1
         dash_indent, first = structural[start]
-        prefix = re.match(r"(?:-\s+)+", first).group(0)
+        prefix_match = re.match(r"(?:-\s+)+", first)
+        if not prefix_match:
+            problems.append(f"unsupported workflow syntax: {line} (checkout step outside a steps list)")
+            continue
+        prefix = prefix_match.group(0)
         step = [(dash_indent + len(prefix), first[len(prefix):])]
         for child_indent, child in structural[start + 1:]:
             if child_indent <= dash_indent:
@@ -511,11 +521,17 @@ def audit(text, reachable=None):
     # expressions are evaluated before the shell sees them.
     expressions = re.findall(r"\$\{\{(.*?)\}\}", "\n".join(line for _, line, _ in entries), re.S)
     # `if:` values are expressions even without ${{ }}.
-    for position, (_, line) in enumerate(structural):
-        match = re.match(r"(?:-\s+)*if:\s*(.*)", line)
+    for position, (indent, line) in enumerate(structural):
+        match = re.match(r"((?:-\s+)*)if:\s*(.*)", line)
         if match:
-            expressions.append(match.group(1))
-            expressions += [child for _, child in _block(structural, position)]
+            expressions.append(match.group(2))
+            if re.fullmatch(r"[|>][+-]?\d*|", match.group(2).strip()):
+                # The key sits after any `- ` prefix; its scalar is indented deeper.
+                key_indent = indent + len(match.group(1))
+                for child_indent, child in structural[position + 1:]:
+                    if child_indent <= key_indent:
+                        break
+                    expressions.append(child)
     for expression in expressions:
         if SECRET_REFERENCE.search(re.sub(r"'[^']*'", "''", expression)):
             problems.append("references a secret other than GITHUB_TOKEN")
@@ -1138,6 +1154,96 @@ class WorkflowForkSafetyTests(unittest.TestCase):
 
     def test_job_keys_must_be_real_github_actions_keys(self):
         self.rejected(lambda t: t.replace("    runs-on:", "    snapshot: image\n    runs-on:"), "unknown key snapshot")
+
+    def test_block_scalar_bodies_are_data_for_any_key_but_if(self):
+        upload = (
+            "      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9\n"
+            "        with:\n          name: report\n          path: |\n            playwright-report/\n"
+        )
+        base = GOOD + upload
+        self.assertEqual(audit(base), [])
+        # Ordinary edit: a negated path pattern in the multi-line input.
+        self.assertEqual(audit(base + "            !playwright-report/trace/**\n"), [])
+        self.assertEqual(audit(base + "            *.log\n            &odd\n"), [])
+        # JSON inside a block scalar on env:/with: is not a flow mapping.
+        self.assertEqual(audit(GOOD + "      - run: x\n        env:\n          CONFIG: |\n            {\"a\": [1, {\"b\": 2}]}\n"), [])
+        self.assertEqual(audit(GOOD + "      - run: x\n        env:\n          CONFIG: >-\n            {a: [1]}\n"), [])
+        # YAML-looking text in a text input is neither structure nor a finding.
+        looks_like_yaml = (
+            "      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea\n"
+            "        with:\n          body: |\n            permissions:\n              contents: write\n"
+            "            uses: actions/checkout@v4\n            environment: prod\n            runs-on: self-hosted\n"
+            "            - *anchor\n            on: pull_request_target\n"
+        )
+        self.assertEqual(audit(GOOD + looks_like_yaml), [])
+        self.assertEqual(audit_all({"a.yml": DEPLOY + looks_like_yaml.replace("          body", "          body")}), {"a.yml": []})
+        # Expressions inside any block scalar are still evaluated, so secrets are caught.
+        self.rejected(lambda t: t + upload + "            ${{ secrets.DEPLOY_KEY }}\n", "secret other than GITHUB_TOKEN")
+        self.rejected(lambda t: t + looks_like_yaml + "            token ${{ SECRETS.X }}\n", "secret other than GITHUB_TOKEN")
+        # The body ends at the next key, which is read as structure again.
+        self.rejected(lambda t: t + upload + "          environment: [a]\n", "unsupported workflow syntax")
+        # if: stays an expression, never data.
+        self.rejected(lambda t: t + "      - if: >-\n          secrets.A != ''\n        run: x\n", "secret other than GITHUB_TOKEN")
+
+    def test_if_continuations_are_scanned_only_for_block_scalar_conditions(self):
+        for step in (
+            "      - if: always()\n        name: secrets-report\n        run: npm run lint:secrets\n",
+            "      - if: always()\n        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9\n        with:\n          name: secrets-report\n",
+            "      - if: failure() && github.event_name == 'pull_request'\n        name: Report on secrets handling\n        run: echo ok\n",
+            "      - if: >-\n          github.event_name == 'push'\n        name: secrets report\n        run: echo ok\n",
+        ):
+            self.assertEqual(audit(GOOD + step), [], step)
+        for step in (
+            "      - if: secrets.A != ''\n        run: x\n",
+            "      - if: ${{ secrets.A }}\n        run: x\n",
+            "      - if: >-\n          secrets.A != ''\n        run: x\n",
+            "      - if: |\n          SECRETS.A\n        run: x\n",
+            "      - if: always()\n        run: x\n        env:\n          K: ${{ secrets.A }}\n",
+        ):
+            self.rejected(lambda t, x=step: t + x, "secret other than GITHUB_TOKEN")
+
+    def test_checkout_outside_a_steps_list_fails_closed_without_crashing(self):
+        sha = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+        job_level = GOOD.replace("    steps:\n", f"    uses: actions/checkout@{sha}\n    steps:\n")
+        self.rejected(lambda t: job_level, "checkout step outside a steps list")
+        top_level = GOOD + f"uses: actions/checkout@{sha}\n"
+        self.rejected(lambda t: top_level, "checkout step outside a steps list")
+        self.assertTrue(audit_all({"a.yml": job_level})["a.yml"])
+
+    def test_anchor_sigils_matter_only_at_the_start_of_a_value(self):
+        for text in (
+            GOOD.replace("      - run:", "      - name: Fix *foo and Q&A *all*\n        run: true\n      - run:"),
+            GOOD.replace("      - run:", "      - run: true\n        env:\n          URL: https://x.example/?a=1&b=2\n          NOTE: use *stars* & ampersands\n      - run:"),
+            GOOD.replace("  pull_request:\n", "  schedule:\n    - cron: 0 0 * * *\n    - cron: '*/15 * * * *'\n  pull_request:\n"),
+            GOOD.replace("      - run:", "      - if: ${{ !cancelled() }}\n        run: true\n      - run:"),
+        ):
+            self.assertEqual(audit(text), [], text)
+        for text in (
+            GOOD.replace("branches: [main]", "branches: [*main]"),
+            GOOD.replace("branches: [main]", "branches: [main, &x dev]".replace("&x dev", "&x")),
+            GOOD.replace("branches: [main]", "branches: [!!str main]"),
+            GOOD.replace("contents: read", "contents: &r read"),
+            GOOD.replace("      - run:", "      - &s run: x\n      - run:"),
+            GOOD.replace("      - run:", "      - name: *n\n      - run:"),
+        ):
+            self.assertTrue(any("unsupported workflow syntax" in p for p in audit(text)), text)
+
+    def test_realistic_ordinary_edits_do_not_fail(self):
+        edits = {
+            "matrix": "    strategy:\n      fail-fast: false\n      matrix:\n        python: ['3.11', '3.12']\n        node: [20, 22]\n        include:\n          - python: '3.12'\n            node: 22\n",
+            "defaults and timeout": "    timeout-minutes: 10\n    defaults:\n      run:\n        shell: bash\n    continue-on-error: false\n",
+            "services": "    services:\n      db:\n        image: postgres:17\n        ports: ['5432:5432']\n        options: >-\n          --health-cmd pg_isready\n          --health-retries 10\n",
+        }
+        for label, block in edits.items():
+            self.assertEqual(audit(GOOD.replace("    steps:", block + "    steps:")), [], label)
+        top = GOOD.replace("permissions:\n  contents: read\n", "permissions:\n  contents: read\n\nconcurrency:\n  group: ${{ github.workflow }}-${{ github.ref }}\n  cancel-in-progress: true\n\nenv:\n  CI: true\n")
+        self.assertEqual(audit(top), [])
+        filters = GOOD.replace("  pull_request:\n", "  pull_request:\n    paths:\n      - 'src/**'\n      - '!docs/**'\n      - \"*.md\"\n    paths-ignore: ['docs/**']\n")
+        self.assertEqual(audit(filters), [])
+        self.assertEqual(audit(GOOD.replace("on:\n", "on:  # Don't touch 'this'\n").replace(
+            "      - run:", "      # it's a \"comment\" about secrets: write\n      - run:")), [])
+        self.assertEqual(audit(GOOD + "      - run: >-\n          npm test\n          -- --ci\n"), [])
+        self.assertEqual(audit(GOOD + "      - run: |\n          for i in {1..3}; do echo ${i}; done\n          echo \"*.txt & !x\"\n"), [])
 
     def test_real_workflows_fail_when_deliberately_broken_in_memory(self):
         """Mutate the real files in memory only; nothing on disk changes."""
