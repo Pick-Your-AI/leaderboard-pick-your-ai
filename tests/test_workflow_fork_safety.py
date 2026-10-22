@@ -69,7 +69,7 @@ HOSTED_RUNNER = re.compile(
 )
 TOP_KEYS = {"name", "run-name", "on", "permissions", "env", "defaults", "concurrency", "jobs"}
 JOB_KEYS = {
-    "name", "permissions", "needs", "if", "runs-on", "snapshot", "environment",
+    "name", "permissions", "needs", "if", "runs-on", "environment",
     "concurrency", "outputs", "env", "defaults", "steps", "timeout-minutes",
     "strategy", "continue-on-error", "container", "services", "uses", "with", "secrets",
 }
@@ -78,7 +78,8 @@ LOCAL_WORKFLOW = re.compile(r"\./\.github/workflows/([\w.-]+\.ya?ml)")
 KEY = r"[A-Za-z_][\w-]*"
 QUOTED_KEY = re.compile(r"^((?:-\s+)*)([\"'])(" + KEY + r")\2\s*:(?=\s|$)")
 SPACED_KEY = re.compile(r"^((?:-\s+)*)(" + KEY + r")\s+:(?=\s|$)")
-QUOTED_ITEM = re.compile(r"^((?:-\s+)+)([\"'])([^\"']*)\2$")
+QUOTED_ITEM = re.compile(
+    r"^((?:-\s+)+)([\"'])([A-Za-z0-9_./$](?:(?!:\s|:$|\s#)[^\"'])*)\2$")
 KEY_VALUE = re.compile(r"^(" + KEY + r"):(?:\s+(.*))?$")
 KNOWN_EVENTS = {
     "branch_protection_rule", "check_run", "check_suite", "create", "delete",
@@ -452,23 +453,35 @@ def audit(text, reachable=None):
         if match and not action.startswith("./") and not PINNED_ACTION.fullmatch(action):
             problems.append(f"action not pinned to a full commit SHA: {action}")
 
-    # Universal: checkout never persists the token or fetches a PR head.
-    for index, (_, line) in enumerate(structural):
-        if not re.search(r"\buses:\s*['\"]?actions/checkout@", line, re.I):
+    # Universal: checkout never persists the token or fetches a PR head. Only
+    # the step's own `with:` inputs count, not a same-named key elsewhere.
+    for index, (uses_indent, line) in enumerate(structural):
+        if not re.match(r"(?:-\s+)*uses:\s*['\"]?actions/checkout@", line, re.I):
             continue
         start = index
-        while start > 0 and not structural[start][1].startswith("- "):
-            start -= 1
-        step_indent = structural[start][0]
-        step = [structural[start][1]]
+        if not line.startswith("- "):
+            while start > 0 and not (structural[start][0] < uses_indent and structural[start][1].startswith("- ")):
+                start -= 1
+        dash_indent, first = structural[start]
+        prefix = re.match(r"(?:-\s+)+", first).group(0)
+        step = [(dash_indent + len(prefix), first[len(prefix):])]
         for child_indent, child in structural[start + 1:]:
-            if child_indent <= step_indent:
+            if child_indent <= dash_indent:
                 break
-            step.append(child)
-        step_text = "\n".join(step)
-        if not re.search(r"^persist-credentials:\s*['\"]?false['\"]?$", step_text, re.M | re.I):
-            problems.append("checkout does not disable persist-credentials")
-        for ref in re.findall(r"^ref:\s*(.+)$", step_text, re.M):
+            step.append((child_indent, child))
+        inputs = []
+        for position, (property_indent, property_line) in enumerate(step):
+            if property_indent == step[0][0] and property_line == "with:":
+                nested = _block(step, position)
+                inputs = [child for child_indent, child in nested if child_indent == nested[0][0]]
+                break
+        if not any(re.fullmatch(r"persist-credentials:\s*['\"]?false['\"]?", item, re.I) for item in inputs):
+            problems.append("checkout does not disable persist-credentials in its with: inputs")
+        for item in inputs:
+            ref_match = re.fullmatch(r"ref:\s*(.+)", item)
+            if not ref_match:
+                continue
+            ref = ref_match.group(1)
             if UNTRUSTED_REF.search(ref):
                 problems.append(f"checkout of untrusted pull-request ref: {ref}")
             elif "github.event.workflow_run" in ref.lower() and ref.strip("${}'\" ").lower() != "github.event.workflow_run.head_sha":
@@ -1074,6 +1087,57 @@ class WorkflowForkSafetyTests(unittest.TestCase):
             "workflow_run ref", RUN_GOOD)
         self.assertEqual(audit(GOOD.replace("  checks:", '  "checks" :')), [])
         self.rejected(lambda t: t.replace("  checks:", '  "checks" :').replace("ubuntu-latest", "self-hosted"), "allowlisted GitHub-hosted")
+
+    def test_checkout_inputs_are_read_only_from_the_steps_with_block(self):
+        sha = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+        step = f"      - uses: actions/checkout@{sha}\n        with:\n          persist-credentials: false\n"
+        self.assertIn(step, GOOD)
+        misplaced = f"      - uses: actions/checkout@{sha}\n        env:\n          persist-credentials: false\n"
+        self.rejected(lambda t: t.replace(step, misplaced), "persist-credentials")
+        # A sibling key does not satisfy the check even beside a real with: block.
+        beside = f"{misplaced}        with:\n          fetch-depth: 1\n"
+        self.rejected(lambda t: t.replace(step, beside), "persist-credentials")
+        before = f"      - uses: actions/checkout@{sha}\n        with:\n          fetch-depth: 1\n        env:\n          persist-credentials: false\n"
+        self.rejected(lambda t: t.replace(step, before), "persist-credentials")
+        nested = f"      - uses: actions/checkout@{sha}\n        with:\n          sparse:\n            persist-credentials: false\n"
+        self.rejected(lambda t: t.replace(step, nested), "persist-credentials")
+        self.rejected(lambda t: t.replace(step, f"      - uses: actions/checkout@{sha}\n"), "persist-credentials")
+        # The real input in a real with: block, in any position or step layout, passes.
+        for ok in (
+            f"      - uses: actions/checkout@{sha}\n        with:\n          fetch-depth: 1\n          persist-credentials: false\n",
+            f"      - name: Check out\n        env:\n          A: b\n        with:\n          persist-credentials: false\n        uses: actions/checkout@{sha}\n",
+            f"      - with:\n          sparse-checkout: [a, b]\n          persist-credentials: 'false'\n        uses: actions/checkout@{sha}\n",
+            f"      - with:\n          paths:\n            - a\n          persist-credentials: false\n        uses: actions/checkout@{sha}\n",
+        ):
+            self.assertEqual(audit(GOOD.replace(step, ok)), [], ok)
+        # A with: block that follows another step's list items is still this step's own.
+        two = (f"      - uses: actions/checkout@{sha}\n        with:\n          persist-credentials: false\n"
+               f"      - uses: actions/checkout@{sha}\n        with:\n          fetch-depth: 1\n")
+        self.rejected(lambda t: t.replace(step, two), "persist-credentials")
+        # ref: counts only as a with: input; elsewhere it is not a checkout ref.
+        head = "${{ github.event.pull_request.head.sha }}"
+        self.rejected(lambda t: t.replace(step, step + f"          ref: {head}\n"), "untrusted pull-request ref")
+        self.rejected(lambda t: t.replace(step, step.replace("          persist", f"          ref: {head}\n          persist")), "untrusted pull-request ref")
+        self.assertEqual(audit(GOOD.replace(step, step.replace("        with:", f"        env:\n          ref: {head}\n        with:"))), [])
+        # Text that merely mentions a checkout is not a checkout step.
+        self.assertEqual(audit(GOOD.replace("      - run:", f"      - run: echo uses: actions/checkout@{sha}\n      - run:")), [])
+
+    def test_quoted_globs_are_data_not_anchors_or_flow_syntax(self):
+        trigger = "  pull_request:\n"
+        for item in ("'*test*'", "'*-docs'", '"**/*.md"', "'&name'", "'!ignored'", "'[abc]'", "'{a,b}'", "'a: b'", "'# note'", "'- x'"):
+            for key in ("paths", "paths-ignore", "branches"):
+                text = GOOD.replace(trigger, f"{trigger}    {key}:\n      - {item}\n")
+                self.assertEqual(unsupported(text), [], (key, item))
+                self.assertEqual(audit(text), [], (key, item))
+        # Plain content is still unquoted so triggers and labels are read consistently.
+        self.assertEqual(scan("on:\n  - 'push'\n")[1][1], "- push")
+        self.assertEqual(scan("a:\n  - '*x*'\n")[1][1], "- '*x*'")
+        # Real anchors, aliases and tags are still rejected, quoted or not elsewhere.
+        for line in ("      - *test", "      - &test x", "      - !!str x", "      - key: *alias", "      - key: &anchor x"):
+            self.rejected(lambda t, l=line: t.replace("      - run:", f"{l}\n      - run:"), "unsupported workflow syntax")
+
+    def test_job_keys_must_be_real_github_actions_keys(self):
+        self.rejected(lambda t: t.replace("    runs-on:", "    snapshot: image\n    runs-on:"), "unknown key snapshot")
 
     def test_real_workflows_fail_when_deliberately_broken_in_memory(self):
         """Mutate the real files in memory only; nothing on disk changes."""
