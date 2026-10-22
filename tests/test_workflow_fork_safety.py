@@ -50,8 +50,10 @@ PRIVILEGED_PR_TRIGGERS = {
     "issue_comment",
 }
 # workflow_run runs with the base repository's context. When reachable from a
-# pull request it is accepted only if every job is limited to trusted
-# same-repository pushes on main.
+# pull request it is accepted only if every job's `if:` is a pure `&&`
+# conjunction (no `||`) with each of these as one of its top-level terms, so the
+# guards constrain every branch that can succeed; extra `&&` terms may only
+# narrow it further.
 WORKFLOW_RUN_GUARDS = (
     "github.event.workflow_run.event == 'push'",
     "github.event.workflow_run.head_branch == 'main'",
@@ -421,6 +423,86 @@ def _branches(block):
     return None
 
 
+def _expression_flags(expression):
+    """Per-character flags: True inside a single-quoted expression string."""
+    flags, quoted = [], False
+    for char in expression:
+        if char == "'":
+            quoted = not quoted
+            flags.append(True)
+        else:
+            flags.append(quoted)
+    return flags
+
+
+def _wrapped(expression):
+    """True when one pair of parentheses encloses the whole expression."""
+    if not expression.startswith("(") or not expression.endswith(")"):
+        return False
+    flags, depth = _expression_flags(expression), 0
+    for index, char in enumerate(expression):
+        if flags[index]:
+            continue
+        depth += char == "("
+        depth -= char == ")"
+        if depth == 0:
+            return index == len(expression) - 1
+    return False
+
+
+def condition_terms(condition):
+    """Split a job `if:` into its top-level `&&` terms.
+
+    Returns (terms, error). Only a pure conjunction is supported: any `||` (even
+    inside parentheses or functions), mixed `${{ }}` wrappers or unbalanced
+    parentheses return an error, so a guard cannot sit in one alternative branch.
+    """
+    text = re.sub(r"\s+", " ", condition).strip()
+    text = re.sub(r"^[|>][+-]?\d*\s*", "", text)
+    wrapper = re.fullmatch(r"\$\{\{(.*)\}\}", text)
+    expression = wrapper.group(1) if wrapper else text
+    if "${{" in expression or "}}" in expression:
+        return [], "mixed or repeated ${{ }} wrappers"
+    flags = _expression_flags(expression)
+    if any(not flags[i] and expression.startswith("||", i) for i in range(len(expression))):
+        return [], "contains ||"
+    if any(flags) and expression.count("'") % 2:
+        return [], "unterminated string"
+    depth = 0
+    for index, char in enumerate(expression):
+        if not flags[index]:
+            depth += char == "("
+            depth -= char == ")"
+            if depth < 0:
+                return [], "unbalanced parentheses"
+    if depth:
+        return [], "unbalanced parentheses"
+    terms = []
+
+    def split(piece):
+        piece = piece.strip()
+        while _wrapped(piece):
+            piece = piece[1:-1].strip()
+        piece_flags, depth, start, parts = _expression_flags(piece), 0, 0, []
+        for index, char in enumerate(piece):
+            if piece_flags[index]:
+                continue
+            depth += char == "("
+            depth -= char == ")"
+            if depth == 0 and piece.startswith("&&", index):
+                parts.append(piece[start:index])
+                start = index + 2
+        parts.append(piece[start:])
+        if len(parts) == 1:
+            terms.append(re.sub(r"\s*==\s*", " == ", re.sub(r"\s+", " ", piece)).lower())
+        else:
+            for part in parts:
+                split(part)
+
+    split(expression)
+    return terms, None
+
+
 def _property(body, indent, key):
     """Return (inline value + nested lines) for a job-level property, or None."""
     for position, (child_indent, line) in enumerate(body):
@@ -599,10 +681,13 @@ def audit(text, reachable=None):
         if runner:
             problems.append(f"job {name} runner is not an allowlisted GitHub-hosted label: {runner}")
         if "workflow_run" in events:
-            condition = _property(body, indent, "if") or ""
-            for guard in WORKFLOW_RUN_GUARDS:
-                if guard.lower() not in condition.lower():
-                    problems.append(f"job {name} lacks workflow_run guard: {guard}")
+            terms, error = condition_terms(_property(body, indent, "if") or "")
+            if error:
+                problems.append(f"job {name} workflow_run condition is not a supported pure conjunction: {error}")
+            else:
+                for guard in WORKFLOW_RUN_GUARDS:
+                    if guard.lower() not in terms:
+                        problems.append(f"job {name} lacks workflow_run guard: {guard}")
     if "workflow_run" in events and _branches(blocks["workflow_run"]) != ["main"]:
         problems.append("workflow_run trigger is not limited to branches: [main]")
     return problems
@@ -1444,6 +1529,168 @@ class WorkflowForkSafetyTests(unittest.TestCase):
         ):
             self.rejected(lambda t, r=ref: RUN_GOOD.replace(
                 "ref: ${{ github.event.workflow_run.head_sha }}", f"ref: {r}"), "workflow_run ref" if "head_branch" in ref else "untrusted pull-request ref", RUN_GOOD)
+
+    def run_with(self, expression, layout="inline"):
+        """RUN_GOOD with its job condition replaced by `expression`."""
+        start = RUN_GOOD.index("    if: >-")
+        end = RUN_GOOD.index("    runs-on:")
+        if layout == "inline":
+            condition = f"    if: ${{{{ {expression} }}}}\n"
+        elif layout == "bare":
+            condition = f"    if: {expression}\n"
+        else:  # folded
+            condition = f"    if: >-\n      ${{{{ {expression} }}}}\n"
+        return RUN_GOOD[:start] + condition + RUN_GOOD[end:]
+
+    def test_workflow_run_condition_must_be_a_pure_conjunction_of_the_guards(self):
+        a = "github.event.workflow_run.event == 'push'"
+        b = "github.event.workflow_run.head_branch == 'main'"
+        c = "github.event.workflow_run.head_repository.full_name == github.repository"
+        for layout in ("inline", "folded", "bare"):
+            self.assertEqual(audit(self.run_with(f"{a} && {b} && {c}", layout)), [], layout)
+        # Accepted: any order, extra narrowing terms, grouping, leading operators, case.
+        for expression in (
+            f"{c} && {a} && {b}",
+            f"{b} && {c} && {a} && github.event.workflow_run.conclusion == 'success'",
+            f"always() && !cancelled() && {a} && {b} && {c}",
+            f"({a} && {b}) && {c}",
+            f"(({a} && {b} && {c}))",
+            f"{a}\n          && {b}\n          && !cancelled()\n          && {c}",
+            f"GITHUB.EVENT.WORKFLOW_RUN.EVENT=='push' && {b.upper().replace('MAIN', 'main')} && {c}",
+        ):
+            self.assertEqual(audit(self.run_with(expression)), [], expression)
+        rejected = {
+            "or true after the last term": f"{a} && {b} && {c} || true",
+            "or true in the expression": f"{a} && {b} && ({c} || true)",
+            "alternative push branch": f"{a} && {b} && {c} || github.event_name == 'push'",
+            "ternary-like": f"{a} && {b} && {c} || {a}",
+            "guards only in the left alternative": f"({a} && {b} && {c}) || {a}",
+            "guards only in the right alternative": f"{a} || ({a} && {b} && {c})",
+            "partial conjunction alternative": f"({a} && {b} && {c}) || ({a} && {b})",
+            "or inside an extra term": f"(github.event_name == 'x' || true) && {a} && {b} && {c}",
+            "or inside a function": f"contains(fromJSON('[1]'), 1) && {a} && {b} && {c} || true",
+            "negated whole conjunction": f"!({a} && {b} && {c})",
+            "negated guard": f"!({a}) && {b} && {c}",
+            "inverted comparison": f"github.event.workflow_run.event != 'push' && {b} && {c}",
+            "inverted repository": f"{a} && {b} && github.event.workflow_run.head_repository.full_name != github.repository",
+            "function wrapper": f"contains({a}, 'x') && {b} && {c}",
+            "fromJSON wrapper": f"fromJSON('true') && format('{{0}}', {a}) && {b} && {c}",
+            "guard only inside a call": f"toJSON({a} && {b} && {c})",
+            "string literal mention": f"'{a} && {b} && {c}'",
+            "missing event guard": f"{b} && {c}",
+            "missing branch guard": f"{a} && {c}",
+            "missing repository guard": f"{a} && {b}",
+            "different branch": f"{a} && github.event.workflow_run.head_branch == 'dev' && {c}",
+            "no condition at all": "true",
+        }
+        for label, expression in rejected.items():
+            problems = audit(self.run_with(expression))
+            self.assertTrue(
+                any("workflow_run" in problem and ("guard" in problem or "conjunction" in problem) for problem in problems),
+                (label, problems))
+        # `||` placed before or after the closing delimiter is equally rejected.
+        before = self.run_with(f"{a} && {b} && {c} || true")
+        after = self.run_with(f"{a} && {b} && {c}").replace(" }}\n", " }} || true\n", 1)
+        self.assertNotEqual(after, self.run_with(f"{a} && {b} && {c}"))
+        for text in (before, after):
+            self.assertTrue(any("pure conjunction" in problem for problem in audit(text)), text)
+        # Folded and leading-operator layouts keep working.
+        self.assertEqual(audit(self.run_with(f"{a}\n          && {b}\n          && {c}", "folded")), [])
+        # A missing `if:` is missing every guard.
+        no_if = RUN_GOOD[:RUN_GOOD.index("    if: >-")] + RUN_GOOD[RUN_GOOD.index("    runs-on:"):]
+        self.assertEqual(sum("lacks workflow_run guard" in p for p in audit(no_if)), 3)
+
+    def test_real_prepare_site_condition_is_a_pure_conjunction_and_rejects_boolean_bypasses(self):
+        texts = self.texts()
+        prepare = texts["prepare-site.yml"]
+        self.assertEqual(audit_all(texts)["prepare-site.yml"], [])
+        self.assertIn("github.repository }}", prepare)
+        for label, mutated in {
+            "|| true before the delimiter": prepare.replace("github.repository }}", "github.repository || true }}", 1),
+            "|| true after the delimiter": prepare.replace("github.repository }}", "github.repository }} || true", 1),
+            "alternative branch": prepare.replace("github.repository }}", "github.repository || github.event_name == 'push' }}", 1),
+            "negated repository": prepare.replace("== github.repository }}", "!= github.repository }}", 1),
+            "negated conjunction": prepare.replace("${{ github.event.workflow_run.conclusion", "${{ !(github.event.workflow_run.conclusion", 1).replace("github.repository }}", "github.repository) }}", 1),
+        }.items():
+            self.assertNotEqual(mutated, prepare, label)
+            problems = audit_all({**texts, "prepare-site.yml": mutated})["prepare-site.yml"]
+            self.assertTrue(problems, label)
+        # Reordered, leading-operator and single-line spellings of the real guard pass.
+        guard_a = "github.event.workflow_run.event == 'push'"
+        reordered = prepare.replace(
+            "    if: >-\n      ${{ github.event.workflow_run.conclusion == 'success' &&\n"
+            f"          {guard_a} &&\n          github.event.workflow_run.head_branch == 'main' &&\n"
+            "          github.event.workflow_run.head_repository.full_name == github.repository }}",
+            "    if: >-\n      ${{ github.event.workflow_run.head_repository.full_name == github.repository\n"
+            f"          && github.event.workflow_run.head_branch == 'main'\n          && {guard_a}\n"
+            "          && github.event.workflow_run.conclusion == 'success' }}",
+        )
+        self.assertNotEqual(reordered, prepare)
+        self.assertEqual(audit_all({**texts, "prepare-site.yml": reordered})["prepare-site.yml"], [])
+
+    def test_review_thread_regressions_on_the_real_workflows(self):
+        texts = self.texts()
+        runtime, browser, prepare = texts["runtime-ci.yml"], texts["browser-ci.yml"], texts["prepare-site.yml"]
+
+        def broken(name, text):
+            return audit_all({**texts, name: text})[name]
+
+        # Local workflow_call edges, including a nested call: the callee is strict.
+        pr_caller = "name: Caller\non:\n  pull_request:\npermissions:\n  contents: read\njobs:\n  call:\n    uses: ./.github/workflows/reusable.yml\n"
+        callee = (
+            "name: Reusable\non:\n  workflow_call:\npermissions:\n  contents: read\njobs:\n  inner:\n"
+            "    runs-on: self-hosted\n    steps:\n      - run: echo ok\n"
+        )
+        nested = callee.replace("    runs-on: self-hosted\n    steps:\n      - run: echo ok\n",
+                                "    uses: ./.github/workflows/leaf.yml\n")
+        leaf = callee.replace("name: Reusable", "name: Leaf")
+        direct = audit_all({"caller.yml": pr_caller, "reusable.yml": callee})
+        self.assertTrue(any("self-hosted" in p for p in direct["reusable.yml"]))
+        chain = audit_all({"caller.yml": pr_caller, "reusable.yml": nested, "leaf.yml": leaf})
+        self.assertTrue(any("self-hosted" in p for p in chain["leaf.yml"]))
+        self.assertTrue(any("unresolvable" in p for p in audit_all({"caller.yml": pr_caller})["caller.yml"]))
+
+        # Effective checkout inputs: a name-only marker and a folded PR-head ref fail.
+        real_input = "          persist-credentials: false\n"
+        self.assertIn(real_input, runtime)
+        name_only = runtime.replace(real_input, "", 1).replace(
+            "      - uses: actions/checkout@", "      - name: 'x persist-credentials: false'\n        uses: actions/checkout@", 1)
+        self.assertNotEqual(name_only, runtime)
+        self.assertTrue(any("persist-credentials" in p for p in broken("runtime-ci.yml", name_only)))
+        folded_ref = runtime.replace(
+            real_input, real_input + "          ref: >-\n            ${{ github.event.pull_request.head.sha }}\n", 1)
+        self.assertNotEqual(folded_ref, runtime)
+        self.assertTrue(any("unsupported workflow syntax" in p for p in broken("runtime-ci.yml", folded_ref)))
+        inline_ref = runtime.replace(real_input, real_input + "          ref: ${{ github.event.pull_request.head.sha }}\n", 1)
+        self.assertTrue(any("untrusted pull-request ref" in p for p in broken("runtime-ci.yml", inline_ref)))
+
+        # Quoted structural keys are read like plain ones.
+        self.assertIn("  pull_request:\n", runtime)
+        self.assertTrue(any("pull_request_target" in p for p in broken(
+            "runtime-ci.yml", runtime.replace("  pull_request:\n", '  "pull_request_target":\n', 1))))
+        self.assertTrue(any("pull_request_target" in p for p in broken(
+            "browser-ci.yml", browser.replace("  pull_request:\n", "  'pull_request_target' :\n", 1))))
+        job_write_all = runtime.replace("    runs-on: ubuntu-latest\n", '    "permissions": write-all\n    runs-on: ubuntu-latest\n', 1)
+        self.assertNotEqual(job_write_all, runtime)
+        self.assertTrue(any("permissions" in p for p in broken("runtime-ci.yml", job_write_all)))
+
+        # Source discovery reads only the workflows list, so inline and block-list
+        # spellings of the same push-only chain agree on reachability and results.
+        trigger = "  push:\n    branches: [main]"
+        inline = DEPLOY.replace(trigger, "  workflow_run:\n    workflows: [Deploy]\n    types: [completed]\n    branches: [main]")
+        block = DEPLOY.replace(
+            trigger,
+            "  workflow_run:\n    workflows:\n      - Deploy\n    types:\n      - completed\n    branches:\n      - main",
+        )
+        results = []
+        for follower in (inline, block):
+            follower = follower.replace("name: Deploy", "name: Follow")
+            chain = {"deploy.yml": DEPLOY, "follow.yml": follower}
+            self.assertEqual(run_sources(follower), ["Deploy"])
+            self.assertNotIn("follow.yml", pr_reachable(chain))
+            results.append(audit_all(chain))
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[0]["follow.yml"], [])
 
     def test_real_workflows_fail_when_deliberately_broken_in_memory(self):
         """Mutate the real files in memory only; nothing on disk changes."""
