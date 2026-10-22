@@ -91,6 +91,10 @@ KNOWN_EVENTS = {
     "repository_dispatch", "schedule", "status", "watch", "workflow_call",
     "workflow_dispatch", "workflow_run",
 }
+# Keys whose value drives a rule: `uses`, `ref` and `persist-credentials` must be
+# inline plain scalars; the others may be blocks/lists but never folded scalars.
+SCALAR_REQUIRED_KEYS = {"uses", "ref", "persist-credentials"}
+SCALAR_INLINE_KEYS = {"runs-on", "workflows", "branches", "environment"}
 # A simple one-line `[a, b]` value is understood for ordinary keys (filters,
 # matrix values, inputs). Keys that carry workflow structure must be block style.
 FLOW_SEQUENCE_FORBIDDEN_KEYS = {
@@ -143,7 +147,7 @@ def unsupported(text):
     entries = structure(text)
     for line in _trigger_scan(text)[1]:
         problems.append(f"unsupported workflow syntax: {line} (unrecognized trigger entry)")
-    for position, (_, line) in enumerate(entries):
+    for position, (indent, line) in enumerate(entries):
         if line == "---" and position == 0:
             continue
         if line in ("---", "...") or line.startswith(("--- ", "... ")):
@@ -154,6 +158,21 @@ def unsupported(text):
         key, value = (match.group(1), (match.group(2) or "").strip()) if match else (None, body)
         if key in ("run", "script"):
             continue  # shell/script text, not workflow structure
+        # Keys that drive a rule must be single-line inline scalars; a value on
+        # the next line, folded, or spread across lines would be read as empty.
+        if key in SCALAR_REQUIRED_KEYS and (not value or value[0] in "|>"):
+            problems.append(f"unsupported workflow syntax: {line} (multi-line or folded {key} value)")
+            continue
+        if key in SCALAR_INLINE_KEYS and value[:1] in ("|", ">"):
+            problems.append(f"unsupported workflow syntax: {line} (folded {key} value)")
+            continue
+        key_indent = indent + len(line) - len(body)
+        continues = position + 1 < len(entries) and entries[position + 1][0] > key_indent
+        if key in SCALAR_REQUIRED_KEYS | SCALAR_INLINE_KEYS and value and (
+            continues or value.count("${{") != value.count("}}")
+        ) and not value.startswith("["):
+            problems.append(f"unsupported workflow syntax: {line} (value continues on another line)")
+            continue
         context = f"unsupported workflow syntax: {line}"
         if _quoted(line)[1]:
             problems.append(context + " (multi-line quoted scalar)")
@@ -326,7 +345,9 @@ def pr_reachable(texts):
     Anything that cannot be traced to a push-only origin counts as reachable.
     """
     events = {key: triggers(text) for key, text in texts.items()}
-    names = {workflow_name(text, key).lower(): key for key, text in texts.items()}
+    names = {}
+    for key, text in texts.items():
+        names.setdefault(workflow_name(text, key).lower(), []).append(key)
     by_file = {Path(key).name: key for key in texts}
     callers = {key: [] for key in texts}
     for key, text in texts.items():
@@ -346,7 +367,8 @@ def pr_reachable(texts):
                 sources = run_sources(text)
                 # An unresolvable source cannot be proven PR-free, so it counts.
                 reachable |= not sources or any(
-                    names.get(name.lower()) in reach or name.lower() not in names for name in sources)
+                    any(c in reach for c in names.get(name.lower(), [])) or name.lower() not in names
+                    for name in sources)
             if "workflow_call" in found:
                 # No resolvable caller means it can be called from anywhere.
                 reachable |= not callers[key] or any(caller in reach for caller in callers[key])
@@ -525,13 +547,13 @@ def audit(text, reachable=None):
         match = re.match(r"((?:-\s+)*)if:\s*(.*)", line)
         if match:
             expressions.append(match.group(2))
-            if re.fullmatch(r"[|>][+-]?\d*|", match.group(2).strip()):
-                # The key sits after any `- ` prefix; its scalar is indented deeper.
-                key_indent = indent + len(match.group(1))
-                for child_indent, child in structural[position + 1:]:
-                    if child_indent <= key_indent:
-                        break
-                    expressions.append(child)
+            # The key sits after any `- ` prefix; the rest of a folded or plain
+            # multi-line condition is indented deeper, siblings are not.
+            key_indent = indent + len(match.group(1))
+            for child_indent, child in structural[position + 1:]:
+                if child_indent <= key_indent:
+                    break
+                expressions.append(child)
     for expression in expressions:
         if SECRET_REFERENCE.search(re.sub(r"'[^']*'", "''", expression)):
             problems.append("references a secret other than GITHUB_TOKEN")
@@ -1244,6 +1266,82 @@ class WorkflowForkSafetyTests(unittest.TestCase):
             "      - run:", "      # it's a \"comment\" about secrets: write\n      - run:")), [])
         self.assertEqual(audit(GOOD + "      - run: >-\n          npm test\n          -- --ci\n"), [])
         self.assertEqual(audit(GOOD + "      - run: |\n          for i in {1..3}; do echo ${i}; done\n          echo \"*.txt & !x\"\n"), [])
+
+    def test_rule_driving_scalars_must_be_inline_or_fail_closed(self):
+        sha = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+        step = f"      - uses: actions/checkout@{sha}\n        with:\n          persist-credentials: false\n"
+        self.assertIn(step, GOOD)
+        head = "${{ github.head_ref }}"
+        cases = {
+            "uses on the next line": f"      - uses:\n          actions/checkout@v4\n        with:\n          persist-credentials: true\n",
+            "pinned uses on the next line": f"      - uses:\n          actions/checkout@{sha}\n        with:\n          persist-credentials: true\n",
+            "folded uses": f"      - uses: >-\n          actions/checkout@{sha}\n        with:\n          persist-credentials: true\n",
+            "literal uses": f"      - uses: |\n          actions/checkout@{sha}\n        with:\n          persist-credentials: true\n",
+            "multi-line plain uses": f"      - uses: actions/checkout@{sha}\n          more\n        with:\n          persist-credentials: true\n",
+            "folded ref": step + f"          ref: >-\n            {head}\n",
+            "literal ref": step + f"          ref: |\n            {head}\n",
+            "ref on the next line": step + f"          ref:\n            {head}\n",
+            "multi-line ref expression": step + "          ref: ${{\n            github.head_ref }}\n",
+            "plain multi-line ref": step + "          ref: main\n            ${{ github.head_ref }}\n",
+            "persist on the next line": step.replace("persist-credentials: false", "persist-credentials:\n            true"),
+            "folded persist": step.replace("persist-credentials: false", "persist-credentials: >-\n            true"),
+        }
+        for label, replacement in cases.items():
+            problems = audit(GOOD.replace(step, replacement))
+            self.assertTrue(any("unsupported workflow syntax" in problem for problem in problems), (label, problems))
+        # The same applies to a workflow_run checkout ref.
+        for ref in ("ref: >-\n            ${{ github.event.workflow_run.head_sha }}", "ref:\n            ${{ github.event.workflow_run.head_sha }}"):
+            self.rejected(lambda t, r=ref: RUN_GOOD.replace("ref: ${{ github.event.workflow_run.head_sha }}", r),
+                          "unsupported workflow syntax", RUN_GOOD)
+        for label, mutate in {
+            "folded runs-on": lambda t: t.replace("runs-on: ubuntu-latest", "runs-on: >-\n      self-hosted"),
+            "runs-on continuation": lambda t: t.replace("runs-on: ubuntu-latest", "runs-on: ubuntu-latest\n      self-hosted"),
+            "folded environment": lambda t: t.replace("    runs-on: ubuntu-latest\n", "    runs-on: ubuntu-latest\n    environment: >-\n      prod\n"),
+            "folded permission": lambda t: t.replace("contents: read", "contents: >-\n    write"),
+            "permission continuation": lambda t: t.replace("contents: read", "contents: read\n    write"),
+        }.items():
+            self.assertTrue(audit(mutate(GOOD)), label)
+        folded_branches = RUN_GOOD.replace("branches: [main]", "branches: >-\n      main")
+        self.rejected(lambda t: folded_branches, "not limited to branches", RUN_GOOD)
+        self.rejected(lambda t: RUN_GOOD.replace("branches: [main]", "branches:\n      main"), "not limited to branches", RUN_GOOD)
+        self.rejected(lambda t: RUN_GOOD.replace("workflows: [Fixture]", "workflows: >-\n      Fixture"), "unsupported workflow syntax", RUN_GOOD)
+        # Ordinary inline spellings of the same keys are unaffected.
+        for text in (
+            GOOD.replace(step, step + "          ref: ${{ github.sha }}\n"),
+            GOOD.replace(step, step + "          ref: main\n"),
+            GOOD.replace(step, step.replace("actions/checkout@" + sha, "actions/checkout@" + sha + " # v7")),
+            GOOD.replace("runs-on: ubuntu-latest", "runs-on:\n      - ubuntu-latest"),
+        ):
+            self.assertEqual(audit(text), [], text)
+
+    def test_plain_multi_line_if_conditions_are_scanned_for_secrets(self):
+        for step in (
+            "      - if: github.event_name == 'push' &&\n          secrets.DEPLOY_KEY != ''\n        run: x\n",
+            "      - if: always() &&\n          SECRETS.K\n        run: x\n",
+            "      - name: x\n        if: always() &&\n          secrets.K\n        run: x\n",
+        ):
+            self.rejected(lambda t, x=step: t + x, "secret other than GITHUB_TOKEN")
+        # Siblings after a single-line condition are not part of it.
+        self.assertEqual(audit(GOOD + "      - if: always()\n        name: secrets-report\n        run: echo secrets\n"), [])
+        self.assertEqual(audit(GOOD + "      - if: always() &&\n          github.event_name == 'push'\n        name: secrets-report\n        run: x\n"), [])
+
+    def test_shared_workflow_names_are_all_considered_for_reachability(self):
+        pr = GOOD.replace("name: Fixture", "name: CI")
+        push_only = DEPLOY.replace("name: Deploy", "name: CI")
+        follower = DEPLOY.replace(
+            "  push:\n    branches: [main]",
+            "  workflow_run:\n    workflows: [CI]\n    types: [completed]\n    branches: [main]",
+        ).replace("name: Deploy", "name: Follow")
+        for order in (("pr.yml", "push.yml"), ("push.yml", "pr.yml")):
+            texts = {key: {"pr.yml": pr, "push.yml": push_only}[key] for key in order}
+            texts["follow.yml"] = follower
+            self.assertIn("follow.yml", pr_reachable(texts))
+            self.assertTrue(audit_all(texts)["follow.yml"])
+        # With only push-triggered workflows of that name, the follower is not reachable.
+        other = push_only.replace("branches: [main]", "branches: [main, release]")
+        results = audit_all({"push.yml": push_only, "other.yml": other, "follow.yml": follower})
+        self.assertNotIn("follow.yml", pr_reachable({"push.yml": push_only, "other.yml": other, "follow.yml": follower}))
+        self.assertEqual(results["follow.yml"], [])
 
     def test_real_workflows_fail_when_deliberately_broken_in_memory(self):
         """Mutate the real files in memory only; nothing on disk changes."""
