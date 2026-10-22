@@ -84,8 +84,11 @@ LOCAL_WORKFLOW = re.compile(r"\./\.github/workflows/([\w.-]+\.ya?ml)")
 KEY = r"[A-Za-z_][\w-]*"
 QUOTED_KEY = re.compile(r"^((?:-\s+)*)([\"'])(" + KEY + r")\2\s*:(?=\s|$)")
 SPACED_KEY = re.compile(r"^((?:-\s+)*)(" + KEY + r")\s+:(?=\s|$)")
+# Quoted sequence items are unquoted only when that cannot change their meaning: not
+# for content starting with a YAML indicator, containing `: ` / ` #`, or holding a
+# backslash (escapes must stay visible to the quoted-scalar escape scan).
 QUOTED_ITEM = re.compile(
-    r"^((?:-\s+)+)([\"'])([A-Za-z0-9_./$](?:(?!:\s|:$|\s#)[^\"'])*)\2$")
+    r"^((?:-\s+)+)([\"'])([A-Za-z0-9_./$](?:(?!:\s|:$|\s#)[^\"'\\])*)\2$")
 KEY_VALUE = re.compile(r"^(" + KEY + r"):(?:\s+(.*))?$")
 KNOWN_EVENTS = {
     "branch_protection_rule", "check_run", "check_suite", "create", "delete",
@@ -149,12 +152,39 @@ def _mask(line):
     return re.sub(r"\$\{\{.*?\}\}", "", plain)
 
 
-def _has_unreadable_escape(span):
-    """True for a backslash escape other than \\" and \\\\ (they are compared as literal text)."""
+def _delimiters_unbalanced(value):
+    flags = _expression_flags(value)
+    unquoted = "".join(char for char, inside in zip(value, flags) if not inside)
+    return unquoted.count("${{") != unquoted.count("}}")
+
+
+def _double_quoted_spans(text):
+    spans, current = [], ""
+    for char, inside in zip(text, _quoted(text)[0]):
+        if inside:
+            current += char
+        elif current:
+            spans.append(current)
+            current = ""
+    spans.append(current)
+    return [span for span in spans if span.startswith('"')]
+
+
+# Escapes that decode to harmless whitespace or punctuation and cannot spell an
+# expression delimiter or operator (`\x24`, `\x7b`, `\u...` and friends can).
+INERT_ESCAPES = set('"\\ntr0abfve/ N_LP')
+
+
+def _has_unreadable_escape(span, strict=True):
+    """True for a backslash escape the audit cannot read as literal text.
+
+    Strict: anything but \\" and \\\\. Lenient: anything outside the inert set.
+    """
+    allowed = set('"\\') if strict else INERT_ESCAPES
     index = 0
     while index < len(span):
         if span[index] == "\\":
-            if index + 1 >= len(span) or span[index + 1] not in '"\\':
+            if index + 1 >= len(span) or span[index + 1] not in allowed:
                 return True
             index += 1
         index += 1
@@ -178,7 +208,24 @@ def unsupported(text):
         body = re.sub(r"^(?:-\s+)+", "", line)
         match = KEY_VALUE.match(body)
         key, value = (match.group(1), (match.group(2) or "").strip()) if match else (None, body)
-        if key in ("run", "script"):
+        # Every double-quoted YAML scalar is decoded by the loader, whatever its key
+        # (even `run:`/`script:` when the whole value is quoted), so an escape could
+        # spell `${{`, `||` or a key. Rule-driving values, list items and anything
+        # holding an expression must use only \" and \\; elsewhere only escapes that
+        # cannot synthesise syntax (\n, \t, ...) are tolerated.
+        shell = key in ("run", "script")
+        spans = _double_quoted_spans(value if shell else line)
+        if shell:
+            spans = spans[:1] if value.startswith('"') else []
+        for span in spans:
+            strict = key is None or key in RULE_KEYS or "${{" in span
+            if _has_unreadable_escape(span, strict=strict):
+                problems.append(f"unsupported workflow syntax: {line} (unsupported escape in a quoted scalar)")
+                break
+        if shell:
+            if value[:1] in ('"', "'") and _quoted(value)[1]:
+                # The decoded scalar continues on later lines that are never scanned.
+                problems.append(f"unsupported workflow syntax: {line} (multi-line quoted scalar)")
             continue  # shell/script text, not workflow structure
         # Keys that drive a rule must be single-line inline scalars; a value on
         # the next line, folded, or spread across lines would be read as empty.
@@ -191,26 +238,11 @@ def unsupported(text):
         key_indent = indent + len(line) - len(body)
         continues = position + 1 < len(entries) and entries[position + 1][0] > key_indent
         if key in SCALAR_REQUIRED_KEYS | SCALAR_INLINE_KEYS and value and (
-            continues or value.count("${{") != value.count("}}")
+            continues or _delimiters_unbalanced(value)
         ) and not value.startswith("["):
             problems.append(f"unsupported workflow syntax: {line} (value continues on another line)")
             continue
         context = f"unsupported workflow syntax: {line}"
-        flags = _quoted(line)[0]
-        spans, current = [], ""
-        for char, inside in zip(line, flags):
-            if inside:
-                current += char
-            elif current:
-                spans.append(current)
-                current = ""
-        spans.append(current)
-        for span in spans:
-            if span.startswith('"') and _has_unreadable_escape(span) and (
-                key is None or key in RULE_KEYS or "${{" in span
-            ):
-                problems.append(context + " (unsupported escape in a quoted scalar)")
-                break
         if _quoted(line)[1]:
             problems.append(context + " (multi-line quoted scalar)")
         masked = _mask(line)
@@ -479,6 +511,24 @@ def _wrapped(expression):
     return False
 
 
+def _expressions(text):
+    """Contents of every `${{ }}`, honouring `'...'` strings that may contain `}}`."""
+    found, index = [], 0
+    while True:
+        start = text.find("${{", index)
+        if start < 0:
+            return found
+        position, quoted = start + 3, False
+        while position < len(text):
+            if text[position] == "'":
+                quoted = not quoted
+            elif not quoted and text.startswith("}}", position):
+                break
+            position += 1
+        found.append(text[start + 3:position])
+        index = position + 2
+
+
 def condition_terms(condition):
     """Split a job `if:` into its top-level `&&` terms.
 
@@ -522,22 +572,28 @@ def condition_terms(condition):
         text = inner.strip()
     wrapper = re.fullmatch(r"\$\{\{(.*)\}\}", text)
     expression = wrapper.group(1) if wrapper else text
-    if "${{" in expression or "}}" in expression:
-        return [], "mixed or repeated ${{ }} wrappers"
     flags = _expression_flags(expression)
+    # Delimiters inside string literals (`contains('}}', x)`, `format('{{0}}')`) are data.
+    unquoted = "".join(char for char, inside in zip(expression, flags) if not inside)
+    if "${{" in unquoted or "}}" in unquoted:
+        return [], "mixed or repeated ${{ }} wrappers"
     if any(not flags[i] and expression.startswith("||", i) for i in range(len(expression))):
         return [], "contains ||"
     if any(flags) and expression.count("'") % 2:
         return [], "unterminated string"
-    depth = 0
+    # Parentheses and brackets must nest properly: `&&` inside an index
+    # expression such as `fromJSON('[true]')[false && ...]` is not top level.
+    stack = []
     for index, char in enumerate(expression):
-        if not flags[index]:
-            depth += char == "("
-            depth -= char == ")"
-            if depth < 0:
-                return [], "unbalanced parentheses"
-    if depth:
-        return [], "unbalanced parentheses"
+        if flags[index]:
+            continue
+        if char in "([":
+            stack.append(char)
+        elif char in ")]":
+            if not stack or stack.pop() != ("(" if char == ")" else "["):
+                return [], "unbalanced parentheses or brackets"
+    if stack:
+        return [], "unbalanced parentheses or brackets"
     terms = []
 
     def split(piece):
@@ -548,8 +604,8 @@ def condition_terms(condition):
         for index, char in enumerate(piece):
             if piece_flags[index]:
                 continue
-            depth += char == "("
-            depth -= char == ")"
+            depth += char in "(["
+            depth -= char in ")]"
             if depth == 0 and piece.startswith("&&", index):
                 parts.append(piece[start:index])
                 start = index + 2
@@ -716,7 +772,7 @@ def audit(text, reachable=None):
     # Only `${{ }}` expressions reference secrets; step names and quoted literals
     # that merely mention the word do not. Run bodies are included because their
     # expressions are evaluated before the shell sees them.
-    expressions = re.findall(r"\$\{\{(.*?)\}\}", "\n".join(line for _, line, _ in entries), re.S)
+    expressions = _expressions("\n".join(line for _, line, _ in entries))
     # `if:` values are expressions even without ${{ }}.
     for position, (indent, line) in enumerate(structural):
         match = re.match(r"((?:-\s+)*)if:\s*(.*)", line)
@@ -1867,6 +1923,100 @@ class WorkflowForkSafetyTests(unittest.TestCase):
             '      - run: x\n        env:\n          NOTE: "line\\nbreak \\\\ backslash"\n',
         ):
             self.assertEqual(audit(GOOD + step), [], step)
+
+    def test_escapes_cannot_hide_expression_delimiters_in_any_quoted_scalar(self):
+        hidden = (
+            '"\\x24{{ secrets.NPM_TOKEN }}"',
+            '"$\\x7b{ secrets.NPM_TOKEN }}"',
+            '"\\x24\\x7b\\x7b secrets.NPM_TOKEN }}"',
+            '"\\u0024{{ secrets.NPM_TOKEN }}"',
+            '"$\\u007b{ secrets.NPM_TOKEN }}"',
+            '"$\\x7B{ secrets.NPM_TOKEN }}"',
+        )
+        steps = {
+            "env": "      - run: x\n        env:\n          NODE_AUTH_TOKEN: %s\n",
+            "with": "      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1\n        with:\n          token: %s\n",
+            "name": "      - name: %s\n        run: x\n",
+            "quoted run": "      - run: %s\n",
+            "quoted script": "      - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea\n        with:\n          script: %s\n",
+            "list item": "      - run: x\n        args:\n          - %s\n",
+        }
+        texts = self.texts()
+        for label, template in steps.items():
+            for value in hidden:
+                step = template % value
+                self.assertTrue(audit(GOOD + step), (label, value))
+                self.assertTrue(any("escape" in p for p in audit(GOOD + step)), (label, value))
+                for name in ("runtime-ci.yml", "validate-plan.yml", "validate-ingestion.yml", "prepare-site.yml"):
+                    problems = audit_all({**texts, name: texts[name] + step})[name]
+                    self.assertTrue(any("escape" in p for p in problems), (name, label, value, problems))
+        # A multi-line quoted run/script scalar hides its continuation lines.
+        for step in ('      - run: "echo\n          \\x24{{ secrets.K }}"\n', "      - run: 'echo\n          more'\n"):
+            self.assertTrue(any("multi-line quoted" in p for p in audit(GOOD + step)), step)
+        # A quoted key can hide behind an escape too.
+        for line in ('    "en\\x76ironment": prod\n', '    "perm\\x69ssions": write-all\n'):
+            self.assertTrue(audit(GOOD.replace("    steps:", line + "    steps:")), line)
+        # Inert escapes in values that drive nothing keep working, including in run/script.
+        for step in (
+            '      - name: "tab\\tseparated and \\"quoted\\" and \\/ slash"\n        run: x\n',
+            '      - run: x\n        env:\n          NOTE: "line\\nbreak\\r\\0\\a\\b\\f\\v\\e \\N\\_\\L\\P \\\\ done"\n',
+            '      - run: "echo hi\\nthere"\n',
+            '      - run: echo "a\\x41" and \'b\\x42\'\n',      # shell quoting inside a plain scalar
+        ):
+            self.assertEqual(audit(GOOD + step), [], step)
+        # `${{` inside a quoted span or a rule key needs the strict set, so even \n is refused there.
+        self.assertTrue(audit(GOOD + '      - run: x\n        env:\n          K: "${{ github.event_name }}\\n"\n'))
+
+    def test_brackets_must_nest_and_do_not_hide_guards_inside_index_expressions(self):
+        a = "github.event.workflow_run.event == 'push'"
+        b = "github.event.workflow_run.head_branch == 'main'"
+        c = "github.event.workflow_run.head_repository.full_name == github.repository"
+        good = f"{a} && {b} && {c}"
+        for label, expression in {
+            "guards inside an index": f"fromJSON('[true,true]')[false && {a} && {b} && {c} && false]",
+            "guards inside nested index": f"fromJSON('[true]')[0 && fromJSON('[1]')[{a} && {b} && {c}]]",
+            "guards inside index after a term": f"x && fromJSON('[true,true]')[false && {a} && {b} && {c}]",
+            "mismatched brackets": f"({a}] && {b} && {c}",
+            "mismatched nesting": f"[{a} && {b} && {c})",
+            "unclosed bracket": f"{good} && x[0",
+            "extra closing bracket": f"{good} && x]",
+            "crossed pairs": f"{good} && ([x)]",
+        }.items():
+            problems = audit(self.run_with(expression))
+            self.assertTrue(
+                any("workflow_run" in p and ("guard" in p or "conjunction" in p) for p in problems), (label, problems))
+        self.assertEqual(condition_terms("a && b[0 && 1]")[0], ["a", "b[0 && 1]"])
+        # Legitimate indexed extra terms and brackets inside quoted strings still pass.
+        for expression in (
+            f"github.event.workflow_run.pull_requests[0] == null && {good}",
+            f"{good} && github.event.workflow_run.pull_requests[0].number > 0",
+            f"{a} && contains('[', github.event.workflow_run.name) && {b} && {c}",
+            f"{good} && contains(']]', 'x') && fromJSON('[1,2]')[0] == 1",
+        ):
+            self.assertEqual(audit(self.run_with(expression)), [], expression)
+
+    def test_delimiters_inside_string_literals_are_data_not_wrappers(self):
+        a = "github.event.workflow_run.event == 'push'"
+        b = "github.event.workflow_run.head_branch == 'main'"
+        c = "github.event.workflow_run.head_repository.full_name == github.repository"
+        good = f"{a} && {b} && {c}"
+        for term in (
+            "contains('}}', 'x')", "format('{{0}}', 1)", "contains('${{', x)", "x == '}}'", "format('{{{{0}}}}', 1)",
+        ):
+            self.assertEqual(audit(self.run_with(f"{good} && {term}")), [], term)
+            self.assertEqual(condition_terms(f"${{{{ {good} && {term} }}}}")[1], None, term)
+        # Genuinely repeated or mixed wrappers are still rejected.
+        for expression in (f"{good} }} && ${{{{ true", f"{good} && ${{{{ true"):
+            self.assertIn("wrappers", condition_terms(f"${{{{ {expression} }}}}")[1] or "")
+        self.assertTrue(audit(self.run_with(f"{good}") .replace(" }}\n", " }} && ${{ true }}\n", 1)))
+        # A `}}` inside a string must not end the secret sweep's view of the expression.
+        for expression in (
+            "${{ contains('}}', 'x') && secrets.K }}",
+            "${{ format('}}{0}', secrets.K) }}",
+            "${{ x == '}}' || SECRETS.K }}",
+        ):
+            self.rejected(lambda t, e=expression: t + f"      - run: x\n        env:\n          V: {e}\n", "secret other than GITHUB_TOKEN")
+        self.assertEqual(audit(GOOD + "      - run: x\n        env:\n          V: ${{ format('}}{0}', github.run_id) }}\n"), [])
 
     def test_real_workflows_fail_when_deliberately_broken_in_memory(self):
         """Mutate the real files in memory only; nothing on disk changes."""
