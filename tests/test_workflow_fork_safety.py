@@ -101,6 +101,8 @@ KNOWN_EVENTS = {
 # inline plain scalars; the others may be blocks/lists but never folded scalars.
 SCALAR_REQUIRED_KEYS = {"uses", "ref", "persist-credentials"}
 SCALAR_INLINE_KEYS = {"runs-on", "workflows", "branches", "environment"}
+# Keys whose quoted values are compared as literal text by a rule.
+RULE_KEYS = SCALAR_REQUIRED_KEYS | SCALAR_INLINE_KEYS | {"if"}
 # A simple one-line `[a, b]` value is understood for ordinary keys (filters,
 # matrix values, inputs). Keys that carry workflow structure must be block style.
 FLOW_SEQUENCE_FORBIDDEN_KEYS = {
@@ -147,6 +149,18 @@ def _mask(line):
     return re.sub(r"\$\{\{.*?\}\}", "", plain)
 
 
+def _has_unreadable_escape(span):
+    """True for a backslash escape other than \\" and \\\\ (they are compared as literal text)."""
+    index = 0
+    while index < len(span):
+        if span[index] == "\\":
+            if index + 1 >= len(span) or span[index + 1] not in '"\\':
+                return True
+            index += 1
+        index += 1
+    return False
+
+
 def unsupported(text):
     """Report constructs outside the supported YAML subset (fail closed)."""
     problems = []
@@ -182,6 +196,21 @@ def unsupported(text):
             problems.append(f"unsupported workflow syntax: {line} (value continues on another line)")
             continue
         context = f"unsupported workflow syntax: {line}"
+        flags = _quoted(line)[0]
+        spans, current = [], ""
+        for char, inside in zip(line, flags):
+            if inside:
+                current += char
+            elif current:
+                spans.append(current)
+                current = ""
+        spans.append(current)
+        for span in spans:
+            if span.startswith('"') and _has_unreadable_escape(span) and (
+                key is None or key in RULE_KEYS or "${{" in span
+            ):
+                problems.append(context + " (unsupported escape in a quoted scalar)")
+                break
         if _quoted(line)[1]:
             problems.append(context + " (multi-line quoted scalar)")
         masked = _mask(line)
@@ -470,9 +499,22 @@ def condition_terms(condition):
         if len(text) < 2 or text[-1] != quote:
             return [], "unterminated or partly quoted scalar"
         if quote == '"':
-            if re.search(r'(?<!\\)"', inner):
-                return [], "unterminated or partly quoted scalar"
-            inner = re.sub(r'\\(["\\])', r"\1", inner)
+            # One left-to-right pass; only \" and \\ are understood, so no other
+            # escape (\x7C, \u007c, \n, ...) can smuggle an operator past the parser.
+            chars, index = [], 0
+            while index < len(inner):
+                char = inner[index]
+                if char == "\\":
+                    if index + 1 >= len(inner) or inner[index + 1] not in '"\\':
+                        return [], "unsupported escape in a quoted scalar"
+                    chars.append(inner[index + 1])
+                    index += 2
+                    continue
+                if char == '"':
+                    return [], "unterminated or partly quoted scalar"
+                chars.append(char)
+                index += 1
+            inner = "".join(chars)
         else:
             if "'" in inner.replace("''", ""):
                 return [], "unterminated or partly quoted scalar"
@@ -1771,6 +1813,60 @@ class WorkflowForkSafetyTests(unittest.TestCase):
         for value in ('"${{ secrets.X }}"', "'${{ secrets.X }}'", '"${{ SECRETS.X != \'\' }}"'):
             self.rejected(lambda t, v=value: t + f"      - if: {v}\n        run: x\n", "secret other than GITHUB_TOKEN")
         self.assertEqual(audit(GOOD + '      - if: "${{ github.event_name == \'push\' }}"\n        run: x\n'), [])
+
+    def test_double_quoted_escapes_other_than_quote_and_backslash_fail_closed(self):
+        a = "github.event.workflow_run.event == 'push'"
+        b = "github.event.workflow_run.head_branch == 'main'"
+        c = "github.event.workflow_run.head_repository.full_name == github.repository"
+        good = f"{a} && {b} && {c}"
+
+        def condition(body):
+            start = RUN_GOOD.index("    if: >-")
+            return RUN_GOOD[:start] + f'    if: "{body}"\n' + RUN_GOOD[RUN_GOOD.index("    runs-on:"):]
+
+        # YAML decodes these escapes into operators, so reading them as literal text
+        # would turn `... && false || true` (always true) into a passing conjunction.
+        for escape in ("\\x7C\\x7C", "\\u007c\\u007C", "\\x7c|", "|\\x7c", "\\x28", "\\x29", "\\x21", "\\x26\\x26", "\\n", "\\/"):
+            body = "${{ " + good + " && false " + escape + " true }}"
+            problems = audit(condition(body))
+            self.assertTrue(any("workflow_run" in p or "escape" in p for p in problems), (escape, problems))
+            self.assertEqual(condition_terms('"' + body + '"')[0], [], escape)
+            self.assertIn("unsupported escape", condition_terms('"' + body + '"')[1], escape)
+        for body in (
+            "${{ " + good + " }}\\",              # trailing lone backslash
+            "${{ " + good + " \\\\\\ }}",    # odd run of backslashes ends in a lone one
+            "${{ " + good + " && false \\x7C\\x7C true }}",
+        ):
+            self.assertTrue(audit(condition(body)), body)
+        self.assertIn("unsupported escape", condition_terms('"${{ a }}\\"')[1])
+        # A double backslash is a backslash plus literal text, not an escape sequence.
+        self.assertEqual(condition_terms('"${{ a && \'\\\\x7C\\\\x7C\' == b }}"'), (["a", "'\\x7c\\x7c' == b"], None))
+        # Plain, escaped-quote and single-quoted spellings still work.
+        self.assertEqual(audit(condition("${{ " + good + " }}")), [])
+        self.assertEqual(condition_terms('"${{ a && contains(x, \\"y\\") }}"'), (["a", 'contains(x, "y")'], None))
+        self.assertEqual(condition_terms("'${{ a && b == ''push'' }}'"), (["a", "b == 'push'"], None))
+        # The same applies wherever a double-quoted value drives a rule or holds an expression.
+        sha = "3d3c42e5aac5ba805825da76410c181273ba90b1"
+        for mutate in (
+            lambda t: t.replace("persist-credentials: false", 'persist-credentials: false\n          ref: "${{ github.\\x68ead_ref }}"'),
+            lambda t: t.replace("persist-credentials: false", 'persist-credentials: false\n          ref: "refs/\\x70ull/1/head"'),
+            lambda t: t.replace(f"actions/checkout@{sha}", f'"actions/ch\\x65ckout@{sha}"'),
+            lambda t: t.replace("runs-on: ubuntu-latest", 'runs-on: "self-\\x68osted"'),
+            lambda t: t.replace("persist-credentials: false", 'persist-credentials: "f\\x61lse"'),
+            lambda t: t + '      - run: x\n        env:\n          K: "${{ \\x73ecrets.K }}"\n',
+            lambda t: t.replace("branches: [main]", 'branches: ["ma\\x69n"]'),
+            lambda t: t + '      - if: "${{ always() && \\x73ecrets.K }}"\n        run: x\n',
+        ):
+            text = mutate(GOOD)
+            self.assertNotEqual(text, GOOD)
+            self.assertTrue(audit(text), text)
+        self.assertIn("unsupported escape", "".join(audit(GOOD.replace("persist-credentials: false", 'persist-credentials: false\n          ref: "refs/\\x70ull/1/head"'))))
+        # Ordinary escapes in values that drive nothing are left alone.
+        for step in (
+            '      - name: "tab\\tseparated and \\"quoted\\""\n        run: x\n',
+            '      - run: x\n        env:\n          NOTE: "line\\nbreak \\\\ backslash"\n',
+        ):
+            self.assertEqual(audit(GOOD + step), [], step)
 
     def test_real_workflows_fail_when_deliberately_broken_in_memory(self):
         """Mutate the real files in memory only; nothing on disk changes."""
