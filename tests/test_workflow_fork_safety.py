@@ -58,7 +58,11 @@ WORKFLOW_RUN_GUARDS = (
     "github.event.workflow_run.head_repository.full_name == github.repository",
 )
 PINNED_ACTION = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_./-]+)?@[0-9a-f]{40}$")
-UNTRUSTED_REF = re.compile(r"github\.(?:head_ref|event\.pull_request\.head)", re.I)
+UNTRUSTED_REF = re.compile(
+    r"github\.(?:head_ref|event\.pull_request\.head|event\.pull_request\.merge_commit_sha"
+    r"|event\.(?:number|pull_request\.number|issue\.number))|refs?/pull/",
+    re.I,
+)
 SECRET_REFERENCE = re.compile(r"\bsecrets\b(?!\.GITHUB_TOKEN\b)", re.I)
 # GitHub-hosted runner labels; anything else (self-hosted, groups, custom or
 # larger-runner labels, expressions) is unreviewed and rejected for PR code.
@@ -144,10 +148,12 @@ def _mask(line):
 def unsupported(text):
     """Report constructs outside the supported YAML subset (fail closed)."""
     problems = []
-    entries = structure(text)
+    entries = _marked_structure(text)
     for line in _trigger_scan(text)[1]:
         problems.append(f"unsupported workflow syntax: {line} (unrecognized trigger entry)")
-    for position, (indent, line) in enumerate(entries):
+    for position, (indent, line, is_condition) in enumerate(entries):
+        if is_condition:
+            continue  # continuation text of a multi-line scalar
         if line == "---" and position == 0:
             continue
         if line in ("---", "...") or line.startswith(("--- ", "... ")):
@@ -202,10 +208,16 @@ def scan(text):
     Structural lines have comments removed. Bodies of every `|`/`>` block
     scalar except `if:` (run, script, path, body, JSON inputs, ...) are kept
     (flagged in_body) because `${{ }}` expressions there are evaluated, but they
-    are never read as workflow keys.
+    are never read as workflow keys. Continuation lines of an `if:` condition
+    (folded, literal or plain multi-line) and continuation lines of any other
+    plain multi-line scalar are flagged "cond": they stay in the structure so
+    guard matching and secret sweeps read the whole text, but they are scalar
+    text, so value-start syntax checks skip them.
     """
     result = []
     body_indent = None
+    cond_indent = None
+    cond_all = False
     for raw in text.splitlines():
         stripped = raw.strip()
         indent = len(raw) - len(raw.lstrip(" "))
@@ -220,18 +232,38 @@ def scan(text):
         stripped = _strip_comment(stripped)
         if not stripped:
             continue
+        if cond_indent is not None:
+            # After `if:` every deeper line continues the condition; after another
+            # key with an inline plain value, only lines that are not themselves
+            # keys or list items continue that scalar.
+            looks_structural = re.match(r"-\s|(?:" + KEY + r"|[\"'][^\"']*[\"'])\s*:(?:\s|$)", stripped)
+            if indent > cond_indent and (cond_all or not looks_structural):
+                result.append((indent, stripped, "cond"))
+                continue
+            cond_indent = None
         stripped = QUOTED_KEY.sub(lambda m: f"{m.group(1)}{m.group(3)}:", stripped)
         stripped = SPACED_KEY.sub(lambda m: f"{m.group(1)}{m.group(2)}:", stripped)
         stripped = QUOTED_ITEM.sub(lambda m: f"{m.group(1)}{m.group(3)}", stripped)
         result.append((indent, stripped, False))
+        condition = re.match(r"((?:-\s+)*)if:(?:\s|$)", stripped)
         block = BLOCK_SCALAR.match(stripped)
+        if condition:
+            cond_indent, cond_all = indent + len(condition.group(1)), True
+        elif not block:
+            plain = re.match(r"((?:-\s+)*)" + KEY + r":\s+[^\s\[{|>\"'&*!]", stripped)
+            if plain:
+                cond_indent, cond_all = indent + len(plain.group(1)), False
         if block:
             body_indent = indent + (len(block.group(1)) if block.group(1) else 0)
     return result
 
 
 def structure(text):
-    return [(indent, line) for indent, line, body in scan(text) if not body]
+    return [(indent, line) for indent, line, body in scan(text) if body is not True]
+
+
+def _marked_structure(text):
+    return [(indent, line, body == "cond") for indent, line, body in scan(text) if body is not True]
 
 
 def _block(entries, index):
@@ -1342,6 +1374,76 @@ class WorkflowForkSafetyTests(unittest.TestCase):
         results = audit_all({"push.yml": push_only, "other.yml": other, "follow.yml": follower})
         self.assertNotIn("follow.yml", pr_reachable({"push.yml": push_only, "other.yml": other, "follow.yml": follower}))
         self.assertEqual(results["follow.yml"], [])
+
+    def test_multi_line_conditions_are_expression_text_not_yaml_structure(self):
+        for label, step in {
+            "folded with leading !": "      - if: >-\n          ${{ always() &&\n              !cancelled() }}\n        run: x\n",
+            "literal with leading !": "      - if: |\n          !cancelled()\n        run: x\n",
+            "folded leading &&": "      - if: >-\n          github.event_name == 'push'\n          && github.ref == 'refs/heads/main'\n        run: x\n",
+            "plain leading &&": "      - if: github.event_name == 'push'\n          && github.ref == 'refs/heads/main'\n        run: x\n",
+            "plain leading *": "      - if: github.run_number\n          * 2 > 4\n        run: x\n",
+            "brackets braces quotes": "      - if: >-\n          contains(fromJSON('[\"a\", \"b\"]'), github.event_name) ||\n          {x}\n        run: x\n",
+            "trailing comment": "      - if: >-\n          always() # keep running\n          && true\n        run: x\n",
+            "colon in a string": "      - if: >-\n          github.event.label.name == 'a: b'\n        run: x\n",
+            "then sibling keys": "      - if: >-\n          !cancelled()\n        name: after\n        run: y\n",
+        }.items():
+            self.assertEqual(audit(GOOD + step), [], label)
+        job_level = GOOD.replace("    runs-on:", "    if: |\n      !cancelled() &&\n      github.event_name != 'schedule'\n    runs-on:")
+        self.assertEqual(audit(job_level), [])
+        # Other multi-line plain scalars behave the same way.
+        for step in (
+            "      - name: build ${{ matrix.os }} &&\n          !skipped\n        run: x\n",
+            "      - run: x\n        env:\n          NOTE: some text\n            && more text\n",
+        ):
+            self.assertEqual(audit(GOOD + step), [], step)
+        # The full condition still feeds the secret sweeps and the workflow_run guards.
+        for step in (
+            "      - if: >-\n          !cancelled()\n          && secrets.K != ''\n        run: x\n",
+            "      - if: always()\n          && SECRETS.K\n        run: x\n",
+            "      - if: >-\n          [x] || ${{ secrets.K }}\n        run: x\n",
+        ):
+            self.rejected(lambda t, x=step: t + x, "secret other than GITHUB_TOKEN")
+        leading = RUN_GOOD.replace(
+            "      ${{ github.event.workflow_run.event == 'push' &&\n"
+            "          github.event.workflow_run.head_branch == 'main' &&\n"
+            "          github.event.workflow_run.head_repository.full_name == github.repository }}",
+            "      ${{ github.event.workflow_run.event == 'push'\n"
+            "          && github.event.workflow_run.head_branch == 'main'\n"
+            "          && !cancelled()\n"
+            "          && github.event.workflow_run.head_repository.full_name == github.repository }}",
+        )
+        self.assertNotEqual(leading, RUN_GOOD)
+        self.assertEqual(audit(leading), [])
+        self.rejected(lambda t: leading.replace("          && github.event.workflow_run.head_branch == 'main'\n", ""),
+                      "lacks workflow_run guard", RUN_GOOD)
+        # Real syntax problems on a condition's own line are still reported.
+        self.rejected(lambda t: t + "      - if: !cancelled()\n        run: x\n", "unsupported workflow syntax")
+        self.rejected(lambda t: t + "      - if: always()\n        run: x\n        uses: [a]\n", "unsupported workflow syntax")
+
+    def test_pull_request_checkout_ref_spellings_are_rejected(self):
+        def checkout(ref):
+            return lambda t: t.replace("persist-credentials: false", f"persist-credentials: false\n          ref: {ref}")
+        for ref in (
+            "refs/pull/${{ github.event.number }}/merge",
+            "refs/pull/${{ github.event.number }}/head",
+            "refs/pull/${{ github.event.pull_request.number }}/head",
+            "refs/pull/${{ github.event.issue.number }}/head",
+            "refs/pull/12/head", "ref/pull/12/merge", "'refs/pull/1/head'",
+            "${{ github.event.pull_request.merge_commit_sha }}",
+            "${{ GITHUB.EVENT.NUMBER }}", "${{ Github.Event.Pull_Request.Number }}",
+            "${{ github.head_ref }}", "${{ github.event.pull_request.head.ref }}",
+        ):
+            self.rejected(checkout(ref), "untrusted pull-request ref")
+        for ref in ("main", "refs/heads/main", "${{ github.sha }}", "${{ github.ref }}", "refs/tags/v1"):
+            self.assertEqual(audit(checkout(ref)(GOOD)), [], ref)
+        # The same patterns apply to a workflow_run follower's checkout.
+        for ref in (
+            "refs/pull/${{ github.event.workflow_run.pull_requests[0].number }}/head",
+            "refs/pull/${{ github.event.number }}/merge",
+            "${{ github.event.workflow_run.head_branch }}",
+        ):
+            self.rejected(lambda t, r=ref: RUN_GOOD.replace(
+                "ref: ${{ github.event.workflow_run.head_sha }}", f"ref: {r}"), "workflow_run ref" if "head_branch" in ref else "untrusted pull-request ref", RUN_GOOD)
 
     def test_real_workflows_fail_when_deliberately_broken_in_memory(self):
         """Mutate the real files in memory only; nothing on disk changes."""
