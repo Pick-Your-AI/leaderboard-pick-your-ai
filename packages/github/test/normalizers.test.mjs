@@ -248,6 +248,56 @@ test("explicit revert lineage annotates original delivery without creating rever
   assert.equal(normalizeGithubObservation({ ...input, lineage: [] }).facts.length, 0);
 });
 
+test("reverted_delivery excludes inferred, unproven or mismatched revert lineage and never credits the reverter", () => {
+  const lineage = {
+    relation: "reverted_by",
+    sourceIds: ["PR_synthetic_10"],
+    targetId: "PR_synthetic_revert",
+    evidenceIds: ["synthetic-revert-receipt"],
+  };
+  const revert = (patch = {}) =>
+    normalizeGithubObservation(envelope({ family: "revert", action: "reverted", ...patch }));
+  // Control: valid lineage is one annotation for the original author, not for the sender (the reverter's lens).
+  const control = revert({ lineage: [lineage] });
+  assert.deepEqual(
+    control.facts.map((fact) => [fact.metricId, fact.actorId, fact.state]),
+    [["reverted_delivery", "101", "observed"]],
+  );
+  assert.ok(control.facts.every((fact) => fact.actorId !== "202"));
+  const noEvent = { verified: true, source: "github_webhook", revision: at, isSynthetic: true };
+  for (const [name, out] of [
+    ["lineage is absent", revert()],
+    ["lineage is empty", revert({ lineage: [] })],
+    ["the relation is not reverted_by", revert({ lineage: [{ ...lineage, relation: "squash_of" }] })],
+    [
+      "the lineage describes a different original",
+      revert({ lineage: [{ ...lineage, sourceIds: ["PR_synthetic_other"] }] }),
+    ],
+    ["the lineage names no evidence", revert({ lineage: [{ ...lineage, evidenceIds: [] }] })],
+    ["the observation has no native event proof", revert({ lineage: [lineage], proof: noEvent })],
+  ]) {
+    assert.deepEqual(out.facts, [], name);
+    assert.deepEqual(out.reasons, ["revert_requires_explicit_source_lineage"], name);
+  }
+  // Revert lineage on an ordinary pull request observation cannot create the annotation.
+  assert.deepEqual(metrics(normalizeGithubObservation(envelope({ lineage: [lineage] })), "reverted_delivery"), []);
+  // An unknown original author is unknown, not the reverter.
+  const ghost = revert({
+    lineage: [lineage],
+    payload: { repository: fixture.repository, pull_request: { ...pr(), user: null }, sender: fixture.merger },
+  });
+  assert.deepEqual(
+    metrics(ghost, "reverted_delivery").map((fact) => [fact.actorId, fact.state]),
+    [[null, "unknown"]],
+  );
+  // Private repositories emit nothing.
+  const hidden = revert({
+    lineage: [lineage],
+    repository: { id: 2, slug: "synthetic-owner/repository", visibility: "private", defaultBranch: "main" },
+  });
+  assert.deepEqual(hidden.facts, []);
+});
+
 test("agent execution under a User preserves account kind without certifying manual execution", () => {
   const out = normalizeGithubObservation(
     envelope({
@@ -544,6 +594,84 @@ test("relationship endpoint copies conserve one link and never reinterpret relat
   assert.match(restricted.reasons.join(), /visibility_unverified/);
 });
 
+test("related_links excludes automatic, unproven, unverified and other-kind relationships and never credits a non-actor", () => {
+  const relationship = {
+    kind: "related",
+    from: "issue:a",
+    to: "issue:b",
+    intentional: true,
+    publicEndpointsVerified: true,
+  };
+  const link = (patch = {}, envelopePatch = {}) =>
+    normalizeGithubObservation(
+      envelope({
+        family: "relationship",
+        action: "added",
+        payload: { issue: issue(), sender: fixture.merger, relationship: { ...relationship, ...patch } },
+        ...envelopePatch,
+      }),
+    );
+  // Control: the identical payload is one observed unit for the sender.
+  assert.deepEqual(
+    link().facts.map((fact) => [fact.metricId, fact.actorId, fact.state]),
+    [["related_links", "202", "observed"]],
+  );
+  for (const [name, patch, reason] of [
+    ["an automatic reference", { intentional: false }, "automatic_reference_or_relationship_actor_unverified"],
+    [
+      "a string rather than a true intent flag",
+      { intentional: "true" },
+      "automatic_reference_or_relationship_actor_unverified",
+    ],
+    ["a blank source endpoint", { from: " " }, "automatic_reference_or_relationship_actor_unverified"],
+    ["a missing target endpoint", { to: undefined }, "automatic_reference_or_relationship_actor_unverified"],
+    ["an unsupported relationship kind", { kind: "mentions" }, "automatic_reference_or_relationship_actor_unverified"],
+    ["unverified public endpoints", { publicEndpointsVerified: false }, "relationship_endpoint_visibility_unverified"],
+  ]) {
+    const out = link(patch);
+    assert.deepEqual(out.facts, [], name);
+    assert.deepEqual(out.reasons, [reason], name);
+  }
+  // Without a native event identity the relationship cannot be tied to one action.
+  const noEvent = link({}, { proof: { verified: true, source: "github_webhook", revision: at, isSynthetic: true } });
+  assert.deepEqual(noEvent.facts, []);
+  assert.deepEqual(noEvent.reasons, ["automatic_reference_or_relationship_actor_unverified"]);
+  // Other link kinds feed their own metrics only; a related link is never a blocker or duplicate and vice versa.
+  const blocker = link({ kind: "blocked_by" });
+  assert.deepEqual(metrics(blocker, "related_links"), []);
+  assert.deepEqual(
+    blocker.facts.map((fact) => fact.metricId),
+    ["blocker_links"],
+  );
+  const duplicate = link({ kind: "duplicate" });
+  assert.deepEqual(metrics(duplicate, "related_links"), []);
+  assert.deepEqual(
+    duplicate.facts.map((fact) => fact.metricId),
+    ["duplicate_resolution"],
+  );
+  // A missing sender is an unknown actor and is not replaced by the issue author.
+  const ghost = normalizeGithubObservation(
+    envelope({
+      family: "relationship",
+      action: "added",
+      payload: { issue: issue(), sender: null, relationship },
+    }),
+  );
+  assert.deepEqual(
+    metrics(ghost, "related_links").map((fact) => [fact.actorId, fact.state]),
+    [[null, "unknown"]],
+  );
+  assert.ok(ghost.reasons.includes("unknown_actor"));
+  // Private repositories emit nothing.
+  assert.deepEqual(
+    link(
+      {},
+      { repository: { id: 2, slug: "synthetic-owner/repository", visibility: "private", defaultBranch: "main" } },
+    ).facts,
+    [],
+  );
+});
+
 test("transfer lineage preserves original object and suppresses private/unapproved destinations", () => {
   const destination = {
     repositoryId: 3,
@@ -626,6 +754,91 @@ test("physical line classes exclude vendor/generated/locks/binary/imports and di
   );
 });
 
+// Shared by the pr_lines_added and pr_lines_removed exclusion cases. Every excluded file class carries large
+// additions and deletions so that any leak into either quantity is visible in an exact value.
+function lineIntegration(files, patch = {}, diffPatch = {}) {
+  return {
+    before,
+    after,
+    canonicalChangeId: "synthetic-line-change",
+    defaultBranch: "main",
+    targetBranch: "main",
+    commitShas: [after],
+    diff: { before, after, complete: true, files, ...diffPatch },
+    ...patch,
+  };
+}
+const eligibleLineFiles = [
+  { path: "src/main.ts", additions: 10, deletions: 4 },
+  { path: "tests/main.test.ts", additions: 3, deletions: 0 },
+  { path: "docs/readme.md", additions: 2, deletions: 1 },
+];
+const excludedLineFiles = [
+  { path: "vendor/lib.js", additions: 1000, deletions: 900 },
+  { path: "dist/out.js", additions: 1000, deletions: 900 },
+  { path: "package-lock.json", additions: 1000, deletions: 900 },
+  { path: "image.png", additions: 1000, deletions: 900, binary: true },
+  { path: "src/import.ts", additions: 1000, deletions: 900, imported: true },
+  { path: "src/formatted.ts", additions: 1000, deletions: 900, formattingOnly: true },
+];
+function lineMetricExclusions(metricId, field, eligibleTotal) {
+  const lineUnits = (patch = {}, integration = lineIntegration(eligibleLineFiles)) =>
+    metrics(normalizeGithubObservation(envelope({ integration, ...patch })), metricId);
+  // Control: the eligible classes alone give the exact total, credited to the PR author, not the merger.
+  assert.deepEqual(
+    lineUnits().map((fact) => [fact.actorId, fact.state, fact.quantity]),
+    [["101", "observed", eligibleTotal]],
+  );
+  // Every excluded class, alone or alongside eligible files, adds exactly nothing.
+  const mixed = lineUnits({}, lineIntegration([...eligibleLineFiles, ...excludedLineFiles]));
+  assert.deepEqual(
+    mixed.map((fact) => fact.quantity),
+    [eligibleTotal],
+  );
+  for (const excluded of excludedLineFiles) {
+    const alone = lineUnits({}, lineIntegration([excluded]));
+    assert.deepEqual(
+      alone.map((fact) => [fact.actorId, fact.state, fact.quantity]),
+      [["101", "observed", 0]],
+      `${excluded.path} must contribute no ${field}`,
+    );
+  }
+  // Without a complete, pinned, default-branch integration there is no unit at all, however large the diff.
+  const unverified = [
+    ["a non-default target branch", lineIntegration(eligibleLineFiles, { targetBranch: "research" })],
+    [
+      "a different default branch than the repository",
+      lineIntegration(eligibleLineFiles, { defaultBranch: "trunk", targetBranch: "trunk" }),
+    ],
+    ["a diff pinned to another start commit", lineIntegration(eligibleLineFiles, {}, { before: "e".repeat(40) })],
+    ["a diff pinned to another end commit", lineIntegration(eligibleLineFiles, {}, { after: "d".repeat(40) })],
+    ["a blank canonical change", lineIntegration(eligibleLineFiles, { canonicalChangeId: " " })],
+    ["an incomplete or truncated diff", lineIntegration(eligibleLineFiles, {}, { complete: false })],
+  ];
+  for (const [name, integration] of unverified) assert.deepEqual(lineUnits({}, integration), [], name);
+  // No integration is not a zero-line integration.
+  assert.deepEqual(metrics(normalizeGithubObservation(envelope()), metricId), []);
+  // Private repositories emit nothing; an unknown PR author is unknown, never the merger.
+  assert.deepEqual(
+    lineUnits({
+      repository: { id: 2, slug: "synthetic-owner/repository", visibility: "private", defaultBranch: "main" },
+    }),
+    [],
+  );
+  assert.deepEqual(
+    lineUnits({
+      payload: { repository: fixture.repository, pull_request: { ...pr(), user: null }, sender: fixture.merger },
+    }).map((fact) => [fact.actorId, fact.state, fact.quantity]),
+    [[null, "unknown", eligibleTotal]],
+  );
+}
+test("pr_lines_added excludes ineligible file classes and unverified integrations, and never credits the merger", () => {
+  lineMetricExclusions("pr_lines_added", "additions", 15);
+});
+test("pr_lines_removed excludes ineligible file classes and unverified integrations, and never credits the merger", () => {
+  lineMetricExclusions("pr_lines_removed", "deletions", 5);
+});
+
 test("stacked branch merges keep PR participation while delivered LOC appears once at pinned default integration", () => {
   const baseIntegration = {
     before,
@@ -706,6 +919,88 @@ test("commit author/committer and verified lineage stay separate and integration
   assert.equal(integrated.lineage[0].relation, "squash_of");
   assert.equal(integrated.participation.find((item) => item.role === "coauthor").actorId, "303");
   assert.equal(integrated.participation.filter((item) => item.role === "coauthor").length, 1);
+});
+
+test("commits_integrated excludes commits without verified default-branch integration and never credits the committer or a coauthor", () => {
+  const payload = {
+    sha: after,
+    html_url: `https://github.com/synthetic-owner/repository/commit/${after}`,
+    author: fixture.author,
+    committer: fixture.merger,
+    commit: { message: "source text is not identity" },
+  };
+  const integration = {
+    before,
+    after,
+    canonicalChangeId: "one-change",
+    targetBranch: "main",
+    defaultBranch: "main",
+    commitShas: [after],
+  };
+  // Control: this same payload with a verified integration is the one unit. The committer and coauthor keep
+  // their participation roles, but only the commit author owns the integrated unit.
+  const control = normalizeGithubObservation(
+    envelope({
+      family: "commit",
+      payload,
+      integration,
+      verifiedCoauthors: [{ actor: fixture.reviewer, verificationReceipt: "synthetic-account-link" }],
+    }),
+  );
+  assert.deepEqual(
+    metrics(control, "commits_integrated").map((fact) => [fact.actorId, fact.state, fact.role]),
+    [["101", "observed", "author"]],
+  );
+  assert.equal(metrics(control, "direct_changes").length, 0, "A non-direct integration is not a direct change");
+  assert.deepEqual(control.participation.map((item) => [item.role, item.actorId]).sort(), [
+    ["author", "101"],
+    ["coauthor", "303"],
+    ["committer", "202"],
+  ]);
+  const unverified = [
+    ["no integration at all", undefined],
+    ["a non-default target branch", { ...integration, targetBranch: "research" }],
+    [
+      "a default branch that differs from the repository",
+      { ...integration, defaultBranch: "trunk", targetBranch: "trunk" },
+    ],
+    ["an integration that does not list this commit", { ...integration, commitShas: [before] }],
+  ];
+  for (const [name, candidate] of unverified) {
+    const out = normalizeGithubObservation(envelope({ family: "commit", payload, integration: candidate }));
+    assert.deepEqual(metrics(out, "commits_integrated"), [], name);
+    assert.ok(out.reasons.includes("default_branch_integration_unverified"), name);
+  }
+  // A short or non-hex identifier is not a pinned commit, even if an integration lists the same string.
+  const unpinned = normalizeGithubObservation(
+    envelope({
+      family: "commit",
+      payload: { ...payload, sha: "abc123" },
+      integration: { ...integration, commitShas: ["abc123"] },
+    }),
+  );
+  assert.deepEqual(metrics(unpinned, "commits_integrated"), []);
+  // An integration on another artifact family cannot manufacture a commit unit.
+  assert.deepEqual(metrics(normalizeGithubObservation(envelope({ integration })), "commits_integrated"), []);
+  // An integrated commit with an unknown author is never reassigned to the committer.
+  const ghost = normalizeGithubObservation(
+    envelope({ family: "commit", payload: { ...payload, author: null }, integration }),
+  );
+  assert.deepEqual(
+    metrics(ghost, "commits_integrated").map((fact) => [fact.actorId, fact.state]),
+    [[null, "unknown"]],
+  );
+  assert.ok(ghost.reasons.includes("unknown_actor"));
+  // Private repositories emit nothing.
+  const hidden = normalizeGithubObservation(
+    envelope({
+      repository: { id: 2, slug: "synthetic-owner/repository", visibility: "private", defaultBranch: "main" },
+      family: "commit",
+      payload,
+      integration,
+    }),
+  );
+  assert.deepEqual(hidden.facts, []);
 });
 
 test("release publication keeps automation sender separate from notes author", () => {
@@ -1319,6 +1614,126 @@ test("Discussion hydration validates capability, public identity and exact revis
     discussion: { ...repo.discussion, updatedAt: "2026-10-09T00:00:00Z" },
   };
   assert.match((await normalize(input)).reasons[0], /revision_unverified/);
+});
+
+test("discussions_started excludes unavailable, stale or private Discussions and never borrows a clock or an answer author's credit", async () => {
+  const created = {
+    id: "D_synthetic",
+    url: "https://github.com/synthetic-owner/repository/discussions/4",
+    createdAt: at,
+    updatedAt: "2026-10-07T11:00:00Z",
+    author: fixture.author,
+  };
+  const snapshot = (payload, patch = {}) =>
+    normalizeGithubObservation(envelope({ family: "discussion", action: "snapshot", payload, ...patch }));
+  // Control: a created Discussion is one unit at its creation clock, not its update clock.
+  assert.deepEqual(
+    metrics(snapshot(created), "discussions_started").map((fact) => [fact.actorId, fact.state, fact.occurredAt]),
+    [["101", "observed", "2026-10-07T10:00:00.000Z"]],
+  );
+  // A selected answer credits only the answer's own metric; its author and selector start nothing.
+  const answered = snapshot(
+    {
+      ...created,
+      answerChosenAt: at,
+      answerChosenBy: fixture.merger,
+      answer: { id: "DC_synthetic", createdAt: at, isAnswer: true, author: fixture.reviewer },
+    },
+    { discussionAnswerSelection: { verified: true } },
+  );
+  assert.deepEqual(
+    metrics(answered, "discussions_started").map((fact) => fact.actorId),
+    ["101"],
+  );
+  // A missing or unsupported creation clock is unknown; the update, observation and collection times are not borrowed.
+  for (const createdAt of [undefined, null, "", "2026-10-07", "2026-10-07T10:00:00"]) {
+    const out = snapshot({ ...created, createdAt });
+    assert.deepEqual(
+      metrics(out, "discussions_started").map((fact) => [fact.state, fact.occurredAt]),
+      [["unknown", null]],
+      String(createdAt),
+    );
+    assert.ok(out.reasons.includes("unknown_event_time"));
+  }
+  // A missing author is unknown and is not replaced by the sender.
+  const ghost = snapshot({ ...created, author: null });
+  assert.deepEqual(
+    metrics(ghost, "discussions_started").map((fact) => [fact.actorId, fact.state]),
+    [[null, "unknown"]],
+  );
+  assert.ok(ghost.reasons.includes("unknown_actor"));
+  // Private repositories emit nothing, and an unverified observation is rejected outright.
+  const hidden = snapshot(created, {
+    repository: { id: 2, slug: "synthetic-owner/repository", visibility: "private", defaultBranch: "main" },
+  });
+  assert.deepEqual(hidden.facts, []);
+  assert.throws(
+    () => snapshot(created, { proof: { verified: false, source: "github_webhook", revision: at, isSynthetic: true } }),
+    /Verified repository\/source envelope is required/,
+  );
+
+  // Collected Discussions: unavailable, private and stale-revision hydration produce no unit.
+  let repo = {
+    databaseId: 2,
+    isPrivate: false,
+    hasDiscussionsEnabled: true,
+    discussion: { ...created, answer: null },
+  };
+  const hydrate = createGithubEvidenceNormalizer({
+    client: syntheticRepositoryClient(2, {
+      rest: async () => fixture.repository,
+      graphql: async () => ({ repository: repo }),
+    }),
+    source: "synthetic",
+    allowedRepositoryIds: [2],
+    isSynthetic: true,
+  });
+  const input = {
+    repository: { id: 2, slug: "synthetic-owner/repository" },
+    family: "discussions",
+    factKey: "synthetic-discussion-exclusion",
+    observedAt,
+    policyVersion: "synthetic/v1",
+    fact: {
+      subjectId: "D_synthetic",
+      sourceRevision: githubDiscussionRevision(repo.discussion),
+      sourceUrl: repo.discussion.url,
+      evidence: "current_state",
+      actorId: null,
+      occurredAt: null,
+      state: "present",
+    },
+  };
+  const hydrated = await hydrate(input);
+  assert.deepEqual(
+    metrics(hydrated, "discussions_started").map((fact) => [fact.actorId, fact.state]),
+    [["101", "observed"]],
+  );
+  for (const [name, patch] of [
+    ["Discussions disabled", { hasDiscussionsEnabled: false }],
+    ["a private repository", { isPrivate: true }],
+    ["a missing Discussion", { discussion: null }],
+  ]) {
+    repo = {
+      ...structuredClone(repo),
+      hasDiscussionsEnabled: true,
+      isPrivate: false,
+      discussion: { ...created, answer: null },
+      ...patch,
+    };
+    const out = await hydrate(input);
+    assert.deepEqual(out.facts, [], name);
+    assert.deepEqual(out.reasons, ["discussion_public_source_unavailable"], name);
+  }
+  repo = {
+    ...repo,
+    isPrivate: false,
+    hasDiscussionsEnabled: true,
+    discussion: { ...created, answer: null, updatedAt: "2026-10-09T00:00:00Z" },
+  };
+  const stale = await hydrate(input);
+  assert.deepEqual(stale.facts, []);
+  assert.match(stale.reasons[0], /revision_unverified/);
 });
 
 test("mutable review and Discussion revisions include retractions and selection changes", () => {
