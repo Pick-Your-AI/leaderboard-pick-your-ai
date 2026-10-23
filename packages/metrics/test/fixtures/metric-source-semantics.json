@@ -409,7 +409,7 @@
     {
       "id": "additional-semantic-cases",
       "metric_ids": ["accepted_suggestions", "mentorship", "onboarding"],
-      "reason": "These definitions require further actual source/receipt inclusion and exclusion cases. A raw activity or generic approved author fact does not prove exact suggestion links or consented mentorship/onboarding."
+      "reason": "These definitions require further actual source/receipt inclusion and exclusion cases. A raw activity or generic approved author fact does not prove exact suggestion links or consented mentorship/onboarding. Reviewed again and left deferred: accepted_suggestions counts on an integrated_at clock and an exact suggestion link, neither of which any admitted source or receipt supplies (the generic receipt carries only an acceptance clock); mentorship and onboarding need recorded mentor/mentee consent and, for onboarding, a first-contribution milestone linked to a support relationship, while the generic receipt checks only reviewer independence and target identity."
     }
   ],
   "existing_evidence": [
@@ -417,8 +417,8 @@
       "metric_id": "commits_integrated",
       "path": "packages/github/test/normalizers.test.mjs",
       "positive_test": "commit author/committer and verified lineage stay separate and integration is mandatory",
-      "negative_test": "commit author/committer and verified lineage stay separate and integration is mandatory",
-      "limitation": "Integration proof and role attribution are bounded positives/negatives; empty/merge-only/imported cohort completeness is not established here."
+      "negative_test": "commits_integrated excludes commits without verified default-branch integration and never credits the committer or a coauthor",
+      "limitation": "Integration proof, pinned commit identity, author-only credit and unknown-author handling have separate inclusion and exclusion tests; empty/merge-only/imported cohort completeness is not established here."
     },
     {
       "metric_id": "net_lines",
@@ -431,22 +431,22 @@
       "metric_id": "reverted_delivery",
       "path": "packages/github/test/normalizers.test.mjs",
       "positive_test": "explicit revert lineage annotates original delivery without creating reverter merit or deleting history",
-      "negative_test": "explicit revert lineage annotates original delivery without creating reverter merit or deleting history",
-      "limitation": "Original authorship and explicit reviewed lineage are distinguished from textual revert inference; no quality penalty."
+      "negative_test": "reverted_delivery excludes inferred, unproven or mismatched revert lineage and never credits the reverter",
+      "limitation": "Original authorship and explicit reviewed lineage are distinguished from textual revert inference; the exclusion test covers absent, empty, wrong-relation, wrong-original, evidence-free and event-less lineage. No quality penalty."
     },
     {
       "metric_id": "pr_lines_added",
       "path": "packages/github/test/normalizers.test.mjs",
       "positive_test": "physical line classes exclude vendor/generated/locks/binary/imports and disclose net separately",
-      "negative_test": "physical line classes exclude vendor/generated/locks/binary/imports and disclose net separately",
-      "limitation": "The classifier directly checks additions and exclusions for vendor/generated/lock/binary/import/formatting files. This reference does not establish a separate added-line default-integration exclusion; owned physical source/cohort work remains with #377/#385."
+      "negative_test": "pr_lines_added excludes ineligible file classes and unverified integrations, and never credits the merger",
+      "limitation": "The inclusion test checks the physical classifier directly; the exclusion test runs the normalizer and asserts exact added-line quantities for each ineligible file class and for non-default-branch, mismatched, incomplete and absent integrations. Owned physical source/cohort work remains with #377/#385."
     },
     {
       "metric_id": "pr_lines_removed",
       "path": "packages/github/test/normalizers.test.mjs",
       "positive_test": "physical line classes exclude vendor/generated/locks/binary/imports and disclose net separately",
-      "negative_test": "physical line classes exclude vendor/generated/locks/binary/imports and disclose net separately",
-      "limitation": "The classifier directly checks deletions and exclusions for vendor/generated/lock/binary/import/formatting files. This reference does not establish a separate removed-line default-integration exclusion; owned physical source/cohort work remains with #377/#385."
+      "negative_test": "pr_lines_removed excludes ineligible file classes and unverified integrations, and never credits the merger",
+      "limitation": "The inclusion test checks the physical classifier directly; the exclusion test runs the normalizer and asserts exact removed-line quantities for each ineligible file class and for non-default-branch, mismatched, incomplete and absent integrations. Owned physical source/cohort work remains with #377/#385."
     },
     {
       "metric_id": "pr_lines_changed",
@@ -495,8 +495,8 @@
       "metric_id": "labels_corrected",
       "path": "packages/metrics/test/triage-fairness.test.js",
       "positive_test": "self-triage does not authorize self-recognition or one accepted correction per batch effect",
-      "negative_test": "self-triage does not authorize self-recognition or one accepted correction per batch effect",
-      "limitation": "The independently approved changeset conserves one corrected unit; the host receipt supplies the substantive correction assessment."
+      "negative_test": "labels_corrected excludes raw label activity and every non-independent, unverified, rejected or out-of-lens receipt",
+      "limitation": "The independently approved changeset conserves one corrected unit; the host receipt supplies the substantive correction assessment. The exclusion test shows raw label activity, rejected, unverified, self-reviewed, unauthorized, wrong-actor, evidence-free and out-of-lens receipts count nothing."
     },
     {
       "metric_id": "parent_child_links",
@@ -516,8 +516,8 @@
       "metric_id": "related_links",
       "path": "packages/github/test/normalizers.test.mjs",
       "positive_test": "relationship endpoint copies conserve one link and never reinterpret related links as blockers",
-      "negative_test": "relationship endpoint copies conserve one link and never reinterpret related links as blockers",
-      "limitation": "Same-transition endpoint reversal, automatic references and private endpoints are checked; no all-history edge grouping claim."
+      "negative_test": "related_links excludes automatic, unproven, unverified and other-kind relationships and never credits a non-actor",
+      "limitation": "Same-transition endpoint reversal, automatic references and private endpoints are checked, with separate exclusion cases for unproven, unverified, other-kind and unknown-actor relationships; no all-history edge grouping claim."
     },
     {
       "metric_id": "project_status_updates",
@@ -544,8 +544,8 @@
       "metric_id": "milestone_definitions",
       "path": "packages/metrics/test/triage-definition-days.test.js",
       "positive_test": "definition facets, renames and reversals share one actor/definition/day while no-op metadata emits no fact",
-      "negative_test": "definition facets, renames and reversals share one actor/definition/day while no-op metadata emits no fact",
-      "limitation": "The shared label/milestone body checks milestone no-op exclusion and repeated actor/definition/day units. The separately named label-only midnight/clock test is not milestone evidence. Definition curation remains distinct from applying milestones to issues."
+      "negative_test": "definition changes select their own artifact even alongside an issue; issue applications never become definition credit",
+      "limitation": "The inclusion test checks milestone no-op exclusion and repeated actor/definition/day units. The separate exclusion test shows that applying a milestone to an issue and a missing definition artifact emit no milestone_definitions unit. The label-only midnight/clock test is not milestone evidence."
     },
     {
       "metric_id": "decision_records",
@@ -724,8 +724,8 @@
       "metric_id": "discussions_started",
       "path": "packages/github/test/normalizers.test.mjs",
       "positive_test": "Discussion hydration validates capability, public identity and exact revision",
-      "negative_test": "Discussion hydration validates capability, public identity and exact revision",
-      "limitation": "Synthetic enabled and disabled capability branches are tested. #395 owns end-to-end disabled-source presentation; no actual enabled repository claim."
+      "negative_test": "discussions_started excludes unavailable, stale or private Discussions and never borrows a clock or an answer author's credit",
+      "limitation": "Synthetic enabled and disabled capability branches are tested. The exclusion test also covers private, missing and stale-revision hydration, missing clock and author, and answer participants. #395 owns end-to-end disabled-source presentation; no actual enabled repository claim."
     },
     {
       "metric_id": "discussion_answers",
@@ -765,10 +765,10 @@
     },
     {
       "metric_id": "active_periods",
-      "path": "packages/metrics/test/participation-scale.test.mjs",
-      "positive_test": "partitioned participation keeps actor ordering, historic scope and sorted active weeks",
-      "negative_test": "partitioned participation keeps actor ordering, historic scope and sorted active weeks",
-      "limitation": "Eligible events in distinct UTC weeks produce distinct active weeks; repeated events within one week count once. The case also keeps selected active weeks separate from earlier organization history. It does not establish unknown in-scope state exclusion or month projection, and the five-week calendar context is not certification of a fully covered participation share. No actual participant classification."
+      "path": "packages/metrics/test/activity-periods.test.js",
+      "positive_test": "weeks deduplicate events, repositories and accepted source metrics while retaining all proof IDs",
+      "negative_test": "unaccepted work, suppressed identities and automated accounts cannot create periods",
+      "limitation": "Accepted source activity in distinct UTC weeks produces distinct active periods with all proof IDs retained; repeated events and repositories in one week count once. Unaccepted work, suppressed identities and automated accounts produce no row. Partial edge periods, months and incomplete coverage are covered by other tests in the same file. No actual participant classification."
     },
     {
       "metric_id": "issue_transfers",

@@ -1171,6 +1171,11 @@ test("the semantic inventory accounts for all 98 definitions and preserves exact
       entry.negative_test.trim() && source.includes(entry.negative_test),
       `${entry.metric_id}: missing exclusion test`,
     );
+    assert.notEqual(
+      entry.positive_test,
+      entry.negative_test,
+      `${entry.metric_id}: inclusion and exclusion evidence must be distinct named tests`,
+    );
     assert.ok(entry.limitation.trim());
     if (entry.case_parameter) {
       assert.equal(entry.case_parameter, entry.metric_id);

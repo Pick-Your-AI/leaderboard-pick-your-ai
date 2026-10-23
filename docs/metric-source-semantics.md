@@ -142,15 +142,24 @@ distinct authors, self/unlisted-reviewer rejection, duplicate audits and ambiguo
 targets have explicit assertions. These references do not establish real
 participant consent, live permission, public policy approval or public activation.
 
-An inclusion and an exclusion may be asserted by the same named test. The
-milestone reference uses the body that actually constructs milestone no-ops and
-repeated day units; a label-only midnight test is not substituted for it. The
-added/removed-line references use their actual classifier quantity and exclusion
-assertions, without borrowing the separate changed-line integration result.
-The active-period reference checks distinct UTC weeks and repeated events in one
-week. It does not borrow an out-of-window, other-role newcomer uncertainty case
-as evidence for unknown in-scope active-week exclusion. Its calendar denominator
-is context, not a certified fully covered participation share or month projection.
+Every existing-source mapping names a distinct positive test and a distinct
+exclusion test, and the inventory guard rejects an entry whose two names are equal.
+Nine mappings that earlier cited one test for both were separated. Seven gained a
+new exclusion test with exact-value assertions through the actual normalizer or
+engine: `commits_integrated`, `reverted_delivery`, `pr_lines_added`,
+`pr_lines_removed`, `labels_corrected`, `related_links` and `discussions_started`.
+The added/removed-line inclusion test remains the classifier quantity test; its
+exclusion test runs the normalizer and asserts the exact quantity for each
+ineligible file class and for unverified integrations, without borrowing the
+separate changed-line integration result. Two mappings were re-pointed to existing
+tests that already assert their exclusions: `milestone_definitions` now cites the
+test showing that applying a milestone to an issue and a missing definition emit no
+definition unit (the label-only midnight test is still not substituted), and
+`active_periods` now cites the activity-period aggregator tests for distinct UTC
+weeks and for unaccepted, suppressed and automated exclusion, rather than the
+participation view. Its calendar denominator is context, not a certified fully
+covered participation share. The distinct names show where each assertion lives;
+they do not widen what a synthetic case proves.
 
 The remaining dispositions retain six derivation/admission prerequisites and
 three IDs needing additional semantic cases (`accepted_suggestions`,
@@ -176,7 +185,12 @@ reviewed change that closes a gap.
 The optional retained-line and commit-attributed
 lenses are not silently assigned to the adjacent physical-context PRs. A generic
 accepted author fact cannot prove an exact suggestion link or a consented
-mentorship. The duplicate case verifies an intentional, publicly verified
+mentorship. The three IDs were reviewed again in the evidence-separation batch and
+stay deferred: `accepted_suggestions` counts on an `integrated_at` clock and an
+exact link that no admitted source or receipt supplies, and `mentorship` and
+`onboarding` need recorded consent and, for onboarding, a first-contribution
+milestone tied to a support relationship, while the generic receipt checks only
+reviewer independence and target identity. The duplicate case verifies an intentional, publicly verified
 relation, not preserved unique evidence on the duplicate.
 
 At the original source lane's ownership check, [#382](https://github.com/Pick-Your-AI/pick-your-ai-leaderboard/pull/382)

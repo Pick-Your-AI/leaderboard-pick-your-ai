@@ -230,6 +230,93 @@ test("self-triage does not authorize self-recognition or one accepted correction
   );
 });
 
+test("labels_corrected excludes raw label activity and every non-independent, unverified, rejected or out-of-lens receipt", () => {
+  const raw = normalizeGithubObservation(observation(1));
+  const target = raw.facts.find((fact) => fact.metricId === "items_triaged");
+  const reviewerId = "synthetic-independent-reviewer";
+  const receipt = {
+    verified: true,
+    id: "synthetic-labels-corrected-receipt",
+    metricId: "labels_corrected",
+    actorId: "202",
+    reviewerId,
+    acceptedAt: "2026-10-08T09:00:00Z",
+    decision: "accepted",
+    targetFactId: target.id,
+    evidenceIds: ["synthetic-correction-proof"],
+  };
+  // Rows with a null value are actors with no counted unit.
+  const board = (output, patch = {}, window = scope) =>
+    aggregateMetric(frozen([output]), policy("labels_corrected", patch), window).rows.filter(
+      (row) => row.value !== null,
+    );
+  // Raw label activity is observed triage only: it is never a correction, in any evidence lens.
+  assert.deepEqual(
+    raw.facts.map((fact) => [fact.metricId, fact.state]),
+    [
+      ["labels_applied", "observed"],
+      ["items_triaged", "observed"],
+    ],
+  );
+  assert.equal(board(raw).length, 0);
+  assert.equal(board(raw, { rankedStates: ["observed"], dateBasis: "occurredAt" }).length, 0);
+
+  // Control: a valid independent receipt is exactly one accepted correction for the triager.
+  const accepted = applyRecognitionReceipt(raw, receipt, [reviewerId]);
+  assert.deepEqual(
+    board(accepted).map((row) => [row.actorId, row.value]),
+    [["202", 1]],
+  );
+  // The same accepted correction is invisible to an observed lens and outside its accepted window.
+  assert.equal(board(accepted, { rankedStates: ["observed"], dateBasis: "occurredAt" }).length, 0);
+  assert.equal(board(accepted, {}, { ...scope, to: "2026-10-08T09:00:00Z" }).length, 0);
+  assert.equal(board(accepted, {}, { ...scope, from: "2026-10-08T09:00:01Z" }).length, 0);
+
+  // A rejection is retained as excluded evidence and contributes no unit.
+  const rejected = applyRecognitionReceipt(raw, { ...receipt, decision: "rejected" }, [reviewerId]);
+  assert.deepEqual(
+    rejected.facts.filter((fact) => fact.metricId === "labels_corrected").map((fact) => fact.state),
+    ["excluded"],
+  );
+  assert.equal(board(rejected).length, 0);
+
+  // Receipts that are not verified, independent, authorized, on the actor's own target or evidenced create no fact.
+  for (const [name, patch, reviewers] of [
+    ["unverified", { verified: false }, [reviewerId]],
+    ["self-reviewed", { reviewerId: "202" }, ["202"]],
+    ["an unauthorized reviewer", {}, ["synthetic-other-reviewer"]],
+    ["another actor's target", { actorId: "303" }, [reviewerId, "303"]],
+    ["a missing target fact", { targetFactId: "synthetic-missing-fact" }, [reviewerId]],
+    ["no evidence", { evidenceIds: [] }, [reviewerId]],
+    ["a blank receipt identity", { id: " " }, [reviewerId]],
+    ["an unrelated metric", { metricId: "repositories" }, [reviewerId]],
+  ])
+    assert.throws(
+      () => applyRecognitionReceipt(raw, { ...receipt, ...patch }, reviewers),
+      /Independent verified recognition/,
+      name,
+    );
+  // A known participant who did not perform the triage cannot receive its correction either.
+  const author = { id: 505, node_id: "U_synthetic_author", login: "synthetic-author", type: "User" };
+  const shared = normalizeGithubObservation(
+    observation(2, { payload: { issue: issue(2, author), actor: user, label: { id: 80 } } }),
+  );
+  assert.ok(
+    shared.actors.some((actor) => actor.id === "505"),
+    "The issue author is a known participant",
+  );
+  const sharedTarget = shared.facts.find((fact) => fact.metricId === "items_triaged");
+  assert.equal(sharedTarget.actorId, "202");
+  assert.throws(
+    () => applyRecognitionReceipt(shared, { ...receipt, targetFactId: sharedTarget.id, actorId: "505" }, [reviewerId]),
+    /Independent verified recognition/,
+  );
+  assert.ok(
+    raw.facts.every((fact) => fact.state === "observed" && fact.metricId !== "labels_corrected"),
+    "Rejected receipts leave the raw evidence untouched",
+  );
+});
+
 test("public transfer receipts retain lineage without manufacturing issue creation or resolution", () => {
   const payload = {
     issue: issue(),
