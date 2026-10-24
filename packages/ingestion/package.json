@@ -21,7 +21,7 @@
   "dependencies": { "@pick-your-ai/contracts": "0.1.0", "pg": "8.23.1" },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.10",
-    "@types/node": "24.10.1",
+    "@types/node": "26.6.5",
     "@types/pg": "8.23.1",
     "typescript": "7.0.2"
   }
