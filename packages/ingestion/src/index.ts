@@ -45,5 +45,9 @@ export type {
   OperatorReadObserver,
   ReadOperatorHealth,
 } from "./operator-health.js";
-export { RepositoryRetirementStore } from "./retirement.js";
-export type { RepositoryRetirement, RetirementAuthorize } from "./retirement.js";
+export {
+  RepositoryRetirementStore,
+  validateRepositoryRetirement,
+  validateRepositoryErasureBatch,
+} from "./retirement.js";
+export type { RepositoryRetirement, RetirementAuthorize, RepositoryErasureProgress } from "./retirement.js";

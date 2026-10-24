@@ -31,6 +31,53 @@ function request(value: RepositoryRetirement): Readonly<RepositoryRetirement> {
     operatorId: value.operatorId,
   });
 }
+export { request as validateRepositoryRetirement };
+
+export function validateRepositoryErasureBatch(batchId: string, limit: number): void {
+  if (!identity(batchId) || !Number.isInteger(limit) || limit < 1 || limit > 100)
+    throw new Error("invalid_erasure_batch");
+}
+
+export interface RepositoryErasureProgress {
+  batchId: string;
+  limit: number;
+  status: "erased" | "blocked";
+  attempt: number;
+  deletedSourceFacts: number;
+  sourceFactsRemaining: boolean;
+  completedAt: string;
+}
+
+function progress(row: Record<string, unknown>): RepositoryErasureProgress {
+  const batchId = row.batch_id;
+  const limit = row.batch_limit;
+  if (typeof batchId !== "string" || typeof limit !== "number") throw new Error("erasure_receipt_invalid");
+  validateRepositoryErasureBatch(batchId, limit);
+  if (
+    (row.status !== "erased" && row.status !== "blocked") ||
+    typeof row.attempt !== "number" ||
+    !Number.isSafeInteger(row.attempt) ||
+    row.attempt < 1 ||
+    typeof row.deleted_count !== "number" ||
+    !Number.isSafeInteger(row.deleted_count) ||
+    row.deleted_count < 0 ||
+    row.deleted_count > limit ||
+    typeof row.source_facts_remaining !== "boolean" ||
+    (typeof row.completed_at !== "string" && !(row.completed_at instanceof Date)) ||
+    !Number.isFinite(new Date(row.completed_at as string).getTime())
+  )
+    throw new Error("erasure_receipt_invalid");
+  return {
+    batchId,
+    limit,
+    status: row.status,
+    attempt: Number(row.attempt),
+    deletedSourceFacts: Number(row.deleted_count),
+    sourceFactsRemaining: row.source_facts_remaining,
+    completedAt: new Date(row.completed_at as string).toISOString(),
+  };
+}
+
 async function authorized(authorize: RetirementAuthorize, value: Readonly<RepositoryRetirement>) {
   if (typeof authorize !== "function" || (await authorize(value)) !== true)
     throw new Error("retirement_not_authorized");
@@ -123,10 +170,84 @@ export class RepositoryRetirementStore {
     });
   }
 
+  /** Protected metadata only. A status hint is not a new deletion receipt. */
+  async readProgress(input: RepositoryRetirement, authorize: RetirementAuthorize, batchId?: string) {
+    const value = request(input);
+    if (batchId !== undefined) validateRepositoryErasureBatch(batchId, 1);
+    await authorized(authorize, value);
+    return this.db.transaction(async (tx) => {
+      const access = (
+        await tx.query(
+          "SELECT state,generation FROM leaderboard_ingestion.repository_access WHERE repository_id=$1 FOR UPDATE",
+          [value.repositoryId],
+        )
+      ).rows[0];
+      if (!access) throw new Error("retirement_repository_unknown");
+      const rows = (
+        await tx.query(
+          "SELECT * FROM leaderboard_ingestion.repository_retirements WHERE repository_id=$1 OR operation_id=$2",
+          [value.repositoryId, value.operationId],
+        )
+      ).rows;
+      if (!rows.length) {
+        if (String(access.generation) !== value.expectedGeneration) throw new Error("retirement_generation_changed");
+        await authorized(authorize, value);
+        return { fence: null, pending: null, terminal: null, batch: null };
+      }
+      if (rows.length !== 1) throw new Error("retirement_operation_conflict");
+      const saved = rows[0]!;
+      same(saved, value);
+      if (
+        access.state === "public" ||
+        BigInt(String(access.generation)) < BigInt(String(saved.source_generation)) ||
+        BigInt(String(saved.source_generation)) <= BigInt(value.expectedGeneration)
+      )
+        throw new Error("retirement_fence_unavailable");
+      await authorized(authorize, value);
+      const fields = "batch_id,batch_limit,status,attempt,deleted_count,source_facts_remaining,completed_at";
+      const pending = (
+        await tx.query(
+          "SELECT " +
+            fields +
+            " FROM leaderboard_ingestion.collection_erasure_batches" +
+            " WHERE operation_id=$1 AND status<>'erased' ORDER BY batch_id LIMIT 1",
+          [value.operationId],
+        )
+      ).rows[0];
+      const terminal = (
+        await tx.query(
+          "SELECT " +
+            fields +
+            " FROM leaderboard_ingestion.collection_erasure_batches" +
+            " WHERE operation_id=$1 AND status='erased' AND NOT source_facts_remaining LIMIT 1",
+          [value.operationId],
+        )
+      ).rows[0];
+      const batch =
+        batchId === undefined
+          ? undefined
+          : (
+              await tx.query(
+                "SELECT " +
+                  fields +
+                  " FROM leaderboard_ingestion.collection_erasure_batches WHERE operation_id=$1 AND batch_id=$2",
+                [value.operationId, batchId],
+              )
+            ).rows[0];
+      const result = {
+        fence: receipt(saved),
+        pending: pending ? progress(pending) : null,
+        terminal: terminal ? progress(terminal) : null,
+        batch: batch ? progress(batch) : null,
+      };
+      await authorized(authorize, value);
+      return result;
+    });
+  }
+
   async eraseBatch(input: RepositoryRetirement, batchId: string, limit: number, authorize: RetirementAuthorize) {
     const value = request(input);
-    if (!identity(batchId) || !Number.isInteger(limit) || limit < 1 || limit > 100)
-      throw new Error("invalid_erasure_batch");
+    validateRepositoryErasureBatch(batchId, limit);
     await authorized(authorize, value);
     return this.db.transaction(async (tx) => {
       await retained(tx, value);
