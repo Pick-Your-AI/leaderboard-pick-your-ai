@@ -5,6 +5,11 @@ import {
   bindWorkstreamHelp,
   materializedWorkstreamHelp,
 } from "./workstream-help.mjs";
+import {
+  documentationReviewVersion,
+  validateDocumentationReviewBindings,
+  prepareDocumentationReviewJobs,
+} from "./documentation-review.mjs";
 import { createHash } from "node:crypto";
 import {
   compareSourceInstants,
@@ -45,6 +50,7 @@ import {
 // Private controls only. Never accept a public claim projection as authentication.
 export function recognitionFingerprint(state, bindings = []) {
   const helpBindings = validateWorkstreamHelpBindings(bindings);
+  const documentationBindings = validateDocumentationReviewBindings(bindings);
   // An unsupported opt-in cannot keep an old saved hash current without rematerialization.
   for (const binding of bindings) {
     validateMaintenanceClassificationBinding(binding);
@@ -71,6 +77,7 @@ export function recognitionFingerprint(state, bindings = []) {
   // unbound locale publication cannot remain authorized after this correction.
   const authority = ["localization-review-target/v1", requests, suppressed, audit, bindings];
   if (helpBindings.size) authority.push(workstreamHelpVersion);
+  if (documentationBindings.size) authority.push(documentationReviewVersion);
   // Retire old authority for participant-bearing or malformed consent records.
   // An explicit empty collaborator set keeps its unchanged prior semantics.
   if (requests.some((request) => !hasRequiredParticipantConsent(request) || Object.keys(request.collaborators).length))
@@ -151,8 +158,10 @@ export function materializeRecognition(
   publicReasons = () => [],
 ) {
   let helpBindings = validateWorkstreamHelpBindings(bindings);
+  let documentationBindings = validateDocumentationReviewBindings(bindings);
   if (
     helpBindings.size ||
+    documentationBindings.size ||
     bindings.some((binding) => ["issue_ordering", "helpful_feedback"].includes(binding.metricId))
   ) {
     // Freeze the invocation before any host receipt callback can change a later
@@ -162,9 +171,20 @@ export function materializeRecognition(
     bindings = structuredClone(bindings);
     policies = structuredClone(policies);
     if (helpBindings.size) helpBindings = validateWorkstreamHelpBindings(bindings);
+    if (documentationBindings.size) documentationBindings = validateDocumentationReviewBindings(bindings);
   }
   for (const binding of bindings) validateDocumentationPurposeBinding(binding);
   for (const binding of bindings) validateHelpfulFeedbackBinding(binding);
+  // Validate every opted-in alias before any host callback, including callbacks
+  // for unrelated receipts. Exact recorded heads bypass generic PR ambiguity.
+  const documentationJobs = prepareDocumentationReviewJobs(
+    input,
+    state,
+    bindings,
+    documentationBindings,
+    policies,
+    cutoff,
+  );
   // Invocation snapshots may preserve aliases between bindings or source
   // records. A callback gets detached arguments, never an authority reference
   // that it could mutate before a later request is admitted.
@@ -214,6 +234,7 @@ export function materializeRecognition(
     if (!matches.length) continue;
     if (matches.length !== 1) throw new Error("ambiguous_recognition_binding");
     const binding = matches[0];
+    if (documentationBindings.has(binding)) continue;
     let localeReasons = null;
     if (
       binding.metricId === "localization" ||
@@ -606,6 +627,24 @@ export function materializeRecognition(
     );
     for (const evidence of output.evidence.slice(previousEvidence))
       domainReasons.set(evidence.contribution.contributionId, domain.publicReasonCodes);
+  }
+  for (const { source, request, decision, binding, acceptedAt } of documentationJobs) {
+    output = invokeReceipt(
+      output,
+      {
+        id: decision.id,
+        verified: true,
+        targetFactId: source.target.id,
+        metricId: "evidence_reviews",
+        actorId: request.owner,
+        reviewerId: decision.actor,
+        acceptedAt,
+        decision: "accepted",
+        evidenceIds: [source.target.id],
+        documentationReview: source.proof,
+      },
+      binding.reviewerIds,
+    );
   }
   // Audit receipt identifiers remain private even when the normalizer annotates evidence.
   for (const entry of output.evidence.slice(input.evidence.length))

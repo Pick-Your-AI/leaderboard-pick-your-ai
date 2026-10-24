@@ -53,6 +53,7 @@ import {
 import { readReconciliationProgress, leastReconciliationTime } from "./reconciliation-progress.mjs";
 import { recognitionFingerprint, materializeRecognition } from "./recognition-adapter.mjs";
 import { selectWorkstreamHelp, validateWorkstreamHelpBindings } from "./workstream-help.mjs";
+import { validateDocumentationReviewBindings } from "./documentation-review.mjs";
 import { PolicyComparisonStore } from "../../controls/src/policy-comparison.mjs";
 import { AggregateExplanationStore } from "./aggregate-explanations.mjs";
 import { assertPipelineSourcesNotRetired } from "./derived-retirement.mjs";
@@ -385,6 +386,7 @@ export async function createPipeline(options) {
   const configured = options.config ?? { version: "unconfigured", repositories: [], policies: [], scopes: [] };
   // Admit the optional protected extension before copying host configuration.
   validateWorkstreamHelpBindings(configured.recognitionBindings ?? []);
+  validateDocumentationReviewBindings(configured.recognitionBindings ?? []);
   const config = copy(configured);
   const decisionRepositoryIds = decisionHistoryRepositories(
     options.pullRequestDecisionRepositoryIds,
