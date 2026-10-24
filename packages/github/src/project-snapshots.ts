@@ -12,6 +12,48 @@ export interface PublicProjectSnapshot {
 }
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+const fieldIdentity = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= 128 && !/[^A-Za-z0-9_=.:+\/-]/.test(value);
+
+function projectFieldIdentity(value: Record<string, unknown>): Record<string, unknown> {
+  const typename = value.__typename;
+  if (
+    !Object.hasOwn(value, "__typename") ||
+    typeof typename !== "string" ||
+    typename.length > 128 ||
+    !/^ProjectV2ItemField[A-Za-z]+Value(?![\s\S])/.test(typename)
+  )
+    throw new Error("project_field_identity_unverified");
+  if (
+    ![
+      "ProjectV2ItemFieldSingleSelectValue",
+      "ProjectV2ItemFieldNumberValue",
+      "ProjectV2ItemFieldDateValue",
+    ].includes(typename)
+  )
+    return { __typename: typename };
+  const id = value.id;
+  const field = value.field;
+  if (
+    !Object.hasOwn(value, "id") ||
+    !Object.hasOwn(value, "field") ||
+    !fieldIdentity(id) ||
+    !object(field) ||
+    !Object.hasOwn(field, "id") ||
+    !fieldIdentity(field.id)
+  )
+    throw new Error("project_field_identity_unverified");
+  // Preserve the key order of already-minimal snapshots and their revisions.
+  // The selected page is checkpointed before the normalizer checks its revision.
+  const selected: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    if (key === "__typename") selected[key] = typename;
+    else if (key === "id") selected[key] = id;
+    else if (key === "field") selected[key] = { id: field.id };
+  }
+  return selected;
+}
 export const projectSnapshotRevision = (snapshot: PublicProjectSnapshot): string =>
   createHash("sha256").update(JSON.stringify(snapshot)).digest("hex");
 
@@ -139,7 +181,7 @@ export async function readPublicProjectSnapshot(options: {
       )
         throw new Error("project_field_connection_unavailable");
       return {
-        nodes: item.fieldValues.nodes,
+        nodes: item.fieldValues.nodes.map(projectFieldIdentity),
         pageInfo: item.fieldValues.pageInfo as { hasNextPage: boolean; endCursor: string | null },
       };
     },
