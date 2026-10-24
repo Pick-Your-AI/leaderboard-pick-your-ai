@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { bindOrderingReview } from "@pick-your-ai/github";
 import { hasRequiredParticipantConsent } from "./evidence-consent.mjs";
+import {
+  externalTutorialIntakeVersion,
+  externalTutorialTerms,
+  isExternalTutorialIntake,
+  parseExternalTutorialDeclaration,
+} from "./external-tutorial-intake.mjs";
 
 const schemaVersion = "evidence-intake/v1";
 const consentScope = "public-claim-attribution";
@@ -69,12 +75,14 @@ export function evidenceIntakeAuthority() {
 }
 
 const inputKeys = ["schemaVersion", "termsVersion", "termsDigest", "sourceUseBasis", "roles", "period"];
-export function parseEvidenceIntake(value, participantIds) {
+export function parseEvidenceIntake(value, participantIds, context) {
+  const external = isExternalTutorialIntake(value);
+  const selectedTerms = external ? externalTutorialTerms() : terms;
   if (
-    !keys(value, inputKeys) ||
-    value.schemaVersion !== schemaVersion ||
-    value.termsVersion !== terms.version ||
-    value.termsDigest !== terms.digest ||
+    !keys(value, external ? [...inputKeys, "externalTutorial"] : inputKeys) ||
+    value.schemaVersion !== (external ? externalTutorialIntakeVersion : schemaVersion) ||
+    value.termsVersion !== selectedTerms.version ||
+    value.termsDigest !== selectedTerms.digest ||
     !Array.isArray(participantIds) ||
     participantIds.length > 20 ||
     participantIds.some((id) => !isActor(id)) ||
@@ -93,10 +101,10 @@ export function parseEvidenceIntake(value, participantIds) {
     (keys(basis, ["state", "statement"]) && basis.state === "declared" && boundedText(basis.statement, 1000))
   ))
     return null;
-  return {
-    schemaVersion,
-    termsVersion: terms.version,
-    termsDigest: terms.digest,
+  const parsed = {
+    schemaVersion: external ? externalTutorialIntakeVersion : schemaVersion,
+    termsVersion: selectedTerms.version,
+    termsDigest: selectedTerms.digest,
     sourceUseBasis:
       basis.state === "unresolved" ? { state: "unresolved" } : { state: "declared", statement: basis.statement.trim() },
     roles: {
@@ -107,9 +115,35 @@ export function parseEvidenceIntake(value, participantIds) {
     },
     period: structuredClone(value.period),
   };
+  if (external) {
+    const declaration = parseExternalTutorialDeclaration(value.externalTutorial, {
+      ...context,
+      participantIds,
+      roles: parsed.roles,
+    });
+    if (!declaration) return null;
+    parsed.externalTutorial = declaration;
+  }
+  return parsed;
 }
 
 function claimDigest(request, intake) {
+  if (isExternalTutorialIntake(intake))
+    return digest([
+      "evidence-claim/external-tutorial/v1",
+      request.id,
+      request.owner,
+      request.locator,
+      request.category,
+      request.scope,
+      Object.keys(request.collaborators).sort(),
+      intake.period,
+      intake.termsVersion,
+      intake.termsDigest,
+      rightsPolicyVersion,
+      intake.claimRevision,
+      intake.externalTutorial,
+    ]);
   return digest([
     "evidence-claim/v1",
     request.id,
@@ -154,7 +188,7 @@ export function participantConsent(request, actor, choice, at) {
 }
 
 export function createEvidenceIntake(request, input, at, previousIntake) {
-  const parsed = parseEvidenceIntake(input, Object.keys(request.collaborators));
+  const parsed = parseEvidenceIntake(input, Object.keys(request.collaborators), request);
   if (!parsed || !isActor(request.owner) || !time(at)) throw new TypeError("Invalid evidence intake authority");
   const previousRevision =
     Number.isSafeInteger(previousIntake?.claimRevision) && previousIntake.claimRevision > 0
@@ -188,6 +222,7 @@ function supportedIntake(request) {
     !Object.values(request.collaborators).every((choice) => ["pending", "accepted", "declined"].includes(choice)) ||
     !keys(intake, [
       ...inputKeys,
+      ...(isExternalTutorialIntake(intake) ? ["externalTutorial"] : []),
       "rightsPolicyVersion",
       "claimRevision",
       "claimDigest",
@@ -201,8 +236,9 @@ function supportedIntake(request) {
     Object.keys(intake.participantConsents).some((id) => !Object.hasOwn(request.collaborators, id))
   )
     return false;
-  const input = Object.fromEntries(inputKeys.map((key) => [key, intake[key]]));
-  const parsed = parseEvidenceIntake(input, Object.keys(request.collaborators));
+  const selectedKeys = isExternalTutorialIntake(intake) ? [...inputKeys, "externalTutorial"] : inputKeys;
+  const input = Object.fromEntries(selectedKeys.map((key) => [key, intake[key]]));
+  const parsed = parseEvidenceIntake(input, Object.keys(request.collaborators), request);
   return parsed !== null && same(parsed, input) && intake.claimDigest === claimDigest(request, intake);
 }
 
@@ -312,6 +348,8 @@ export function createSourceUseReview(request, input, { actorId, roleVersion, at
 }
 
 export function hasReviewedEvidenceIntake(request) {
+  // Consent capture cannot activate an unimplemented tutorial qualifier, even for a forged accepted record.
+  if (isExternalTutorialIntake(request?.intake)) return false;
   if (!hasConsentedEvidenceIntake(request) || !Number.isSafeInteger(request.version) || request.version < 1)
     return false;
   const decision = Array.isArray(request.history)
@@ -368,6 +406,7 @@ export function evidenceIntakeEligibility(request) {
   if (!supportedIntake(request) || !validConsent(request, request.owner, request.intake.submitterConsent))
     return { state: "updated_intake_required" };
   if (!hasConsentedEvidenceIntake(request)) return { state: "participant_consent_required" };
+  if (isExternalTutorialIntake(request.intake)) return { state: "external_tutorial_qualification_unavailable" };
   if (request.status !== "accepted") return { state: "awaiting_review" };
   return { state: hasReviewedEvidenceIntake(request) ? "eligible" : "source_use_review_required" };
 }
@@ -383,8 +422,9 @@ export function isEvidenceParticipant(request, actor) {
 }
 
 /** Invitees see their proposed claim and role, not the full protected receipt. */
-export function projectEvidenceInvitation(request, actor) {
+export function projectEvidenceInvitation(request, actor, externalTutorialConsent = false) {
   const supported = supportedIntake(request);
+  const external = isExternalTutorialIntake(request.intake);
   return {
     id: request.id,
     version: request.version,
@@ -398,8 +438,14 @@ export function projectEvidenceInvitation(request, actor) {
     role: supported ? request.intake.roles.collaborators[actor] : null,
     period: supported ? structuredClone(request.intake.period) : null,
     sourceUseState: supported ? request.intake.sourceUseBasis.state : "unknown",
-    terms: supported ? evidenceTerms() : null,
+    terms: supported ? (external ? externalTutorialTerms() : evidenceTerms()) : null,
     intakeEligibility: evidenceIntakeEligibility(request),
+    ...(external
+      ? {
+          externalTutorial: supported ? structuredClone(request.intake.externalTutorial) : null,
+          externalTutorialConsentEnabled: externalTutorialConsent === true,
+        }
+      : {}),
   };
 }
 

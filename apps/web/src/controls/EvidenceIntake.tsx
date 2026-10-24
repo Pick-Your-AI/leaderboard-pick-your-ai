@@ -4,6 +4,7 @@ import {
   type EvidenceInvitation,
   type EvidencePeriod,
   type EvidenceTerms,
+  type ExternalTutorialDeclaration,
   type FieldErrors,
   type IntakeEligibility,
   type Receipt,
@@ -12,10 +13,15 @@ import {
 type InputAccessibility = { id: string; "aria-invalid"?: true; "aria-describedby"?: string };
 function currentIntake(receipt?: Receipt) {
   // The server preserves unsupported historical payloads. Only its current derived state establishes a usable shape.
-  return receipt?.intake?.schemaVersion === "evidence-intake/v1" &&
-    ["participant_consent_required", "awaiting_review", "source_use_review_required", "eligible"].includes(
-      receipt.intakeEligibility?.state ?? "",
-    )
+  return receipt?.intake &&
+    ["evidence-intake/v1", "evidence-intake/external-tutorial/v1"].includes(receipt.intake.schemaVersion) &&
+    [
+      "participant_consent_required",
+      "awaiting_review",
+      "source_use_review_required",
+      "external_tutorial_qualification_unavailable",
+      "eligible",
+    ].includes(receipt.intakeEligibility?.state ?? "")
     ? receipt.intake
     : null;
 }
@@ -109,17 +115,22 @@ function RoleField({
 export function EvidenceIntakeFields({
   actorId,
   terms,
+  tutorialTerms = null,
   categories,
   receipt,
   errors,
 }: {
   actorId: string;
   terms: EvidenceTerms | null;
+  tutorialTerms?: EvidenceTerms | null;
   categories: readonly string[];
   receipt?: Receipt;
   errors: FieldErrors;
 }) {
   const initial = currentIntake(receipt);
+  const [external, setExternal] = useState(initial?.schemaVersion === "evidence-intake/external-tutorial/v1");
+  const declaration = initial?.externalTutorial;
+  const selectedTerms = external ? tutorialTerms : terms;
   const [collaborators, setCollaborators] = useState(Object.keys(receipt?.collaborators ?? {}).join(", "));
   const [periodKind, setPeriodKind] = useState(initial?.period.kind ?? "unknown");
   const [sourceUseState, setSourceUseState] = useState(initial?.sourceUseBasis.state ?? "unresolved");
@@ -134,9 +145,39 @@ export function EvidenceIntakeFields({
         submitting. Details and the source-use statement stay in the protected review workflow. Do not include private
         source content. Submission alone awards no accepted recognition.
       </p>
+      {(tutorialTerms || initial?.schemaVersion === "evidence-intake/external-tutorial/v1") && (
+        <IntakeField
+          name="externalTutorial"
+          label="Declare an external tutorial using a pinned GitHub manifest"
+          errors={errors}
+        >
+          {(attributes) => (
+            <input
+              {...attributes}
+              name="externalTutorial"
+              type="checkbox"
+              checked={external}
+              onChange={(event) => setExternal(event.target.checked)}
+            />
+          )}
+        </IntakeField>
+      )}
+      {external && (
+        <p>
+          This optional profile records consent only. The GitHub manifest is an evidence carrier, not proof of tutorial
+          authorship or permission. Tutorial qualification and public recognition are unavailable. Nothing is fetched.
+          {!tutorialTerms && " This capability is disabled; new affirmative consent cannot be recorded."}
+        </p>
+      )}
       <IntakeField
         name="locator"
-        label={receipt ? "Amended public GitHub source URL" : "Public GitHub source URL"}
+        label={
+          external
+            ? "Pinned GitHub manifest URL"
+            : receipt
+              ? "Amended public GitHub source URL"
+              : "Public GitHub source URL"
+        }
         errors={errors}
       >
         {(attributes) => (
@@ -145,13 +186,79 @@ export function EvidenceIntakeFields({
       </IntakeField>
       <IntakeField name="category" label={receipt ? "Amended category" : "Category"} errors={errors}>
         {(attributes) => (
-          <select {...attributes} name="category" defaultValue={receipt?.category}>
-            {categories.map((category) => (
+          <select
+            {...attributes}
+            name="category"
+            key={String(external)}
+            defaultValue={external ? "other" : receipt?.category}
+          >
+            {(external ? ["other"] : categories).map((category) => (
               <option key={category}>{category}</option>
             ))}
           </select>
         )}
       </IntakeField>
+      {external && (
+        <fieldset>
+          <legend>Declared tutorial and manifest pins</legend>
+          <p>
+            Keep the canonical artifact identity separate from its revision. These pins and the complete proposed
+            account attribution below will be shown to every invited participant. Publication time remains a
+            declaration.
+          </p>
+          <IntakeField name="tutorialUrl" label="Canonical tutorial HTTPS URL" errors={errors}>
+            {(attributes) => (
+              <input
+                {...attributes}
+                name="tutorialUrl"
+                type="url"
+                maxLength={2048}
+                defaultValue={declaration?.canonicalUrl}
+              />
+            )}
+          </IntakeField>
+          <IntakeField name="tutorialRevision" label="Declared tutorial revision" errors={errors}>
+            {(attributes) => (
+              <input {...attributes} name="tutorialRevision" maxLength={128} defaultValue={declaration?.revision.id} />
+            )}
+          </IntakeField>
+          <IntakeField name="tutorialHash" label="Tutorial content SHA-256" errors={errors}>
+            {(attributes) => (
+              <input
+                {...attributes}
+                name="tutorialHash"
+                maxLength={64}
+                defaultValue={declaration?.revision.contentSha256}
+              />
+            )}
+          </IntakeField>
+          <IntakeField name="manifestHash" label="Pinned manifest content SHA-256" errors={errors}>
+            {(attributes) => (
+              <input
+                {...attributes}
+                name="manifestHash"
+                maxLength={64}
+                defaultValue={declaration?.manifest.contentSha256}
+              />
+            )}
+          </IntakeField>
+          <IntakeField
+            name="tutorialPublishedAt"
+            label="Declared publication time in UTC (empty means unknown)"
+            errors={errors}
+          >
+            {(attributes) => (
+              <input
+                {...attributes}
+                name="tutorialPublishedAt"
+                maxLength={24}
+                placeholder="YYYY-MM-DDTHH:mm:ssZ"
+                defaultValue={declaration?.publishedAt ?? ""}
+              />
+            )}
+          </IntakeField>
+        </fieldset>
+      )}
       <IntakeField
         name="scope"
         label={
@@ -299,13 +406,18 @@ export function EvidenceIntakeFields({
           qualified reviewer can resolve it with appropriate evidence.
         </p>
       </fieldset>
-      <EvidenceTermsNotice terms={terms} />
+      <EvidenceTermsNotice terms={selectedTerms} />
       <IntakeField
+        key={external ? "tutorial-consent" : "evidence-consent"}
         name="consent"
-        label="I consent to public attribution of this claim under the displayed evidence terms if independently accepted"
+        label={
+          external
+            ? "I consent to recording this exact tutorial declaration and proposed attribution under the displayed terms"
+            : "I consent to public attribution of this claim under the displayed evidence terms if independently accepted"
+        }
         errors={errors}
       >
-        {(attributes) => <input {...attributes} name="consent" type="checkbox" disabled={!terms} />}
+        {(attributes) => <input {...attributes} name="consent" type="checkbox" disabled={!selectedTerms} />}
       </IntakeField>
     </>
   );
@@ -319,6 +431,8 @@ export function intakeEligibilityText(eligibility?: IntakeEligibility): string {
       return "Current intake and participant choices require an independent review decision.";
     case "source_use_review_required":
       return "This earlier accepted claim is withheld from public recognition until it returns to review and is independently accepted again with a qualified source-use review.";
+    case "external_tutorial_qualification_unavailable":
+      return "Tutorial consent is recorded, but independent qualification is unavailable. This declaration cannot be accepted for public recognition.";
     case "eligible":
       return "The service reports this intake eligible under its current consent and review checks.";
     default:
@@ -329,6 +443,31 @@ export function intakeEligibilityText(eligibility?: IntakeEligibility): string {
 function periodText(period: EvidencePeriod | null): string {
   if (!period || period.kind === "unknown") return "Unknown";
   return period.kind === "date" ? period.date : `${period.start} to ${period.end}`;
+}
+
+function ExternalTutorialDetails({ declaration }: { declaration: ExternalTutorialDeclaration }) {
+  return (
+    <section aria-label="Tutorial declaration shared with participants" style={{ overflowWrap: "anywhere" }}>
+      <h4>Declared tutorial and complete proposed attribution</h4>
+      <p>Canonical tutorial identity: {declaration.canonicalUrl}</p>
+      <p>Declared revision: {declaration.revision.id}</p>
+      <p>Tutorial content SHA-256: {declaration.revision.contentSha256}</p>
+      <p>Pinned GitHub manifest: {declaration.manifest.locator}</p>
+      <p>Manifest content SHA-256: {declaration.manifest.contentSha256}</p>
+      <p>Declared publication time: {declaration.publishedAt ?? "Unknown"}</p>
+      <ul>
+        {declaration.attribution.map(({ actorId, role }) => (
+          <li key={actorId}>
+            GitHub ID {actorId}: {role ?? "Unknown role"}.
+          </li>
+        ))}
+      </ul>
+      <p>
+        These are participant declarations. The service does not fetch the tutorial, establish original authorship or
+        verify permission. Consent does not enable acceptance or public credit.
+      </p>
+    </section>
+  );
 }
 
 export function EvidenceIntakeDetails({ receipt }: { receipt: Receipt }) {
@@ -343,8 +482,9 @@ export function EvidenceIntakeDetails({ receipt }: { receipt: Receipt }) {
           can roll back the earlier decision.
         </p>
       )}
-      {intake?.schemaVersion === "evidence-intake/v1" && (
+      {intake && (
         <>
+          {intake.externalTutorial && <ExternalTutorialDetails declaration={intake.externalTutorial} />}
           <p>
             Claim revision: {intake.claimRevision}. Consent terms: {intake.termsVersion}. Contributor-rights policy:{" "}
             {intake.rightsPolicyVersion}.
@@ -430,15 +570,24 @@ export function AttributionInvitation({
   } catch {
     /* Decline remains available without usable terms. */
   }
+  const external = invitation.externalTutorial !== undefined;
   const canConsent =
     !!terms &&
+    (!external ||
+      (invitation.externalTutorial?.schemaVersion === "external-tutorial-declaration/v1" &&
+        invitation.externalTutorialConsentEnabled === true &&
+        terms.version === "evidence-terms/external-tutorial/2026-10-20")) &&
     Number.isSafeInteger(invitation.claimRevision) &&
     invitation.claimRevision! > 0 &&
     typeof invitation.claimDigest === "string" &&
     /^[a-f0-9]{64}$/.test(invitation.claimDigest) &&
-    ["participant_consent_required", "awaiting_review", "source_use_review_required", "eligible"].includes(
-      invitation.intakeEligibility?.state ?? "",
-    );
+    [
+      "participant_consent_required",
+      "awaiting_review",
+      "source_use_review_required",
+      "external_tutorial_qualification_unavailable",
+      "eligible",
+    ].includes(invitation.intakeEligibility?.state ?? "");
   return (
     <article>
       <h3>Attribution invitation {invitation.id}</h3>
@@ -459,6 +608,7 @@ export function AttributionInvitation({
         Your saved choice: {invitation.consent}. Claim revision: {invitation.claimRevision ?? "Unknown"}.
       </p>
       <p>{intakeEligibilityText(invitation.intakeEligibility)}</p>
+      {invitation.externalTutorial && <ExternalTutorialDetails declaration={invitation.externalTutorial} />}
       <EvidenceTermsNotice terms={terms} />
       {!canConsent && (
         <p>

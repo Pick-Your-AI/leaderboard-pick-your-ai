@@ -13,8 +13,17 @@ export interface EvidenceTerms {
 }
 export type EvidencePeriod =
   { kind: "unknown" } | { kind: "date"; date: string } | { kind: "interval"; start: string; end: string };
+export interface ExternalTutorialDeclaration {
+  schemaVersion: "external-tutorial-declaration/v1";
+  canonicalUrl: string;
+  revision: { id: string; contentSha256: string };
+  manifest: { locator: string; contentSha256: string };
+  publishedAt: string | null;
+  attribution: Array<{ actorId: string; role: string | null }>;
+}
 export interface EvidenceIntakeInput {
-  schemaVersion: "evidence-intake/v1";
+  schemaVersion: "evidence-intake/v1" | "evidence-intake/external-tutorial/v1";
+  externalTutorial?: ExternalTutorialDeclaration;
   termsVersion: string;
   termsDigest: string;
   sourceUseBasis: { state: "unresolved" } | { state: "declared"; statement: string };
@@ -46,6 +55,7 @@ export interface IntakeEligibility {
     | "participant_consent_required"
     | "awaiting_review"
     | "source_use_review_required"
+    | "external_tutorial_qualification_unavailable"
     | "eligible";
 }
 export interface EvidenceInvitation {
@@ -63,6 +73,8 @@ export interface EvidenceInvitation {
   sourceUseState: "unresolved" | "declared" | "unknown";
   terms: EvidenceTerms | null;
   intakeEligibility: IntakeEligibility;
+  externalTutorial?: ExternalTutorialDeclaration | null;
+  externalTutorialConsentEnabled?: boolean;
 }
 export interface EvidenceSubmissionFields {
   locator: string;
@@ -198,6 +210,13 @@ export function verifiedEvidenceTerms(value: unknown): EvidenceTerms {
   return terms;
 }
 
+export function verifiedExternalTutorialTerms(value: unknown): EvidenceTerms {
+  const terms = verifiedEvidenceTerms(value);
+  if (terms.version !== "evidence-terms/external-tutorial/2026-10-20")
+    throw new Error("External tutorial terms are unavailable. Reload before giving new consent.");
+  return terms;
+}
+
 /** A local affordance only; the service rechecks authority, consent and source-use review on every decision. */
 export function canAcceptEvidence(receipt: Receipt): boolean {
   return (
@@ -240,6 +259,7 @@ export function evidenceSubmissionInput(
   terms: EvidenceTerms | null,
   actorId: string,
   categories: readonly string[],
+  tutorialTerms: EvidenceTerms | null = null,
 ): FormResult<EvidenceSubmissionFields> {
   const errors: FieldErrors = {};
   const value = (name: string) => String(data.get(name) ?? "").trim();
@@ -298,7 +318,79 @@ export function evidenceSubmissionInput(
     };
   else if (value("sourceUseState") !== "unresolved")
     errors.sourceUseState = "Choose a declared or unresolved source-use basis.";
-  if (!terms) errors.consent = "Current evidence terms are unavailable. Reload before giving new consent.";
+  const external = data.get("externalTutorial") === "on";
+  const selectedTerms = external ? tutorialTerms : terms;
+  let externalTutorial: ExternalTutorialDeclaration | undefined;
+  if (external) {
+    if (!tutorialTerms) errors.externalTutorial = "External tutorial consent is currently disabled.";
+    if (category !== "other") errors.category = "Use the other category for this consent-only declaration.";
+    const canonicalUrl = value("tutorialUrl");
+    try {
+      const url = new URL(canonicalUrl);
+      if (
+        canonicalUrl.length > 2048 ||
+        url.protocol !== "https:" ||
+        url.username ||
+        url.password ||
+        url.port ||
+        url.href.includes("#") ||
+        url.href !== canonicalUrl
+      )
+        throw new Error();
+    } catch {
+      errors.tutorialUrl = "Enter the canonical HTTPS tutorial identity without credentials or a fragment.";
+    }
+    const revision = required("tutorialRevision", 128, "Identify the exact declared revision in up to 128 characters.");
+    const contentSha256 = value("tutorialHash");
+    const manifestHash = value("manifestHash");
+    if (!/^[a-f0-9]{64}$/.test(contentSha256))
+      errors.tutorialHash = "Enter the 64-character lowercase SHA-256 of the declared tutorial content.";
+    if (!/^[a-f0-9]{64}$/.test(manifestHash))
+      errors.manifestHash = "Enter the 64-character lowercase SHA-256 of the pinned manifest.";
+    try {
+      const url = new URL(locator);
+      const pin = url.pathname.match(/^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/blob\/(?:[a-f0-9]{40}|[a-f0-9]{64})\/(.+)$/);
+      const file = pin?.[1];
+      if (
+        !safeEvidenceLocator(locator) ||
+        url.href !== locator ||
+        url.href.includes("?") ||
+        url.href.includes("#") ||
+        !file ||
+        !file.split("/").every((part) => {
+          const decoded = decodeURIComponent(part);
+          return decoded && decoded.length <= 255 && decoded !== "." && decoded !== ".." && !/[\/\\]/.test(decoded);
+        })
+      )
+        throw new Error();
+    } catch {
+      errors.locator = "Pin the GitHub manifest to a full commit hash and file path, without a query or fragment.";
+    }
+    const publication = value("tutorialPublishedAt");
+    if (publication) {
+      const date = new Date(publication);
+      if (
+        !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{3})?Z$/.test(publication) ||
+        !Number.isFinite(date.getTime()) ||
+        date.toISOString() !== (publication.length === 20 ? publication.slice(0, -1) + ".000Z" : publication)
+      )
+        errors.tutorialPublishedAt = "Enter a real UTC timestamp, or leave it empty when publication time is unknown.";
+    }
+    externalTutorial = {
+      schemaVersion: "external-tutorial-declaration/v1",
+      canonicalUrl,
+      revision: { id: revision, contentSha256 },
+      manifest: { locator, contentSha256: manifestHash },
+      publishedAt: publication || null,
+      attribution: [actorId, ...collaborators].sort().map((id) => ({
+        actorId: id,
+        role: id === actorId ? roles.submitter : (roles.collaborators[id] ?? null),
+      })),
+    };
+    if (new TextEncoder().encode(JSON.stringify(externalTutorial)).byteLength > 12000)
+      errors.externalTutorial = "The declaration is too large. Shorten the declared roles or identifiers.";
+  }
+  if (!selectedTerms) errors.consent = "Current evidence terms are unavailable. Reload before giving new consent.";
   else if (data.get("consent") !== "on") errors.consent = "Review the displayed terms and choose whether to consent.";
   if (Object.keys(errors).length) return { ok: false, errors };
   return {
@@ -311,12 +403,13 @@ export function evidenceSubmissionInput(
       collaborators,
       consent: true,
       intake: {
-        schemaVersion: "evidence-intake/v1",
-        termsVersion: terms!.version,
-        termsDigest: terms!.digest,
+        schemaVersion: external ? "evidence-intake/external-tutorial/v1" : "evidence-intake/v1",
+        termsVersion: selectedTerms!.version,
+        termsDigest: selectedTerms!.digest,
         sourceUseBasis,
         roles,
         period,
+        ...(externalTutorial ? { externalTutorial } : {}),
       },
     },
   };

@@ -26,6 +26,7 @@ import {
   projectEvidenceInvitation,
   protectedEvidenceRequest,
 } from "./evidence-intake.mjs";
+import { externalTutorialTerms, isExternalTutorialIntake } from "./external-tutorial-intake.mjs";
 
 const random = () => randomBytes(32).toString("base64url");
 const hash = (value) => createHash("sha256").update(value).digest("base64url");
@@ -95,6 +96,7 @@ export function createControlsServer({
   sourceVerifier,
   configurationAuthorityCurrent,
   policyComparisons,
+  externalTutorialConsent = false,
   now = Date.now,
   sessionSeconds = 900,
   loginSuccessPath = "/controls/session",
@@ -102,6 +104,7 @@ export function createControlsServer({
   operations,
   authorizeRepository,
 }) {
+  requireThat(typeof externalTutorialConsent === "boolean", 500, "Invalid tutorial consent capability");
   requireThat(["/controls/session", "/account"].includes(loginSuccessPath), 500, "Unsupported login landing path");
   const base = new URL(origin);
   requireThat(
@@ -407,7 +410,10 @@ export function createControlsServer({
       }
       if (req.method === "GET" && path === "/controls/evidence-terms") {
         requireThat([...url.searchParams].length === 0, 400, "Unexpected evidence terms query");
-        send(200, { terms: evidenceTerms() });
+        send(200, {
+          terms: evidenceTerms(),
+          ...(externalTutorialConsent ? { externalTutorialTerms: externalTutorialTerms() } : {}),
+        });
         return;
       }
       if (req.method === "POST" && path === "/controls/logout") {
@@ -511,7 +517,16 @@ export function createControlsServer({
             requireThat(Array.isArray(input.collaborators) && input.collaborators.length <= 20);
             const ids = [...new Set(input.collaborators.map(actorId))];
             requireThat(ids.length === input.collaborators.length && !ids.includes(session.actorId));
-            const intake = parseEvidenceIntake(input.intake, ids);
+            requireThat(
+              !isExternalTutorialIntake(input.intake) || externalTutorialConsent,
+              409,
+              "External tutorial consent intake is disabled",
+            );
+            const intake = parseEvidenceIntake(input.intake, ids, {
+              owner: session.actorId,
+              locator: input.locator,
+              category: input.category,
+            });
             requireThat(
               intake,
               400,
@@ -560,7 +575,7 @@ export function createControlsServer({
         send(200, {
           invitations: Object.values(store.read().requests)
             .filter((r) => isEvidenceParticipant(r, session.actorId) && !["withdrawn", "merged"].includes(r.status))
-            .map((r) => projectEvidenceInvitation(r, session.actorId)),
+            .map((r) => projectEvidenceInvitation(r, session.actorId, externalTutorialConsent)),
         });
         return;
       }
@@ -616,7 +631,16 @@ export function createControlsServer({
               const ids = [...new Set(input.collaborators.map(actorId))];
               requireThat(ids.length === input.collaborators.length && !ids.includes(session.actorId));
               requireThat(input.consent === true, 400, "Explicit consent to the amended claim required");
-              const intake = parseEvidenceIntake(input.intake, ids);
+              requireThat(
+                !isExternalTutorialIntake(input.intake) || externalTutorialConsent,
+                409,
+                "External tutorial consent intake is disabled",
+              );
+              const intake = parseEvidenceIntake(input.intake, ids, {
+                owner: session.actorId,
+                locator: input.locator,
+                category: input.category,
+              });
               requireThat(
                 intake,
                 400,
@@ -656,6 +680,11 @@ export function createControlsServer({
               requireThat(typeof input.consent === "boolean" && !["withdrawn", "merged"].includes(request.status));
               const supported = evidenceIntakeEligibility(request).state !== "updated_intake_required";
               if (input.consent) {
+                requireThat(
+                  !isExternalTutorialIntake(request.intake) || externalTutorialConsent,
+                  409,
+                  "External tutorial consent intake is disabled",
+                );
                 requireThat(supported, 409, "Owner must amend evidence with current intake before consent");
                 requireThat(
                   input.claimDigest === request.intake.claimDigest &&
@@ -758,6 +787,11 @@ export function createControlsServer({
               }
               const reason = text(input.reason);
               if (input.decision === "accept") {
+                requireThat(
+                  !isExternalTutorialIntake(request.intake),
+                  409,
+                  "External tutorial qualification is unavailable",
+                );
                 requireThat(["pending", "appealed"].includes(request.status), 409, "Already reviewed");
                 // Privacy/identity/correction acceptance cannot claim an actual
                 // downstream correction without a dedicated capability handler.
