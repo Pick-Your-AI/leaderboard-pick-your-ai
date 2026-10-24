@@ -18,7 +18,7 @@
     "@pick-your-ai/github": "0.1.0",
     "@pick-your-ai/service": "0.1.0",
     "@pick-your-ai/controls": "0.1.0",
-    "pg": "8.16.3"
+    "pg": "8.23.1"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.10"
